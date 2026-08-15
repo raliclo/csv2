@@ -10,7 +10,9 @@ Claude Code 專屬的部分。
 
 | Path | Contents |
 |---|---|
-| `plan/plan.md` | The design. Currently the entire repository. / 設計文件，目前即本 repo 的全部內容 |
+| `plan/plan.md` | The design, and the reason behind each decision. / 設計文件，以及每項決定的理由 |
+| `todo/todo.md` | Decided but not yet designed in full. / 已確定要做、但尚未完整設計的項目 |
+| `compare/*.csv2` | Comparisons against SQLite and PostgreSQL; also the first real fixtures. / 與 SQLite、PostgreSQL 的比較，亦為第一批真實測試素材 |
 
 ## Working directory / 工作目錄
 
