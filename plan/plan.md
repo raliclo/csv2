@@ -776,23 +776,78 @@ foo.csv2   兩列標頭：第一列英文、第二列正體中文
 
 ## 建置與打包
 
-比照 swift_tar 的既有路徑：
+### 目前不進 rootfs
+
+**決定（2026-08-15）：csv2 暫不納入 guest rootfs、常駐 workspace 或 prebuilt 收成。**
+
+這**不表示不在 Linux 上跑**。測試仍必須兩個平台都做（見「測試」一節）——「不隨映像
+出貨」與「不在該平台上驗證」是兩件不同的事，混為一談就會得到一個從未在目標平台上
+執行過的工具。
+
+理由是使用場合就在 host 上。會被 csv2 修好的那兩次事故——`TARGET_PACKAGES.csv` 的
+`status_notes` 被 `${line%,*}` 改寫、`artifacts.csv` 的 commit 字串被寫進 `built_utc`
+——都是 **host 端的腳本**造成的，而 `update_licenses.sh` 這類真正需要 CSV 解析的東西
+也在 host 上跑。guest 裡目前沒有任何東西讀寫 CSV。
+
+暫緩也拿掉了兩項成本：不必佔用 rootfs 那 47.4 MiB 中的任何一份，也不必在建置流程尚未
+穩定時再多綁一個交叉編譯目標。**尚未寫入任何建置腳本**（已查證：`csv2` 目前不出現在
+任何 `.sh`／`.zsh`／`.mk` 中），因此這不是「移除」，只是不要開始。
+
+這也讓一件事變得沒有意義：guest 內的 `-encrypt`。multissh 的金鑰本來就不隨 rootfs 進入
+guest（見上），所以那條路徑原本就只會走到「找不到金鑰」的錯誤。
+
+**要恢復時，需要的是下面這張表**，原封保留於此，因為屆時重新推導一次沒有意義：
 
 | 階段 | 對應的既有機制 |
 |---|---|
 | guest 內建置 | 新增 `compile_csv2_linux.sh`，比照 `compile_swift_tar_linux.sh` |
 | workspace | 建置腳本的 rsync 區段新增一條，或改為與 swift_tar 同層 |
-| prebuilt 收成 | `update_prebuilt.sh` 的清單新增 `csv`，`MANIFEST.csv` 自動涵蓋 |
+| prebuilt 收成 | `update_prebuilt.sh` 的清單新增 `csv2`，`MANIFEST.csv` 自動涵蓋 |
 | 產物記錄 | `artifacts.csv` 新增一列；`version.txt` 新增 `csv2_commit` |
 | 授權 | 我們自己的程式碼，`TARGET_PACKAGES.csv` 不涵蓋（那是 buildroot 套件） |
 
-**體積預算**：rootfs 是固定 128 MiB，裝進 git 之後剩 **47.4 MiB**。swift_tar 是
-668 KB，`csv` 應在同一量級。若超過 5 MiB 就該回頭檢查是不是靜態連結了不需要的東西。
+**體積預算**（同樣留待日後）：rootfs 是固定 128 MiB，裝進 git 之後剩 **47.4 MiB**。
+swift_tar 是 668 KB，`csv2` 應在同一量級。若超過 5 MiB 就該回頭檢查是不是靜態連結了
+不需要的東西。
+
+### host 端建置
+
+以 `swiftc` 直接建置，比照 swift_tar 的做法（純 `.swift` 原始檔、Foundation + Dispatch、
+無 SwiftPM）。這一段從第一天就要能用，否則每次測試都得開一台 VM。
+
+**即使暫不進 guest，程式碼仍不應綁死 macOS。** 不使用 Darwin-only 的 API，讓日後要交叉
+編譯時不必回頭重寫——這個成本現在幾乎是零，日後才發現則不是。
 
 ## 測試
 
-新增 `sos/linux_test/test_csv.zsh`，比照 `test_git_submodule.zsh` 的體例——**測行為，
-不測檔案存在**。
+### 兩個平台都要測
+
+**同一批案例必須在 macOS 與 aarch64 Linux 上都跑過。** 這與「暫不進 rootfs」不衝突：
+**能在 Linux 上測試**與**隨 rootfs 出貨**是兩件事。測試時把執行檔放進 workspace 映像
+（`buildroot-vm-workspace.ext4`，與那 128 MiB 的 rootfs 是不同的映像）即可，不佔 rootfs
+的空間預算。
+
+**為什麼不能只測 macOS。** Linux 上的 Foundation 是
+swift-corelibs-foundation，**另一份實作**，不是同一份程式碼跨平台編譯。因此「在 mac 上
+會過」對 Linux 的行為不構成證據。具體會咬人的地方：
+
+| 差異 | 會壞在哪 |
+|---|---|
+| Foundation 是兩份實作 | `String`／`Data`／`FileHandle` 的邊界行為、`String.Encoding` 的處理 |
+| 頁面大小 4 KiB（guest）對 16 KiB（Apple Silicon） | mmap／分塊讀取的邊界，只在某一邊對齊時才踩到 |
+| `activeProcessorCount` 不同 | 分塊數不同，平行路徑走的是不同的切法 |
+| 時區 UTC（guest）對 +08:00（host） | `-log` 的時間戳與其位移 |
+| locale 與大小寫摺疊 | `-contains` 的比對 |
+
+這些沒有一項會在編譯時被抓到，全部要到執行才會出現——而其中幾項（分塊邊界）只在特定
+的檔案大小上才會顯現，正是那種「大部分情況正確」的失敗。
+
+**驗收條件是跨平台逐位元相同。** 同一份輸入、同一組旗標，在 mac 與 Linux 上產生的輸出
+必須完全一致。這比「兩邊都通過」強：兩邊各自通過但輸出不同，代表其中一邊是錯的，
+而分別跑的測試不會發現。
+
+體例比照 `sos/linux_test/test_git_submodule.zsh`——**測行為，不測檔案存在**。因此測試
+腳本不得寫入任何綁定 host 路徑的假設，一開始就要能在兩邊跑。
 
 必要的案例，前兩項直接來自本 repo 今天踩過的坑：
 
@@ -850,9 +905,13 @@ foo.csv2   兩列標頭：第一列英文、第二列正體中文
 | 3 | 兩列標頭 + 副檔名判別 + `--json` + `-md` | 以 `--headers 1` 讀既有檔案不遺失任何一筆；`--headers 2` 讀新格式正確 |
 | 4 | 編輯四動詞（含 `-cell`）、`-hash`/`-encrypt`/`-decrypt`、`-debug`/`-log` | 型別不被搬錯的測試通過 |
 | 5 | 多核（索引式） | 平行與單執行緒輸出相同 |
-| 6 | guest 建置、workspace、prebuilt | `test_csv2.zsh` 在 guest 內通過，納入常規測試 |
+| 6 | Linux 交叉編譯 + guest 內測試 | `test_csv2.zsh` 在 mac 與 guest 兩邊都通過，且兩邊輸出逐位元相同 |
+| 7 | （暫緩）workspace 常駐、prebuilt 收成、進 rootfs | 目前不做，見「建置與打包」 |
 
 階段 1 就已經有用——它能取代目前散落在腳本裡的 `cut -d,`。不必等到全部做完。
+
+階段 6 只做「能在 Linux 上建置並測試」，不做「隨映像出貨」。兩者的界線是刻意的：
+前者是正確性的必要條件，後者是還沒有需求的功能。
 
 ## 待決問題
 
