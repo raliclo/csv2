@@ -36,10 +36,14 @@ do not quietly implement something else.
   Dispatch, built with `swiftc` build scripts. No SwiftPM, no SwiftNIO.
   Swift 風格比照 swift_tar：純 `.swift` 原始檔，Foundation + Dispatch，
   以 `swiftc` 建置腳本編譯；不用 SwiftPM、不用 SwiftNIO。
-- **Cross-compiled to aarch64 Linux** from a macOS host. It must also build and
-  run natively on the host, or it cannot be tested without booting a VM.
-  由 macOS host 交叉編譯至 aarch64 Linux；同時必須能在 host 上原生建置與執行，
-  否則每次測試都得開一台 VM。
+- **Both platforms, always.** Built natively on the macOS host and
+  cross-compiled to aarch64 Linux, with the same tests run on each and
+  byte-identical output required. Linux Foundation is swift-corelibs-foundation,
+  a separate implementation — passing on macOS is not evidence about Linux.
+  Not shipping in the rootfs (current decision) does not relax this.
+  **兩個平台都要。** 於 macOS host 原生建置，並交叉編譯至 aarch64 Linux，兩邊跑同一批
+  測試且要求輸出逐位元相同。Linux 的 Foundation 是 swift-corelibs-foundation，另一份
+  實作——「macOS 會過」對 Linux 不構成證據。暫不隨 rootfs 出貨並不放寬這一點。
 
 ## The one rule that matters most / 最重要的一條規則
 

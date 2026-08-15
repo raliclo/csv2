@@ -12,6 +12,11 @@ and the macOS host it is built from.
 nothing else. No source, no build, no binary. See [plan/plan.md](./plan/plan.md)
 for the full design and the questions still open.
 
+It is **not** shipped in the LinuxCS guest rootfs for now — the scripts that
+need it run on the macOS host. It is still tested on **both** macOS and aarch64
+Linux, with byte-identical output required from each: Foundation on Linux is a
+separate implementation, so passing on macOS says nothing about Linux.
+
 Nothing below describes working software. It describes what is intended.
 
 ## Why this exists

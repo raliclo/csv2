@@ -11,6 +11,10 @@ English: [README.md](./README.md)
 **計畫中，尚未實作。** 本 repo 目前只有設計文件，沒有原始碼、沒有建置、沒有執行檔。
 完整設計與尚未決定的問題見 [plan/plan.md](./plan/plan.md)。
 
+目前**不**隨 LinuxCS 的 guest rootfs 出貨——需要它的腳本都在 macOS host 上執行。
+但測試仍在 **macOS 與 aarch64 Linux 兩個平台**上進行，且要求兩邊輸出逐位元相同：
+Linux 上的 Foundation 是另一份實作，「在 macOS 上會過」對 Linux 不構成證據。
+
 以下所有內容描述的都是「打算做成什麼」，不是已經能用的軟體。
 
 ## 為什麼要做
