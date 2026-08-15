@@ -8,14 +8,30 @@ English: [README.md](./README.md)
 
 ## 狀態
 
-**計畫中，尚未實作。** 本 repo 目前只有設計文件，沒有原始碼、沒有建置、沒有執行檔。
-完整設計與尚未決定的問題見 [plan/plan.md](./plan/plan.md)。
+**第 1–4 階段已實作並通過測試；第 5–7 階段尚未完成。**
+
+```sh
+./compile_csv2.sh       # 建置 release/csv2
+./test/test_csv2.zsh    # macOS（arm64、Swift 6.4）上 60 通過、0 失敗、8 略過
+```
+
+| 可用 | 尚未做 |
+|---|---|
+| RFC 4180 解析、引號、內嵌逗號與換行、CRLF、BOM | `.csv.index` / `.csv2.index` sidecar |
+| `-r`、`-contains`、`-A`/`-B`/`-C`、`-head`/`-tail`/`-mid`、`-rownum` | 平行掃描 |
+| `.csv2` 兩列標頭、`--json`、`-md` | `--pretty` 的對齊（旗標可接受，但不對齊） |
+| `-insert`/`-append`/`-delete`/`-update`、`-delete -cell` | Linux 交叉編譯與 guest 內執行 |
+| `-hash`、`-encrypt`、`-decrypt`、`-keyfile`、`-debug`、`-log` | |
+| `-append` 的 O(1) 快路徑 | |
+
+進度以核取方塊記在 [plan/plan.md](./plan/plan.md) 文末，且**只有在
+[test/test_csv2.zsh](./test/test_csv2.zsh) 中對應的案例通過時才打勾**。
+工具尚未能滿足的案例會回報為 SKIP 並附原因，不會安靜地略過。
 
 目前**不**隨 LinuxCS 的 guest rootfs 出貨——需要它的腳本都在 macOS host 上執行。
-但測試仍在 **macOS 與 aarch64 Linux 兩個平台**上進行，且要求兩邊輸出逐位元相同：
+但測試仍應在 **macOS 與 aarch64 Linux 兩個平台**上進行，且要求兩邊輸出逐位元相同：
 Linux 上的 Foundation 是另一份實作，「在 macOS 上會過」對 Linux 不構成證據。
-
-以下所有內容描述的都是「打算做成什麼」，不是已經能用的軟體。
+後半尚未做到——那是第 6 階段，測試中的 T47 就是負責斷言它的那個案例。
 
 ## 為什麼要做
 

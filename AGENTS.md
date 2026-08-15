@@ -3,16 +3,33 @@
 Guidance for coding agents working in this repository.
 供 coding agent 在本 repo 工作時參考。
 
-## Status: no implementation yet / 狀態：尚未實作
+## Status: phases 1–4 work, 5–7 do not / 狀態：第 1–4 階段可用，5–7 未完成
 
-`plan/plan.md` is the only content. There is no source, no build script, no
-binary. Do not write documentation, tests or release notes that describe
-behaviour as if it exists — a README that promises a flag which does not work is
-worse than no README, because it is believed.
+```sh
+./compile_csv2.sh      # builds release/csv2 with swiftc / 以 swiftc 建置 release/csv2
+./test/test_csv2.zsh   # 60 PASS, 0 FAIL, 8 SKIP on macOS / macOS 上 60 通過、0 失敗、8 略過
+```
 
-`plan/plan.md` 是目前唯一的內容：沒有原始碼、沒有建置腳本、沒有執行檔。不要撰寫任何
-把行為描述成「已存在」的文件、測試或發行說明——一份承諾了不存在旗標的 README 比沒有
-README 更糟，因為它會被相信。
+Working: the RFC 4180 parser, `-r`, the selection flags, two-row headers,
+`--json`, `-md`, all four edit verbs, `-hash`/`-encrypt`/`-decrypt`, `-debug`,
+`-log`, and the `-append` O(1) fast path.
+
+Not implemented: the `.index` sidecar, parallel scanning, `--pretty` alignment
+(the flag is accepted but does not align), and the Linux cross-compile.
+
+可用：RFC 4180 解析器、`-r`、選取旗標、兩列標頭、`--json`、`-md`、四個編輯動詞、
+`-hash`／`-encrypt`／`-decrypt`、`-debug`、`-log`，以及 `-append` 的 O(1) 快路徑。
+未實作：`.index` sidecar、平行掃描、`--pretty` 的對齊（旗標可接受但不對齊），
+以及 Linux 交叉編譯。
+
+**Do not document a flag as working until its case in `test/test_csv2.zsh`
+passes.** A README that promises a flag which does not work is worse than no
+README, because it is believed. The plan's phase checklists carry the same
+rule: a box is ticked only when its test passes.
+
+**在 `test/test_csv2.zsh` 中對應的案例通過之前，不要把任何旗標寫成「可用」。**
+一份承諾了不存在旗標的 README 比沒有 README 更糟，因為它會被相信。計畫的階段
+清單適用同一條規則：測試通過才打勾。
 
 ## Read the plan first / 先讀計畫
 

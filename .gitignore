@@ -1,0 +1,16 @@
+# Build output. The binary is derived from src/ and compile_csv2.sh; keeping it
+# in git would put a 5 MB blob in every clone for something a build reproduces
+# in seconds.
+# 建置產物。執行檔可由 src/ 與 compile_csv2.sh 重現，放進 git 只會讓每個 clone
+# 多帶一個 5 MB 的 blob，換取幾秒鐘的建置。
+release/
+
+# Index sidecars are derived from the data file, never the source of truth.
+# 索引 sidecar 是從資料檔衍生出來的，永遠不是真實來源。
+*.csv.index
+*.csv2.index
+
+# Test output and the temp dirs the suite creates beside itself.
+# 測試輸出，以及測試腳本在自己旁邊建立的暫存目錄。
+test/*.log
+test/.test_csv2.*

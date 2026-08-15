@@ -1,0 +1,476 @@
+// =====================================================================
+//  Ops.swift — the operations: select, search, edit, append, transform
+//  Ops.swift — 各項操作：選取、搜尋、編輯、追加、轉換
+// =====================================================================
+
+import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
+
+// ---------------------------------------------------------------------
+// MARK: - Byte search / 位元組搜尋
+// ---------------------------------------------------------------------
+
+/// Comparison happens on the DECODED value, not the raw bytes. Searching for
+/// `b,c` in `a,"b,c",d` must hit field 2; matching raw bytes would "find" it
+/// across a quote, at a position that maps to no single cell.
+/// 比對的是解碼後的值，不是原始位元組。在 `a,"b,c",d` 中搜尋 `b,c` 必須命中
+/// 欄位 2；比對原始位元組會「找到」它，但那個位置跨越了引號，無法對應到任何
+/// 單一儲存格。
+func bytesContain(_ haystack: [UInt8], _ needle: [UInt8]) -> Bool {
+    if needle.isEmpty { return true }
+    if needle.count > haystack.count { return false }
+    let first = needle[0]
+    let last = haystack.count - needle.count
+    var i = 0
+    while i <= last {
+        if haystack[i] == first {
+            var j = 1
+            while j < needle.count && haystack[i + j] == needle[j] { j += 1 }
+            if j == needle.count { return true }
+        }
+        i += 1
+    }
+    return false
+}
+
+/// Normalisation NEVER touches what is stored -- that would change bytes and
+/// break the byte-identical round-trip, which is the first and most valuable
+/// test. It applies to comparison only, and only when asked for, because
+/// `--normalize` separates "what you can find" from "what is actually in the
+/// file" and that gap has to be something the user asked for.
+/// 正規化絕不動已儲存的內容——那會改動位元組，破壞逐位元相同的 round-trip，
+/// 也就是第一個、也最有價值的測試。它只作用於比對，且只在被要求時，因為
+/// `--normalize` 會讓「找得到」與「檔案裡實際是什麼」分離，那個差異必須是
+/// 使用者明確要求的。
+func normalizedBytes(_ v: [UInt8]) -> [UInt8] {
+    guard let s = String(bytes: v, encoding: .utf8) else { return v }
+    return [UInt8](s.precomposedStringWithCanonicalMapping.utf8)
+}
+
+// ---------------------------------------------------------------------
+// MARK: - Emitters / 輸出器
+// ---------------------------------------------------------------------
+
+struct EmitContext {
+    var format: Format
+    var headers: [Record]
+    var withHeader: Bool
+    var rownum: Bool
+    var zh: Bool
+    var physical: Bool
+    var a1: Bool
+    var jsonASCII: Bool
+    var preserveRaw: Bool
+}
+
+protocol RecordEmitter: AnyObject {
+    func begin(_ ctx: EmitContext) throws
+    /// `matches` lists the 0-based field indices that matched, for the
+    /// locating report. Empty means "this is a context or plain record".
+    /// `matches` 是命中的 0-based 欄位索引，供定位報告使用；空的表示這是
+    /// 上下文或一般紀錄。
+    func emit(_ r: Record, matches: [Int], ctx: EmitContext) throws
+    func gap(_ ctx: EmitContext) throws
+    func end(_ ctx: EmitContext, records: Int, matched: Int) throws
+}
+
+func columnLabel(_ ctx: EmitContext, _ index: Int) -> String {
+    guard let h = ctx.headers.first else { return "\(index + 1)" }
+    let row = ctx.zh && ctx.headers.count > 1 ? ctx.headers[1] : h
+    guard index < row.count else { return "\(index + 1)" }
+    return baseName(headerName(row.fields[index]))
+}
+
+/// A1 notation is offered but never the default: CSV need not have a header
+/// and its column count need not be constant, so making A1 primary would
+/// make it a lie on exactly those files.
+/// 提供 A1 記法但絕不作為預設：CSV 未必有標頭、欄數未必一致，把 A1 當主要
+/// 格式會在那些檔案上變成謊言。
+func a1Column(_ index: Int) -> String {
+    var n = index
+    var s = ""
+    repeat {
+        s = String(UnicodeScalar(UInt8(65 + n % 26))) + s
+        n = n / 26 - 1
+    } while n >= 0
+    return s
+}
+
+func rownumHeaderFields(_ ctx: EmitContext, row: Int) -> Field {
+    // A column added to the output must be named in BOTH header rows.
+    // Without this the header would have one field fewer than the data --
+    // which is the very "field count mismatch" the tool refuses to accept,
+    // manufactured by the tool itself.
+    // 輸出新增的欄位在兩列標頭都要有名字。少了這一步，標頭的欄數就會比資料
+    // 少一——正是這支工具自己要擋的「欄數不符」，而且是它自己製造出來的。
+    Field(value: [UInt8]((row == 1 ? "列號" : "rownum").utf8))
+}
+
+final class CSVEmitter: RecordEmitter {
+    private let sink: ByteSink
+    init(sink: ByteSink) { self.sink = sink }
+
+    func begin(_ ctx: EmitContext) throws {
+        guard ctx.withHeader else { return }
+        for (i, h) in ctx.headers.enumerated() {
+            var r = h
+            if ctx.rownum { r.fields.insert(rownumHeaderFields(ctx, row: i), at: 0) }
+            sink.write(FieldEncoder.encodeRecord(r, format: ctx.format,
+                                                 preserveRaw: ctx.preserveRaw && !ctx.rownum))
+        }
+    }
+
+    func emit(_ r: Record, matches: [Int], ctx: EmitContext) throws {
+        var rec = r
+        if ctx.rownum {
+            rec.fields.insert(Field(value: [UInt8]("\(r.number)".utf8)), at: 0)
+        }
+        sink.write(FieldEncoder.encodeRecord(rec, format: ctx.format,
+                                             preserveRaw: ctx.preserveRaw && !ctx.rownum))
+    }
+
+    /// grep prints `--` between non-adjacent blocks and so do we. It is
+    /// documented as a separator rather than data, because a downstream
+    /// script that treats it as a record gets one bogus row per block.
+    /// grep 在不相鄰的區塊之間印 `--`，此處照做。它在說明中被標示為分隔線而
+    /// 非資料，否則下游腳本每個區塊會多讀到一筆假的紀錄。
+    func gap(_ ctx: EmitContext) throws { sink.write("--\n") }
+
+    func end(_ ctx: EmitContext, records: Int, matched: Int) throws {}
+}
+
+final class ReportEmitter: RecordEmitter {
+    private let sink: ByteSink
+    private let needle: [UInt8]
+    init(sink: ByteSink, needle: [UInt8]) { self.sink = sink; self.needle = needle }
+
+    func begin(_ ctx: EmitContext) throws {}
+
+    func emit(_ r: Record, matches: [Int], ctx: EmitContext) throws {
+        // One line per matching CELL, because the unit is a cell. Two matching
+        // columns in one record are two different locations and print twice;
+        // two occurrences inside one cell are one location and print once.
+        // 每個命中的儲存格印一行，因為單位是儲存格。同一筆有兩欄命中就印兩行，
+        // 那是兩個不同的位置；同一儲存格內出現兩次是同一個位置，只印一次。
+        for idx in matches {
+            let label = r.number == 0 ? "0" : "\(r.number)"
+            var addr = "\(label):\(idx + 1)"
+            if ctx.physical { addr += "@L\(r.line)" }
+            if ctx.a1 { addr += " [\(a1Column(idx))\(r.number)]" }
+            let name = columnLabel(ctx, idx)
+            let value = echoValue(r.fields[idx].value, limit: 200)
+            sink.write("\(addr)\t\(name)\t\(value)\n")
+        }
+    }
+
+    func gap(_ ctx: EmitContext) throws {}
+    func end(_ ctx: EmitContext, records: Int, matched: Int) throws {}
+}
+
+final class JSONEmitter: RecordEmitter {
+    private let sink: ByteSink
+    private let reportMode: Bool
+    init(sink: ByteSink, reportMode: Bool) { self.sink = sink; self.reportMode = reportMode }
+
+    func begin(_ ctx: EmitContext) throws {
+        // JSON Lines, not one big array, so it streams -- consistent with
+        // `-so` promising not to buffer the whole output.
+        // 採 JSON Lines 而非一個大陣列，如此才能串流——與 `-so` 承諾不緩衝整份
+        // 輸出一致。
+        let fields = ctx.headers.first?.count ?? 0
+        sink.write("{\"meta\":{\"format\":\"\(ctx.format.rawValue)\",\"headers\":\(ctx.headers.count),\"fields\":\(fields)}}\n")
+    }
+
+    func emit(_ r: Record, matches: [Int], ctx: EmitContext) throws {
+        if reportMode {
+            for idx in matches {
+                var parts = ["\"record\":\(r.number)", "\"field\":\(idx + 1)"]
+                if let h = ctx.headers.first, idx < h.count {
+                    parts.append("\"header_en\":\(JSONOut.string(h.fields[idx].value, asciiOnly: ctx.jsonASCII))")
+                }
+                if ctx.headers.count > 1, idx < ctx.headers[1].count {
+                    parts.append("\"header_zh\":\(JSONOut.string(ctx.headers[1].fields[idx].value, asciiOnly: ctx.jsonASCII))")
+                }
+                parts.append("\"value\":\(JSONOut.string(r.fields[idx].value, asciiOnly: ctx.jsonASCII))")
+                parts.append("\"line\":\(r.line)")
+                sink.write("{" + parts.joined(separator: ",") + "}\n")
+            }
+            return
+        }
+        var parts = ["\"record\":\(r.number)", "\"line\":\(r.line)"]
+        var cells: [String] = []
+        for (i, f) in r.fields.enumerated() {
+            let key = ctx.headers.first.map { i < $0.count ? baseName(headerName($0.fields[i])) : "\(i + 1)" } ?? "\(i + 1)"
+            cells.append("\(JSONOut.string([UInt8](key.utf8), asciiOnly: ctx.jsonASCII)):\(JSONOut.string(f.value, asciiOnly: ctx.jsonASCII))")
+        }
+        parts.append("\"fields\":{" + cells.joined(separator: ",") + "}")
+        sink.write("{" + parts.joined(separator: ",") + "}\n")
+    }
+
+    func gap(_ ctx: EmitContext) throws {}
+
+    /// The record count cannot be in the FIRST meta line without reading the
+    /// whole input before writing anything, which is the streaming guarantee
+    /// the plan makes a hard requirement. So the count comes last, in a
+    /// second meta line, rather than the guarantee being quietly dropped.
+    /// 紀錄總數無法放進第一行 metadata，除非先讀完整份輸入才開始輸出——而那正是
+    /// 計畫列為硬需求的串流保證。因此總數放在最後一行的第二個 metadata 中，
+    /// 而不是安靜地放棄那個保證。
+    func end(_ ctx: EmitContext, records: Int, matched: Int) throws {
+        sink.write("{\"meta\":{\"records\":\(records),\"matched\":\(matched)}}\n")
+    }
+}
+
+final class MarkdownEmitter: RecordEmitter {
+    private let sink: ByteSink
+    private var wroteHeader = false
+    init(sink: ByteSink) { self.sink = sink }
+
+    func begin(_ ctx: EmitContext) throws {
+        var names: [String] = []
+        if ctx.rownum { names.append("rownum<br>列號") }
+        for i in 0..<(ctx.headers.first?.count ?? 0) {
+            // A Markdown table has ONE header row and .csv2 has two. Merging
+            // them into one cell with <br> matches how this project's docs
+            // already present both languages side by side.
+            // Markdown 表格只有一列標頭而 .csv2 有兩列。以 <br> 併入同一個
+            // 儲存格，與本專案文件雙語並列的既有習慣一致。
+            let en = MarkdownOut.cell(ctx.headers[0].fields[i].value)
+            if ctx.headers.count > 1 && i < ctx.headers[1].count {
+                let zh = MarkdownOut.cell(ctx.headers[1].fields[i].value)
+                names.append(ctx.zh ? zh : "\(en)<br>\(zh)")
+            } else {
+                names.append(en)
+            }
+        }
+        sink.write("|" + names.joined(separator: "|") + "|\n")
+        sink.write("|" + names.map { _ in "---" }.joined(separator: "|") + "|\n")
+        wroteHeader = true
+    }
+
+    func emit(_ r: Record, matches: [Int], ctx: EmitContext) throws {
+        var cells: [String] = []
+        if ctx.rownum { cells.append("\(r.number)") }
+        cells.append(contentsOf: r.fields.map { MarkdownOut.cell($0.value) })
+        sink.write("|" + cells.joined(separator: "|") + "|\n")
+    }
+
+    func gap(_ ctx: EmitContext) throws {}
+    func end(_ ctx: EmitContext, records: Int, matched: Int) throws {}
+}
+
+// ---------------------------------------------------------------------
+// MARK: - Column transforms / 欄位轉換
+// ---------------------------------------------------------------------
+
+enum CellTransform {
+    case none
+    case encrypt(columns: [Int], key: [UInt8], fingerprint: String, salt: [UInt8], names: [String])
+    case decrypt(columns: [Int], key: [UInt8], names: [String])
+    case hash(columns: [Int])
+}
+
+/// Ciphertext must become text, since CSV is a text format. base64's alphabet
+/// (A-Za-z0-9+/=) contains no comma, quote or newline, so it needs no further
+/// escaping. The cell grows: nonce 12 + tag 16, then 4/3 for base64.
+/// 密文必須編碼成文字，因為 CSV 是文字格式。base64 的字元集（A-Za-z0-9+/=）
+/// 不含逗號、引號或換行，因此不需額外跳脫。儲存格會變長：nonce 12 + 標籤 16，
+/// 再乘上 base64 的 4/3。
+func applyTransform(_ t: CellTransform, to record: inout Record, header: Record) throws {
+    switch t {
+    case .none:
+        return
+
+    case .encrypt(let cols, let key, _, _, let names):
+        for (n, c) in cols.enumerated() {
+            guard c < record.count else { continue }
+            // A fresh nonce every time. Reusing one destroys ChaCha20-Poly1305
+            // entirely, so this is not optional -- and it is why the same
+            // plaintext gives different ciphertext on every run.
+            // 每次都用新的 nonce。重用會徹底摧毀 ChaCha20-Poly1305，因此這不是
+            // 選項——也正因如此，同樣的明文每次會產生不同的密文。
+            let nonce = cryptoRandomBytes(12)
+            let aad = [UInt8](names[n].utf8)
+            let sealed = ChaChaPoly.seal(plaintext: record.fields[c].value,
+                                         key: key, nonce: nonce, aad: aad)
+            var blob = nonce
+            blob.append(contentsOf: sealed.ciphertext)
+            blob.append(contentsOf: sealed.tag)
+            record.fields[c].set([UInt8](B64.encode(blob).utf8))
+        }
+
+    case .decrypt(let cols, let key, let names):
+        for (n, c) in cols.enumerated() {
+            guard c < record.count else { continue }
+            let text = String(bytes: record.fields[c].value, encoding: .utf8) ?? ""
+            guard let blob = B64.decode(text), blob.count >= 28 else {
+                throw fault(
+                    "record \(record.number), column \(names[n]): not a valid encrypted cell",
+                    "第 \(record.number) 筆，欄位 \(names[n])：不是合法的加密儲存格")
+            }
+            let nonce = Array(blob[0..<12])
+            let tag = Array(blob[(blob.count - 16)...])
+            let ct = Array(blob[12..<(blob.count - 16)])
+            guard let plain = ChaChaPoly.open(ciphertext: ct, tag: tag, key: key,
+                                              nonce: nonce, aad: [UInt8](names[n].utf8)) else {
+                // The AEAD tag is what SHA-256 could never give: a tampered
+                // cell FAILS instead of quietly decrypting to something wrong.
+                // AEAD 的認證標籤帶來 SHA-256 給不了的性質：被竄改的儲存格會
+                // 失敗，而不是安靜地還原出錯誤的內容。
+                throw fault(
+                    "record \(record.number), column \(names[n]): authentication failed; the cell was modified after it was encrypted",
+                    "第 \(record.number) 筆，欄位 \(names[n])：認證失敗；該儲存格在加密之後被修改過")
+            }
+            record.fields[c].set(plain)
+        }
+
+    case .hash(let cols):
+        for c in cols where c < record.count {
+            // SHA-256 hashes the STORED bytes, not a normalised form. The same
+            // "looks identical" string therefore hashes differently in an NFD
+            // file and an NFC file -- documented, because otherwise a
+            // cross-platform hash comparison shows a false mismatch for a
+            // reason nobody can see.
+            // SHA-256 雜湊的是已儲存的位元組，不是正規化後的形式。因此同一個
+            // 「看起來一樣」的字串在 NFD 與 NFC 檔案上會得到不同的雜湊——這要
+            // 寫進說明，否則跨平台比對雜湊會得到假的不相符，而原因完全看不出來。
+            let digest = SHA256.hash(record.fields[c].value)
+            record.fields[c].set([UInt8](digest.map { String(format: "%02x", $0) }.joined().utf8))
+        }
+    }
+}
+
+func markHeaders(_ headers: inout [Record], transform: CellTransform) {
+    switch transform {
+    case .encrypt(let cols, _, let fp, let salt, let names):
+        for c in cols {
+            for i in headers.indices where c < headers[i].count {
+                let m = EncMarker(base: names[cols.firstIndex(of: c)!], fingerprint: fp, salt: salt)
+                let name = i == 0 ? m.encoded
+                    : EncMarker(base: baseName(headerName(headers[i].fields[c])),
+                                fingerprint: fp, salt: salt).encoded
+                headers[i].fields[c].set([UInt8](name.utf8))
+            }
+        }
+    case .decrypt(let cols, _, _):
+        for c in cols {
+            for i in headers.indices where c < headers[i].count {
+                headers[i].fields[c].set([UInt8](baseName(headerName(headers[i].fields[c])).utf8))
+            }
+        }
+    case .hash(let cols):
+        for c in cols {
+            for i in headers.indices where c < headers[i].count {
+                let n = baseName(headerName(headers[i].fields[c])) + ":hash"
+                headers[i].fields[c].set([UInt8](n.utf8))
+            }
+        }
+    case .none:
+        return
+    }
+}
+
+func buildTransform(_ o: Options, headers: [Record]) throws -> CellTransform {
+    guard let header = headers.first else { return .none }
+    let given = [o.encryptCols, o.decryptCols, o.hashCols].compactMap { $0 }
+    if given.count > 1 {
+        throw fault("-encrypt, -decrypt and -hash are mutually exclusive",
+                    "-encrypt、-decrypt 與 -hash 互斥")
+    }
+    if let spec = o.hashCols {
+        let cols = try resolveColumnList(spec, header: header)
+        for c in cols where hashMarkerBase(headerName(header.fields[c])) != nil {
+            throw fault("column \(baseName(headerName(header.fields[c]))) is already hashed",
+                        "欄位 \(baseName(headerName(header.fields[c]))) 已經是雜湊過的")
+        }
+        Logger.shared.redactedColumns = Set(cols.map { baseName(headerName(header.fields[$0])) })
+        return .hash(columns: cols)
+    }
+    if let spec = o.encryptCols {
+        let cols = try resolveColumnList(spec, header: header)
+        for c in cols where EncMarker.parse(headerName(header.fields[c])) != nil {
+            // Refused rather than layered. A second layer would need a second
+            // decrypt to undo, and nothing in the file would say how many.
+            // 直接拒絕而非疊加一層。疊加需要再解一次才能還原，而檔案裡沒有任何
+            // 東西會說明疊了幾層。
+            throw fault("column \(baseName(headerName(header.fields[c]))) is already encrypted",
+                        "欄位 \(baseName(headerName(header.fields[c]))) 已經加密過")
+        }
+        let material = try KeySource.loadKeyMaterial(path: o.keyfile, assumeYes: o.assumeYes)
+        let salt = cryptoRandomBytes(16)
+        let key = KeySource.derive(material: material.bytes, salt: salt)
+        let fp = KeySource.fingerprint(key)
+        let names = cols.map { baseName(headerName(header.fields[$0])) }
+        Logger.shared.redactedColumns = Set(names)
+        Logger.shared.info("encrypting columns \(names.joined(separator: ",")) with key \(material.path) (fingerprint \(fp))")
+        return .encrypt(columns: cols, key: key, fingerprint: fp, salt: salt, names: names)
+    }
+    if let spec = o.decryptCols {
+        let cols = try resolveColumnList(spec, header: header)
+        guard !cols.isEmpty else {
+            throw fault("no encrypted columns found", "找不到任何已加密的欄位")
+        }
+        var markers: [EncMarker] = []
+        for c in cols {
+            guard let m = EncMarker.parse(headerName(header.fields[c])) else {
+                throw fault("column \(baseName(headerName(header.fields[c]))) is not marked as encrypted",
+                            "欄位 \(baseName(headerName(header.fields[c]))) 未被標記為已加密")
+            }
+            markers.append(m)
+        }
+        let material = try KeySource.loadKeyMaterial(path: o.keyfile, assumeYes: o.assumeYes)
+        let key = KeySource.derive(material: material.bytes, salt: markers[0].salt)
+        let fp = KeySource.fingerprint(key)
+        if fp != markers[0].fingerprint {
+            // Without the fingerprint this shows up as a Poly1305 failure,
+            // which reads like file corruption and sends the user to look at
+            // the file rather than at the key.
+            // 沒有指紋時，這件事會表現為 Poly1305 認證失敗——那看起來像檔案損毀，
+            // 會讓使用者去查檔案而不是去查金鑰。
+            throw fault(
+                "this file was encrypted with key fingerprint \(markers[0].fingerprint), the current key is \(fp); the key may have been regenerated by mssh-keygen",
+                "本檔案以指紋 \(markers[0].fingerprint) 的金鑰加密，目前的金鑰指紋為 \(fp)；金鑰可能已被 mssh-keygen 重新產生")
+        }
+        let names = cols.map { baseName(headerName(header.fields[$0])) }
+        Logger.shared.redactedColumns = Set(names)
+        return .decrypt(columns: cols, key: key, names: names)
+    }
+    return .none
+}
+
+// ---------------------------------------------------------------------
+// MARK: - Row literals / 一整列 CSV 文字
+// ---------------------------------------------------------------------
+
+/// `-insert` and `-append` take ONE line of CSV-encoded text, parsed by the
+/// same parser as the file. Not `-append v1 v2 v3`: that would make the user
+/// express "this value contains a comma" through shell quoting rules, and
+/// shell quoting is not CSV quoting -- that mismatch is the class of error
+/// this tool exists to remove.
+/// `-insert` 與 `-append` 的參數是一列 CSV 編碼過的文字，由與檔案相同的解析器
+/// 處理。不採 `-append v1 v2 v3`：那等於要求使用者用 shell 的引號規則表達
+/// 「值裡面有逗號」，而 shell 與 CSV 的引號規則不同——那正是這支工具要消滅的
+/// 那類轉換錯誤。
+func parseRowLiteral(_ text: String, format: Format, expected: Int, what: String) throws -> Record {
+    var out: Record?
+    let parser = RecordParser(format: format) { r in
+        if out == nil { out = r }
+        return true
+    }
+    try parser.feed([UInt8](text.utf8))
+    try parser.finish()
+    guard var r = out else {
+        throw fault("\(what): empty row", "\(what)：空的一列")
+    }
+    if parser.recordsEmitted > 1 {
+        throw fault("\(what): the value spans more than one record",
+                    "\(what)：這個值跨越了不只一筆紀錄")
+    }
+    try checkFieldCount(r, expected: expected, what: what)
+    r.number = 0
+    return r
+}

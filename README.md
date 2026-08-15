@@ -8,16 +8,33 @@ and the macOS host it is built from.
 
 ## Status
 
-**Planned, not implemented.** This repository currently contains its design and
-nothing else. No source, no build, no binary. See [plan/plan.md](./plan/plan.md)
-for the full design and the questions still open.
+**Phases 1–4 are implemented and pass their tests. Phases 5–7 are not.**
+
+```sh
+./compile_csv2.sh       # build release/csv2
+./test/test_csv2.zsh    # 60 PASS, 0 FAIL, 8 SKIP on macOS (arm64, Swift 6.4)
+```
+
+| Works | Does not yet |
+|---|---|
+| RFC 4180 parsing, quotes, embedded commas and newlines, CRLF, BOM | `.csv.index` / `.csv2.index` sidecars |
+| `-r`, `-contains`, `-A`/`-B`/`-C`, `-head`/`-tail`/`-mid`, `-rownum` | parallel scanning |
+| two-row `.csv2` headers, `--json`, `-md` | `--pretty` alignment (the flag is accepted, it does not align) |
+| `-insert`/`-append`/`-delete`/`-update`, `-delete -cell` | the Linux cross-compile and the in-guest run |
+| `-hash`, `-encrypt`, `-decrypt`, `-keyfile`, `-debug`, `-log` | |
+| the `-append` O(1) fast path | |
+
+Progress is tracked as checkboxes at the end of [plan/plan.md](./plan/plan.md),
+and a box is only ticked once the matching case in
+[test/test_csv2.zsh](./test/test_csv2.zsh) passes. Cases the tool cannot yet
+satisfy are reported as SKIP with the reason rather than quietly left out.
 
 It is **not** shipped in the LinuxCS guest rootfs for now — the scripts that
-need it run on the macOS host. It is still tested on **both** macOS and aarch64
-Linux, with byte-identical output required from each: Foundation on Linux is a
-separate implementation, so passing on macOS says nothing about Linux.
-
-Nothing below describes working software. It describes what is intended.
+need it run on the macOS host. It is still meant to be tested on **both** macOS
+and aarch64 Linux, with byte-identical output required from each: Foundation on
+Linux is a separate implementation, so passing on macOS says nothing about
+Linux. That second half has not happened yet; it is phase 6, and T47 in the
+suite is the case that will assert it.
 
 ## Why this exists
 
