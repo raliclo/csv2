@@ -3,24 +3,39 @@
 Guidance for coding agents working in this repository.
 供 coding agent 在本 repo 工作時參考。
 
-## Status: phases 1–4 work, 5–7 do not / 狀態：第 1–4 階段可用，5–7 未完成
+## Status: phases 1–5 work, 6–7 do not / 狀態：第 1–5 階段可用，6–7 未完成
 
 ```zsh
 ./compile_csv2.zsh      # builds release/csv2 with swiftc / 以 swiftc 建置 release/csv2
-./test/test_csv2.zsh   # 60 PASS, 0 FAIL, 8 SKIP on macOS / macOS 上 60 通過、0 失敗、8 略過
+./test/test_csv2.zsh   # 74 PASS, 0 FAIL, 1 SKIP on macOS / macOS 上 74 通過、0 失敗、1 略過
 ```
 
 Working: the RFC 4180 parser, `-r`, the selection flags, two-row headers,
-`--json`, `-md`, all four edit verbs, `-hash`/`-encrypt`/`-decrypt`, `-debug`,
-`-log`, and the `-append` O(1) fast path.
+`--json`, `-md` including `--pretty` with a UAX #11 width table, all four edit
+verbs, `-hash`/`-encrypt`/`-decrypt`, `-debug`, `-log`, the `-append` O(1) fast
+path, the `.index` sidecar with `--verify-index`, and parallel search.
 
-Not implemented: the `.index` sidecar, parallel scanning, `--pretty` alignment
-(the flag is accepted but does not align), and the Linux cross-compile.
+Not implemented: the Linux cross-compile and the in-guest run (phase 6), and
+shipping (phase 7). T47 is the one remaining SKIP in the suite.
 
-可用：RFC 4180 解析器、`-r`、選取旗標、兩列標頭、`--json`、`-md`、四個編輯動詞、
-`-hash`／`-encrypt`／`-decrypt`、`-debug`、`-log`，以及 `-append` 的 O(1) 快路徑。
-未實作：`.index` sidecar、平行掃描、`--pretty` 的對齊（旗標可接受但不對齊），
-以及 Linux 交叉編譯。
+可用：RFC 4180 解析器、`-r`、選取旗標、兩列標頭、`--json`、`-md`（含 `--pretty`
+與 UAX #11 寬度表）、四個編輯動詞、`-hash`／`-encrypt`／`-decrypt`、`-debug`、
+`-log`、`-append` 的 O(1) 快路徑、`.index` sidecar 與 `--verify-index`，以及平行搜尋。
+未實作：Linux 交叉編譯與 guest 內執行（第 6 階段），以及出貨（第 7 階段）。
+測試中僅剩的 SKIP 就是 T47。
+
+### Environment knobs / 環境變數
+
+All exist so the logic can be TESTED without a 16 MiB fixture, not merely for
+tuning. 全部的存在理由是「讓邏輯不需要 16 MiB 的 fixture 就能測試」，而不只是調校。
+
+| Variable | Default | Effect |
+|---|---|---|
+| `CSV2_INDEX_MIN_BYTES` | 16 MiB | below this no index is read or written |
+| `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | set above the file size to force single-threaded |
+| `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | smaller values make a small file yield many chunks |
+| `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `-md --pretty` refuses above this rather than being OOM-killed |
+| `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | upper bound on `-tail N` / `-B N` |
 
 **Do not document a flag as working until its case in `test/test_csv2.zsh`
 passes.** A README that promises a flag which does not work is worse than no

@@ -35,20 +35,36 @@ It is never quietly dropped. A suite that hides what it did not run reports a
 coverage it does not have — which is the same failure mode as a script that
 exits zero after corrupting a file.
 
-Current state: **60 PASS, 0 FAIL, 8 SKIP** on macOS (arm64, Swift 6.4).
+Current state: **74 PASS, 0 FAIL, 1 SKIP** on macOS (arm64, Swift 6.4).
 
-The eight skips are:
+The one skip is T47, which needs the Linux cross-compile (phase 6). It cannot
+be turned into a pass on this machine: the whole point of the case is that the
+Linux build produces byte-identical output, and there is no Linux build yet.
 
-| Case | Why |
+T9, T12 and T13 used to be skips for a more uncomfortable reason — the code
+took the streaming path, but "it is written as a ring buffer" is not evidence
+that RSS stays bounded. They are now measured: csv2 reports peak RSS and bytes
+read on a `metrics:` line under `-debug`, and the cases assert against those
+numbers. T13 in particular shows `-mid 1,2` reading 64 KiB of a 3.3 MB file,
+which is the property that separates it from `-tail`.
+
+The plan asks T9 for "an input larger than memory". A regression suite cannot
+build one, and does not have to: the property that matters is that memory does
+not GROW with the input, and two inputs an order of magnitude apart show that
+directly in seconds.
+
+## Environment knobs the suite relies on
+
+| Variable | Used for |
 |---|---|
-| T9, T12, T13 | The behaviour is implemented (ring buffers, early stop) but asserting it needs an RSS/bytes-read harness, which does not exist yet |
-| T19 | `--pretty` is accepted but does not align; the UAX #11 width table is not written |
-| T41, T42, T46 | The `.index` sidecar and parallel scanning are phase 5 and not implemented |
-| T47 | Needs the Linux cross-compile (phase 6) |
+| `CSV2_INDEX_MIN_BYTES` | T41/T46 — otherwise the index cases would need a 16 MiB fixture |
+| `CSV2_PARALLEL_MIN_BYTES` | T42 — set high to force the single-threaded run that the parallel one is compared against |
+| `CSV2_PARALLEL_CHUNK_BYTES` | T42 — turned down so a small file yields many chunks. A run that produces ONE chunk exercises no boundary and would pass on an implementation with no chunking logic at all |
+| `CSV2_PRETTY_MAX_BYTES` | T19c — to reach the refusal without building a table that would actually exhaust memory |
 
-Three of those (T9, T12, T13) are the uncomfortable ones: the code takes the
-streaming path, but "it is written as a ring buffer" is not evidence that RSS
-stays bounded. They are skips rather than passes for that reason.
+These exist in the tool for exactly this reason, and it is written in the
+source next to each of them: a threshold that cannot be lowered is a threshold
+that can only be tested by producing the data it was meant to protect against.
 
 ## Fixtures
 

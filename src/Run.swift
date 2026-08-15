@@ -65,11 +65,136 @@ func validateHeaders(_ headers: [Record], want: Int, path: String) throws {
 // MARK: - Select / read / search  —— 選取、讀取、搜尋
 // ---------------------------------------------------------------------
 
-func runSelect(_ o: Options) throws {
+/// Reads ONLY the header rows. Used when an index seek jumps straight into the
+/// data: the column names still have to come from the front of the file.
+/// 只讀取標頭列。索引 seek 直接跳進資料區時使用：欄名仍然必須來自檔案開頭。
+func readHeaderRows(path: String, format: Format, want: Int) throws -> [Record] {
+    var headers: [Record] = []
+    let src = try ByteSource(path: path, chunkSize: 1 << 16)
+    defer { src.close() }
+    let parser = RecordParser(format: format) { r in
+        headers.append(r)
+        return headers.count < want
+    }
+    while headers.count < want, let c = src.next() { try parser.feed(c) }
+    if headers.count < want { try parser.finish() }
+    try validateHeaders(headers, want: want, path: path)
+    return headers
+}
+
+/// Decides whether this call can seek instead of scan. The index only helps
+/// RANDOM access: `-r` and `-contains` read the whole file no matter what, so
+/// they neither use nor create one -- building an index for them is pure waste.
+/// 決定這次呼叫能不能用 seek 取代掃描。索引只對隨機存取有幫助：`-r` 與
+/// `-contains` 無論如何都要讀完整個檔案，因此既不使用也不建立索引——為它們建
+/// 索引是純粹的浪費。
+struct IndexPlan {
+    var resumeOffset: UInt64?
+    var resumeRecord: Int = 1
+    var lower: Int?
+    var upper: Int?
+    var builder: IndexBuilder?
+}
+
+func planIndex(_ o: Options, plan: InputPlan, lower: Int, upper: Int) -> IndexPlan {
+    var out = IndexPlan()
+    guard !o.noIndex, let path = o.input, o.contains == nil else { return out }
+    let wantsRandomAccess = (o.mid != nil) || (o.tail != nil)
+    guard wantsRandomAccess else { return out }
+
+    if let idx = CSVIndex.load(dataPath: path) {
+        // The seek is only taken when the file has no embedded newlines. With
+        // one, a record number no longer equals a line number, and the index
+        // stores byte offsets but not line numbers -- so resuming would report
+        // a physical line the full scan would not. Output with and without an
+        // index must be byte-identical, and `--physical` puts the line in the
+        // output.
+        // 只有在檔案沒有內嵌換行時才走 seek。有內嵌換行時紀錄號不再等於行號，
+        // 而索引存的是位元組偏移量、不是行號——恢復解析會回報一個完整掃描不會
+        // 給出的物理行號。有無索引的輸出必須逐位元相同，而 `--physical` 會把
+        // 行號放進輸出。
+        guard idx.noEmbeddedNewlines, idx.records > 0 else { return out }
+        var startRecord = lower
+        if let n = o.tail {
+            let total = Int(idx.records)
+            startRecord = max(1, total - n + 1)
+            out.lower = startRecord
+            out.upper = total
+        }
+        guard let gp = idx.gridPoint(forRecord: startRecord) else { return out }
+        out.resumeOffset = gp.offset
+        out.resumeRecord = gp.recordNumber
+        Logger.shared.debug("index hit: record \(startRecord) via grid point \(gp.recordNumber) at byte \(gp.offset)")
+        return out
+    }
+
+    // No index. Build one only when the scan is happening anyway. `-tail`
+    // without an index must read the whole file to find the end, so noting the
+    // offsets on the way costs nothing. `-mid` stops early by design, so
+    // building there would turn a cheap operation into a full scan.
+    // 沒有索引。只在「掃描本來就要發生」時建立。`-tail` 沒有索引時必須讀完整個
+    // 檔案才能找到結尾，順手記下偏移量不花額外成本。`-mid` 的設計是提前停止，
+    // 在那裡建索引會把一個便宜的操作變成一次全掃描。
+    guard o.tail != nil else { return out }
+    guard let st = FileStamp.of(path: path), st.size >= UInt64(indexMinBytes()) else { return out }
+    out.builder = IndexBuilder(isCSV2: plan.format == .csv2)
+    return out
+}
+
+/// O(n), and the only thing here that is a proof rather than a heuristic.
+/// Offered because the O(1) validation deliberately is not one.
+/// O(n)，也是此處唯一構成證明而非啟發式的東西。之所以提供它，正因為 O(1) 的
+/// 驗證刻意不是證明。
+func runVerifyIndex(_ o: Options) throws {
+    guard let path = o.input else {
+        throw fault("--verify-index needs -i FILE", "--verify-index 需要 -i FILE")
+    }
     let plan = try openInput(o)
     defer { plan.source.close() }
+    guard let idx = CSVIndex.load(dataPath: path) else {
+        throw fault("no usable index beside \(path)", "\(path) 旁沒有可用的索引")
+    }
+    var headers: [Record] = []
+    var n = 0
+    var mismatches: [String] = []
+    let parser = RecordParser(format: plan.format) { rec in
+        if headers.count < plan.headerRows { headers.append(rec); return true }
+        n = rec.number - plan.headerRows
+        if (n - 1) % idx.stride == 0 {
+            let g = (n - 1) / idx.stride
+            if g < idx.offsets.count && idx.offsets[g] != UInt64(rec.offset) {
+                mismatches.append("record \(n): index says byte \(idx.offsets[g]), actual \(rec.offset)")
+            }
+        }
+        return true
+    }
+    while let c = plan.source.next() { try parser.feed(c) }
+    try parser.finish()
+    if Int(idx.records) != n {
+        mismatches.append("record count: index says \(idx.records), actual \(n)")
+    }
+    let sink = ByteSink(stdout: 1 << 13)
+    if mismatches.isEmpty {
+        sink.write("index OK: \(n) records, stride \(idx.stride), \(idx.offsets.count) grid points\n")
+        try sink.close()
+        return
+    }
+    for m in mismatches { sink.write("index MISMATCH: \(m)\n") }
+    try sink.close()
+    throw fault("index beside \(path) does not describe the file",
+                "\(path) 旁的索引與檔案不符")
+}
+
+func runSelect(_ o: Options) throws {
+    if let p = o.input, canRunParallelSearch(o, format: Format.from(path: p) ?? .csv) {
+        try checkTornAppend(path: p, format: Format.from(path: p) ?? .csv,
+                            truncatePartial: o.truncatePartial)
+        try runParallelSearch(o)
+        return
+    }
     if let p = o.input {
-        try checkTornAppend(path: p, format: plan.format, truncatePartial: o.truncatePartial)
+        try checkTornAppend(path: p, format: Format.from(path: p) ?? .csv,
+                            truncatePartial: o.truncatePartial)
     }
 
     let searching = o.contains != nil
@@ -91,17 +216,36 @@ func runSelect(_ o: Options) throws {
                     "-B \(o.before) 超過可緩衝的紀錄上限（\(maxBuffer)）")
     }
 
-    var headers: [Record] = []
-    var pendingError: Error?
-
-    let sink = try makeSink(o)
-    var aborted = true
-    defer { if aborted { sink.abort() } }
-
     var lower = 1
     var upper = Int.max
     if let (a, b) = o.mid { lower = a; upper = b ?? Int.max }
     if let n = o.head { upper = min(upper, n) }
+
+    let ip = planIndex(o, plan: try openInput(o), lower: lower, upper: upper)
+    var tailN = o.tail
+    if ip.resumeOffset != nil, let l = ip.lower, let u = ip.upper {
+        // The index turned `-tail N` into a range, so the ring buffer is no
+        // longer needed: this is the seek the plan describes.
+        // 索引把 `-tail N` 變成了一個範圍，於是不再需要環狀緩衝：這就是計畫
+        // 所描述的那個 seek。
+        lower = l
+        upper = u
+        tailN = nil
+    }
+
+    var plan = try openInput(o)
+    var headers: [Record] = []
+    if let off = ip.resumeOffset, let path = o.input {
+        headers = try readHeaderRows(path: path, format: plan.format, want: plan.headerRows)
+        plan.source.close()
+        plan.source = try ByteSource(path: path, chunkSize: 1 << 16, startAt: off)
+    }
+    defer { plan.source.close() }
+
+    var pendingError: Error?
+    let sink = try makeSink(o)
+    var aborted = true
+    defer { if aborted { sink.abort() } }
 
     let needle: [UInt8] = o.contains.map {
         o.normalize ? normalizedBytes([UInt8]($0.utf8)) : [UInt8]($0.utf8)
@@ -111,7 +255,7 @@ func runSelect(_ o: Options) throws {
     if o.json {
         emitter = JSONEmitter(sink: sink, reportMode: reportMode)
     } else if o.markdown {
-        emitter = MarkdownEmitter(sink: sink)
+        emitter = MarkdownEmitter(sink: sink, pretty: o.pretty)
     } else if reportMode {
         emitter = ReportEmitter(sink: sink, needle: needle)
     } else {
@@ -127,6 +271,7 @@ func runSelect(_ o: Options) throws {
     var seen = 0
     var matchedCount = 0
     var tailRing: [Record] = []
+    let builder = ip.builder
 
     func matchesIn(_ r: Record) -> [Int] {
         guard searching else { return [] }
@@ -147,40 +292,53 @@ func runSelect(_ o: Options) throws {
         lastEmitted = r.number
     }
 
-    let parser = RecordParser(format: plan.format) { rec in
+    func headersComplete() throws {
+        try validateHeaders(headers, want: plan.headerRows, path: plan.describedPath)
+        expectedFields = headers[0].count
+        transform = try buildTransform(o, headers: headers)
+        markHeaders(&headers, transform: transform)
+        ctx = EmitContext(
+            format: plan.format, headers: headers, withHeader: o.withHeader,
+            rownum: o.rownum, zh: o.zh, physical: o.physical, a1: o.a1,
+            jsonASCII: o.jsonASCII, preserveRaw: true)
+        try emitter.begin(ctx!)
+        if searching && o.includeHeaders {
+            for (i, h) in headers.enumerated() {
+                let hits = matchesIn(h)
+                if !hits.isEmpty {
+                    var hh = h
+                    hh.number = 0
+                    // Header hits are reported as 0a / 0b: the header does not
+                    // take a data record number, so "record N" always means the
+                    // Nth record of DATA.
+                    // 標頭命中回報為 0a / 0b：標頭不佔用資料的編號，因此「第 N 筆」
+                    // 永遠指第 N 筆資料。
+                    Logger.shared.debug("match in header row 0\(i == 0 ? "a" : "b")")
+                    try emitter.emit(hh, matches: hits, ctx: ctx!)
+                }
+            }
+        }
+    }
+
+    let resuming = ip.resumeOffset != nil
+    if resuming { try headersComplete() }
+
+    let firstRecord = resuming ? ip.resumeRecord + plan.headerRows : 1
+    // With no embedded newlines a record number IS a line number offset by the
+    // header rows, which is why the seek is only taken in that case.
+    // 沒有內嵌換行時，紀錄號就是行號減去標頭列數——這正是只在該情況下才走 seek
+    // 的原因。
+    let firstLine = resuming ? ip.resumeRecord + plan.headerRows : 1
+
+    let parser = RecordParser(format: plan.format, sink: { rec in
         do {
-            if headers.count < plan.headerRows {
+            if !resuming && headers.count < plan.headerRows {
                 var h = rec
                 h.number = 0
                 headers.append(h)
                 if headers.count == plan.headerRows {
-                    try validateHeaders(headers, want: plan.headerRows, path: plan.describedPath)
-                    expectedFields = headers[0].count
-                    transform = try buildTransform(o, headers: headers)
-                    markHeaders(&headers, transform: transform)
-                    ctx = EmitContext(
-                        format: plan.format, headers: headers, withHeader: o.withHeader,
-                        rownum: o.rownum, zh: o.zh, physical: o.physical, a1: o.a1,
-                        jsonASCII: o.jsonASCII,
-                        preserveRaw: true)
-                    try emitter.begin(ctx!)
-                    if searching && o.includeHeaders {
-                        for (i, h) in headers.enumerated() {
-                            let hits = matchesIn(h)
-                            if !hits.isEmpty {
-                                var hh = h
-                                hh.number = 0
-                                // Header hits are reported as 0a / 0b: the
-                                // header does not take a data record number,
-                                // so "record N" always means the Nth record
-                                // of DATA.
-                                // 標頭命中回報為 0a / 0b：標頭不佔用資料的編號，
-                                // 因此「第 N 筆」永遠指第 N 筆資料。
-                                Logger.shared.debug("match in header row 0\(i == 0 ? "a" : "b")")
-                                try emitter.emit(hh, matches: hits, ctx: ctx!)
-                            }
-                        }
-                    }
+                    try headersComplete()
+                    builder?.headerEnded(at: UInt64(rec.offset + 1))
                 }
                 return true
             }
@@ -190,6 +348,7 @@ func runSelect(_ o: Options) throws {
             seen = r.number
             try checkFieldCount(r, expected: expectedFields,
                                 what: "record \(r.number) (line \(r.line))")
+            builder?.add(record: r.number, at: UInt64(r.offset), spansLines: false)
             try applyTransform(transform, to: &r, header: headers[0])
 
             if r.number < lower {
@@ -200,10 +359,14 @@ func runSelect(_ o: Options) throws {
                 return true
             }
             if r.number > upper {
-                return afterRemaining > 0 || o.tail != nil ? true : false
+                // A builder means the whole file is being scanned to produce
+                // the index, so stopping early would leave it incomplete.
+                // 有 builder 表示正在為了產生索引而掃描全檔，提前停止會讓它不完整。
+                if builder != nil { return true }
+                return afterRemaining > 0 || tailN != nil ? true : false
             }
 
-            if let n = o.tail {
+            if let n = tailN {
                 tailRing.append(r)
                 if tailRing.count > n { tailRing.removeFirst() }
                 return true
@@ -236,43 +399,49 @@ func runSelect(_ o: Options) throws {
             // operation on a huge file.
             // 在此回傳 false 即停止讀取。`-mid a,b` 因此不會碰到 b 之後的任何
             // 一個位元組，那正是它在巨大檔案上最便宜的原因。
-            if r.number >= upper && afterRemaining == 0 && o.tail == nil { return false }
+            if r.number >= upper && afterRemaining == 0 && tailN == nil && builder == nil { return false }
             return true
         } catch {
             pendingError = error
             return false
         }
+    }, firstRecordNumber: firstRecord, firstOffset: Int(ip.resumeOffset ?? 0), firstLine: firstLine)
+
+    while !parser.stopped, let chunk = plan.source.next() {
+        try parser.feed(chunk)
+    }
+    if !parser.stopped { try parser.finish() }
+    if let e = pendingError { throw e }
+
+    if headers.count < plan.headerRows {
+        throw fault("\(plan.describedPath): expected \(plan.headerRows) header row(s), found \(headers.count)",
+                    "\(plan.describedPath)：預期 \(plan.headerRows) 列標頭，實際只有 \(headers.count) 列")
+    }
+    if let c = ctx {
+        for r in tailRing { try emitRecord(r, matches: matchesIn(r)) }
+        try emitter.end(c, records: seen, matched: matchedCount)
+    }
+    try sink.close()
+    aborted = false
+
+    // The index is written only after everything else has succeeded, and it is
+    // never allowed to turn a completed operation into a failed one.
+    // 索引只在其餘一切都成功之後才寫，且絕不允許它把一個已完成的操作變成失敗。
+    if let b = builder, let path = o.input, let idx = b.finish(dataPath: path) {
+        idx.save(dataPath: path)
     }
 
-    do {
-        while !parser.stopped, let chunk = plan.source.next() {
-            try parser.feed(chunk)
-        }
-        if !parser.stopped { try parser.finish() }
-        if let e = pendingError { throw e }
-
-        if headers.count < plan.headerRows {
-            throw fault("\(plan.describedPath): expected \(plan.headerRows) header row(s), found \(headers.count)",
-                        "\(plan.describedPath)：預期 \(plan.headerRows) 列標頭，實際只有 \(headers.count) 列")
-        }
-        if let c = ctx {
-            for r in tailRing { try emitRecord(r, matches: matchesIn(r)) }
-            try emitter.end(c, records: seen, matched: matchedCount)
-        }
-        try sink.close()
-        aborted = false
-        Logger.shared.debug("format=\(plan.format.rawValue) fields=\(expectedFields) records=\(seen)")
-        if parser.sawCRLF {
-            // Recorded at INFO in the log, NOT printed to stderr: reading a
-            // CRLF file and writing LF changes every line of the git diff, and
-            // that surprises people -- but the rule about staying silent on
-            // the normal path does not get an exception for it.
-            // 以 INFO 記入 log，不印到 stderr：讀 CRLF 寫 LF 會讓整份 git diff
-            // 變動，那會讓人意外——但「正常路徑上不出聲」那條規則不因此破例。
-            Logger.shared.info("input contained CRLF line endings; normalised to LF")
-        }
-    } catch {
-        throw error
+    Logger.shared.debug("format=\(plan.format.rawValue) fields=\(expectedFields) records=\(seen)")
+    Metrics.report(bytesRead: plan.source.bytesRead,
+                   fileSize: o.input.flatMap { Int(FileStamp.of(path: $0)?.size ?? 0) } ?? 0)
+    if parser.sawCRLF {
+        // Recorded at INFO in the log, NOT printed to stderr: reading a CRLF
+        // file and writing LF changes every line of the git diff, and that
+        // surprises people -- but the rule about staying silent on the normal
+        // path does not get an exception for it.
+        // 以 INFO 記入 log，不印到 stderr：讀 CRLF 寫 LF 會讓整份 git diff 變動，
+        // 那會讓人意外——但「正常路徑上不出聲」那條規則不因此破例。
+        Logger.shared.info("input contained CRLF line endings; normalised to LF")
     }
 }
 
@@ -314,8 +483,39 @@ func runEdit(_ o: Options) throws {
     var pendingError: Error?
     var touched = Set<Int>()
 
+    // The write path already knows where every record starts -- it is about to
+    // write it. Noting the offsets costs no extra scan, which is why building
+    // the index here is nearly free while building one for a read would not be.
+    // 寫入端本來就知道每一筆從哪裡開始——它正要寫下去。順手記下偏移量不需要額外
+    // 掃描，這正是「在此建索引幾乎免費、而為讀取建索引則不然」的原因。
+    var outOffset = 0
+    var outRecords = 0
+    var builder: IndexBuilder? = nil
+    if !o.noIndex, let outPath = o.output, Format.declaresFormat(path: outPath),
+       let inPath = o.input, let st = FileStamp.of(path: inPath),
+       st.size >= UInt64(indexMinBytes()) {
+        builder = IndexBuilder(isCSV2: plan.format == .csv2)
+    }
+
     func emit(_ r: Record) {
-        sink.write(FieldEncoder.encodeRecord(r, format: plan.format, preserveRaw: true))
+        let bytes = FieldEncoder.encodeRecord(r, format: plan.format, preserveRaw: true)
+        sink.write(bytes)
+        outOffset += bytes.count
+    }
+
+    func emitData(_ r: Record) {
+        let bytes = FieldEncoder.encodeRecord(r, format: plan.format, preserveRaw: true)
+        outRecords += 1
+        // A record that itself contains a newline makes the record number stop
+        // matching the line number, and the index cannot then be used to seek
+        // (it stores bytes, not lines). Recorded here so the flag in the index
+        // header is right.
+        // 自身含換行的紀錄會讓紀錄號不再等於行號，屆時索引就不能用來 seek
+        // （它存的是位元組而非行號）。在此記錄，讓索引檔頭的旗標是正確的。
+        let spans = bytes.dropLast().contains(BYTE_LF)
+        builder?.add(record: outRecords, at: UInt64(outOffset), spansLines: spans)
+        sink.write(bytes)
+        outOffset += bytes.count
     }
 
     let parser = RecordParser(format: plan.format) { rec in
@@ -335,6 +535,7 @@ func runEdit(_ o: Options) throws {
                     // 編輯會重寫整個檔案，因此標頭一定寫出。`-t` 是給選取用的
                     // ——那產生的是片段，而這裡產生的是一個完整檔案。
                     for h in headers { emit(h) }
+                    builder?.headerEnded(at: UInt64(outOffset))
                 }
                 return true
             }
@@ -394,7 +595,7 @@ func runEdit(_ o: Options) throws {
                 }
             }
             try applyTransform(transform, to: &r, header: headers[0])
-            emit(r)
+            emitData(r)
             return true
         } catch {
             pendingError = error
@@ -420,7 +621,7 @@ func runEdit(_ o: Options) throws {
     for row in appends {
         let rec = try parseRowLiteral(row, format: plan.format, expected: expectedFields,
                                       what: "-append")
-        emit(rec)
+        emitData(rec)
         total += 1
         Logger.shared.info("append record \(total)")
     }
@@ -445,6 +646,17 @@ func runEdit(_ o: Options) throws {
 
     try sink.close()
     aborted = false
+
+    // After the data file is renamed into place, never before. Interrupted
+    // between the two, the index is absent or fails validation, and both fall
+    // back to scanning. The other order gives an index describing content that
+    // does not exist.
+    // 在資料檔 rename 就位「之後」才寫，絕不在之前。若在兩者之間被打斷，索引
+    // 要嘛不存在、要嘛驗證不過，兩種都會退回掃描。反過來的順序會得到一個描述著
+    // 不存在內容的索引。
+    if let b = builder, let outPath = o.output, let idx = b.finish(dataPath: outPath) {
+        idx.save(dataPath: outPath)
+    }
     Logger.shared.info("wrote \(total) records, \(expectedFields) fields, atomic rename OK")
 }
 
@@ -502,6 +714,15 @@ func runAppendFast(_ o: Options) throws {
     try validateHeaders(headers, want: headerRows, path: path)
     let expected = headers[0].count
 
+    // Load the index BEFORE writing. Validation compares against the file as
+    // it is now, so an index loaded after the append would always look stale
+    // and could never be updated -- the sidecar would silently die on the
+    // first append and every later read would go back to scanning.
+    // 在寫入「之前」載入索引。驗證比對的是當下的檔案，因此追加之後才載入的索引
+    // 永遠看起來是過期的，也就永遠無法更新——sidecar 會在第一次追加時靜默失效，
+    // 之後每次讀取都退回掃描。
+    let existingIndex = o.noIndex ? nil : CSVIndex.load(dataPath: path)
+
     guard let h = FileHandle(forUpdatingAtPath: path) else {
         throw fault("cannot open \(path) for appending", "無法開啟 \(path) 以追加")
     }
@@ -546,6 +767,20 @@ func runAppendFast(_ o: Options) throws {
         payload.append(contentsOf: FieldEncoder.encodeRecord(rec, format: fmt, preserveRaw: false))
     }
 
+    // Where each appended record will start, needed before the write so the
+    // index can be updated afterwards without a scan.
+    // 每一筆追加紀錄的起始位置，必須在寫入前算好，索引才能在事後無須掃描地更新。
+    var appendOffsets: [UInt64] = []
+    do {
+        var at = size + UInt64(prefix.count)
+        for e in o.edits {
+            guard case .append(let row) = e else { continue }
+            appendOffsets.append(at)
+            let rec = try parseRowLiteral(row, format: fmt, expected: expected, what: "-append")
+            at += UInt64(FieldEncoder.encodeRecord(rec, format: fmt, preserveRaw: false).count)
+        }
+    }
+
     h.seek(toFileOffset: size)
     // ONE write() per call. POSIX makes the offset update and the write atomic
     // for O_APPEND, so two concurrent appends do not interleave -- the only
@@ -556,4 +791,21 @@ func runAppendFast(_ o: Options) throws {
     // 邊界（NFS、過大的寫入），所以它是盡力而為，偵測仍然必須存在。
     h.write(Data(payload))
     Logger.shared.info("append fast path: wrote \(payload.count) bytes to \(path) (file was \(size) bytes)")
+
+    // Data first, then the index. Interrupted between them the index is stale,
+    // which validation catches and turns into a scan -- a safe downgrade.
+    // 先寫資料，再更新索引。中間被打斷的話索引是過期的，會被驗證擋下並退回掃描
+    // ——安全的降級。
+    if let idx = existingIndex {
+        var n = Int(idx.records)
+        for off in appendOffsets {
+            n += 1
+            idx.noteAppend(record: n, at: off)
+        }
+        // No index means do NOT build one here: an O(n) scan to serve an O(1)
+        // operation cancels out the whole point of the fast path.
+        // 沒有索引時不在此建立：為了一個 O(1) 的操作去做 O(n) 全掃描，會把快路徑
+        // 的意義完全抵銷。
+        idx.save(dataPath: path)
+    }
 }

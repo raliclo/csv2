@@ -8,21 +8,23 @@ and the macOS host it is built from.
 
 ## Status
 
-**Phases 1–4 are implemented and pass their tests. Phases 5–7 are not.**
+**Phases 1–5 are implemented and pass their tests. Phases 6–7 are not.**
 
 ```zsh
 ./compile_csv2.zsh       # build release/csv2
-./test/test_csv2.zsh    # 60 PASS, 0 FAIL, 8 SKIP on macOS (arm64, Swift 6.4)
+./test/test_csv2.zsh    # 74 PASS, 0 FAIL, 1 SKIP on macOS (arm64, Swift 6.4)
 ```
 
 | Works | Does not yet |
 |---|---|
-| RFC 4180 parsing, quotes, embedded commas and newlines, CRLF, BOM | `.csv.index` / `.csv2.index` sidecars |
-| `-r`, `-contains`, `-A`/`-B`/`-C`, `-head`/`-tail`/`-mid`, `-rownum` | parallel scanning |
-| two-row `.csv2` headers, `--json`, `-md` | `--pretty` alignment (the flag is accepted, it does not align) |
-| `-insert`/`-append`/`-delete`/`-update`, `-delete -cell` | the Linux cross-compile and the in-guest run |
+| RFC 4180 parsing, quotes, embedded commas and newlines, CRLF, BOM | the Linux cross-compile and the in-guest run (phase 6) |
+| `-r`, `-contains`, `-A`/`-B`/`-C`, `-head`/`-tail`/`-mid`, `-rownum` | shipping in the rootfs, `install.zsh` (phase 7) |
+| two-row `.csv2` headers, `--json`, `-md`, `--pretty` (UAX #11 widths) | |
+| `-insert`/`-append`/`-delete`/`-update`, `-delete -cell` | |
 | `-hash`, `-encrypt`, `-decrypt`, `-keyfile`, `-debug`, `-log` | |
 | the `-append` O(1) fast path | |
+| `.csv.index` / `.csv2.index` sidecars, `--verify-index` | |
+| parallel search, byte-identical to the single-threaded run | |
 
 Progress is tracked as checkboxes at the end of [plan/plan.md](./plan/plan.md),
 and a box is only ticked once the matching case in

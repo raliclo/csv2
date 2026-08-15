@@ -300,3 +300,38 @@ enum MarkdownOut {
         return s
     }
 }
+
+// ---------------------------------------------------------------------
+// MARK: - Metrics / 量測
+// ---------------------------------------------------------------------
+
+/// Reported under `-debug` so the streaming guarantees can be ASSERTED rather
+/// than asserted-by-comment. "It is written as a ring buffer" is not evidence
+/// that memory stays bounded, and "it stops early" is not evidence that no
+/// bytes past record b were read. Both were skipped cases until these numbers
+/// existed.
+/// 在 `-debug` 下回報，讓串流保證可以被「斷言」而不是「以註解宣稱」。
+/// 「它是以環狀緩衝寫的」不構成記憶體有上界的證據，「它會提前停止」也不構成
+/// 「沒有讀取 b 之後任何位元組」的證據。在這些數字存在之前，兩者都只能是 SKIP。
+enum Metrics {
+    /// Peak resident set size in bytes. ru_maxrss is BYTES on Darwin and
+    /// KILOBYTES on Linux -- the same field with two units, which is exactly
+    /// the kind of difference that only shows up when the guest runs it.
+    /// 峰值常駐記憶體，單位為位元組。ru_maxrss 在 Darwin 上是 bytes、在 Linux
+    /// 上是 KB——同一個欄位兩種單位，正是那種「只有在 guest 上跑才會現形」的差異。
+    static func peakRSSBytes() -> Int {
+        var usage = rusage()
+        guard getrusage(RUSAGE_SELF, &usage) == 0 else { return 0 }
+        #if canImport(Darwin)
+        return Int(usage.ru_maxrss)
+        #else
+        return Int(usage.ru_maxrss) * 1024
+        #endif
+    }
+
+    /// One line, at DEBUG, in a shape a test can parse without guessing.
+    /// 一行，DEBUG 層級，格式讓測試不必猜就能解析。
+    static func report(bytesRead: Int, fileSize: Int) {
+        Logger.shared.debug("metrics: read_bytes=\(bytesRead) file_bytes=\(fileSize) peak_rss_bytes=\(peakRSSBytes())")
+    }
+}

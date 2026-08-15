@@ -315,9 +315,26 @@ final class RecordParser {
     private let sink: (Record) throws -> Bool
     private(set) var stopped = false
 
-    init(format: Format, sink: @escaping (Record) throws -> Bool) {
+    /// `firstRecordNumber`, `firstOffset` and `firstLine` let parsing resume
+    /// at an index grid point while producing exactly the numbers a full scan
+    /// would have produced. Output with and without an index has to be
+    /// byte-identical, and the record numbers are part of the output.
+    /// `firstRecordNumber`、`firstOffset` 與 `firstLine` 讓解析能從索引格點恢復，
+    /// 同時產生與完整掃描完全相同的編號。有無索引的輸出必須逐位元相同，而紀錄號
+    /// 就是輸出的一部分。
+    init(format: Format, sink: @escaping (Record) throws -> Bool,
+         firstRecordNumber: Int = 1, firstOffset: Int = 0, firstLine: Int = 1) {
         self.format = format
         self.sink = sink
+        self.recordsEmitted = firstRecordNumber - 1
+        self.offset = firstOffset
+        self.recOffset = firstOffset
+        self.line = firstLine
+        self.recLine = firstLine
+        // A resumed stream starts at a record boundary, so there is no BOM to
+        // look for -- and looking would eat three data bytes.
+        // 從紀錄邊界恢復的串流沒有 BOM 可找——而去找它會吃掉三個資料位元組。
+        if firstOffset > 0 { self.bomDone = true }
     }
 
     func feed(_ chunk: [UInt8]) throws {
@@ -540,10 +557,19 @@ final class ByteSource {
     let chunkSize: Int
     private(set) var bytesRead = 0
 
-    init(path: String, chunkSize: Int = 1 << 16) throws {
+    init(path: String, chunkSize: Int = 1 << 16, startAt: UInt64 = 0) throws {
         guard let h = FileHandle(forReadingAtPath: path) else {
             throw fault("cannot open input file: \(path)", "無法開啟輸入檔：\(path)")
         }
+        // Seeking here is the whole point of the index: fetching record 10,000
+        // becomes "read 8 bytes of index, seek, read one record" and the file
+        // is never read at all. On the guest's QEMU disk a 100 MB file is
+        // hundreds of milliseconds to a second, so what the index saves is
+        // I/O, not CPU.
+        // 在此 seek 正是索引的全部意義：取第 10,000 筆變成「讀 8 bytes 索引、
+        // seek、讀一筆」，整個檔案根本不必讀進來。在 guest 的 QEMU 磁碟上，
+        // 一個 100 MB 的檔案是數百 ms 到 1 秒，所以索引省下的是 I/O 而非 CPU。
+        if startAt > 0 { h.seek(toFileOffset: startAt) }
         handle = h
         closeOnDeinit = true
         self.chunkSize = chunkSize
@@ -592,6 +618,24 @@ final class ByteSink {
         tmpPath = nil
         finalPath = nil
         buf.reserveCapacity(limit)
+    }
+
+    /// In-memory, for a parallel worker to build its fragment. It never
+    /// flushes, so the fragment is bounded by what that one chunk produced --
+    /// which is why only the locating report runs in parallel.
+    /// 記憶體內，供平行工作者組出自己的片段。它不會 flush，因此片段的大小由那一個
+    /// 區塊的產出決定——這正是只有定位報告走平行的原因。
+    init(memory: Void) {
+        handle = FileHandle.nullDevice
+        self.limit = Int.max
+        tmpPath = nil
+        finalPath = nil
+    }
+
+    func takeBytes() -> [UInt8] {
+        let b = buf
+        buf.removeAll(keepingCapacity: false)
+        return b
     }
 
     /// stderr / 標準錯誤

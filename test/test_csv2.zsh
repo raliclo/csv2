@@ -185,7 +185,41 @@ fi
 "$CSV2" -r -t -i "$TMP/latin1.csv" -o "$TMP/t8.csv" 2>/dev/null
 assert_same "$TMP/latin1.csv" "$TMP/t8.csv" "T8 non-UTF-8 bytes round-trip unchanged / 非 UTF-8 位元組原樣 round-trip"
 
-skipt "T9 -si/-so streaming RSS has an upper bound / 串流 RSS 有上界 (not implemented: needs an input larger than RAM and an RSS harness / 未實作：需大於記憶體的輸入與 RSS 量測)"
+# T9 / T12 / T13 measure. csv2 reports peak RSS and bytes read under -debug,
+# so these assert the streaming guarantees instead of trusting them.
+#
+# The plan asks for "an input larger than memory". A regression suite cannot
+# build one, and it does not have to: the property that matters is that memory
+# does not GROW with the input. Two inputs an order of magnitude apart show
+# that directly, and run in seconds.
+# 計畫要求「以大於記憶體的輸入驗證」。回歸測試造不出那種輸入，也不需要：真正
+# 要證明的性質是「記憶體不隨輸入變大而變大」。兩個相差一個數量級的輸入可以直接
+# 顯示這一點，而且只要幾秒鐘。
+mk_rows() { # path records
+    { print -r -- 'k,v,note'
+      print -r -- '鍵,值,註記'
+      for i in {1..$2}; do print -r -- "row$i,value$i,\"note, with comma $((i % 97))\""; done
+    } > "$1"
+}
+mk_rows "$TMP/m_small.csv2" 2000
+mk_rows "$TMP/m_big.csv2"   80000
+rss_of() {  # reads the metrics line csv2 emits under -debug
+    grep -o 'peak_rss_bytes=[0-9]*' "$1" | tail -1 | cut -d= -f2
+}
+read_of() {
+    grep -o 'read_bytes=[0-9]*' "$1" | tail -1 | cut -d= -f2
+}
+
+cat "$TMP/m_small.csv2" | "$CSV2" -si --headers 2 -so -r -debug > /dev/null 2>"$TMP/m9a.txt"
+cat "$TMP/m_big.csv2"   | "$CSV2" -si --headers 2 -so -r -debug > /dev/null 2>"$TMP/m9b.txt"
+r_small=$(rss_of "$TMP/m9a.txt"); r_big=$(rss_of "$TMP/m9b.txt")
+size_small=$(wc -c < "$TMP/m_small.csv2" | tr -d ' ')
+size_big=$(wc -c < "$TMP/m_big.csv2" | tr -d ' ')
+if [[ -n "$r_small" && -n "$r_big" && $((size_big / size_small)) -ge 10 && $r_big -lt $((r_small * 2)) ]]; then
+    ok "T9 -si/-so RSS does not grow with the input (${size_small}B→${r_small}B, ${size_big}B→${r_big}B) / 串流 RSS 不隨輸入變大"
+else
+    bad "T9 streaming RSS (small ${size_small}B→${r_small}B, big ${size_big}B→${r_big}B)"
+fi
 
 echo
 echo "--- Phase 2: selection and locating / 第 2 階段：選取與定位 ---"
@@ -202,8 +236,32 @@ assert_eq "$n" "3" "T11a -head 3 -t output reads back as 3 records / -t 的輸�
 assert_fails "T11b -head without -t refuses to write a .csv2 / 無 -t 拒絕寫入 .csv2" -- \
     "$CSV2" -head 3 -i "$PKG" -o "$TMP/t11b.csv2"
 
-skipt "T12 -tail RSS has an upper bound / -tail 的 RSS 有上界 (implemented as a ring buffer, but not yet measured / 已以環狀緩衝實作，但尚未量測)"
-skipt "T13 -mid does not read past b / -mid 不讀取 b 之後 (implemented via early stop, but not yet measured in bytes / 已以提前停止實作，但尚未以位元組量測)"
+# T12 — -tail keeps only N records, so its memory is set by N and not by the
+# file. Measured with --no-index so this tests the ring buffer rather than the
+# index seek, which would avoid the question entirely.
+# T12 —— -tail 只保留 N 筆，因此它的記憶體由 N 決定而非由檔案決定。以 --no-index
+# 量測，讓這裡測到的是環狀緩衝本身，而不是索引 seek——後者會直接繞過這個問題。
+"$CSV2" -tail 10 --no-index -i "$TMP/m_small.csv2" -debug >/dev/null 2>"$TMP/m12a.txt"
+"$CSV2" -tail 10 --no-index -i "$TMP/m_big.csv2"   -debug >/dev/null 2>"$TMP/m12b.txt"
+t_small=$(rss_of "$TMP/m12a.txt"); t_big=$(rss_of "$TMP/m12b.txt")
+if [[ -n "$t_small" && -n "$t_big" && $t_big -lt $((t_small * 2)) ]]; then
+    ok "T12 -tail RSS is bounded by N, not by file size (${size_small}B→${t_small}B, ${size_big}B→${t_big}B) / -tail 的 RSS 由 N 決定，與檔案大小無關"
+else
+    bad "T12 -tail RSS (small→$t_small, big→$t_big)"
+fi
+
+# T13 — the property that separates -mid from -tail. If -mid were implemented
+# as "read it all, then slice", this number would equal the file size and the
+# cheapest range operation on a huge file would not be cheap at all.
+# T13 —— 這是 -mid 與 -tail 的關鍵差異。若 -mid 被實作成「全讀再切片」，這個數字
+# 會等於檔案大小，而「巨大檔案上最便宜的範圍操作」就一點也不便宜了。
+"$CSV2" -mid 1,2 --no-index -i "$TMP/m_big.csv2" -debug >/dev/null 2>"$TMP/m13.txt"
+mid_read=$(read_of "$TMP/m13.txt")
+if [[ -n "$mid_read" && $mid_read -lt $((size_big / 10)) ]]; then
+    ok "T13 -mid 1,2 read $mid_read of $size_big bytes, stopping at record b / -mid 只讀了 $mid_read／$size_big 位元組，在第 b 筆處停止"
+else
+    bad "T13 -mid read $mid_read of $size_big bytes (expected far less) / -mid 讀了 $mid_read／$size_big（預期應遠小於）"
+fi
 
 # T14 — the four -mid boundary rules, each with its own decided answer.
 assert_fails "T14a -mid 7,3 (a>b) is an error, not silently swapped / a>b 報錯，不自動對調" -- \
@@ -247,7 +305,69 @@ assert_fails "T18a -md without -t is an error / -md 未給 -t 即報錯" -- \
 assert_fails "T18b -md into a .csv2 path is an error / -md 寫入 .csv2 即報錯" -- \
     "$CSV2" -head 1 -t -md -i "$PKG" -o "$TMP/t18.csv2"
 
-skipt "T19 -md --pretty gives up streaming / --pretty 放棄串流 (--pretty accepted but alignment and the UAX #11 width table are not implemented / --pretty 可接受，但對齊與 UAX #11 寬度表尚未實作)"
+# T19 — the trade --pretty makes, asserted from both sides.
+#
+# The alignment check uses Han and ASCII only. zsh's ${(m)#s} gives the
+# display width, and it is right for CJK -- but it sums the scalars of a ZWJ
+# sequence and calls the family emoji 8, which is the very mistake the width
+# table exists to avoid. Using it as the oracle for emoji would assert the
+# wrong answer.
+# 對齊檢查只用中文與 ASCII。zsh 的 ${(m)#s} 給的是顯示寬度，對 CJK 是對的——但它
+# 會把 ZWJ 序列的各 scalar 加總，說家庭 emoji 是 8，而那正是這張寬度表要避免的
+# 錯誤。拿它當 emoji 的判準，會斷言出錯誤的答案。
+{
+  print -r -- 'a,b'
+  print -r -- '甲,乙'
+  print -r -- '套件名稱,x'          # 4 characters, 8 columns
+  print -r -- 'abcdefgh,y'          # 8 characters, 8 columns
+} > "$TMP/p19.csv2"
+"$CSV2" -r -t -md --pretty -i "$TMP/p19.csv2" > "$TMP/p19.md" 2>/dev/null
+widths=()
+while IFS= read -r ln; do widths+=(${(m)#ln}); done < "$TMP/p19.md"
+uniq_w=$(print -l -- $widths | sort -u | wc -l | tr -d ' ')
+if [[ "$uniq_w" == "1" && ${#widths} -eq 4 ]]; then
+    ok "T19a --pretty aligns by DISPLAY width: 套件名稱 counts 8, not 4 / --pretty 以顯示寬度對齊：套件名稱 算 8 而非 4"
+else
+    bad "T19a --pretty alignment (line widths: $widths)"
+fi
+
+# The default form is the minimal |a|b|, which renders identically and needs
+# to know none of this -- which is why it is the default.
+# The distinguishing property is padding, not any one line's text: the plain
+# form pads nothing, the aligned form pads. Checking for a literal header line
+# would only have tested how the two header rows are merged.
+# 區分兩者的性質是「有沒有填空白」，而不是某一行的字面內容：未對齊的形式完全
+# 不填，對齊的形式會填。去比對某一行的字面內容，只會測到兩列標頭怎麼合併。
+pad_plain=$("$CSV2" -r -t -md -i "$TMP/p19.csv2" 2>/dev/null | grep -c '  ' || true)
+pad_pretty=$(grep -c '  ' "$TMP/p19.md" || true)
+if [[ "$pad_plain" == "0" && "$pad_pretty" -gt 0 ]]; then
+    ok "T19b without --pretty nothing is padded; with it, cells are / 未給 --pretty 時完全不填空白，給了才填"
+else
+    bad "T19b padding (plain=$pad_plain lines padded, pretty=$pad_pretty)"
+fi
+
+# --pretty has already given up streaming, so on a large table the failure
+# mode is the OOM killer -- and a killed process leaves no message at all.
+# It must refuse instead.
+# --pretty 已經放棄串流，因此在大表上的失敗模式是被 OOM killer 終結——而被殺掉的
+# 行程不會留下任何訊息。它必須改為拒絕。
+out=$(CSV2_PRETTY_MAX_BYTES=100 "$CSV2" -r -t -md --pretty -i "$TMP/m_big.csv2" 2>&1)
+rc=$?
+if [[ $rc -ne 0 && "$out" == *"--pretty"* ]]; then
+    ok "T19c --pretty refuses a table too large to hold, rather than being OOM-killed / --pretty 對持有不下的表格選擇拒絕，而不是被 OOM 殺掉"
+else
+    bad "T19c --pretty over the limit (rc=$rc, out: ${out:0:160})"
+fi
+
+# And the other side of the trade: the unaligned form still streams.
+"$CSV2" -r -t -md -i "$TMP/m_small.csv2" -debug >/dev/null 2>"$TMP/p19a.txt"
+"$CSV2" -r -t -md -i "$TMP/m_big.csv2"   -debug >/dev/null 2>"$TMP/p19b.txt"
+md_small=$(rss_of "$TMP/p19a.txt"); md_big=$(rss_of "$TMP/p19b.txt")
+if [[ -n "$md_small" && -n "$md_big" && $md_big -lt $((md_small * 2)) ]]; then
+    ok "T19d -md without --pretty still streams (${md_small}B→${md_big}B RSS) / 未加 --pretty 的 -md 仍然串流"
+else
+    bad "T19d -md streaming RSS (small→$md_small, big→$md_big)"
+fi
 
 # T20 — JSON Lines: metadata first, one object per hit, non-ASCII raw.
 j=$("$CSV2" -contains "套件" -i "$TMP/emoji.csv2" --json 2>/dev/null)
@@ -450,8 +570,92 @@ fi
 echo
 echo "--- Phase 5: index, parallel, append / 第 5 階段：索引、平行、追加 ---"
 
-skipt "T41 behaviour identical with no index / 無索引時行為完全相同 (the .index sidecar is not implemented / .index sidecar 尚未實作)"
-skipt "T42 parallel and single-threaded output are byte-identical / 平行與單執行緒輸出逐位元相同 (parallel scanning is not implemented / 平行掃描尚未實作)"
+# A file with enough records to have several index grid points (stride 256)
+# and, with the chunk size turned down, several parallel chunks. The
+# thresholds are environment-overridable precisely so this does not need a
+# 16 MiB fixture.
+# 一個紀錄數足以產生多個索引格點（stride 256）的檔案；把區塊大小調小之後，
+# 它也足以切出多個平行區塊。門檻之所以可由環境變數覆寫，正是為了讓這件事
+# 不需要 16 MiB 的 fixture。
+{
+  print -r -- 'k,v,note'
+  print -r -- '鍵,值,註記'
+  for i in {1..3000}; do print -r -- "row$i,value$i,\"note, with comma $((i % 97))\""; done
+} > "$TMP/idx.csv2"
+export CSV2_INDEX_MIN_BYTES=1000
+
+# The index is a by-product of writing, so an edit is what creates one.
+"$CSV2" -update '1:v' 'CHANGED' -i "$TMP/idx.csv2" -o "$TMP/ix.csv2" 2>/dev/null
+if [[ -f "$TMP/ix.csv2.index" ]]; then
+    ok "T41a writing a file leaves an index beside it / 寫入時順手產生索引"
+else
+    bad "T41a no index was written / 沒有產生索引"
+fi
+assert_succeeds "T41b --verify-index confirms the index describes the file / --verify-index 確認索引與檔案相符" -- \
+    "$CSV2" --verify-index -i "$TMP/ix.csv2"
+
+# The rule the whole feature hangs from: with a good index, a missing one, a
+# stale one and a truncated one, the output must be byte-identical and none
+# may fail. An index that quickly gives you the wrong data is far worse than
+# no index at all, so the default action on any doubt is to discard and scan.
+# 整個功能所繫的那條規則：索引正確、不存在、過期、被截斷四種情況，輸出必須
+# 逐位元相同，且都不得失敗。一個會很快給你錯資料的索引，比沒有索引糟得多，
+# 因此只要有疑慮，預設動作就是丟棄並掃描。
+cp "$TMP/ix.csv2.index" "$TMP/good.index"
+"$CSV2" -mid 1500,1502 -i "$TMP/ix.csv2" > "$TMP/i_good.txt" 2>/dev/null
+"$CSV2" -tail 3        -i "$TMP/ix.csv2" > "$TMP/t_good.txt" 2>/dev/null
+
+rm -f "$TMP/ix.csv2.index"
+"$CSV2" -mid 1500,1502 -i "$TMP/ix.csv2" > "$TMP/i_none.txt" 2>/dev/null
+"$CSV2" -tail 3        -i "$TMP/ix.csv2" > "$TMP/t_none.txt" 2>/dev/null
+
+# stale: same size, but the recorded content hash no longer matches
+printf 'STALEBYTES' | dd of="$TMP/ix.csv2.index" bs=1 seek=64 conv=notrunc 2>/dev/null
+cp "$TMP/good.index" "$TMP/ix.csv2.index"
+printf 'STALEBYTES' | dd of="$TMP/ix.csv2.index" bs=1 seek=64 conv=notrunc 2>/dev/null
+"$CSV2" -mid 1500,1502 -i "$TMP/ix.csv2" > "$TMP/i_stale.txt" 2>/dev/null
+rc_stale=$?
+
+# truncated: header intact, grid entries cut off
+head -c 100 "$TMP/good.index" > "$TMP/ix.csv2.index"
+"$CSV2" -mid 1500,1502 -i "$TMP/ix.csv2" > "$TMP/i_trunc.txt" 2>/dev/null
+rc_trunc=$?
+
+if cmp -s "$TMP/i_good.txt" "$TMP/i_none.txt" \
+   && cmp -s "$TMP/i_good.txt" "$TMP/i_stale.txt" \
+   && cmp -s "$TMP/i_good.txt" "$TMP/i_trunc.txt" \
+   && cmp -s "$TMP/t_good.txt" "$TMP/t_none.txt" \
+   && [[ $rc_stale -eq 0 && $rc_trunc -eq 0 ]]; then
+    ok "T41c good/missing/stale/truncated index all give identical output and none fails / 索引正確、不存在、過期、截斷四種情況輸出相同且都不失敗"
+else
+    bad "T41c index degradation (stale rc=$rc_stale, truncated rc=$rc_trunc)"
+fi
+if [[ -s "$TMP/i_good.txt" ]]; then
+    ok "T41d the comparison was not vacuous — the selection returned records / 比對不是空的：選取確實有回傳紀錄"
+else
+    bad "T41d the -mid selection returned nothing, so T41c compared empty files / -mid 沒有回傳任何東西，T41c 比的是空檔案"
+fi
+cp "$TMP/good.index" "$TMP/ix.csv2.index"
+
+# T42 — the acceptance condition for going multi-core. The chunk size is
+# turned down so the file yields many chunks: a run that produces ONE chunk
+# exercises no boundary and would pass on an implementation with no chunking
+# logic at all.
+if [[ $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1) -lt 2 ]]; then
+    skipt "T42 parallel and single-threaded output are byte-identical / 平行與單執行緒輸出逐位元相同 (single-core machine, the parallel path cannot engage / 單核機器，平行路徑不會啟用)"
+else
+    CSV2_PARALLEL_MIN_BYTES=999999999 "$CSV2" -contains "comma 42" -i "$TMP/ix.csv2" \
+        > "$TMP/p_single.txt" 2>/dev/null
+    CSV2_PARALLEL_MIN_BYTES=1000 CSV2_PARALLEL_CHUNK_BYTES=8192 "$CSV2" -contains "comma 42" \
+        -i "$TMP/ix.csv2" -debug > "$TMP/p_multi.txt" 2>"$TMP/p_dbg.txt"
+    chunks=$(grep -o 'parallel: [0-9]* chunks' "$TMP/p_dbg.txt" | head -1 | awk '{print $2}')
+    if [[ -n "$chunks" && "$chunks" -gt 1 ]] && cmp -s "$TMP/p_single.txt" "$TMP/p_multi.txt" \
+       && [[ -s "$TMP/p_single.txt" ]]; then
+        ok "T42 parallel ($chunks chunks) and single-threaded output are byte-identical / 平行（$chunks 個區塊）與單執行緒輸出逐位元相同"
+    else
+        bad "T42 parallel vs single (chunks=${chunks:-none}, single=$(wc -l < "$TMP/p_single.txt") lines)"
+    fi
+fi
 
 # T43 — the whole point of the fast path: bytes written must not depend on
 # how big the file already is. Measured in bytes via -log, not in seconds.
@@ -489,7 +693,26 @@ assert_fails "T45a a torn .csv2 append is detected on read / 撕裂的追加在�
 assert_succeeds "T45b --truncate-partial makes dropping it explicit / --truncate-partial 讓丟棄成為明示" -- \
     "$CSV2" -r --truncate-partial -i "$TMP/torn.csv2" -so
 
-skipt "T46 the index is still correct after an append / 追加後索引仍正確 (the .index sidecar is not implemented / .index sidecar 尚未實作)"
+# T46 — four combinations: before and after an append, each read with and
+# without the index. The append fast path updates the index in O(1); if it
+# instead let the index go stale, this is where that shows up.
+# T46 —— 四種組合：追加前後，各自以有索引與無索引讀取。追加快路徑以 O(1) 更新
+# 索引；若它反而讓索引過期，就會在這裡現形。
+cp "$TMP/good.index" "$TMP/ix.csv2.index"
+"$CSV2" -tail 2 -i "$TMP/ix.csv2" > "$TMP/b_idx.txt" 2>/dev/null
+"$CSV2" -tail 2 --no-index -i "$TMP/ix.csv2" > "$TMP/b_noidx.txt" 2>/dev/null
+"$CSV2" -append 'zz,last,"note, appended"' -i "$TMP/ix.csv2" --in-place 2>/dev/null
+"$CSV2" -tail 2 -i "$TMP/ix.csv2" > "$TMP/a_idx.txt" 2>/dev/null
+"$CSV2" -tail 2 --no-index -i "$TMP/ix.csv2" > "$TMP/a_noidx.txt" 2>/dev/null
+if cmp -s "$TMP/b_idx.txt" "$TMP/b_noidx.txt" && cmp -s "$TMP/a_idx.txt" "$TMP/a_noidx.txt" \
+   && ! cmp -s "$TMP/b_idx.txt" "$TMP/a_idx.txt"; then
+    ok "T46a index and no-index agree both before and after an append / 追加前後，有索引與無索引的結果一致"
+else
+    bad "T46a index after append (before: $(cat "$TMP/b_idx.txt" | tr '\n' '|'), after: $(cat "$TMP/a_idx.txt" | tr '\n' '|'))"
+fi
+assert_succeeds "T46b --verify-index still passes after the append / 追加後 --verify-index 仍通過" -- \
+    "$CSV2" --verify-index -i "$TMP/ix.csv2"
+unset CSV2_INDEX_MIN_BYTES
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"

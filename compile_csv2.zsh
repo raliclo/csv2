@@ -36,6 +36,9 @@ SOURCES=(
     src/Crypto.swift
     src/Core.swift
     src/Support.swift
+    src/Width.swift
+    src/Index.swift
+    src/Parallel.swift
     src/Ops.swift
     src/Run.swift
     src/main.swift

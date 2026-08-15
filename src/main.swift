@@ -75,6 +75,7 @@ struct Options {
     var debug = false
     var logPath: String?
     var noIndex = false
+    var verifyIndex = false
 }
 
 func usageError(_ en: String, _ zh: String) -> CSV2Error { fault(en, zh) }
@@ -201,6 +202,7 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "debug": o.debug = true
         case "log": o.logPath = try need(arg)
         case "no-index": o.noIndex = true
+        case "verify-index": o.verifyIndex = true
         case "version", "V":
             print("csv2 \(CSV2_VERSION)")
             exit(0)
@@ -313,6 +315,9 @@ func validate(_ o: inout Options) throws {
     }
     if o.input == nil && !o.useStdin {
         throw usageError("no input: give -i FILE or -si", "沒有輸入：請給 -i FILE 或 -si")
+    }
+    if o.verifyIndex && o.input == nil {
+        throw usageError("--verify-index needs -i FILE", "--verify-index 需要 -i FILE")
     }
     if o.head != nil && o.tail != nil {
         // Not interpreted as "the middle" or "both ends". There is no reading
@@ -626,6 +631,9 @@ func printHelp() {
     DIAGNOSTICS / 診斷
       -debug             diagnostics to stderr
       -log FILE          append a timestamped operation record
+      --no-index         never read or write a .index sidecar
+      --verify-index     O(n) full check of the sidecar; the O(1) check the
+                         normal path does is deliberately a heuristic
       --version  --help
 
     NOTES / 注意
@@ -693,7 +701,9 @@ func main() -> Int32 {
 
         Logger.shared.log(.info, "csv2 \(sanitizedCommandLine(Array(CommandLine.arguments.dropFirst())))")
 
-        if !o.edits.isEmpty {
+        if o.verifyIndex {
+            try runVerifyIndex(o)
+        } else if !o.edits.isEmpty {
             if canUseAppendFastPath(o) {
                 try runAppendFast(o)
             } else {

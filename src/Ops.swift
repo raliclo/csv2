@@ -228,7 +228,27 @@ final class JSONEmitter: RecordEmitter {
 final class MarkdownEmitter: RecordEmitter {
     private let sink: ByteSink
     private var wroteHeader = false
-    init(sink: ByteSink) { self.sink = sink }
+    private let pretty: Bool
+    /// Only used by --pretty. Column widths cannot be known until every row
+    /// has been seen, so aligning means holding the table. That is the trade
+    /// the flag makes, and it is why it is not the default.
+    /// 只有 --pretty 會用到。欄寬要看過每一列才知道，因此對齊就等於必須持有整張
+    /// 表。這就是這個旗標所做的取捨，也是它不作為預設的原因。
+    private var buffered: [[String]] = []
+    private var bufferedBytes = 0
+    private var headerCells: [String] = []
+
+    init(sink: ByteSink, pretty: Bool = false) {
+        self.sink = sink
+        self.pretty = pretty
+    }
+
+    private func prettyLimit() -> Int {
+        if let v = ProcessInfo.processInfo.environment["CSV2_PRETTY_MAX_BYTES"], let n = Int(v) {
+            return n
+        }
+        return 16 * 1024 * 1024
+    }
 
     func begin(_ ctx: EmitContext) throws {
         var names: [String] = []
@@ -247,20 +267,65 @@ final class MarkdownEmitter: RecordEmitter {
                 names.append(en)
             }
         }
+        wroteHeader = true
+        if pretty {
+            headerCells = names
+            return
+        }
         sink.write("|" + names.joined(separator: "|") + "|\n")
         sink.write("|" + names.map { _ in "---" }.joined(separator: "|") + "|\n")
-        wroteHeader = true
     }
 
     func emit(_ r: Record, matches: [Int], ctx: EmitContext) throws {
         var cells: [String] = []
         if ctx.rownum { cells.append("\(r.number)") }
         cells.append(contentsOf: r.fields.map { MarkdownOut.cell($0.value) })
+        if pretty {
+            for c in cells { bufferedBytes += c.utf8.count }
+            // Refuse above the limit rather than try and get killed. --pretty
+            // has already given up streaming, so on a large file the failure
+            // mode is the OOM killer, not slowness -- and a process that is
+            // killed leaves no message at all.
+            // 超過上限時拒絕，而不是硬做然後被殺掉。--pretty 已經放棄串流，因此
+            // 在大檔案上的失敗模式是被 OOM killer 終結而非變慢——而被殺掉的行程
+            // 不會留下任何訊息。
+            if bufferedBytes > prettyLimit() {
+                throw fault(
+                    "-md --pretty has to hold the whole table to align it, and this one is over \(prettyLimit()) bytes; drop --pretty (the unaligned form renders identically) or raise CSV2_PRETTY_MAX_BYTES",
+                    "-md --pretty 必須持有整張表才能對齊，而這一張超過 \(prettyLimit()) 位元組；請拿掉 --pretty（未對齊的形式呈現結果完全相同），或調高 CSV2_PRETTY_MAX_BYTES")
+            }
+            buffered.append(cells)
+            return
+        }
         sink.write("|" + cells.joined(separator: "|") + "|\n")
     }
 
     func gap(_ ctx: EmitContext) throws {}
-    func end(_ ctx: EmitContext, records: Int, matched: Int) throws {}
+
+    func end(_ ctx: EmitContext, records: Int, matched: Int) throws {
+        guard pretty else { return }
+        let n = max(headerCells.count, buffered.map { $0.count }.max() ?? 0)
+        var widths = [Int](repeating: 0, count: n)
+        for (i, c) in headerCells.enumerated() { widths[i] = max(widths[i], DisplayWidth.of(c)) }
+        for row in buffered {
+            for (i, c) in row.enumerated() where i < n {
+                widths[i] = max(widths[i], DisplayWidth.of(c))
+            }
+        }
+        func line(_ cells: [String]) -> String {
+            var out = "|"
+            for i in 0..<n {
+                let c = i < cells.count ? cells[i] : ""
+                out += " " + DisplayWidth.pad(c, to: widths[i]) + " |"
+            }
+            return out + "\n"
+        }
+        sink.write(line(headerCells))
+        var sep = "|"
+        for i in 0..<n { sep += String(repeating: "-", count: widths[i] + 2) + "|" }
+        sink.write(sep + "\n")
+        for row in buffered { sink.write(line(row)) }
+    }
 }
 
 // ---------------------------------------------------------------------
