@@ -42,6 +42,13 @@ So the first requirement is not speed and not feature count:
 > handled correctly, and anything else must fail loudly rather than silently
 > emit a half-correct file.
 
+Output always uses `\n` as the record separator, on every platform, with no
+detection of the host OS — otherwise the requirement that macOS and Linux
+produce byte-identical output could not hold. Input accepts LF and CRLF mixed in
+one file, decided per record rather than per file. Bytes inside quoted fields
+are never touched, so "LF only" describes the record separator and not every
+byte in the file.
+
 ## Two formats, declared by suffix
 
 | Suffix | Header rows |
