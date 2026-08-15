@@ -72,36 +72,67 @@ Linux 上的 Foundation 是另一份實作，「在 macOS 上會過」對 Linux 
 兩列標頭的形式之所以存在，是因為本專案的資料檔是雙語的；把中文欄位標題放在檔案裡，
 勝過放在另一份會逐漸失真的文件中。
 
-## 規劃中的介面
+## 介面
 
 ```
-csv2 -r               讀取
-csv2 -contains S      輸出含有 S 的紀錄，並附上位址
-csv2 -A N -B N -C N   比對前後的上下文，如 grep
-csv2 -head N          前 N 筆              （筆，不是行）
-csv2 -tail N          後 N 筆
-csv2 -mid a,b         第 a 到第 b 筆，含兩端
-csv2 -t               輸出帶上標頭列（預設不帶）
-csv2 -rownum          最前面加一欄紀錄號
-csv2 -md              輸出 Markdown 表格
-csv2 --json           輸出 JSON Lines
-csv2 -i / -o          輸入／輸出檔
-csv2 -si / -so        由 stdin 讀／寫到 stdout，且不整檔緩衝
+選取
+  -r                    讀取
+  -contains S           輸出每個含有 S 的「儲存格」，形式為 紀錄:欄位
+  --filter              與 -contains 併用時，改為輸出命中的紀錄
+  --include-headers     一併搜尋標頭列（回報為紀錄 0a／0b）
+  --normalize           以 NFC 比對；已儲存的內容絕不正規化
+  -A N  -B N  -C N      以「筆」為單位的上下文，如 grep；區塊之間以 -- 分隔
+  -head N               前 N 筆              （筆，不是行）
+  -tail N               後 N 筆
+  -mid a,b              第 a 到第 b 筆，含兩端；`a,` 與 `,b` 為開放端
+  -t                    輸出帶上標頭列（預設不帶）
+  -rownum               最前面加一欄紀錄號
+  --physical            額外輸出該紀錄起始的物理行號
+  --a1                  額外輸出試算表的 A1 記法
 
-csv2 -insert N ROW      插入為第 N 筆
-csv2 -append ROW        加在最後
-csv2 -delete a[,b]      刪除第 a 筆，或第 a 到第 b 筆
-csv2 -delete -cell r:c  清空一個儲存格（欄數不變）
-csv2 -update r:c VAL    更新一個儲存格
+輸入／輸出
+  -i FILE  -o FILE      檔案路徑；-o 會寫暫存檔再 rename
+  -si  -so              由 stdin 讀／寫到 stdout，且不整檔緩衝
+  --headers 1|2         搭配 -si 時為必要：stdin 沒有副檔名可宣告格式
+  --in-place            就地編輯 -i，同樣走暫存檔加 rename
 
-csv2 -hash COLS       以 SHA-256 遮蔽欄位，單向
-csv2 -encrypt COLS    加密欄位（ChaCha20-Poly1305）
-csv2 -decrypt COLS    解密欄位
-csv2 -keyfile PATH    金鑰檔；預設為 multissh 的私鑰
+輸出形狀
+  -md [--pretty]        Markdown 表格；需要 -t。--pretty 以「顯示寬度」對齊，
+                        因此放棄串流
+  --json                JSON Lines；--json-ascii 會跳脫非 ASCII
+  --en  --zh            以哪一列標頭命名欄位
 
-csv2 -debug           診斷訊息輸出到 stderr
-csv2 -log FILE        追加帶時間戳的操作紀錄
+編輯
+  -insert N ROW         插入為第 N 筆；ROW 是一列 CSV 文字
+  -append ROW           加在最後（就地寫入時為 O(1)）
+  -delete a[,b]         刪除第 a 筆，或第 a 到第 b 筆
+  -delete -cell r:c     清空一個儲存格（欄數不變）
+  -update r:c VAL       更新一個儲存格
+  --truncate-partial    丟棄結尾不完整的紀錄，而非以錯誤結束
+
+保護
+  -hash COLS            以 SHA-256 遮蔽欄位，單向
+  -encrypt COLS         加密欄位（ChaCha20-Poly1305，每次新 nonce）
+  -decrypt COLS         解密；COLS 可用 `all` 表示所有被標記的欄位
+  -keyfile PATH         金鑰檔；預設為 multissh 的私鑰
+  --yes                 不經詢問即採用預設金鑰
+
+索引
+  --no-index            完全不讀也不寫 .index sidecar
+  --verify-index        O(n) 的完整比對；正常路徑上的 O(1) 檢查刻意只是啟發式，
+                        不是證明
+
+診斷
+  -debug                診斷訊息輸出到 stderr，含一行 metrics:
+  -log FILE             追加帶時間戳的操作紀錄
+  --version  --help
 ```
+
+每個旗標兩種寫法都接受：`-contains` 與 `--contains` 等價。**未知**旗標一律報錯——
+multissh 已經被「未知選項被當成主機名稱吞掉」咬過一次。
+
+刻意不提供 `-key`。命令列上傳遞的秘密，在 `ps` 中對本機每個行程都可見，也會留在
+shell 歷史裡。
 
 全篇的 `N` 數的都是**筆數，不是行數**。含引號換行的紀錄會跨多行，數行只會得到半筆資料。
 
@@ -112,6 +143,19 @@ csv2 -log FILE        追加帶時間戳的操作紀錄
 csv2 -contains "舊的值" -i a.csv2     # → 12:6 status_notes …
 csv2 -update 12:6 "新的值" -i a.csv2 -o b.csv2
 ```
+
+### 環境變數
+
+每一個的存在理由都是**讓它的邏輯能被測試**，而不是為了調校：一個不能被調低的門檻，
+唯一的測試方式就是真的產生它本來要防的那種資料（例如一個 16 MiB 的 fixture）。
+
+| 變數 | 預設 | 作用 |
+|---|---|---|
+| `CSV2_INDEX_MIN_BYTES` | 16 MiB | 低於此值不讀也不寫索引 |
+| `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | 設成大於檔案大小即可強制走單執行緒 |
+| `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | 調小可讓小檔案也切出多個區塊，區塊邊界才真的被測到 |
+| `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `-md --pretty` 超過此值時拒絕，而不是被 OOM 殺掉 |
+| `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | `-tail N` 與 `-B N` 的上限 |
 
 ## 讀程式碼前值得先知道的幾項決定
 
@@ -126,6 +170,15 @@ csv2 -update 12:6 "新的值" -i a.csv2 -o b.csv2
 - **沒有 `-key` 旗標。** 命令列上的秘密在 `ps` 中可見，也會留在 shell 歷史裡。
   只提供 `-keyfile`。
 - **正常路徑上不輸出任何訊息。** 會說話的 CLI 放不進管線。預設的記錄門檻是 WARN。
+- **索引永遠是最佳化，永遠不是必要條件。** 沒有索引時行為完全相同。過期、截斷、
+  損毀、版本不符——一律丟棄改用掃描，沒有一個是錯誤。一個會很快給你錯資料的索引，
+  比沒有索引糟得多。
+- **平行的輸出必須與單執行緒逐位元相同。** 那是驗收條件而非期望：本專案的失敗多半
+  是靜默的，而平行化尤其擅長產生「大部分情況正確」的結果。
+- **`--pretty` 以顯示寬度對齊，而那是第四個數字。** `套件名稱` 是 12 位元組、
+  4 個碼位、4 個 grapheme cluster，以及 **8 欄**。Swift 的 `String.count` 給的是
+  cluster 數，用它對齊在中文上就是錯的——而這在 emoji 出現之前就已經成立，因為
+  `.csv2` 的第二列標頭就是繁體中文。
 
 ## 比較
 
@@ -136,8 +189,11 @@ csv2 -update 12:6 "新的值" -i a.csv2 -o b.csv2
 
 每一列都有 `basis`（依據）欄，標明該項是在此地**實測**、取自**已記載**的行為、
 由工作的形狀**推論**而得，還是**UNMEASURED**（尚未量測，不可倚賴）。這一欄比結論本身
-更重要：儲存空間各列是實測的，而全檔掃描各列不是——因為目前還沒有 Swift 的 RFC 4180
-解析器可供量測。
+更重要：儲存空間各列是實測的，而全檔掃描各列不是。
+
+那些表寫成時，理由是「還沒有 Swift 的 RFC 4180 解析器可以量」。現在有了，所以那些列
+是量得出來的，只是還沒去量——一個比較站不住腳的理由；而表格仍標示 UNMEASURED，
+因為那就是它們的現狀。
 
 實測的儲存結果並非一面倒。相對 SQLite，CSV 在文字資料上較小（1.31 倍，若已建索引則為
 1.75 倍），但在整數資料上**較大**（SQLite 為 0.75 倍）——因為 SQLite 存的是 varint，
@@ -160,6 +216,11 @@ CSV 存的是十進位數字的文字。
 
 MIT —— 見 [LICENSE](./LICENSE)。
 
-若要沿用本設計請注意：計畫中的欄位加密建立在 swift_tar 的 `crypto.swift` 之上。
-若日後是把那份程式碼**併入**而非僅僅引用，它自身的授權會一併適用，屆時本檔就不是
-授權的全部。
+`src/Crypto.swift` 是從 `multissh/swift_tar/crypto.swift` **複製**進來的，不是引用：
+swift_tar 位於本 repo 之外，一個會伸出去取檔案的建置只在這台機器上成立，而計畫要求
+csv2 同樣要能在 Linux guest 上建置。
+
+那份複本是同一位作者自己的程式碼（`raliclo/multissh`），因此沒有任何第三方授權隨之
+而來。這一點值得講清楚，因為 multissh 本身**沒有 LICENSE 檔**：在此以 MIT 重新授權，
+是著作權人自己的選擇，而不是繼承來的。若有人沿用本設計、但那些密碼學原語的來源不同，
+那就是一個本檔回答不了的授權問題。

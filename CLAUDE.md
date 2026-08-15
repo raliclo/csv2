@@ -10,9 +10,22 @@ Claude Code 專屬的部分。
 
 | Path | Contents |
 |---|---|
-| `plan/plan.md` | The design, and the reason behind each decision. / 設計文件，以及每項決定的理由 |
+| `plan/plan.md` | The design, the reason behind each decision, and the phase checkboxes that record what is done. / 設計、每項決定的理由，以及記錄進度的階段核取方塊 |
+| `src/*.swift` | The implementation. `main.swift` must be compiled LAST. / 實作。`main.swift` 必須排在編譯順序的最後 |
+| `compile_csv2.zsh` | Build. Ends by RUNNING the binary, not by checking it exists. / 建置。結尾以「執行產物」驗證，而非檢查檔案存在 |
+| `test/test_csv2.zsh` | The suite. Case numbers match the plan's test list one to one. / 測試。案例編號與計畫的測試清單一一對應 |
 | `todo/todo.md` | Decided but not yet designed in full. / 已確定要做、但尚未完整設計的項目 |
 | `compare/*.csv2` | Comparisons against SQLite and PostgreSQL; also the first real fixtures. / 與 SQLite、PostgreSQL 的比較，亦為第一批真實測試素材 |
+
+```zsh
+./compile_csv2.zsh && ./test/test_csv2.zsh    # 74 PASS, 0 FAIL, 1 SKIP
+```
+
+**Tick a checkbox in the plan only once its test passes.** Code written but not
+tested is not done — that is the exact "looks like it succeeded" failure this
+project keeps running into.
+**計畫中的核取方塊，只有在對應測試通過時才打勾。** 寫好但沒測不算完成——那正是本
+專案一再遇到的那種「看起來成功」的失敗。
 
 ## Working directory / 工作目錄
 

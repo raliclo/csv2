@@ -82,36 +82,68 @@ The two-row form exists because this project's data files are bilingual, and
 carrying the Chinese column titles in the file beats keeping them in a separate
 document that drifts.
 
-## Planned interface
+## Interface
 
 ```
-csv2 -r               read
-csv2 -contains S      records containing S, with their addresses
-csv2 -A N -B N -C N   context around matches, as in grep
-csv2 -head N          first N records          (records, not lines)
-csv2 -tail N          last N records
-csv2 -mid a,b         records a through b, inclusive
-csv2 -t               include the header rows (off by default)
-csv2 -rownum          prepend a record-number column
-csv2 -md              Markdown table output
-csv2 --json           JSON Lines output
-csv2 -i / -o          input / output file
-csv2 -si / -so        read stdin / write stdout, without buffering the whole file
+SELECTING / 選取
+  -r                    read
+  -contains S           report every CELL containing S, as record:field
+  --filter              with -contains, emit the matching records instead
+  --include-headers     search the header rows too (reported as record 0a / 0b)
+  --normalize           compare in NFC; what is stored is never normalised
+  -A N  -B N  -C N      context in RECORDS, as in grep; blocks separated by --
+  -head N               first N records          (records, not lines)
+  -tail N               last N records
+  -mid a,b              records a through b, inclusive; `a,` and `,b` are open
+  -t                    include the header rows (off by default)
+  -rownum               prepend a record-number column
+  --physical            also print the physical line the record starts on
+  --a1                  also print spreadsheet A1 notation
 
-csv2 -insert N ROW      insert as record N
-csv2 -append ROW        append at the end
-csv2 -delete a[,b]      delete record a, or records a through b
-csv2 -delete -cell r:c  clear one cell (the field count never changes)
-csv2 -update r:c VAL    update one cell
+INPUT / OUTPUT
+  -i FILE  -o FILE      file paths; -o writes a temp file and renames
+  -si  -so              stdin / stdout, without buffering the whole file
+  --headers 1|2         required with -si: stdin has no extension
+  --in-place            edit -i in place, via temp file + rename
 
-csv2 -hash COLS       mask columns with SHA-256, one way
-csv2 -encrypt COLS    encrypt columns (ChaCha20-Poly1305)
-csv2 -decrypt COLS    decrypt columns
-csv2 -keyfile PATH    key file; defaults to multissh's private key
+OUTPUT SHAPE / 輸出形狀
+  -md [--pretty]        Markdown table; needs -t. --pretty aligns by DISPLAY
+                        width and therefore gives up streaming
+  --json                JSON Lines; --json-ascii escapes non-ASCII
+  --en  --zh            which header row names the columns
 
-csv2 -debug           diagnostics to stderr
-csv2 -log FILE        append a timestamped operation record
+EDITING / 編輯
+  -insert N ROW         insert as record N; ROW is ONE line of CSV text
+  -append ROW           append at the end (O(1) when writing in place)
+  -delete a[,b]         delete record a, or records a through b
+  -delete -cell r:c     clear one cell (the field count never changes)
+  -update r:c VAL       update one cell
+  --truncate-partial    drop a trailing incomplete record instead of failing
+
+PROTECTION / 保護
+  -hash COLS            mask columns with SHA-256, one way
+  -encrypt COLS         encrypt columns (ChaCha20-Poly1305, fresh nonce)
+  -decrypt COLS         decrypt; COLS may be `all` to take every marked column
+  -keyfile PATH         key file; defaults to multissh's private key
+  --yes                 accept the default key without a prompt
+
+INDEX / 索引
+  --no-index            never read or write a .index sidecar
+  --verify-index        O(n) full check; the O(1) check on the normal path is
+                        deliberately a heuristic, not a proof
+
+DIAGNOSTICS / 診斷
+  -debug                diagnostics to stderr, including a metrics: line
+  -log FILE             append a timestamped operation record
+  --version  --help
 ```
+
+Both spellings of every flag are accepted: `-contains` and `--contains` are the
+same. An **unknown** flag is always an error — multissh has already been bitten
+by an unknown option being swallowed as a hostname.
+
+There is deliberately no `-key`. A secret passed on the command line is visible
+in `ps` to every process on the machine and stays in shell history.
 
 `N` counts **records, not lines** throughout. A record with a quoted newline in
 it spans several lines, and counting lines yields half a record.
@@ -123,6 +155,20 @@ finding and editing compose:
 csv2 -contains "old value" -i a.csv2     # -> 12:6 status_notes …
 csv2 -update 12:6 "new value" -i a.csv2 -o b.csv2
 ```
+
+### Environment variables
+
+Each exists so its logic can be **tested** without producing the data it was
+meant to protect against, not merely so it can be tuned. A threshold that
+cannot be lowered can only be exercised by building a 16 MiB fixture.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `CSV2_INDEX_MIN_BYTES` | 16 MiB | below this, no index is read or written |
+| `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | set above the file size to force the single-threaded path |
+| `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | smaller values make a small file yield many chunks, so chunk boundaries are actually exercised |
+| `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `-md --pretty` refuses above this rather than being OOM-killed |
+| `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | upper bound on `-tail N` and `-B N` |
 
 ## Design decisions worth knowing before reading the code
 
@@ -140,6 +186,19 @@ Each of these is argued in full in [plan/plan.md](./plan/plan.md).
   in shell history. `-keyfile` only.
 - **Nothing is printed on the normal path.** A CLI that talks cannot go in a
   pipeline. The default log threshold is WARN.
+- **The index is always an optimisation and never a precondition.** With no
+  index, behaviour is identical. Stale, truncated, corrupt, wrong version — all
+  are discarded in favour of a scan, none is an error. An index that quickly
+  gives you the wrong data is far worse than no index.
+- **Parallel output must be byte-identical to single-threaded.** That is the
+  acceptance condition, not an aspiration: this project's failures are mostly
+  silent, and parallelising is especially good at producing results that are
+  correct most of the time.
+- **`--pretty` aligns by display width, which is a fourth number.** `套件名稱`
+  is 12 bytes, 4 code points, 4 grapheme clusters and **8 columns**. Swift's
+  `String.count` gives clusters, so aligning with it is wrong for Han — which
+  was already true before emoji, since a `.csv2` file's second header row is
+  Traditional Chinese.
 
 ## Comparisons
 
@@ -152,8 +211,12 @@ header rows, English then Traditional Chinese — so they double as the first re
 Each row carries a `basis` column saying whether the claim was **measured** here,
 taken from **documented** behaviour, **reasoned** from the shape of the work, or
 is **UNMEASURED** and must not be relied on. That column matters more than the
-verdicts: the storage rows are measured, and the full-scan rows are not, because
-no Swift RFC 4180 parser exists yet to measure.
+verdicts: the storage rows are measured, the full-scan rows are not.
+
+When those tables were written the reason was that no Swift RFC 4180 parser
+existed to measure. One exists now, so the rows are measurable and simply have
+not been measured — a weaker excuse, and the tables still say UNMEASURED
+because that is what they are.
 
 The measured storage result is not one-sided. Against SQLite, CSV is smaller for
 text (1.31x, or 1.75x once an index exists) and **larger** for integers
@@ -180,7 +243,14 @@ point, since both CSV accidents were recovered from git.
 
 MIT — see [LICENSE](./LICENSE).
 
-Note for anyone reusing the design: the plan calls for column encryption built
-on swift_tar's `crypto.swift`. If that code is ever vendored in rather than
-merely referenced, its own licence travels with it and this file is not the
-whole story.
+`src/Crypto.swift` is **copied** from
+`multissh/swift_tar/crypto.swift`, not referenced: swift_tar lives outside this
+repository, and a build that reached across to it would work on this machine and
+nowhere else — while the plan requires csv2 to build on the Linux guest too.
+
+That copy is the same author's own code (`raliclo/multissh`), so nothing
+third-party travels with it. Worth stating precisely, because multissh itself
+carries **no LICENSE file**: relicensing it here under MIT is the copyright
+holder's own choice, not something inherited. Anyone reusing this design with a
+different provenance for those primitives has a licence question that this file
+does not answer.

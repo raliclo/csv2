@@ -63,7 +63,9 @@ origin = https://github.com/raliclo/csv2.git    （唯一 remote，可推可拉�
 ```
 
 與 `sos/kernel`、`render/*` 那種「無修改、單一 origin」不同——它們的 origin 是別人的。
-這是第三種情況，CLAUDE.md 目前沒有涵蓋，實作時要補上一段。
+這是第三種情況。母專案的 CLAUDE.md 原本沒有涵蓋，**現已補上**（見其「Submodule
+管理規則」中「我們自己寫的 submodule 不適用 fork 規則」那一段），判斷方式是看 `origin`
+的 URL 是不是 `raliclo/`。`sync_all.zsh` 也有對應的分支處理這一種。
 
 ## CLI 介面
 
@@ -1354,8 +1356,13 @@ sparse image，且這是寫入尚未配置的區塊。但那正是 csv2 的情�
 也在 host 上跑。guest 裡目前沒有任何東西讀寫 CSV。
 
 暫緩也拿掉了兩項成本：不必佔用 rootfs 那 47.4 MiB 中的任何一份，也不必在建置流程尚未
-穩定時再多綁一個交叉編譯目標。**尚未寫入任何建置腳本**（已查證：`csv2` 目前不出現在
-任何 `.sh`／`.zsh`／`.mk` 中），因此這不是「移除」，只是不要開始。
+穩定時再多綁一個交叉編譯目標。
+
+**已更新（2026-08-16）：** 上面原本寫著「尚未寫入任何建置腳本」。現在有
+`compile_csv2.zsh` 了，但它是 **host 端**的建置，只產生 `release/csv2`。
+「暫不進 rootfs」這個決定沒有變——`csv2` 仍然不出現在母專案任何 rootfs／workspace／
+prebuilt 的腳本中，因此這仍然不是「移除」，只是不要開始。第 6 階段要新增的
+`compile_csv2_linux.zsh` 也屬於「能在 Linux 上建置並測試」，不屬於「隨映像出貨」。
 
 這也讓一件事變得沒有意義：guest 內的 `-encrypt`。multissh 的金鑰本來就不隨 rootfs 進入
 guest（見上），所以那條路徑原本就只會走到「找不到金鑰」的錯誤。

@@ -9,7 +9,23 @@ Items that are decided but not yet designed in full. The design itself lives in
 
 ## 1. Install into the package manager's bin directory / 安裝到套件管理員的 bin 目錄
 
-**Status: to do. / 狀態：待辦。**
+**Status: to do. The drop-in half is now unblocked; the tap and the shim are
+not. / 狀態：待辦。drop-in 那一半已經沒有東西擋著，tap 與 shim 仍被擋住。**
+
+There is a binary to install now (`./compile_csv2.zsh` → `release/csv2`), so
+the `$(brew --prefix)/bin` drop-in, the `~/.local/bin` fallback, `--uninstall`
+and the verify-by-running step can all be written today. What remains blocked
+is blocked on things outside this repository:
+
+現在已經有可安裝的執行檔（`./compile_csv2.zsh` → `release/csv2`），因此
+`$(brew --prefix)/bin` 的 drop-in、退回 `~/.local/bin`、`--uninstall`，以及「以執行
+來驗證」那一步，今天就可以寫。仍被擋住的部分，擋住它們的都是本 repo 之外的東西：
+
+| Part | Blocked on |
+|---|---|
+| drop-in `install.zsh` | nothing — can be written now / 沒有，現在就能寫 |
+| Homebrew tap + formula | `raliclo/csv2` is private / repo 尚未公開 |
+| Windows scoop shim | no Windows build exists / 沒有 Windows build |
 
 `install.zsh` puts the built `csv2` binary where the platform's package manager
 already has a directory on `PATH`, so that using the tool does not require
