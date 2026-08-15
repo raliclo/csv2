@@ -8,7 +8,7 @@ and the macOS host it is built from.
 
 ## Status
 
-**Phases 1–5 are implemented and pass their tests. Phases 6–7 are not.**
+**Phases 1–6 are implemented and pass their tests. Phase 7 (shipping) is a deliberate deferral.**
 
 ```zsh
 ./compile_csv2.zsh       # build release/csv2
@@ -17,14 +17,15 @@ and the macOS host it is built from.
 
 | Works | Does not yet |
 |---|---|
-| RFC 4180 parsing, quotes, embedded commas and newlines, CRLF, BOM | the Linux cross-compile and the in-guest run (phase 6) |
-| `-r`, `-contains`, `-A`/`-B`/`-C`, `-head`/`-tail`/`-mid`, `-rownum` | shipping in the rootfs, `install.zsh` (phase 7) |
+| RFC 4180 parsing, quotes, embedded commas and newlines, CRLF, BOM | shipping in the rootfs, `install.zsh` (phase 7) |
+| `-r`, `-contains`, `-A`/`-B`/`-C`, `-head`/`-tail`/`-mid`, `-rownum` | |
 | two-row `.csv2` headers, `--json`, `-md`, `--pretty` (UAX #11 widths) | |
 | `-insert`/`-append`/`-delete`/`-update`, `-delete -cell` | |
 | `-hash`, `-encrypt`, `-decrypt`, `-keyfile`, `-debug`, `-log` | |
 | the `-append` O(1) fast path | |
 | `.csv.index` / `.csv2.index` sidecars, `--verify-index` | |
 | parallel search, byte-identical to the single-threaded run | |
+| builds and runs on aarch64 Linux, byte-identical to macOS | |
 
 Progress is tracked as checkboxes at the end of [plan/plan.md](./plan/plan.md),
 and a box is only ticked once the matching case in

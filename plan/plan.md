@@ -1,6 +1,7 @@
 # `csv2` —— guest 端的 CSV 解析器與編輯器
 
-狀態：**第 1–5 階段已實作並通過測試（74 通過、0 失敗、1 略過）；只剩第 6 階段的 Linux 建置與第 7 階段的出貨。**
+狀態：**第 1–6 階段全部完成。** macOS 上 74 通過、0 失敗、1 略過（T47 由 guest 端的測試涵蓋）；
+aarch64 Linux guest 內 72 通過、0 失敗、3 略過；兩邊 12 組輸出逐位元相同。只剩第 7 階段（出貨，刻意暫緩）。
 進度見文末「分階段」的核取方塊，測試見 [`../test/`](../test/)。
 
 ## 為什麼值得做
@@ -1514,7 +1515,7 @@ swift-corelibs-foundation，**另一份實作**，不是同一份程式碼跨平
 
 #### 第 6 階段：跨平台
 
-- [ ] **T47 mac 與 aarch64 Linux 的輸出逐位元相同** —— 同一份輸入、同一組旗標
+- [x] **T47 mac 與 aarch64 Linux 的輸出逐位元相同** —— 同一份輸入、同一組旗標
 
 ## 實作時定案的四件事
 
@@ -1605,6 +1606,68 @@ metadata 的形狀不是，因此讓步的是後者。
 
 為此 `-debug` 新增一行 `metrics:`，回報讀取位元組數與峰值 RSS。少了它，T9、T12、T13
 只能停在 SKIP：「它是以環狀緩衝寫的」不構成記憶體有上界的證據。
+
+## 第 6 階段實作時定案的事，以及它抓到的兩個缺陷
+
+第 6 階段的價值不是「多一個平台能跑」，而是它**在第一次執行時就抓到兩個 macOS 上
+永遠不會顯現的缺陷**。兩個都不是打錯字，都是看起來完全正常的程式碼。
+
+### 缺陷一：`getrusage` 的參數型別兩個平台不同
+
+```swift
+guard getrusage(RUSAGE_SELF, &usage) == 0 else { return 0 }
+```
+
+Darwin 宣告 `getrusage(Int32, ...)`，glibc 宣告 `getrusage(__rusage_who_t, ...)`，
+而 `RUSAGE_SELF` 本身被匯入為 `__rusage_who`。同一行在 macOS 上編譯得過，在 Linux 上
+是型別錯誤，**連編都編不過**。
+
+計畫原本預測的是「`ru_maxrss` 在 Darwin 是 bytes、在 Linux 是 KB」——那個預測是對的，
+但問題還更早一步。
+
+### 缺陷二：`--in-place` 在 Linux 上什麼也沒做，卻回報成功
+
+`ByteSink.close()` 原本用 `FileManager.replaceItemAt`。它在 Linux 的
+swift-corelibs-foundation 中是**另一份實作**，結果是目的檔維持不變——`--in-place`
+安靜地什麼也沒改，然後以 0 結束。
+
+這正是本專案最怕的形狀：成功回報、檔案沒改。macOS 上沒有任何東西會發現它。
+
+改用 POSIX `rename(2)`。那本來就是這份設計指定的原語（「寫暫存檔 → 成功後 rename」，
+同一檔案系統內原子），而且兩個平台行為一致。`replaceItemAt` 做的事比 rename 多
+（備份項目、屬性保留），而那些多出來的事正是兩份實作分歧的地方。
+
+### 原始碼清單只能有一份
+
+兩支建置腳本各自維護一份 `SOURCES` 清單，於是它們分岔了：`compile_csv2_linux.zsh`
+漏了 `src/Parallel.swift`，Linux 建置以 `cannot find 'runParallelSearch' in scope`
+失敗——那個訊息指出的是一個「符號」而非缺少的「檔案」，會把人導向錯的方向。
+
+一開始寫的是「比對兩份清單並警告」的防護。警告只能回報分岔。改為
+[`src/sources.list`](../src/sources.list) 一份清單、兩支腳本都讀它——**根本沒有東西
+可以分岔**。
+
+### 原始碼怎麼進到 guest
+
+以 `debugfs` 在開機前把 payload 直接寫進 workspace ext4 image。另一條路——用
+`mke2fs -d` 從 staging 目錄重建 image——會刪掉所有在 guest 內建置的執行檔並迫使完整
+重建。寫入的對象是 `guestvm.zsh` 建立的「每次執行一份」APFS 複本，共用的那份不會被碰到。
+
+**一個必須先做的步驟：先 `e2fsck -f -y`。** workspace image 帶著上次非乾淨關機留下的
+髒 journal，而 guest 掛載時會重播它——那會把 debugfs 剛改的 metadata 復原回去。第一次
+執行時 payload「寫入成功」、`debugfs` 回傳 0，而檔案在 guest 內根本不存在；主控台 log
+裡的 `EXT4-fs (vdb): recovery complete` 就是原因。
+
+並且：**`debugfs` 即使寫入沒生效也回傳 0**，因此寫完要回頭問檔案系統那個檔案在不在，
+而不是相信它的結束碼。
+
+### guest 內三個 SKIP 的原因
+
+| 案例 | 為什麼在 guest 內略過 |
+|---|---|
+| T25 | 判準是 `iconv`，而 guest 的 busybox 沒有可用的版本。工具缺席不等於性質失敗 |
+| T42 | `getconf _NPROCESSORS_ONLN` 在 busybox 上取不到，測試因此無法確認有多核可用 |
+| T47 | 它本身就是由 host 端的 `run_csv2_test.zsh` 驅動的，在 guest 內自然略過 |
 
 ## 分階段
 
@@ -1703,13 +1766,13 @@ metadata 的形狀不是，因此讓步的是後者。
 - [x] 平行區塊掃描（固定大小區塊 + 工作佇列，不是「檔案大小 ÷ P」）
 - [x] 測試 T41、T42、T46
 
-### 第 6 階段：Linux 交叉編譯與 guest 內測試 ⏳
+### 第 6 階段：Linux 交叉編譯與 guest 內測試 ✅
 
 **完成的定義：`test_csv2.zsh` 在 mac 與 guest 兩邊都通過，且兩邊輸出逐位元相同。**
 
-- [ ] `compile_csv2_linux.zsh`，比照 `compile_swift_tar_linux.sh`
-- [ ] 放進 workspace 映像（不佔 rootfs 的 128 MiB 預算）
-- [ ] 測試 T47（跨平台逐位元相同）
+- [x] `compile_csv2_linux.zsh`，比照 `compile_swift_tar_linux.zsh`
+- [x] 放進 workspace 映像（不佔 rootfs 的 128 MiB 預算）
+- [x] 測試 T47（跨平台逐位元相同）
 
 ### 第 7 階段（暫緩）：出貨 ⏸
 

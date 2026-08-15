@@ -14,6 +14,11 @@
 // =====================================================================
 
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 // ---------------------------------------------------------------------
 // MARK: - Errors / 錯誤
@@ -689,17 +694,28 @@ final class ByteSink {
         flush()
         if let tmp = tmpPath, let final = finalPath {
             try? handle.close()
-            do {
-                if FileManager.default.fileExists(atPath: final) {
-                    _ = try FileManager.default.replaceItemAt(
-                        URL(fileURLWithPath: final), withItemAt: URL(fileURLWithPath: tmp))
-                } else {
-                    try FileManager.default.moveItem(atPath: tmp, toPath: final)
-                }
-            } catch {
+            // POSIX rename(2), not FileManager.replaceItemAt. rename is the
+            // primitive the design actually calls for -- atomic within a
+            // filesystem, so a reader either sees the whole old file or the
+            // whole new one -- and it behaves identically on both platforms.
+            // replaceItemAt is a Foundation abstraction that does more than
+            // that (backup items, attribute preservation) and is a SEPARATE
+            // implementation in swift-corelibs-foundation: on Linux it left
+            // the destination unchanged, so --in-place silently did nothing
+            // while exiting zero. Caught by T28b running in the guest, not by
+            // anything on macOS.
+            // 使用 POSIX rename(2)，而非 FileManager.replaceItemAt。rename 正是
+            // 這份設計要的原語——在同一檔案系統內是原子的，讀者要嘛看到完整的舊
+            // 檔、要嘛看到完整的新檔——而且兩個平台行為一致。replaceItemAt 是
+            // Foundation 的抽象，做的事更多（備份項目、屬性保留），且在
+            // swift-corelibs-foundation 中是另一份實作：在 Linux 上它讓目的檔
+            // 維持不變，於是 --in-place 什麼也沒做卻以 0 結束。這是由 T28b 在
+            // guest 內執行時抓到的，macOS 上沒有任何東西會發現。
+            if rename(tmp, final) != 0 {
+                let e = String(cString: strerror(errno))
                 try? FileManager.default.removeItem(atPath: tmp)
-                throw fault("cannot write output file \(final): \(error)",
-                          "無法寫入輸出檔 \(final)：\(error)")
+                throw fault("cannot rename \(tmp) onto \(final): \(e)",
+                            "無法將 \(tmp) rename 為 \(final)：\(e)")
             }
         }
     }

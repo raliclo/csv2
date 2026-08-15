@@ -33,10 +33,31 @@ SKIP  T41 behaviour identical with no index (the .index sidecar is not implement
 絕不安靜地略過。一份隱藏「沒跑什麼」的測試，回報的是它並不具備的涵蓋率——
 那與「弄壞檔案之後仍以 0 結束的腳本」是同一種失敗模式。
 
-目前狀態：macOS（arm64、Swift 6.4）上 **74 PASS、0 FAIL、1 SKIP**。
+目前狀態：macOS（arm64、Swift 6.4）上 **74 PASS、0 FAIL、1 SKIP**，
+aarch64 Linux guest 內 **72 PASS、0 FAIL、3 SKIP**。
 
-唯一的 SKIP 是 T47，它需要 Linux 交叉編譯（第 6 階段）。這台機器上無法把它變成
-PASS：該案例的重點就是「Linux 版產生逐位元相同的輸出」，而目前根本還沒有 Linux 版。
+T47 是 macOS 上那個 SKIP，而且在這裡也只能是 SKIP：該案例斷言的是「**Linux** 版產生
+相同的輸出」，因此它由母專案的 `../../test_submodules/run_csv2_test.zsh` 驅動——那支
+腳本在 guest 內建置 csv2，並逐一以 sha256 比對 12 組呼叫。該 runner 回報
+**25 PASS、0 FAIL**。
+
+guest 內略過三項：T25 因為 guest 的 busybox 沒有可用的 `iconv` 來驗證 UTF-8；
+T42 因為那裡取不到 `getconf _NPROCESSORS_ONLN`，測試無法確認有多於一個核心；
+以及 T47 本身。三者都是**工具**缺席而非**性質**失敗——這正是它們是「附原因的 SKIP」
+而不是 FAIL 的理由。
+
+### 在第二個平台上跑，實際抓到了什麼
+
+兩個 macOS 永遠不會顯現的缺陷，而且都在第一次執行時就出現：
+
+- `getrusage(RUSAGE_SELF, &usage)` 在 Linux 上根本編譯不過。Darwin 宣告
+  `getrusage(Int32, ...)`，glibc 宣告 `getrusage(__rusage_who_t, ...)`，而
+  `RUSAGE_SELF` 被匯入為 `__rusage_who`。
+- `--in-place` 安靜地什麼也沒做，然後以 0 結束。它用的是
+  `FileManager.replaceItemAt`——在 swift-corelibs-foundation 中是另一份實作，
+  結果是目的檔維持不變。現已改用 POSIX `rename(2)`，那本來就是設計指定的做法。
+
+兩者都不是打錯字，都是讀起來完全正確的程式碼。
 
 T9、T12、T13 曾經是 SKIP，理由更不舒服——程式碼確實走串流路徑，但「它是以環狀緩衝
 寫的」並不構成「RSS 有上界」的證據。現在它們有量測了：csv2 在 `-debug` 下以一行

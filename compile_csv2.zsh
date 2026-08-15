@@ -28,21 +28,10 @@ for arg in "$@"; do
     esac
 done
 
-# main.swift must come LAST. Swift only allows top-level statements in a file
-# named main.swift, and the driver treats file order as significant for it.
-# main.swift 必須排在最後。Swift 只允許名為 main.swift 的檔案含頂層敘述，
-# 而 driver 對它的檔案順序是敏感的。
-SOURCES=(
-    src/Crypto.swift
-    src/Core.swift
-    src/Support.swift
-    src/Width.swift
-    src/Index.swift
-    src/Parallel.swift
-    src/Ops.swift
-    src/Run.swift
-    src/main.swift
-)
+# One list, read from src/sources.list -- see the reasoning in that file.
+# 只有一份清單，讀自 src/sources.list——理由寫在該檔中。
+SOURCES=(${(f)"$(grep -v '^[[:space:]]*#' src/sources.list | grep -v '^[[:space:]]*$')"})
+[[ ${#SOURCES} -gt 0 ]] || { print -u2 -- "src/sources.list is empty / src/sources.list 是空的"; exit 1 }
 
 for f in $SOURCES; do
     if [[ ! -f "$f" ]]; then

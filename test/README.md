@@ -35,11 +35,34 @@ It is never quietly dropped. A suite that hides what it did not run reports a
 coverage it does not have — which is the same failure mode as a script that
 exits zero after corrupting a file.
 
-Current state: **74 PASS, 0 FAIL, 1 SKIP** on macOS (arm64, Swift 6.4).
+Current state: **74 PASS, 0 FAIL, 1 SKIP** on macOS (arm64, Swift 6.4), and
+**72 PASS, 0 FAIL, 3 SKIP** inside the aarch64 Linux guest.
 
-The one skip is T47, which needs the Linux cross-compile (phase 6). It cannot
-be turned into a pass on this machine: the whole point of the case is that the
-Linux build produces byte-identical output, and there is no Linux build yet.
+T47 is the skip on macOS, and it cannot be anything else here: the case asserts
+that the LINUX build produces identical output, so it is driven from the parent
+project by `../../test_submodules/run_csv2_test.zsh`, which builds csv2 in the
+guest and compares 12 invocations sha256 by sha256. That runner reports
+**25 PASS, 0 FAIL**.
+
+The guest skips three: T25 because the guest's busybox has no working `iconv`
+to validate UTF-8 with, T42 because `getconf _NPROCESSORS_ONLN` is unavailable
+there so the suite cannot confirm more than one core, and T47 itself. All three
+are missing TOOLS, not failing properties -- which is why they are skips with a
+reason rather than failures.
+
+### What running on the second platform actually caught
+
+Two defects that macOS could never have shown, both on the first run:
+
+- `getrusage(RUSAGE_SELF, &usage)` does not compile on Linux at all. Darwin
+  declares `getrusage(Int32, ...)`; glibc declares `getrusage(__rusage_who_t, ...)`
+  while `RUSAGE_SELF` imports as `__rusage_who`.
+- `--in-place` silently did nothing and exited zero. It used
+  `FileManager.replaceItemAt`, a separate implementation in
+  swift-corelibs-foundation that left the destination unchanged. Now POSIX
+  `rename(2)`, which is what the design specified in the first place.
+
+Neither is a typo. Both are code that reads as entirely correct.
 
 T9, T12 and T13 used to be skips for a more uncomfortable reason — the code
 took the streaming path, but "it is written as a ring buffer" is not evidence

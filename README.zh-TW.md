@@ -8,7 +8,7 @@ English: [README.md](./README.md)
 
 ## 狀態
 
-**第 1–5 階段已實作並通過測試；第 6–7 階段尚未完成。**
+**第 1–6 階段已實作並通過測試；第 7 階段（出貨）是刻意暫緩。**
 
 ```zsh
 ./compile_csv2.zsh       # 建置 release/csv2
@@ -17,14 +17,15 @@ English: [README.md](./README.md)
 
 | 可用 | 尚未做 |
 |---|---|
-| RFC 4180 解析、引號、內嵌逗號與換行、CRLF、BOM | Linux 交叉編譯與 guest 內執行（第 6 階段） |
-| `-r`、`-contains`、`-A`/`-B`/`-C`、`-head`/`-tail`/`-mid`、`-rownum` | 隨 rootfs 出貨、`install.zsh`（第 7 階段） |
+| RFC 4180 解析、引號、內嵌逗號與換行、CRLF、BOM | 隨 rootfs 出貨、`install.zsh`（第 7 階段） |
+| `-r`、`-contains`、`-A`/`-B`/`-C`、`-head`/`-tail`/`-mid`、`-rownum` | |
 | `.csv2` 兩列標頭、`--json`、`-md`、`--pretty`（UAX #11 寬度） | |
 | `-insert`/`-append`/`-delete`/`-update`、`-delete -cell` | |
 | `-hash`、`-encrypt`、`-decrypt`、`-keyfile`、`-debug`、`-log` | |
 | `-append` 的 O(1) 快路徑 | |
 | `.csv.index` / `.csv2.index` sidecar、`--verify-index` | |
 | 平行搜尋，且與單執行緒逐位元相同 | |
+| 可在 aarch64 Linux 上建置執行，且與 macOS 逐位元相同 | |
 
 進度以核取方塊記在 [plan/plan.md](./plan/plan.md) 文末，且**只有在
 [test/test_csv2.zsh](./test/test_csv2.zsh) 中對應的案例通過時才打勾**。

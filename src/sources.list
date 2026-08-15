@@ -1,0 +1,27 @@
+# The source list, in compile order. ONE list, read by both build scripts.
+# 原始檔清單，依編譯順序。只有一份，兩支建置腳本都讀它。
+#
+# It lives here rather than being written out twice because the two scripts
+# DID drift: compile_csv2_linux.zsh was missing src/Parallel.swift, and the
+# Linux build failed with "cannot find 'runParallelSearch' in scope" -- a
+# message that names a symbol, not the missing file, so it sends you looking
+# at the wrong thing. A guard comparing the two lists would only have reported
+# the drift; keeping one list means there is nothing to drift.
+# 之所以放在這裡而不是在兩處各寫一份：那兩支腳本真的分岔過——
+# compile_csv2_linux.zsh 漏了 src/Parallel.swift，Linux 建置以
+# 「cannot find 'runParallelSearch' in scope」失敗，而那個訊息指出的是一個符號、
+# 不是缺少的檔案，會讓人去查錯的方向。比對兩份清單的防護只能「回報」分岔；
+# 只留一份則根本沒有東西可以分岔。
+#
+# main.swift MUST come last: Swift only allows top-level statements in a file
+# with that name, and the driver treats its position as significant.
+# main.swift 必須排最後：Swift 只允許該檔名含頂層敘述，且 driver 對它的位置敏感。
+src/Crypto.swift
+src/Core.swift
+src/Support.swift
+src/Width.swift
+src/Index.swift
+src/Parallel.swift
+src/Ops.swift
+src/Run.swift
+src/main.swift

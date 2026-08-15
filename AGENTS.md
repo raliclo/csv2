@@ -3,26 +3,40 @@
 Guidance for coding agents working in this repository.
 供 coding agent 在本 repo 工作時參考。
 
-## Status: phases 1–5 work, 6–7 do not / 狀態：第 1–5 階段可用，6–7 未完成
+## Status: phases 1–6 done; only phase 7 (shipping) remains / 狀態：第 1–6 階段完成，只剩第 7 階段（出貨）
 
 ```zsh
 ./compile_csv2.zsh      # builds release/csv2 with swiftc / 以 swiftc 建置 release/csv2
-./test/test_csv2.zsh   # 74 PASS, 0 FAIL, 1 SKIP on macOS / macOS 上 74 通過、0 失敗、1 略過
+./test/test_csv2.zsh    # 74 PASS, 0 FAIL, 1 SKIP on macOS / macOS 上 74 通過、0 失敗、1 略過
+
+# the Linux half, driven from the parent project (boots a guest VM)
+# Linux 那一半，由母專案驅動（會啟動 guest VM）
+../test_submodules/run_csv2_test.zsh   # 25 PASS, 0 FAIL
 ```
+
+**The source list lives in `src/sources.list`, read by BOTH build scripts.**
+Add a `.swift` file there, never to a script. The two scripts each carried
+their own copy once and drifted; the Linux build then failed with
+`cannot find 'runParallelSearch' in scope` -- a message naming a symbol, not
+the missing file.
+**原始檔清單在 `src/sources.list`，兩支建置腳本都讀它。** 新增 `.swift` 請加在那裡，
+不要加進腳本。那兩支腳本曾各自持有一份而分岔，Linux 建置因此以
+`cannot find 'runParallelSearch' in scope` 失敗——那個訊息指出的是符號，不是缺少的檔案。
 
 Working: the RFC 4180 parser, `-r`, the selection flags, two-row headers,
 `--json`, `-md` including `--pretty` with a UAX #11 width table, all four edit
 verbs, `-hash`/`-encrypt`/`-decrypt`, `-debug`, `-log`, the `-append` O(1) fast
 path, the `.index` sidecar with `--verify-index`, and parallel search.
 
-Not implemented: the Linux cross-compile and the in-guest run (phase 6), and
-shipping (phase 7). T47 is the one remaining SKIP in the suite.
+Phase 6 is done: csv2 builds inside the aarch64 Linux guest and its output is
+byte-identical to macOS across 12 compared invocations. Not implemented:
+shipping (phase 7), which is a deliberate deferral rather than a gap.
 
 可用：RFC 4180 解析器、`-r`、選取旗標、兩列標頭、`--json`、`-md`（含 `--pretty`
 與 UAX #11 寬度表）、四個編輯動詞、`-hash`／`-encrypt`／`-decrypt`、`-debug`、
 `-log`、`-append` 的 O(1) 快路徑、`.index` sidecar 與 `--verify-index`，以及平行搜尋。
-未實作：Linux 交叉編譯與 guest 內執行（第 6 階段），以及出貨（第 7 階段）。
-測試中僅剩的 SKIP 就是 T47。
+第 6 階段已完成：csv2 能在 aarch64 Linux guest 內建置，且 12 組比對的輸出與 macOS
+逐位元相同。未實作：出貨（第 7 階段），那是刻意暫緩而非缺口。
 
 ### Environment knobs / 環境變數
 

@@ -155,10 +155,15 @@ assert_fails "T3 mismatched field count is an error / 欄數不一致即報錯" 
 # T4 — CRLF and LF in the SAME file, decided per record, and everything
 # written out as LF.
 "$CSV2" -r -t -i "$TMP/mixed.csv" -so > "$TMP/t4.out" 2>/dev/null
-if [[ $(tr -dc '\r' < "$TMP/t4.out" | wc -c) -eq 0 && $(wc -l < "$TMP/t4.out") -eq 3 ]]; then
+# LC_ALL=C because this counts CR BYTES. That is byte work by definition, and
+# a multibyte locale can make tr reject the input rather than count it.
+# LC_ALL=C，因為這裡數的是 CR「位元組」。那依定義就是位元組操作，而在多位元組
+# locale 下 tr 可能會拒絕輸入而不是去數。
+cr_count() { LC_ALL=C tr -dc '\r' < "$1" | wc -c | tr -d ' ' }
+if [[ $(cr_count "$TMP/t4.out") -eq 0 && $(wc -l < "$TMP/t4.out") -eq 3 ]]; then
     ok "T4 mixed CRLF/LF parsed per record, written as LF / 混用逐筆判斷，一律寫 LF"
 else
-    bad "T4 mixed CRLF/LF (got $(wc -l < "$TMP/t4.out") lines, $(tr -dc '\r' < "$TMP/t4.out" | wc -c) CR)"
+    bad "T4 mixed CRLF/LF (got $(wc -l < "$TMP/t4.out") lines, $(cr_count "$TMP/t4.out") CR)"
 fi
 
 # T5 — the opposite rule, which is easy to break while implementing T4:
@@ -413,22 +418,58 @@ fi
 # T25 — a long emoji cell echoed in output must still be valid UTF-8 after
 # truncation. A tool that produces mojibake while reporting sends you the
 # wrong way.
-# 300 clusters, so the echo limit is actually crossed. At 80 the value fits
-# and the case would pass while testing nothing about truncation.
-long=$(printf '\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x91\xa7\xe2\x80\x8d\xf0\x9f\x91\xa6%.0s' {1..300})
+# T25 — truncation must land on a grapheme cluster boundary.
+#
+# Asserted by construction, with no external tool. The value is 300 identical
+# ZWJ family emoji and the report's echo limit is 200 clusters, so the correct
+# output is EXACTLY 200 families followed by the truncation marker. Building
+# that expected string here and comparing it is strictly stronger than asking
+# "is this valid UTF-8": it pins the truncation POINT, not merely the fact
+# that nothing was cut in half.
+#
+# The earlier version used `iconv -f UTF-8 -t UTF-8` as the oracle. That made
+# the case depend on a tool the guest's busybox does not provide, so it turned
+# into a SKIP on the platform where byte-level behaviour matters most -- and a
+# skip is exactly what this case should never be.
+# T25 —— 截斷必須落在 grapheme cluster 邊界。
+#
+# 以「構造」來斷言，不依賴任何外部工具。值是 300 個相同的 ZWJ 家庭 emoji，而報告的
+# 回顯上限是 200 個 cluster，因此正確的輸出恰好是 200 個家庭加上截斷標記。在此建出
+# 那個預期字串並比對，比問「這是不是合法的 UTF-8」嚴格得多：它釘住的是截斷的「位置」，
+# 而不只是「沒有把東西切成兩半」這個事實。
+#
+# 先前的版本以 `iconv -f UTF-8 -t UTF-8` 當判準，那讓這個案例依賴一個 guest 的
+# busybox 並不提供的工具，於是它在「位元組層級行為最要緊」的那個平台上變成 SKIP
+# ——而這個案例最不該變成的就是 SKIP。
+family=$(printf '\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x91\xa7\xe2\x80\x8d\xf0\x9f\x91\xa6')
+long=""
+for i in {1..300}; do long+=$family; done
 printf 'k,v\n鍵,值\nlong,%s\n' "$long" > "$TMP/long.csv2"
-"$CSV2" -contains "k" --include-headers -i "$TMP/long.csv2" > "$TMP/t25.out" 2>&1
-"$CSV2" -contains "$(printf '\xf0\x9f\x91\xa8')" -i "$TMP/long.csv2" >> "$TMP/t25.out" 2>&1
-# The converted bytes go to a FILE, not /dev/null: macOS iconv returns ENOTTY
-# when its output is /dev/null, which reads as "invalid input" and would fail
-# this case for a reason that has nothing to do with the encoding.
-# 轉換結果寫進檔案而非 /dev/null：macOS 的 iconv 在輸出為 /dev/null 時會回
-# ENOTTY，那看起來像「輸入不合法」，會讓這個案例因為與編碼無關的理由而失敗。
-if iconv -f UTF-8 -t UTF-8 "$TMP/t25.out" > "$TMP/t25.conv" 2>/dev/null; then
-    ok "T25 truncation stays on a grapheme cluster boundary / 截斷落在 grapheme cluster 邊界"
+
+want=""
+for i in {1..200}; do want+=$family; done
+want+="…[+100 more chars]"
+
+got=$("$CSV2" -contains "$family" -i "$TMP/long.csv2" 2>&1 | head -1 | cut -f3)
+if [[ "$got" == "$want" ]]; then
+    ok "T25 truncation cuts at exactly 200 clusters, not mid-sequence / 截斷恰好在第 200 個 cluster，未切在序列中間"
 else
-    bad "T25 truncation produced invalid UTF-8 / 截斷產生了不合法的 UTF-8"
-    print -r -- "      last bytes: $(tail -c 24 "$TMP/t25.out" | xxd -p | tr -d '\n')"
+    bad "T25 truncation point (got ${#got} chars, want ${#want}) / 截斷位置不符"
+    print -r -- "      got tail:  $(print -r -- "$got" | LC_ALL=C tail -c 32 | LC_ALL=C od -An -tx1 | LC_ALL=C tr -d ' \n')"
+    print -r -- "      want tail: $(print -r -- "$want" | LC_ALL=C tail -c 32 | LC_ALL=C od -An -tx1 | LC_ALL=C tr -d ' \n')"
+fi
+
+# And the complementary half: a cell whose bytes are NOT valid UTF-8 must be
+# rendered as hex rather than emitted raw, so the report itself never becomes
+# unreadable. csv2 decides this, so no external validator is needed here either.
+# 另一半：位元組並非合法 UTF-8 的儲存格必須以十六進位呈現而非原樣輸出，讓報告本身
+# 不會變成不可讀。這件事由 csv2 自己決定，因此此處同樣不需要外部驗證工具。
+printf 'k,v\n鍵,值\nbad,x\xe9y\n' > "$TMP/nonutf8.csv2"
+got=$("$CSV2" -contains "x" -i "$TMP/nonutf8.csv2" 2>&1 | head -1)
+if [[ "$got" == *"non-UTF-8"* ]]; then
+    ok "T25b a non-UTF-8 cell is echoed as hex, not raw bytes / 非 UTF-8 儲存格以十六進位回顯，不吐原始位元組"
+else
+    bad "T25b non-UTF-8 echo (got: ${got:0:80})"
 fi
 
 # T26 — stdin has no extension, so the format cannot be a declared fact and
@@ -641,20 +682,37 @@ cp "$TMP/good.index" "$TMP/ix.csv2.index"
 # turned down so the file yields many chunks: a run that produces ONE chunk
 # exercises no boundary and would pass on an implementation with no chunking
 # logic at all.
-if [[ $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1) -lt 2 ]]; then
-    skipt "T42 parallel and single-threaded output are byte-identical / 平行與單執行緒輸出逐位元相同 (single-core machine, the parallel path cannot engage / 單核機器，平行路徑不會啟用)"
-else
-    CSV2_PARALLEL_MIN_BYTES=999999999 "$CSV2" -contains "comma 42" -i "$TMP/ix.csv2" \
-        > "$TMP/p_single.txt" 2>/dev/null
-    CSV2_PARALLEL_MIN_BYTES=1000 CSV2_PARALLEL_CHUNK_BYTES=8192 "$CSV2" -contains "comma 42" \
-        -i "$TMP/ix.csv2" -debug > "$TMP/p_multi.txt" 2>"$TMP/p_dbg.txt"
-    chunks=$(grep -o 'parallel: [0-9]* chunks' "$TMP/p_dbg.txt" | head -1 | awk '{print $2}')
-    if [[ -n "$chunks" && "$chunks" -gt 1 ]] && cmp -s "$TMP/p_single.txt" "$TMP/p_multi.txt" \
-       && [[ -s "$TMP/p_single.txt" ]]; then
-        ok "T42 parallel ($chunks chunks) and single-threaded output are byte-identical / 平行（$chunks 個區塊）與單執行緒輸出逐位元相同"
+# The core count is read from csv2's own -debug line, not from `getconf`:
+# busybox does not provide _NPROCESSORS_ONLN, which turned this case into a
+# SKIP inside the guest -- on the platform whose DIFFERENT core count is
+# precisely what the case exists to exercise. csv2 reports the worker count it
+# actually used, which is the number that matters anyway.
+# 核心數取自 csv2 自己的 -debug 輸出，而非 `getconf`：busybox 不提供
+# _NPROCESSORS_ONLN，那讓這個案例在 guest 內變成 SKIP——而 guest 那個「不同的
+# 核心數」正是本案例存在要測的東西。csv2 回報的是它實際使用的工作者數，那本來
+# 就是真正要緊的數字。
+CSV2_PARALLEL_MIN_BYTES=999999999 "$CSV2" -contains "comma 42" -i "$TMP/ix.csv2" \
+    > "$TMP/p_single.txt" 2>/dev/null
+CSV2_PARALLEL_MIN_BYTES=1000 CSV2_PARALLEL_CHUNK_BYTES=8192 "$CSV2" -contains "comma 42" \
+    -i "$TMP/ix.csv2" -debug > "$TMP/p_multi.txt" 2>"$TMP/p_dbg.txt"
+chunks=$(grep -o 'parallel: [0-9]* chunks' "$TMP/p_dbg.txt" | head -1 | awk '{print $2}')
+workers=$(grep -o '[0-9]* workers' "$TMP/p_dbg.txt" | head -1 | awk '{print $1}')
+if [[ -z "$workers" || "$workers" -lt 2 ]]; then
+    # Genuinely one core: the parallel path cannot engage, so single and
+    # "parallel" are the same code and comparing them proves nothing. Assert
+    # what IS true there -- that asking for it still produces correct output.
+    # 真的只有一個核心：平行路徑不會啟用，單執行緒與「平行」是同一段程式碼，比對
+    # 它們什麼也證明不了。改為斷言在那裡確實成立的事——要求平行仍產生正確的輸出。
+    if cmp -s "$TMP/p_single.txt" "$TMP/p_multi.txt" && [[ -s "$TMP/p_single.txt" ]]; then
+        ok "T42 single core (${workers:-1} worker): output still correct / 單核（${workers:-1} 個工作者）：輸出仍正確"
     else
-        bad "T42 parallel vs single (chunks=${chunks:-none}, single=$(wc -l < "$TMP/p_single.txt") lines)"
+        bad "T42 single core output differs / 單核輸出不一致"
     fi
+elif [[ -n "$chunks" && "$chunks" -gt 1 ]] && cmp -s "$TMP/p_single.txt" "$TMP/p_multi.txt" \
+   && [[ -s "$TMP/p_single.txt" ]]; then
+    ok "T42 parallel ($chunks chunks, $workers workers) and single-threaded output are byte-identical / 平行（$chunks 區塊、$workers 工作者）與單執行緒輸出逐位元相同"
+else
+    bad "T42 parallel vs single (chunks=${chunks:-none}, workers=${workers:-none}, single=$(wc -l < "$TMP/p_single.txt") lines)"
 fi
 
 # T43 — the whole point of the fast path: bytes written must not depend on
@@ -716,7 +774,14 @@ unset CSV2_INDEX_MIN_BYTES
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
-skipt "T47 macOS and aarch64 Linux produce byte-identical output / mac 與 Linux 輸出逐位元相同 (needs the Linux cross-compile, phase 6 / 需要第 6 階段的 Linux 交叉編譯)"
+# T47 compares TWO platforms, so it cannot run from inside one of them. It is
+# driven from the parent project by test_submodules/run_csv2_test.zsh, which
+# builds csv2 in the guest and compares 12 invocations sha256 by sha256. This
+# line reports where it lives rather than pretending the case does not exist.
+# T47 比對的是「兩個平台」，因此無法從其中一個平台內部執行。它由母專案的
+# test_submodules/run_csv2_test.zsh 驅動——在 guest 內建置 csv2，並逐一以 sha256
+# 比對 12 組呼叫。這一行說明它在哪裡執行，而不是假裝這個案例不存在。
+skipt "T47 macOS and aarch64 Linux produce byte-identical output / mac 與 Linux 輸出逐位元相同 (runs from the parent project: test_submodules/run_csv2_test.zsh / 由母專案的 test_submodules/run_csv2_test.zsh 執行)"
 
 echo
 echo "====================================================================="

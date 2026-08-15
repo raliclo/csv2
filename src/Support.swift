@@ -321,7 +321,27 @@ enum Metrics {
     /// 上是 KB——同一個欄位兩種單位，正是那種「只有在 guest 上跑才會現形」的差異。
     static func peakRSSBytes() -> Int {
         var usage = rusage()
-        guard getrusage(RUSAGE_SELF, &usage) == 0 else { return 0 }
+        // The `who` argument has a different TYPE on each platform, not just a
+        // different value: Darwin declares getrusage(Int32, ...) and glibc
+        // declares getrusage(__rusage_who_t, ...) while RUSAGE_SELF itself
+        // imports as `__rusage_who`. Passing it straight through compiles on
+        // macOS and fails on Linux with "cannot convert value of type
+        // '__rusage_who' to expected argument type '__rusage_who_t'".
+        // 這個 `who` 參數在兩個平台上「型別」就不同，不只是值不同：Darwin 宣告
+        // getrusage(Int32, ...)，glibc 宣告 getrusage(__rusage_who_t, ...)，
+        // 而 RUSAGE_SELF 本身被匯入為 `__rusage_who`。直接傳過去在 macOS 上
+        // 編譯得過，在 Linux 上會失敗。
+        #if canImport(Darwin)
+        let who: Int32 = RUSAGE_SELF
+        #else
+        let who: Int32 = Int32(RUSAGE_SELF.rawValue)
+        #endif
+        guard getrusage(who, &usage) == 0 else { return 0 }
+        // And the UNIT differs too: ru_maxrss is bytes on Darwin, kilobytes on
+        // Linux. The same struct field, two units -- exactly the kind of thing
+        // that only shows up when the guest runs it.
+        // 單位也不同：ru_maxrss 在 Darwin 是位元組，在 Linux 是 KB。同一個結構
+        // 欄位、兩種單位——正是那種「只有在 guest 上跑才會現形」的差異。
         #if canImport(Darwin)
         return Int(usage.ru_maxrss)
         #else
