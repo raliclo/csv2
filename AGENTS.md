@@ -5,8 +5,8 @@ Guidance for coding agents working in this repository.
 
 ## Status: phases 1–4 work, 5–7 do not / 狀態：第 1–4 階段可用，5–7 未完成
 
-```sh
-./compile_csv2.sh      # builds release/csv2 with swiftc / 以 swiftc 建置 release/csv2
+```zsh
+./compile_csv2.zsh      # builds release/csv2 with swiftc / 以 swiftc 建置 release/csv2
 ./test/test_csv2.zsh   # 60 PASS, 0 FAIL, 8 SKIP on macOS / macOS 上 60 通過、0 失敗、8 略過
 ```
 
@@ -47,8 +47,17 @@ do not quietly implement something else.
 - **Bilingual**: explanations, code comments and responses in both English and
   Traditional Chinese (繁體中文). Never Simplified Chinese.
   說明、註解與回覆一律中英雙語，繁體中文，不使用簡體。
-- **Scripts in zsh**, matching multissh and the parent project.
-  腳本一律使用 zsh，與 multissh 及母專案一致。
+- **Scripts are zsh, named `.zsh`, with `#!/usr/bin/env zsh`.** Matching
+  multissh and the parent project. `env zsh` rather than `/bin/zsh`: on the
+  aarch64 Linux guest zsh is not at `/bin/zsh`, and phase 6 requires these
+  scripts to run there unchanged. A subshell spawned from a script uses
+  `zsh -c`, never `sh -c` — `/bin/sh` is dash on many Linux systems, so
+  `sh -c` silently tests a different shell from the one the script is written in.
+  腳本一律使用 zsh，副檔名 `.zsh`，shebang 為 `#!/usr/bin/env zsh`，與 multissh
+  及母專案一致。用 `env zsh` 而非 `/bin/zsh`：aarch64 Linux guest 上的 zsh 不在
+  `/bin/zsh`，而第 6 階段要求這些腳本能原封不動地在那裡執行。腳本內開子 shell 用
+  `zsh -c`，絕不用 `sh -c`——許多 Linux 上的 `/bin/sh` 是 dash，`sh -c` 會靜默地
+  測到一個與腳本語法不同的 shell。
 - **Swift style follows swift_tar**: plain `.swift` sources, Foundation +
   Dispatch, built with `swiftc` build scripts. No SwiftPM, no SwiftNIO.
   Swift 風格比照 swift_tar：純 `.swift` 原始檔，Foundation + Dispatch，

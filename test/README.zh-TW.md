@@ -4,7 +4,7 @@
 
 `csv2` 的回歸測試。一份腳本，編號與計畫一一對應。
 
-```sh
+```zsh
 ./test_csv2.zsh                      # release/csv2 不存在時會先建置
 CSV2=/path/to/csv2 ./test_csv2.zsh   # 測試指定的執行檔，例如 Linux 版
 ```

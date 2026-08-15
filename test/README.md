@@ -4,7 +4,7 @@
 
 The regression suite for `csv2`. One script, numbered to match the plan.
 
-```sh
+```zsh
 ./test_csv2.zsh                      # builds release/csv2 first if it is missing
 CSV2=/path/to/csv2 ./test_csv2.zsh   # test a specific binary, e.g. the Linux one
 ```

@@ -10,8 +10,8 @@ English: [README.md](./README.md)
 
 **第 1–4 階段已實作並通過測試；第 5–7 階段尚未完成。**
 
-```sh
-./compile_csv2.sh       # 建置 release/csv2
+```zsh
+./compile_csv2.zsh       # 建置 release/csv2
 ./test/test_csv2.zsh    # macOS（arm64、Swift 6.4）上 60 通過、0 失敗、8 略過
 ```
 

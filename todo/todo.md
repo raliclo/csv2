@@ -11,11 +11,11 @@ Items that are decided but not yet designed in full. The design itself lives in
 
 **Status: to do. / 狀態：待辦。**
 
-`install.sh` puts the built `csv2` binary where the platform's package manager
+`install.zsh` puts the built `csv2` binary where the platform's package manager
 already has a directory on `PATH`, so that using the tool does not require
 remembering a path.
 
-`install.sh` 把建好的 `csv2` 放到該平台套件管理員既有的、且已在 `PATH` 上的目錄，
+`install.zsh` 把建好的 `csv2` 放到該平台套件管理員既有的、且已在 `PATH` 上的目錄，
 使得使用這支工具不必記住任何路徑。
 
 ### macOS and Linux: ask `brew`, never hardcode / macOS 與 Linux：問 `brew`，絕不寫死
@@ -59,12 +59,12 @@ Therefore:
 - The installer **prints this** rather than leaving it to be discovered. A user
   who believes `brew upgrade` maintains this binary will run an old version for
   a long time without noticing.
-- `install.sh --uninstall` **must exist**, because `brew uninstall` cannot
+- `install.zsh --uninstall` **must exist**, because `brew uninstall` cannot
   remove something brew never installed.
 
 因此：安裝程式**要主動印出這件事**，而不是留給使用者日後自行發現——以為
 `brew upgrade` 會維護它的人，會在不知情的狀況下用著舊版本很久；並且
-`install.sh --uninstall` **必須存在**，因為 `brew uninstall` 無法移除 brew 沒裝過的東西。
+`install.zsh --uninstall` **必須存在**，因為 `brew uninstall` 無法移除 brew 沒裝過的東西。
 
 ### A real formula needs a public repository / 真正的 formula 需要公開的 repo
 

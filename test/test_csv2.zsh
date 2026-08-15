@@ -29,8 +29,8 @@ ROOT="${HERE:h}"
 : ${CSV2:="$ROOT/release/csv2"}
 
 if [[ ! -x "$CSV2" ]]; then
-    echo "building first / 先建置：$ROOT/compile_csv2.sh"
-    "$ROOT/compile_csv2.sh" >/dev/null || { echo "build failed / 建置失敗" >&2; exit 1 }
+    echo "building first / 先建置：$ROOT/compile_csv2.zsh"
+    "$ROOT/compile_csv2.zsh" >/dev/null || { echo "build failed / 建置失敗" >&2; exit 1 }
 fi
 
 LOG="$HERE/test_csv2.log"
@@ -46,9 +46,14 @@ cleanup() { rm -rf "$TMP" }
 trap cleanup EXIT INT TERM
 
 pass=0; fail=0; skip=0
-ok()   { print -r -- "PASS  $1"; ((pass++)) }
-bad()  { print -r -- "FAIL  $1"; ((fail++)) }
-skipt(){ print -r -- "SKIP  $1"; ((skip++)) }
+# (( n++ )) evaluates to the OLD value, so it returns status 1 the first time a
+# counter leaves 0. Harmless while this script does not set -e, but it is a trap
+# left lying for whoever adds it.
+# (( n++ )) 取的是舊值，因此計數器第一次離開 0 時回傳狀態 1。目前這支腳本沒有
+# set -e 所以無害，但那是留給下一個加上 set -e 的人的陷阱。
+ok()   { print -r -- "PASS  $1"; pass=$((pass + 1)) }
+bad()  { print -r -- "FAIL  $1"; fail=$((fail + 1)) }
+skipt(){ print -r -- "SKIP  $1"; skip=$((skip + 1)) }
 
 # assert_same FILE_A FILE_B DESC — byte-identical or fail
 # assert_same 檔A 檔B 說明 —— 逐位元相同才 PASS
@@ -309,9 +314,9 @@ fi
 # T26 — stdin has no extension, so the format cannot be a declared fact and
 # a default here would be a guess.
 assert_fails "T26 -si without --headers is an error / -si 未給 --headers 即報錯" -- \
-    sh -c "cat '$PKG' | '$CSV2' -si -so -r"
+    zsh -c "cat '$PKG' | '$CSV2' -si -so -r"
 assert_succeeds "T26b -si with --headers 1 works / -si 加 --headers 1 可用" -- \
-    sh -c "cat '$PKG' | '$CSV2' -si --headers 1 -so -r > /dev/null"
+    zsh -c "cat '$PKG' | '$CSV2' -si --headers 1 -so -r > /dev/null"
 
 echo
 echo "--- Phase 4: editing, encryption, logging / 第 4 階段：編輯、加密、記錄 ---"
@@ -419,7 +424,7 @@ else
 fi
 
 # T38 — a prompt that cannot be shown is never a yes.
-out=$(HOME="$TMP/home" sh -c "'$CSV2' -encrypt status_notes -i '$PKG' -o '$TMP/x2.csv' < /dev/null" 2>&1)
+out=$(HOME="$TMP/home" zsh -c "'$CSV2' -encrypt status_notes -i '$PKG' -o '$TMP/x2.csv' < /dev/null" 2>&1)
 rc=$?
 if [[ $rc -ne 0 && "$out" == *"tty"* ]]; then
     ok "T38 no tty means fail, never assume yes / 無 tty 時失敗，絕不視為同意"

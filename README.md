@@ -10,8 +10,8 @@ and the macOS host it is built from.
 
 **Phases 1–4 are implemented and pass their tests. Phases 5–7 are not.**
 
-```sh
-./compile_csv2.sh       # build release/csv2
+```zsh
+./compile_csv2.zsh       # build release/csv2
 ./test/test_csv2.zsh    # 60 PASS, 0 FAIL, 8 SKIP on macOS (arm64, Swift 6.4)
 ```
 

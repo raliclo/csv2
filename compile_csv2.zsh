@@ -1,7 +1,7 @@
-#!/bin/zsh
+#!/usr/bin/env zsh
 # =====================================================================
-# compile_csv2.sh — build csv2 on the macOS host
-# compile_csv2.sh — 在 macOS host 上建置 csv2
+# compile_csv2.zsh — build csv2 on the macOS host
+# compile_csv2.zsh — 在 macOS host 上建置 csv2
 #
 # Plain .swift sources compiled with swiftc, the same way swift_tar is
 # built: Foundation + Dispatch only, no SwiftPM, no SwiftNIO. That choice
@@ -14,8 +14,8 @@
 # Output / 輸出：release/csv2
 #
 # Usage / 用法：
-#   ./compile_csv2.sh            optimised build / 最佳化建置
-#   ./compile_csv2.sh --debug    -Onone with assertions / 不最佳化、保留斷言
+#   ./compile_csv2.zsh            optimised build / 最佳化建置
+#   ./compile_csv2.zsh --debug    -Onone with assertions / 不最佳化、保留斷言
 # =====================================================================
 set -e
 cd "$(dirname "$0")"

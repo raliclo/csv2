@@ -1364,7 +1364,7 @@ guest（見上），所以那條路徑原本就只會走到「找不到金鑰」
 
 | 階段 | 對應的既有機制 |
 |---|---|
-| guest 內建置 | 新增 `compile_csv2_linux.sh`，比照 `compile_swift_tar_linux.sh` |
+| guest 內建置 | 新增 `compile_csv2_linux.zsh`，比照 `compile_swift_tar_linux.sh` |
 | workspace | 建置腳本的 rsync 區段新增一條，或改為與 swift_tar 同層 |
 | prebuilt 收成 | `update_prebuilt.sh` 的清單新增 `csv2`，`MANIFEST.csv` 自動涵蓋 |
 | 產物記錄 | `artifacts.csv` 新增一列；`version.txt` 新增 `csv2_commit` |
@@ -1653,7 +1653,7 @@ metadata 的形狀不是，因此讓步的是後者。
 
 **完成的定義：`test_csv2.zsh` 在 mac 與 guest 兩邊都通過，且兩邊輸出逐位元相同。**
 
-- [ ] `compile_csv2_linux.sh`，比照 `compile_swift_tar_linux.sh`
+- [ ] `compile_csv2_linux.zsh`，比照 `compile_swift_tar_linux.sh`
 - [ ] 放進 workspace 映像（不佔 rootfs 的 128 MiB 預算）
 - [ ] 測試 T47（跨平台逐位元相同）
 
@@ -1664,7 +1664,7 @@ metadata 的形狀不是，因此讓步的是後者。
 - [ ] 進 rootfs
 - [ ] 常駐 workspace
 - [ ] prebuilt 收成、`artifacts.csv` 與 `version.txt` 的登記
-- [ ] `install.sh`（見 [`todo/todo.md`](../todo/todo.md)，被「repo 尚未公開」擋住）
+- [ ] `install.zsh`（見 [`todo/todo.md`](../todo/todo.md)，被「repo 尚未公開」擋住）
 
 ### 為什麼是這個順序
 
