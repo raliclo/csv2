@@ -122,6 +122,22 @@ Each of these is argued in full in [plan/plan.md](./plan/plan.md).
 - **Nothing is printed on the normal path.** A CLI that talks cannot go in a
   pipeline. The default log threshold is WARN.
 
+## When to stop using this
+
+> Above about 1 GiB with write traffic, or when you need lookups by key, use
+> SQLite instead.
+
+Every edit rewrites the whole file, so changing one cell in a 1 GiB file writes
+1 GiB where PostgreSQL would write about 10 KB. `-append` is the exception and
+takes an O(1) path. Lookups are by position, not by key, so finding the row
+where `pkg_name = busybox` is a full scan.
+
+SQLite is the real neighbour here, not PostgreSQL — one file, no daemon, no
+schema migration — and it has B-trees, page-level updates and transactions.
+csv2 keeps exactly one advantage over it: **the file stays plain text that a
+human can read and git can diff**. For this project that advantage is the whole
+point, since both CSV accidents were recovered from git.
+
 ## Licence
 
 MIT — see [LICENSE](./LICENSE).

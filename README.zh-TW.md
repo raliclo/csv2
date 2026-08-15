@@ -109,6 +109,19 @@ csv2 -update 12:6 "新的值" -i a.csv2 -o b.csv2
   只提供 `-keyfile`。
 - **正常路徑上不輸出任何訊息。** 會說話的 CLI 放不進管線。預設的記錄門檻是 WARN。
 
+## 什麼時候該改用別的
+
+> 超過約 1 GiB 且有寫入流量，或需要依鍵值查詢時，改用 SQLite。
+
+每次編輯都會重寫整個檔案，因此改動 1 GiB 檔案中的一個儲存格要寫入 1 GiB，
+而 PostgreSQL 只需約 10 KB。`-append` 是例外，走 O(1) 的路徑。
+查詢是依位置而非依鍵值，所以「找出 `pkg_name = busybox` 那一列」是全檔掃描。
+
+真正的鄰居是 SQLite 而非 PostgreSQL——同樣是單一檔案、無 daemon、無 schema migration，
+但它有 B-tree、page 級更新與交易。csv2 相對它只保有**一個**優勢：
+**檔案仍是人看得懂、git diff 得出來的純文字**。對本專案而言那正是全部的重點，
+因為兩次 CSV 事故都是從 git 還原的。
+
 ## 授權
 
 MIT —— 見 [LICENSE](./LICENSE)。
