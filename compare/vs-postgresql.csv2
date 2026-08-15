@@ -1,0 +1,19 @@
+dimension,csv2,postgresql,advantage,basis,note
+比較項目,csv2,PostgreSQL,優勢方,依據,說明
+"storage, text at scale",1.00x,"roughly 1.2-1.5x, plus 20-40% per index",csv2,documented,"24-byte tuple header per row, plus alignment and page fill factor; NOT measured here"
+"storage, narrow numeric rows",1.00x,up to 3-5x,csv2,documented,the fixed per-row header dominates when rows are small; NOT measured here
+update one cell in 1 GiB,rewrites the whole file,"one 8 KiB page plus WAL, about 10 KiB",PostgreSQL,measured + documented,0.4 s at just 16 MiB versus 0.25 ms; the ratio grows linearly with file size
+append one row,O(1) via O_APPEND,INSERT plus WAL,tie,reasoned,both are cheap; PostgreSQL adds a round trip
+lookup by key,O(n) full scan,O(log n) B-tree,PostgreSQL,documented,
+full scan,memchr plus parse,seq scan with MVCC visibility per row,csv2,UNMEASURED,"PostgreSQL does more work per row, but no Swift parser exists yet to compare against"
+concurrency,"single writer, no locking","MVCC, many concurrent writers",PostgreSQL,documented,
+transactions,none,"ACID, across statements and tables",PostgreSQL,documented,
+referential integrity,none,"foreign keys, CHECK, NOT NULL, UNIQUE",PostgreSQL,documented,
+NULL,cannot express it,first-class,PostgreSQL,documented,CSV cannot distinguish empty from absent; update_licenses.sh uses a sentinel instead
+deployment,"one binary, no daemon",a server process to run and maintain,csv2,documented,
+network access,none,"yes, with roles and permissions",PostgreSQL,documented,
+git diff,"line-level, reviewable",not applicable; it is a live server,csv2,measured,decisive here: both CSV accidents in this repo were recovered from git
+backup,copy the file,"pg_dump, WAL archiving, PITR",depends,documented,PostgreSQL is far more capable; csv2 is far simpler
+comfortable read-write size,under 1 GiB,hundreds of GiB to a few TB,PostgreSQL,measured + documented,
+hard ceiling,about 17 GiB here,32 TB per table,PostgreSQL,measured + documented,atomic rename needs 2x the size; 34 GiB free on this volume
+right tool when,the file must stay reviewable text,the data outgrows one machine,,reasoned,"for anything between, SQLite is usually the answer; see vs-sqlite.csv2"

@@ -1,0 +1,24 @@
+dimension,csv2,sqlite,advantage,basis,note
+比較項目,csv2,SQLite,優勢方,依據,說明
+"storage, text at scale","1.00x (856,773 B)",1.31x; 1.75x with one index,csv2,measured,"37,250 rows x 4 cols, marathon-data.csv, all columns TEXT, after VACUUM"
+"storage, integers","1.00x (6,363,162 B)","0.75x (4,767,744 B)",SQLite,measured,"200,000 rows x 4 INTEGER; SQLite stores varints, CSV stores decimal text"
+"storage, tiny file","1.00x (10,522 B)",1.95x; 2.34x with index,csv2,measured,"TARGET_PACKAGES.csv, 21 rows; dominated by 4 KiB page granularity, not representative"
+update one cell in 1 GiB,rewrites the whole file,one page (4-8 KiB) plus WAL,SQLite,measured + documented,"39 MiB/s here, so 26 s versus under a millisecond; roughly 100,000x"
+append one row,"O(1) via O_APPEND, no rewrite",transaction plus lock,csv2,reasoned,the one edit shape this project performs in a loop (artifacts.csv per build)
+lookup by key,O(n) full scan,O(log n) B-tree,SQLite,documented,"the .index sidecar indexes positions, not contents"
+lookup by record number,O(1) seek plus <=stride parse,O(log n),tie,reasoned,comparable in practice; both are a handful of page reads
+full scan,memchr plus parse,B-tree page walk,csv2,UNMEASURED,no Swift RFC 4180 parser exists yet; do not rely on this row
+transactions,none,"ACID, rollback",SQLite,documented,"csv2 applies all edits in one invocation atomically, but cannot span invocations"
+concurrency,"single writer, no locking","WAL: many readers, one writer",SQLite,documented,two concurrent csv2 writers silently lose one set of edits; -append is the exception
+types and constraints,none,"affinity, or STRICT plus CHECK/UNIQUE/FK",SQLite,documented,a CHECK would have caught the commit string written into artifacts.csv built_utc
+query language,-contains and -where,"full SQL: JOIN, GROUP BY, ORDER BY",SQLite,documented,
+git diff,"line-level, reviewable",opaque binary blob,csv2,measured,decisive here: both CSV accidents in this repo were recovered from git
+schema change,edit the header rows,"ALTER TABLE, or the 12-step rebuild",csv2,documented,
+emergency repair,editable in vi,requires the sqlite3 tool,csv2,reasoned,
+read by other tools,"Excel, awk, grep, any stdlib",requires the SQLite library,csv2,documented,
+sidecar files,"optional .index, disposable",-wal and -shm in WAL mode,csv2,documented,copying only the .db file in WAL mode can lose committed data
+dependency in rootfs,one static binary,"library, roughly 1 MiB",csv2,documented,csv2 is not shipped in the guest rootfs for now either way
+streaming larger than RAM,"yes, constant memory, pipeable","cursors, but not a pipe stage",csv2,reasoned,the guest has 2-4 GiB
+comfortable read-only size,about 100 GiB,about 1 TB,SQLite,reasoned,
+comfortable read-write size,under 1 GiB,hundreds of GiB,SQLite,measured + reasoned,csv2 rewrites the whole file on every edit except append
+hard ceiling,about 17 GiB here,281 TB,SQLite,measured,atomic rename needs 2x the size; 34 GiB free on this volume

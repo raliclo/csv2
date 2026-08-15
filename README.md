@@ -122,6 +122,25 @@ Each of these is argued in full in [plan/plan.md](./plan/plan.md).
 - **Nothing is printed on the normal path.** A CLI that talks cannot go in a
   pipeline. The default log threshold is WARN.
 
+## Comparisons
+
+[`compare/vs-sqlite.csv2`](./compare/vs-sqlite.csv2) and
+[`compare/vs-postgresql.csv2`](./compare/vs-postgresql.csv2) hold the comparison
+dimension by dimension. They are written in the format they describe — two
+header rows, English then Traditional Chinese — so they double as the first real
+`.csv2` fixtures.
+
+Each row carries a `basis` column saying whether the claim was **measured** here,
+taken from **documented** behaviour, **reasoned** from the shape of the work, or
+is **UNMEASURED** and must not be relied on. That column matters more than the
+verdicts: the storage rows are measured, and the full-scan rows are not, because
+no Swift RFC 4180 parser exists yet to measure.
+
+The measured storage result is not one-sided. Against SQLite, CSV is smaller for
+text (1.31x, or 1.75x once an index exists) and **larger** for integers
+(SQLite came in at 0.75x), because SQLite stores varints where CSV stores
+decimal digits.
+
 ## When to stop using this
 
 > Above about 1 GiB with write traffic, or when you need lookups by key, use
