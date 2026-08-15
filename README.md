@@ -117,4 +117,9 @@ Each of these is argued in full in [plan/plan.md](./plan/plan.md).
 
 ## Licence
 
-To be decided before the first release.
+MIT — see [LICENSE](./LICENSE).
+
+Note for anyone reusing the design: the plan calls for column encryption built
+on swift_tar's `crypto.swift`. If that code is ever vendored in rather than
+merely referenced, its own licence travels with it and this file is not the
+whole story.

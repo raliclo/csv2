@@ -804,7 +804,7 @@ guest（見上），所以那條路徑原本就只會走到「找不到金鑰」
 | workspace | 建置腳本的 rsync 區段新增一條，或改為與 swift_tar 同層 |
 | prebuilt 收成 | `update_prebuilt.sh` 的清單新增 `csv2`，`MANIFEST.csv` 自動涵蓋 |
 | 產物記錄 | `artifacts.csv` 新增一列；`version.txt` 新增 `csv2_commit` |
-| 授權 | 我們自己的程式碼，`TARGET_PACKAGES.csv` 不涵蓋（那是 buildroot 套件） |
+| 授權 | MIT（見 `LICENSE`）。我們自己的程式碼，`TARGET_PACKAGES.csv` 不涵蓋（那是 buildroot 套件） |
 
 **體積預算**（同樣留待日後）：rootfs 是固定 128 MiB，裝進 git 之後剩 **47.4 MiB**。
 swift_tar 是 668 KB，`csv2` 應在同一量級。若超過 5 MiB 就該回頭檢查是不是靜態連結了
