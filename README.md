@@ -80,6 +80,37 @@ byte in the file.
 The format is **declared by the suffix, never detected**. Detection guesses, and
 a wrong guess turns the first data record into a header — silently.
 
+**The one exception is `--headers 1|2`.** It is required for `-si`, and it is
+also accepted with `-i`, where it **overrides the suffix**. The override is never
+checked against the file name, so `--headers 1 -i a.csv2` is accepted and
+misparses the file exactly as a wrong guess would.
+
+The consequences are worse than a wrong read, because they are written back.
+Verified on `compare/vs-sqlite.csv2` (2026-08-16):
+
+```console
+$ csv2 -r --json -i vs-sqlite.csv2 | tail -1
+{"meta":{"records":22,"matched":0}}
+$ csv2 --headers 1 -delete 1 -i vs-sqlite.csv2 -o bad.csv2   # rc=0
+$ csv2 -r --json -i bad.csv2 | tail -1
+{"meta":{"records":21,"matched":0}}
+```
+
+Twenty-two records became twenty-one. The Traditional Chinese title row is gone
+and a **data** row has taken its place as the second header row — the file is
+still structurally valid and still reads without error. The same override edits
+the wrong cell: `--headers 2 -update 1:1 X -i a.csv` overwrites record 2, not
+record 1, at exit 0.
+
+**And it defeats the check this document recommends.** The `--json` metadata line
+is offered below as the way to assert the parse was what you expected — but
+`--headers` changes the number you would assert on, and the line then
+contradicts itself: `{"meta":{"format":"csv2","headers":1,…}}`. A `.csv2` with
+one header row does not exist. The assertion passes while the parse is wrong.
+
+Use `--headers` with `-i` only when the suffix is genuinely wrong, and never
+together with an edit verb.
+
 The two-row form exists because this project's data files are bilingual, and
 carrying the Chinese column titles in the file beats keeping them in a separate
 document that drifts.
@@ -127,7 +158,10 @@ SELECTING / 選取
 INPUT / OUTPUT
   -i FILE  -o FILE      file paths; -o writes a temp file and renames
   -si  -so              stdin / stdout, without buffering the whole file
-  --headers 1|2         required with -si: stdin has no extension
+  --headers 1|2         required with -si: stdin has no extension. Also
+                        accepted with -i, where it OVERRIDES the suffix -- the
+                        one place the format is not declared by the name. See
+                        the warning above; never combine it with an edit verb
   --in-place            edit -i in place, via temp file + rename
 
 OUTPUT SHAPE / 輸出形狀
