@@ -136,6 +136,11 @@ $ csv2 -r --json -i example.csv2 | head -1
   -hash COLS            單向遮蔽欄位。確定性的，因此相等的值仍然相等
                         ——但請先讀下方的警告
   -encrypt COLS         加密欄位（ChaCha20-Poly1305，每次新 nonce）
+                        一律要給 -t。金鑰指紋與 salt 存在標頭列裡；沒有它們，
+                        密文永遠無法解密，而 salt 每次執行都不同，事後也無法
+                        重建。-encrypt 與 -head／-tail／-mid／--filter 併用且
+                        未給 -t 時會丟掉標頭，且仍以 0 結束。這是已知缺陷
+                        （2026-08-16）；在程式修好之前，-t 要由你負責給。
   -decrypt COLS         解密；COLS 可用 `all` 表示所有被標記的欄位
   -keyfile PATH         金鑰檔；預設為 multissh 的私鑰。
                         與 -hash 併用時，會從純 SHA-256 改為 HMAC

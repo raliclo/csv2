@@ -148,6 +148,13 @@ PROTECTION / 保護
   -hash COLS            mask columns, one way. Deterministic, so equal values
                         stay equal — and see the warning below
   -encrypt COLS         encrypt columns (ChaCha20-Poly1305, fresh nonce)
+                        ALWAYS pass -t. The key fingerprint and salt live in
+                        the header row; without them the ciphertext can never
+                        be decrypted, and the salt is new on every run so it
+                        cannot be reconstructed afterwards. Combining -encrypt
+                        with -head/-tail/-mid/--filter and no -t drops the
+                        header and still exits 0. This is a known defect
+                        (2026-08-16); until it is fixed in code, -t is on you.
   -decrypt COLS         decrypt; COLS may be `all` to take every marked column
   -keyfile PATH         key file; defaults to multissh's private key.
                         With -hash it selects HMAC over plain SHA-256
