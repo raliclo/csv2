@@ -12,7 +12,7 @@ English: [README.md](./README.md)
 
 ```zsh
 ./compile_csv2.zsh       # 建置 release/csv2
-./test/test_csv2.zsh    # macOS（arm64、Swift 6.4）上 85 通過、0 失敗、1 略過
+./test/test_csv2.zsh    # macOS（arm64、Swift 6.4）上 88 通過、0 失敗、1 略過
 ```
 
 | 可用 | 尚未做 |
@@ -32,9 +32,10 @@ English: [README.md](./README.md)
 工具尚未能滿足的案例會回報為 SKIP 並附原因，不會安靜地略過。
 
 目前**不**隨 LinuxCS 的 guest rootfs 出貨——需要它的腳本都在 macOS host 上執行。
-但測試仍應在 **macOS 與 aarch64 Linux 兩個平台**上進行，且要求兩邊輸出逐位元相同：
-Linux 上的 Foundation 是另一份實作，「在 macOS 上會過」對 Linux 不構成證據。
-後半尚未做到——那是第 6 階段，測試中的 T47 就是負責斷言它的那個案例。
+但測試在 **macOS 與 aarch64 Linux 兩個平台**上都做，且要求兩邊輸出逐位元相同：
+Linux 上的 Foundation 是另一份實作，「在 macOS 上會過」對 Linux 不構成證據。那就是
+案例 T47，由母專案的 `test_submodules/run_csv2_test.zsh` 驅動——它在 guest 內建置
+csv2，並逐一以 sha256 比對十二組呼叫。
 
 ## 為什麼要做
 
@@ -147,6 +148,70 @@ shell 歷史裡。
 csv2 -contains "舊的值" -i a.csv2     # → 12:6 status_notes …
 csv2 -update 12:6 "新的值" -i a.csv2 -o b.csv2
 ```
+
+### 各種模式實際輸出什麼
+
+這支工具會吐出四種不同的形狀，而挑錯是最容易犯的錯：**`-contains` 印的是「報告」，
+不是 CSV。**
+
+```console
+$ csv2 -contains busybox -i TARGET_PACKAGES.csv
+1:1	pkg_name	busybox
+1:4	source	fork raliclo/busybox branch develop; upstream git.busybox.net
+```
+
+三個欄位以 **TAB** 分隔，每個命中的**儲存格**一行：位址、欄名、值。同一筆有兩欄命中就
+印兩行；同一格內出現兩次只印一行。在腳本裡就是 `cut -f1`、`cut -f2`、`cut -f3`。
+
+```console
+$ csv2 -contains busybox --filter -i TARGET_PACKAGES.csv
+busybox,fce9d7f35ea3 (submodule),896 KiB,fork raliclo/busybox branch develop,…
+```
+
+`--filter` 改為輸出命中的**紀錄**，形式為 CSV。要一併帶出標頭請加 `-t`——`-t` 在哪些
+情況下不是選用的，見下方的「會被拒絕的組合」。
+
+```console
+$ csv2 -contains busybox --json -i TARGET_PACKAGES.csv
+{"meta":{"format":"csv","headers":1,"fields":7}}
+{"record":1,"field":1,"header_en":"pkg_name","value":"busybox","line":2}
+{"record":1,"field":4,"header_en":"source","value":"fork raliclo/busybox …"}
+{"meta":{"records":21,"matched":3}}
+```
+
+JSON Lines。**第一行**是 metadata，帶出 csv2「認為」自己正在讀的格式，讓呼叫端可以
+斷言 `headers` 是否符合預期，而不是默默接受一個猜錯的解析。**最後一行**帶總數：它們
+無法放進第一行，除非先讀完整份輸入才開始輸出，而那正是串流保證的反面。
+
+`-md` 產生 Markdown 表格，且是單向的——csv2 無法把它讀回來。
+
+### 結束狀態
+
+成功為 `0`，任何錯誤為非零，沒有第三種情況：csv2 不會「部分成功」。失敗的執行不會
+在 `-o` 留下任何東西，因為輸出寫的是暫存檔，一切都成功之後才 rename。
+
+錯誤訊息走 stderr，並指出是哪一筆、哪一欄。正常路徑上完全不輸出任何訊息——它必須能
+放進管線。
+
+### 會被拒絕的組合，以及為什麼
+
+「拒絕」正是這支工具的重點，所以在此列出，而不是留給人自己撞到。以下每一項都會以
+非零結束，並說明原因：
+
+| 組合 | 為什麼被拒絕 |
+|---|---|
+| `-head 3 -o out.csv2`（未給 `-t`） | 把不帶標頭的資料列寫進一個「副檔名承諾了標頭」的路徑；下次讀取會把最前面的紀錄當成標頭吃掉 |
+| `-md` 未給 `-t` | 沒有標頭列就渲染不出 Markdown 表格；自動補上會讓「預設不帶標頭」出現一個看不見的例外 |
+| `-md -o out.csv2` | 副檔名宣告的是 CSV，內容卻是 Markdown |
+| `-si` 未給 `--headers 1` 或 `2` | stdin 沒有副檔名，格式未被宣告；此處的預設值就是猜測 |
+| `-head` 與 `-tail` 併用 | 兩者沒有一個明顯正確的合併讀法 |
+| `-mid 7,3` | `a > b`；不替你對調，因為範圍寫反通常表示別處的邏輯也反了 |
+| `-i x -o x` 未給 `--in-place` | 開啟輸出會在輸入讀完前把它截斷 |
+| `-delete 12:6` | 那是儲存格位址；請加 `-cell`，或改給紀錄號 |
+| `-insert -cell` | 在一列中間插入儲存格，會把該列後面的欄位全部往後推一格 |
+| 在 21 筆的檔案上 `-update 99:3` | 越界是錯誤，絕不是「自動長大」 |
+| `-encrypt` 未給 `-keyfile` 且沒有 tty | 無法顯示的提示絕不視為「是」 |
+| 未知旗標 | 絕不被當成別的東西吞掉 |
 
 ### 環境變數
 

@@ -850,6 +850,30 @@ else
     bad "T49c A1 past Z (got 26=$a26 27=$a27 28=$a28)"
 fi
 
+# T52 — every refusal the README lists must actually refuse, and the tool must
+# exit non-zero without leaving output behind. Two of the twelve had no test:
+# an unknown flag, and -head with -tail. Documenting a refusal that does not
+# happen is worse than not documenting it, because a reader will rely on it.
+# T52 —— README 列出的每一條「拒絕」都必須真的拒絕，且必須以非零結束、不留下輸出。
+# 十二條中有兩條原本沒有測試：未知旗標，以及 -head 與 -tail 併用。記載一條「其實不會
+# 發生」的拒絕，比不記載更糟，因為讀者會依賴它。
+assert_fails "T52a an unknown flag is refused, never swallowed / 未知旗標被拒，絕不被吞掉" -- \
+    "$CSV2" --nonesuch -i "$PKG" -so
+assert_fails "T52b -head with -tail is refused / -head 與 -tail 併用被拒" -- \
+    "$CSV2" -head 3 -tail 3 -i "$PKG" -so
+
+# The claim that a failed run leaves nothing behind is what makes -o safe to
+# point at a real file. Asserted rather than assumed.
+# 「失敗的執行不留下任何東西」這項宣稱，正是讓 -o 可以指向真實檔案的依據。要斷言，
+# 不要假設。
+rm -f "$TMP/t52.csv"
+"$CSV2" -update '99:3' 'x' -i "$PKG" -o "$TMP/t52.csv" 2>/dev/null
+if [[ ! -e "$TMP/t52.csv" ]]; then
+    ok "T52c a failed run leaves no output file at all / 失敗的執行完全不留下輸出檔"
+else
+    bad "T52c a failed run left $TMP/t52.csv behind / 失敗的執行留下了輸出檔"
+fi
+
 # T50 — -debug has five levels in the plan and had one in the CLI. TRACE was
 # unreachable, so it is asserted here as reachable AND as not firing without it.
 # T50 —— 計畫定義 -debug 有五個層級，CLI 只實作了一個，TRACE 無法達到。此處斷言它

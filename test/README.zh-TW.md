@@ -33,7 +33,7 @@ SKIP  T41 behaviour identical with no index (the .index sidecar is not implement
 絕不安靜地略過。一份隱藏「沒跑什麼」的測試，回報的是它並不具備的涵蓋率——
 那與「弄壞檔案之後仍以 0 結束的腳本」是同一種失敗模式。
 
-目前狀態：macOS（arm64、Swift 6.4）上 **85 PASS、0 FAIL、1 SKIP**。guest 端由母專案在
+目前狀態：macOS（arm64、Swift 6.4）上 **88 PASS、0 FAIL、1 SKIP**。guest 端由母專案在
 每次變更後重新驗證；最近一次完整執行時兩邊回報相同的總數。
 
 T47 是 macOS 上那個 SKIP，而且在這裡也只能是 SKIP：該案例斷言的是「**Linux** 版產生

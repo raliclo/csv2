@@ -12,7 +12,7 @@ and the macOS host it is built from.
 
 ```zsh
 ./compile_csv2.zsh       # build release/csv2
-./test/test_csv2.zsh    # 85 PASS, 0 FAIL, 1 SKIP on macOS (arm64, Swift 6.4)
+./test/test_csv2.zsh    # 88 PASS, 0 FAIL, 1 SKIP on macOS (arm64, Swift 6.4)
 ```
 
 | Works | Does not yet |
@@ -33,11 +33,12 @@ and a box is only ticked once the matching case in
 satisfy are reported as SKIP with the reason rather than quietly left out.
 
 It is **not** shipped in the LinuxCS guest rootfs for now — the scripts that
-need it run on the macOS host. It is still meant to be tested on **both** macOS
-and aarch64 Linux, with byte-identical output required from each: Foundation on
-Linux is a separate implementation, so passing on macOS says nothing about
-Linux. That second half has not happened yet; it is phase 6, and T47 in the
-suite is the case that will assert it.
+need it run on the macOS host. It is tested on **both** macOS and aarch64
+Linux, with byte-identical output required from each: Foundation on Linux is a
+separate implementation, so passing on macOS says nothing about Linux. That is
+case T47, driven from the parent project by
+`test_submodules/run_csv2_test.zsh`, which builds csv2 in the guest and
+compares twelve invocations sha256 by sha256.
 
 ## Why this exists
 
@@ -161,6 +162,75 @@ finding and editing compose:
 csv2 -contains "old value" -i a.csv2     # -> 12:6 status_notes …
 csv2 -update 12:6 "new value" -i a.csv2 -o b.csv2
 ```
+
+### What each mode actually emits
+
+Four different shapes come out of this tool, and picking the wrong one is the
+easiest mistake to make: `-contains` prints a **report**, not CSV.
+
+```console
+$ csv2 -contains busybox -i TARGET_PACKAGES.csv
+1:1	pkg_name	busybox
+1:4	source	fork raliclo/busybox branch develop; upstream git.busybox.net
+```
+
+Three fields separated by a **TAB**, one line per matching **cell**: the
+address, the column name, the value. Two matching columns in one record print
+two lines; the same string twice inside one cell prints one. In a script,
+`cut -f1`, `cut -f2`, `cut -f3`.
+
+```console
+$ csv2 -contains busybox --filter -i TARGET_PACKAGES.csv
+busybox,fce9d7f35ea3 (submodule),896 KiB,fork raliclo/busybox branch develop,…
+```
+
+`--filter` switches to the matching **records**, as CSV. Add `-t` to get the
+header rows too — and see the refusals below for when `-t` is not optional.
+
+```console
+$ csv2 -contains busybox --json -i TARGET_PACKAGES.csv
+{"meta":{"format":"csv","headers":1,"fields":7}}
+{"record":1,"field":1,"header_en":"pkg_name","value":"busybox","line":2}
+{"record":1,"field":4,"header_en":"source","value":"fork raliclo/busybox …"}
+{"meta":{"records":21,"matched":3}}
+```
+
+JSON Lines. The **first** line is metadata describing the format csv2 believes
+it is reading, so a caller can assert `headers` is what it expected instead of
+accepting a wrong guess. The **last** line carries the counts: they cannot be
+in the first line without reading the whole input before emitting anything,
+which is the streaming guarantee.
+
+`-md` emits a Markdown table and is one-way — csv2 cannot read it back.
+
+### Exit status
+
+`0` on success, non-zero on any error, and there is no third case: csv2 does
+not partially succeed. A run that fails writes nothing to `-o`, because output
+goes to a temp file that is renamed only after everything else worked.
+
+Errors go to stderr and name the record and field. On the normal path csv2
+prints nothing at all — it has to work inside a pipeline.
+
+### What it refuses, and why
+
+Refusals are the point of the tool, so they are listed rather than discovered.
+Each of these exits non-zero with a message saying why:
+
+| Combination | Why it is refused |
+|---|---|
+| `-head 3 -o out.csv2` (no `-t`) | data rows without a header written to a path whose suffix promises one; the next read would eat the first records as the header |
+| `-md` without `-t` | a Markdown table has no shape without a header row, and silently adding one would make "no header by default" grow an invisible exception |
+| `-md -o out.csv2` | the suffix declares CSV, the content would be Markdown |
+| `-si` without `--headers 1` or `2` | stdin has no suffix, so the format is not declared; a default here would be a guess |
+| `-head` with `-tail` | no single reading of both is obviously right |
+| `-mid 7,3` | `a > b`; not swapped for you, because a range written backwards usually means the logic is backwards too |
+| `-i x -o x` without `--in-place` | opening the output truncates it before the input has been read |
+| `-delete 12:6` | that is a cell address; add `-cell`, or give a record number |
+| `-insert -cell` | inserting a cell mid-record shifts every later field one column along |
+| `-update 99:3` on a 21-record file | out of range is an error, never "grow the file to fit" |
+| `-encrypt` with no `-keyfile` and no tty | a prompt that cannot be shown is never a yes |
+| unknown flag | never swallowed as something else |
 
 ### Environment variables
 
