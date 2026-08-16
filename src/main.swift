@@ -464,7 +464,16 @@ struct EncMarker {
 }
 
 func hashMarkerBase(_ name: String) -> String? {
-    name.hasSuffix(":hash") ? String(name.dropLast(5)) : nil
+    if name.hasSuffix(":hash") { return String(name.dropLast(5)) }
+    // `:hmac:<fingerprint>` is the keyed form. Recognised here so that
+    // re-hashing an already-hashed column is refused either way, and so the
+    // base name still resolves for addressing.
+    // `:hmac:<指紋>` 是 keyed 形式。在此一併辨識，讓「對已雜湊的欄位再雜湊一次」
+    // 兩種形式都會被拒絕，也讓定址時仍能解析出原本的欄名。
+    if let r = name.range(of: ":hmac:", options: .backwards) {
+        return String(name[name.startIndex..<r.lowerBound])
+    }
+    return nil
 }
 
 /// The visible column name, with any marker removed. Addressing by name works

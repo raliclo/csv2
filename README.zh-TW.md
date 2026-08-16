@@ -12,7 +12,7 @@ English: [README.md](./README.md)
 
 ```zsh
 ./compile_csv2.zsh       # 建置 release/csv2
-./test/test_csv2.zsh    # macOS（arm64、Swift 6.4）上 94 通過、0 失敗、1 略過
+./test/test_csv2.zsh    # macOS（arm64、Swift 6.4）上 100 通過、0 失敗、1 略過
 ```
 
 | 可用 | 尚未做 |
@@ -74,6 +74,26 @@ csv2，並逐一以 sha256 比對十二組呼叫。
 兩列標頭的形式之所以存在，是因為本專案的資料檔是雙語的；把中文欄位標題放在檔案裡，
 勝過放在另一份會逐漸失真的文件中。
 
+`.csv2` 除此之外就是一份普通的 CSV——第二列只是第二列標頭，沒有標記、也沒有分隔：
+
+```csv
+pkg,ver,note
+套件,版本,備註
+zlib,1.3.2,first record
+zstd,1.5.6,second record
+```
+
+那個檔案有**兩**筆紀錄，不是三筆。`csv2 --json` 的第一行會說明這件事，那是確認 csv2
+讀成你要的格式最快的方法：
+
+```console
+$ csv2 -r --json -i example.csv2 | head -1
+{"meta":{"format":"csv2","headers":2,"fields":3}}
+```
+
+兩列標頭的欄數必須與資料相同。`.csv2` 的儲存格內不得含原始換行——一筆永遠是一行——
+因此值裡的換行寫成 `\n`、CR 寫成 `\r`、反斜線寫成 `\\`。
+
 ## 介面
 
 ```
@@ -113,11 +133,16 @@ csv2，並逐一以 sha256 比對十二組呼叫。
   --truncate-partial    丟棄結尾不完整的紀錄，而非以錯誤結束
 
 保護
-  -hash COLS            以 SHA-256 遮蔽欄位，單向
+  -hash COLS            單向遮蔽欄位。確定性的，因此相等的值仍然相等
+                        ——但請先讀下方的警告
   -encrypt COLS         加密欄位（ChaCha20-Poly1305，每次新 nonce）
   -decrypt COLS         解密；COLS 可用 `all` 表示所有被標記的欄位
-  -keyfile PATH         金鑰檔；預設為 multissh 的私鑰
+  -keyfile PATH         金鑰檔；預設為 multissh 的私鑰。
+                        與 -hash 併用時，會從純 SHA-256 改為 HMAC
   --yes                 不經詢問即採用預設金鑰
+
+COLS 是以逗號分隔的清單，可用欄名、1-based 欄號，或兩者混用：
+`-hash license`、`-hash 7`、`-hash 6,license`。
 
 索引
   --no-index            完全不讀也不寫 .index sidecar
@@ -186,6 +211,9 @@ busybox,fce9d7f35ea3 (submodule),896 KiB,fork raliclo/busybox branch develop,…
 `--filter` 改為輸出命中的**紀錄**，形式為 CSV。要一併帶出標頭請加 `-t`——`-t` 在哪些
 情況下不是選用的，見下方的「會被拒絕的組合」。
 
+`-A`、`-B`、`-C` **隱含 `--filter`**：上下文紀錄沒有命中的儲存格，儲存格報告對它無話
+可說。不相鄰的區塊之間以 `--` 分隔，與 grep 相同。
+
 ```console
 $ csv2 -contains busybox --json -i TARGET_PACKAGES.csv
 {"meta":{"format":"csv","headers":1,"fields":7}}
@@ -221,6 +249,9 @@ $ csv2 -mid 5,5 --json -i TARGET_PACKAGES.csv
 成功為 `0`，任何錯誤為非零，沒有第三種情況：csv2 不會「部分成功」。失敗的執行不會
 在 `-o` 留下任何東西，因為輸出寫的是暫存檔，一切都成功之後才 rename。
 
+`--build-index` 與 `--verify-index` 各自會印一行到 **stdout**——它們是明確的管理動作、
+不屬於正常路徑，但若你把它們接進管線，那一行就在你的串流裡。
+
 錯誤訊息走 stderr，恰好**兩行**（英文一行、中文一行），並指出是哪一筆、哪一欄。
 給了 `-log FILE` 時，同一個失敗會另外帶時間戳追加到該檔；沒給則不會再印任何東西。
 正常路徑上完全不輸出任何訊息——它必須能放進管線。
@@ -247,7 +278,62 @@ $ csv2 -mid 5,5 --json -i TARGET_PACKAGES.csv
 | 在 21 筆的檔案上 `-update 99:3` | 越界是錯誤，絕不是「自動長大」 |
 | 在 7 欄的檔案上 `-append 'a,b,c'` | 欄數必須與標頭相符；csv2 不會補空或截斷來湊合 |
 | `-encrypt` 未給 `-keyfile` 且沒有 tty | 無法顯示的提示絕不視為「是」 |
+| 編輯時沒有給 `-o`、`-so` 或 `--in-place` | `-insert`/`-append`/`-delete`/`-update` 需要明確的目的地；沒有「隱含就地編輯」這回事 |
+| `-o /dev/stdout` | 輸出會先寫到目標旁的暫存檔再 rename，那需要一個一般檔案。請改用 `-so` |
 | 未知旗標 | 絕不被當成別的東西吞掉 |
+
+### 遮蔽欄位：使用 `-hash` 之前請先讀這一段
+
+`-hash` 是**確定性**的——那正是選它而不選 `-encrypt` 的全部理由。相等的值產生相等的
+摘要，因此你仍然分得出哪些列原本的值相同。`-encrypt` 每格用新的 nonce，相同的明文會
+得到不同的密文，那個能力就沒有了。
+
+確定性是有代價的，而且代價不小：
+
+> **沒有金鑰的 `-hash` 就是該值無鹽的純 SHA-256。** 對於可能值很少的欄位——
+> `license`、`status`、`category`、國碼——任何拿到雜湊後檔案的人，只要把一份詞表
+> 拿去雜湊，就能把該欄直接讀回來。
+
+這不是假設。一次對本工具的盲測，**僅憑雜湊後的輸出**、沒有原始檔、只用一份 SPDX
+識別碼清單，就還原了範例檔中 21 個 license 裡的 3 個。
+
+**給 `-keyfile`，它就變成 HMAC-SHA256。** 仍然是確定性的，相等的值仍然相等，但摘要
+現在取決於一份秘密，那份詞表因此失效：
+
+```console
+$ csv2 -hash license -i TARGET_PACKAGES.csv -o masked.csv -t
+$ head -1 masked.csv | cut -d, -f7
+license:hash                       # 無金鑰——字典適用
+
+$ csv2 -hash license -keyfile k.bin -i TARGET_PACKAGES.csv -o masked.csv -t
+$ head -1 masked.csv | cut -d, -f7
+license:hmac:289b9391              # 有金鑰——附上所用金鑰的指紋
+```
+
+只有在值空間確實夠大時才選無金鑰的形式——長的自由文字欄位、不透明的識別碼——或者
+你其實並不需要對「拿到檔案的人」隱藏那些值。
+
+### 受保護的欄位會在檔案中被標記
+
+`-hash`、`-encrypt`、`-decrypt` 會改寫**標頭**，讓檔案記錄下對哪一欄做了什麼：
+
+| 標記 | 意義 |
+|---|---|
+| `license:hash` | 無金鑰的 SHA-256 |
+| `license:hmac:<指紋>` | HMAC-SHA256，`<指紋>` 標識所用的金鑰 |
+| `license:enc:<指紋>:<salt>` | 已加密；`-decrypt all` 會找出這些 |
+
+定址仍使用原本的欄名：遮蔽之後 `-update 3:license` 照樣可用。對已標記的欄位再次遮蔽
+會被拒絕，而不是疊加一層。
+
+`--json` 的鍵維持乾淨的欄名，因此同樣的標記改為出現在 metadata 那一行：
+
+```console
+$ csv2 -head 1 -t --json -i masked.csv
+{"meta":{"format":"csv","headers":1,"fields":7,"protected":{"license":"hmac"}}}
+```
+
+沒有任何欄位受保護時，該鍵完全不會出現。
 
 ### 環境變數
 

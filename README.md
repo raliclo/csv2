@@ -12,7 +12,7 @@ and the macOS host it is built from.
 
 ```zsh
 ./compile_csv2.zsh       # build release/csv2
-./test/test_csv2.zsh    # 94 PASS, 0 FAIL, 1 SKIP on macOS (arm64, Swift 6.4)
+./test/test_csv2.zsh    # 100 PASS, 0 FAIL, 1 SKIP on macOS (arm64, Swift 6.4)
 ```
 
 | Works | Does not yet |
@@ -84,6 +84,28 @@ The two-row form exists because this project's data files are bilingual, and
 carrying the Chinese column titles in the file beats keeping them in a separate
 document that drifts.
 
+A `.csv2` file is otherwise an ordinary CSV — the second row is simply a second
+header, with no marker and no separator:
+
+```csv
+pkg,ver,note
+套件,版本,備註
+zlib,1.3.2,first record
+zstd,1.5.6,second record
+```
+
+That file holds **two** records, not three. `csv2 --json` says so on its first
+line, which is the quickest way to check csv2 read the format you meant:
+
+```console
+$ csv2 -r --json -i example.csv2 | head -1
+{"meta":{"format":"csv2","headers":2,"fields":3}}
+```
+
+Both header rows must have the same field count as the data. A `.csv2` cell may
+not contain a raw newline — one record is always one line — so newlines inside
+values are written `\n`, carriage returns `\r` and backslashes `\\`.
+
 ## Interface
 
 ```
@@ -123,11 +145,16 @@ EDITING / 編輯
   --truncate-partial    drop a trailing incomplete record instead of failing
 
 PROTECTION / 保護
-  -hash COLS            mask columns with SHA-256, one way
+  -hash COLS            mask columns, one way. Deterministic, so equal values
+                        stay equal — and see the warning below
   -encrypt COLS         encrypt columns (ChaCha20-Poly1305, fresh nonce)
   -decrypt COLS         decrypt; COLS may be `all` to take every marked column
-  -keyfile PATH         key file; defaults to multissh's private key
+  -keyfile PATH         key file; defaults to multissh's private key.
+                        With -hash it selects HMAC over plain SHA-256
   --yes                 accept the default key without a prompt
+
+COLS is a comma-separated list of column names, 1-based column numbers, or a
+mix: `-hash license`, `-hash 7`, `-hash 6,license`.
 
 INDEX / 索引
   --no-index            never read or write a .index sidecar
@@ -206,6 +233,10 @@ busybox,fce9d7f35ea3 (submodule),896 KiB,fork raliclo/busybox branch develop,…
 `--filter` switches to the matching **records**, as CSV. Add `-t` to get the
 header rows too — and see the refusals below for when `-t` is not optional.
 
+`-A`, `-B` and `-C` **imply `--filter`**: a context record has no matching cell,
+so there is nothing for a cell report to say about it. Blocks that are not
+adjacent are separated by `--`, as in grep.
+
 ```console
 $ csv2 -contains busybox --json -i TARGET_PACKAGES.csv
 {"meta":{"format":"csv","headers":1,"fields":7}}
@@ -246,6 +277,10 @@ without counting.
 not partially succeed. A run that fails writes nothing to `-o`, because output
 goes to a temp file that is renamed only after everything else worked.
 
+`--build-index` and `--verify-index` each print one line to **stdout** — they
+are explicit administrative actions, not the normal path, but if you pipe them
+anywhere that line is in your stream.
+
 Errors go to stderr as exactly **two** lines, English then Chinese, and name the
 record and field. With `-log FILE` the same failure is also appended there with
 a timestamp; without it nothing else is printed. On the normal path csv2 prints
@@ -274,7 +309,69 @@ Each of these exits non-zero with a message saying why:
 | `-update 99:3` on a 21-record file | out of range is an error, never "grow the file to fit" |
 | `-append 'a,b,c'` on a 7-column file | the field count must match the header; csv2 will not pad or truncate to fit |
 | `-encrypt` with no `-keyfile` and no tty | a prompt that cannot be shown is never a yes |
+| an edit with no `-o`, `-so` or `--in-place` | `-insert`/`-append`/`-delete`/`-update` need an explicit destination; there is no implied in-place |
+| `-o /dev/stdout` | output is written to a temp file beside the target and renamed, which needs a regular file. Use `-so` |
 | unknown flag | never swallowed as something else |
+
+### Masking a column: read this before using `-hash`
+
+`-hash` is **deterministic** — that is the whole reason to choose it over
+`-encrypt`. Equal values produce equal digests, so you can still tell which
+rows had the same original value. `-encrypt` uses a fresh nonce per cell, so
+identical plaintexts give different ciphertexts and that ability is gone.
+
+Determinism has a price, and it is not small:
+
+> **`-hash` without a key is plain, unsalted SHA-256 of the value.** For a
+> column with few possible values — `license`, `status`, `category`, a country
+> code — anyone holding the hashed file can hash a word list and read the
+> column straight back.
+
+That is not hypothetical. A blind review of this tool recovered 3 of the 21
+licences in the sample file from the hashed output alone, with no access to the
+original and nothing but a list of SPDX identifiers.
+
+**Pass `-keyfile` and it becomes HMAC-SHA256.** Still deterministic, so equal
+values still compare equal, but the digests now depend on a secret and the word
+list is useless without it:
+
+```console
+$ csv2 -hash license -i TARGET_PACKAGES.csv -o masked.csv -t
+$ head -1 masked.csv | cut -d, -f7
+license:hash                       # unkeyed — dictionary applies
+
+$ csv2 -hash license -keyfile k.bin -i TARGET_PACKAGES.csv -o masked.csv -t
+$ head -1 masked.csv | cut -d, -f7
+license:hmac:289b9391              # keyed — fingerprint of the key used
+```
+
+Choose the unkeyed form only when the value space is genuinely large — a long
+free-text field, an opaque identifier — or when you do not actually need the
+values hidden from someone holding the file.
+
+### Protected columns are marked in the file
+
+`-hash`, `-encrypt` and `-decrypt` rewrite the **header** so the file records
+what was done to which column:
+
+| Marker | Meaning |
+|---|---|
+| `license:hash` | unkeyed SHA-256 |
+| `license:hmac:<fp>` | HMAC-SHA256, `<fp>` identifying the key |
+| `license:enc:<fp>:<salt>` | encrypted; `-decrypt all` finds these |
+
+Addressing still uses the plain name: `-update 3:license` works after masking.
+Re-masking an already-marked column is refused rather than layered.
+
+`--json` keys stay clean, so the same marking appears in the metadata line
+instead:
+
+```console
+$ csv2 -head 1 -t --json -i masked.csv
+{"meta":{"format":"csv","headers":1,"fields":7,"protected":{"license":"hmac"}}}
+```
+
+The key is absent entirely when nothing is protected.
 
 ### Environment variables
 

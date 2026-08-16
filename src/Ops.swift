@@ -221,7 +221,30 @@ final class JSONEmitter: RecordEmitter {
         // 採 JSON Lines 而非一個大陣列，如此才能串流——與 `-so` 承諾不緩衝整份
         // 輸出一致。
         let fields = ctx.headers.first?.count ?? 0
-        sink.write("{\"meta\":{\"format\":\"\(ctx.format.rawValue)\",\"headers\":\(ctx.headers.count),\"fields\":\(fields)}}\n")
+        // Which columns are protected, and how. The CSV header carries the
+        // marker (`license:hash`, `license:hmac:<fp>`, `license:enc:…`) but the
+        // JSON keys are the clean names, so without this a JSON consumer cannot
+        // tell a masked column from a plain one -- and the whole point of this
+        // meta line is that a caller can assert what it is reading instead of
+        // accepting a wrong guess.
+        // 哪些欄位受保護、以哪一種方式。CSV 標頭帶著標記（`license:hash`、
+        // `license:hmac:<fp>`、`license:enc:…`），但 JSON 的鍵是乾淨的欄名，
+        // 因此少了這一項，JSON 的消費端分不出被遮蔽的欄位與一般欄位——而這行
+        // metadata 的全部意義，就是讓呼叫端能斷言自己讀到的是什麼，而不是接受
+        // 一個猜錯的解析。
+        var protected: [String] = []
+        for f in ctx.headers.first?.fields ?? [] {
+            let n = headerName(f)
+            if EncMarker.parse(n) != nil {
+                protected.append("\(JSONOut.string([UInt8](baseName(n).utf8), asciiOnly: ctx.jsonASCII)):\"enc\"")
+            } else if n.hasSuffix(":hash") {
+                protected.append("\(JSONOut.string([UInt8](baseName(n).utf8), asciiOnly: ctx.jsonASCII)):\"hash\"")
+            } else if n.range(of: ":hmac:", options: .backwards) != nil {
+                protected.append("\(JSONOut.string([UInt8](baseName(n).utf8), asciiOnly: ctx.jsonASCII)):\"hmac\"")
+            }
+        }
+        let prot = protected.isEmpty ? "" : ",\"protected\":{" + protected.joined(separator: ",") + "}"
+        sink.write("{\"meta\":{\"format\":\"\(ctx.format.rawValue)\",\"headers\":\(ctx.headers.count),\"fields\":\(fields)\(prot)}}\n")
     }
 
     func emit(_ r: Record, matches: [Int], ctx: EmitContext) throws {
@@ -375,7 +398,14 @@ enum CellTransform {
     case none
     case encrypt(columns: [Int], key: [UInt8], fingerprint: String, salt: [UInt8], names: [String])
     case decrypt(columns: [Int], key: [UInt8], names: [String])
-    case hash(columns: [Int])
+    /// `key` nil means plain SHA-256: deterministic, so equal values still
+    /// compare equal, and dictionary-attackable for exactly that reason. With a
+    /// key it is HMAC-SHA256: still deterministic, but an attacker without the
+    /// key cannot build the dictionary.
+    /// `key` 為 nil 時是純 SHA-256：確定性的，因此相等的值仍然相等——也正因為
+    /// 確定性，它可被字典攻擊。給了金鑰則是 HMAC-SHA256：同樣是確定性的，但沒有
+    /// 金鑰的攻擊者建不出那份字典。
+    case hash(columns: [Int], key: [UInt8]?, fingerprint: String?)
 }
 
 /// Ciphertext must become text, since CSV is a text format. base64's alphabet
@@ -432,7 +462,7 @@ func applyTransform(_ t: CellTransform, to record: inout Record, header: Record)
             record.fields[c].set(plain)
         }
 
-    case .hash(let cols):
+    case .hash(let cols, let key, _):
         for c in cols where c < record.count {
             // SHA-256 hashes the STORED bytes, not a normalised form. The same
             // "looks identical" string therefore hashes differently in an NFD
@@ -442,7 +472,18 @@ func applyTransform(_ t: CellTransform, to record: inout Record, header: Record)
             // SHA-256 雜湊的是已儲存的位元組，不是正規化後的形式。因此同一個
             // 「看起來一樣」的字串在 NFD 與 NFC 檔案上會得到不同的雜湊——這要
             // 寫進說明，否則跨平台比對雜湊會得到假的不相符，而原因完全看不出來。
-            let digest = SHA256.hash(record.fields[c].value)
+            // Unkeyed SHA-256 masks a value only as well as its value space is
+            // large. `license`, `status`, `category` -- the columns people
+            // reach for masking on -- have a handful of possible values, so a
+            // dictionary recovers them in seconds. A blind review of this tool
+            // recovered 3 of 21 licences from the hashed file alone. With a key
+            // the same determinism survives and the dictionary does not.
+            // 無金鑰的 SHA-256，其遮蔽效果只取決於值空間有多大。`license`、
+            // `status`、`category`——正是人們會拿來遮蔽的那些欄位——可能的值只有
+            // 少數幾個，一份字典幾秒鐘就能還原。一次盲測僅憑雜湊後的檔案就還原了
+            // 21 個 license 中的 3 個。給了金鑰，確定性仍在，而字典不再管用。
+            let digest = key.map { HMACSHA256.authenticate(record.fields[c].value, key: $0) }
+                ?? SHA256.hash(record.fields[c].value)
             record.fields[c].set([UInt8](digest.map { String(format: "%02x", $0) }.joined().utf8))
         }
     }
@@ -466,10 +507,16 @@ func markHeaders(_ headers: inout [Record], transform: CellTransform) {
                 headers[i].fields[c].set([UInt8](baseName(headerName(headers[i].fields[c])).utf8))
             }
         }
-    case .hash(let cols):
+    case .hash(let cols, _, let fp):
         for c in cols {
             for i in headers.indices where c < headers[i].count {
-                let n = baseName(headerName(headers[i].fields[c])) + ":hash"
+                // The file records WHICH kind was used, and for the keyed form
+                // the key's fingerprint too. Without that, a reader cannot tell
+                // a dictionary-attackable column from a protected one.
+                // 檔案記錄用的是哪一種，keyed 形式還記下金鑰指紋。少了它，讀者
+                // 分不出「可被字典攻擊的欄位」與「受保護的欄位」。
+                let suffix = fp.map { ":hmac:\($0)" } ?? ":hash"
+                let n = baseName(headerName(headers[i].fields[c])) + suffix
                 headers[i].fields[c].set([UInt8](n.utf8))
             }
         }
@@ -492,7 +539,21 @@ func buildTransform(_ o: Options, headers: [Record]) throws -> CellTransform {
                         "欄位 \(baseName(headerName(header.fields[c]))) 已經是雜湊過的")
         }
         Logger.shared.redactedColumns = Set(cols.map { baseName(headerName(header.fields[$0])) })
-        return .hash(columns: cols)
+        // A key turns SHA-256 into HMAC-SHA256. Both are deterministic, so
+        // either way equal values still compare equal -- the difference is
+        // whether someone without the key can build a dictionary of hashes and
+        // read the column back.
+        // 給了金鑰就從 SHA-256 變成 HMAC-SHA256。兩者都是確定性的，因此不論哪一種，
+        // 相等的值仍然相等——差別在於「沒有金鑰的人能不能建出一份雜湊字典把該欄
+        // 讀回來」。
+        if o.keyfile != nil || o.assumeYes {
+            let material = try KeySource.loadKeyMaterial(path: o.keyfile, assumeYes: o.assumeYes)
+            let key = KeySource.derive(material: material.bytes, salt: [UInt8]("csv2-hash".utf8))
+            let fp = KeySource.fingerprint(key)
+            Logger.shared.info("hashing columns with a key from \(material.path) (fingerprint \(fp))")
+            return .hash(columns: cols, key: key, fingerprint: fp)
+        }
+        return .hash(columns: cols, key: nil, fingerprint: nil)
     }
     if let spec = o.encryptCols {
         let cols = try resolveColumnList(spec, header: header)

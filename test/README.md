@@ -35,7 +35,7 @@ It is never quietly dropped. A suite that hides what it did not run reports a
 coverage it does not have — which is the same failure mode as a script that
 exits zero after corrupting a file.
 
-Current state: **94 PASS, 0 FAIL, 1 SKIP** on macOS (arm64, Swift 6.4). The
+Current state: **100 PASS, 0 FAIL, 1 SKIP** on macOS (arm64, Swift 6.4). The
 guest run is re-verified by the parent project after every change; at the last
 full run both sides reported the same totals.
 

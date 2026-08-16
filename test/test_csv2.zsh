@@ -940,6 +940,82 @@ fi
 n2=$("$CSV2" -update '99:3' 'x' -i "$PKG" -o "$TMP/t54b.csv" 2>&1 >/dev/null | wc -l | tr -d ' ')
 assert_eq "$n2" "2" "T54c a runtime failure also prints exactly two lines / 執行期失敗同樣恰好印兩行"
 
+# T55 — masking has to actually mask.
+#
+# `-hash` alone is unsalted SHA-256: deterministic, which is the point, and
+# dictionary-attackable for exactly the same reason. A blind review recovered
+# 3 of 21 licences from the hashed file with nothing but an SPDX word list,
+# because `license` has a handful of possible values -- and low-cardinality
+# columns are precisely the ones people reach for masking on.
+# T55 —— 遮蔽必須真的能遮蔽。
+# 單獨的 `-hash` 是無鹽的 SHA-256：確定性的（那正是重點），也正因為確定性而可被
+# 字典攻擊。一次盲測僅憑一份 SPDX 詞表就從雜湊後的檔案還原了 21 個 license 中的 3 個
+# ——因為 `license` 只有少數幾種可能值，而低基數欄位正是人們會拿來遮蔽的那種。
+printf 'id,lic\na,MIT\nb,GPL\nc,MIT\n' > "$TMP/t55.csv"
+head -c 64 /dev/urandom > "$TMP/t55.key"
+head -c 64 /dev/urandom > "$TMP/t55b.key"
+
+"$CSV2" -hash lic -i "$TMP/t55.csv" -o "$TMP/t55_plain.csv" -t 2>/dev/null
+plain_mit=$("$CSV2" -mid 1,1 -i "$TMP/t55_plain.csv" 2>/dev/null | cut -d, -f2)
+# The unkeyed form is plain SHA-256 of the value, and this asserts it IS -- so
+# that anyone reading the suite sees the exposure rather than inferring it.
+# 無金鑰形式就是該值的純 SHA-256，此處直接斷言「它就是」——讓讀測試的人看見這個
+# 暴露面，而不是自己去推論。
+want_sha=$(printf 'MIT' | shasum -a 256 | cut -d' ' -f1)
+assert_eq "$plain_mit" "$want_sha" "T55a -hash without a key is plain SHA-256 of the value, dictionary-attackable / 無金鑰的 -hash 就是該值的純 SHA-256，可被字典攻擊"
+
+"$CSV2" -hash lic -keyfile "$TMP/t55.key" -i "$TMP/t55.csv" -o "$TMP/t55_keyed.csv" -t 2>/dev/null
+keyed_mit=$("$CSV2" -mid 1,1 -i "$TMP/t55_keyed.csv" 2>/dev/null | cut -d, -f2)
+if [[ "$keyed_mit" != "$want_sha" && -n "$keyed_mit" ]]; then
+    ok "T55b -hash with a key is not the plain SHA-256, so the dictionary does not apply / 有金鑰的 -hash 不是純 SHA-256，字典因此失效"
+else
+    bad "T55b keyed hash still matches the unkeyed digest / 有金鑰的雜湊仍等於無金鑰的摘要"
+fi
+
+# The whole reason to hash rather than encrypt is that equal values stay equal.
+# Losing that would make the feature pointless, keyed or not.
+# 選擇雜湊而非加密的全部理由，就是相等的值仍然相等。失去它，這個功能不論有沒有金鑰
+# 都失去意義。
+a=$("$CSV2" -mid 1,1 -i "$TMP/t55_keyed.csv" 2>/dev/null | cut -d, -f2)
+c=$("$CSV2" -mid 3,3 -i "$TMP/t55_keyed.csv" 2>/dev/null | cut -d, -f2)
+b=$("$CSV2" -mid 2,2 -i "$TMP/t55_keyed.csv" 2>/dev/null | cut -d, -f2)
+if [[ "$a" == "$c" && "$a" != "$b" ]]; then
+    ok "T55c keyed hashing keeps equal values equal and unequal values unequal / 有金鑰的雜湊：相等仍相等、不等仍不等"
+else
+    bad "T55c keyed hash equality (a=${a:0:12} b=${b:0:12} c=${c:0:12})"
+fi
+
+"$CSV2" -hash lic -keyfile "$TMP/t55b.key" -i "$TMP/t55.csv" -o "$TMP/t55_other.csv" -t 2>/dev/null
+if cmp -s "$TMP/t55_keyed.csv" "$TMP/t55_other.csv"; then
+    bad "T55d a different key produced identical output / 換一把金鑰卻得到相同輸出"
+else
+    ok "T55d a different key gives different digests / 換一把金鑰得到不同的摘要"
+fi
+
+# The file records WHICH form was used. Without that a reader cannot tell a
+# dictionary-attackable column from a protected one.
+# 檔案記錄用的是哪一種形式。少了它，讀者分不出「可被字典攻擊的欄位」與「受保護的欄位」。
+h_plain=$(head -1 "$TMP/t55_plain.csv" | cut -d, -f2)
+h_keyed=$(head -1 "$TMP/t55_keyed.csv" | cut -d, -f2)
+if [[ "$h_plain" == "lic:hash" && "$h_keyed" == lic:hmac:* ]]; then
+    ok "T55e the header records which form was used / 標頭記錄了使用的是哪一種形式"
+else
+    bad "T55e header markers (plain='$h_plain' keyed='$h_keyed')"
+fi
+
+# And --json says so too. The JSON keys are the clean names, so without this a
+# JSON consumer cannot tell a masked column from a plain one -- which would
+# undercut the stated reason the meta line exists.
+# --json 也要說明。JSON 的鍵是乾淨的欄名，因此少了這一項，JSON 的消費端分不出被遮蔽
+# 的欄位與一般欄位——那會抵銷掉這行 metadata 存在的理由。
+m_keyed=$("$CSV2" -head 1 -t --json -i "$TMP/t55_keyed.csv" 2>/dev/null | head -1)
+m_clean=$("$CSV2" -head 1 -t --json -i "$PKG" 2>/dev/null | head -1)
+if [[ "$m_keyed" == *'"protected":{"lic":"hmac"}'* && "$m_clean" != *protected* ]]; then
+    ok "T55f --json meta names the protected columns, and omits the key when there are none / --json 的 metadata 指出受保護的欄位，沒有時則不出現該鍵"
+else
+    bad "T55f json protected meta (keyed='${m_keyed:0:90}')"
+fi
+
 # T50 — -debug has five levels in the plan and had one in the CLI. TRACE was
 # unreachable, so it is asserted here as reachable AND as not firing without it.
 # T50 —— 計畫定義 -debug 有五個層級，CLI 只實作了一個，TRACE 無法達到。此處斷言它
