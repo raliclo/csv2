@@ -773,6 +773,121 @@ assert_succeeds "T46b --verify-index still passes after the append / 追加後 -
 unset CSV2_INDEX_MIN_BYTES
 
 echo
+echo "--- Addressing, width and diagnostics / 定位、寬度與診斷 ---"
+
+# T48 — the UAX #11 width table, pinned against the numbers the plan MEASURED.
+#
+# --pretty pads each cell to the column width, so the padding IS the measured
+# width, read off without needing a width oracle of our own. zsh's ${(m)#s}
+# cannot serve as that oracle: it sums the scalars of a ZWJ sequence and calls
+# the family emoji 8, which is the very mistake this table exists to avoid.
+# T48 —— UAX #11 寬度表，以計畫「實測」的數字釘住。
+# --pretty 會把每個儲存格補到欄寬，因此補了幾格就是量到的寬度，不需要我們自己的
+# 寬度判準。zsh 的 ${(m)#s} 不能當那個判準：它會把 ZWJ 序列的各 scalar 加總，說
+# 家庭 emoji 是 8——而那正是這張表要避免的錯誤。
+{
+  print -r -- 'w,note'
+  print -r -- '寬,註'
+  print -r -- 'ok,x'
+  printf '\xe5\xa5\x97\xe4\xbb\xb6\xe5\x90\x8d\xe7\xa8\xb1,x\n'
+  printf '\xf0\x9f\x98\x80,x\n'
+  printf '\xf0\x9f\x91\x8d\xf0\x9f\x8f\xbd,x\n'
+  printf '\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x91\xa7\xe2\x80\x8d\xf0\x9f\x91\xa6,x\n'
+  printf '\xf0\x9f\x87\xb9\xf0\x9f\x87\xbc,x\n'
+  printf '1\xef\xb8\x8f\xe2\x83\xa3,x\n'
+} > "$TMP/w.csv2"
+"$CSV2" -r -t -md --pretty -i "$TMP/w.csv2" > "$TMP/w.md" 2>/dev/null
+# trailing-space count of the first cell on a line
+pad_of() { local c=${1#| }; c=${c%% |*}; local t=${c##*[! ]}; print -r -- ${#t} }
+typeset -a wpad
+while IFS= read -r ln; do
+    [[ "$ln" == '|-'* ]] && continue
+    wpad+=($(pad_of "$ln"))
+done < "$TMP/w.md"
+# header + 7 samples; column width is 8, set by 套件名稱.
+# widths per the plan: ok 2, 套件名稱 8, and every emoji sample 2.
+if [[ ${#wpad} -eq 8 && ${wpad[2]} -eq 6 && ${wpad[3]} -eq 0 && ${wpad[4]} -eq 6 \
+      && ${wpad[5]} -eq 6 && ${wpad[6]} -eq 6 && ${wpad[7]} -eq 6 && ${wpad[8]} -eq 6 ]]; then
+    ok "T48 display widths match the plan's measured table (ok 2, 套件名稱 8, every emoji 2) / 顯示寬度與計畫實測的表相符"
+else
+    bad "T48 width table (padding per row: $wpad, want 6 0 6 6 6 6 6 after the header)"
+fi
+
+# T49 — the locating report's optional address parts.
+#
+# The plan specifies `12:6@L34` for --physical and says --a1 is offered as an
+# ADDITIONAL output, never the default, because CSV need not have a header and
+# its column count need not be constant. It does not specify the shape of the
+# A1 part; that is fixed here and in the plan as ` [F12]` appended.
+# T49 —— 定位報告的選用位址部分。
+# 計畫規定了 --physical 的 `12:6@L34`，並說明 --a1 是「額外輸出」、絕不作為預設
+# （因為 CSV 未必有標頭、欄數也未必一致）。計畫沒有規定 A1 那一段的形狀；此處與
+# 計畫一併訂為在其後附加 ` [F12]`。
+addr=$("$CSV2" -contains busybox --physical --a1 -i "$PKG" 2>/dev/null | head -1 | cut -f1)
+assert_eq "$addr" "1:1@L2 [A1]" "T49a --physical and --a1 compose as record:field@Lline [A1] / --physical 與 --a1 組成 record:field@Lline [A1]"
+
+plain=$("$CSV2" -contains busybox -i "$PKG" 2>/dev/null | head -1 | cut -f1)
+assert_eq "$plain" "1:1" "T49b neither is on by default / 兩者預設都不啟用"
+
+# Past column Z the notation becomes AA, AB. Nothing had ever run that code:
+# the widest fixture here has 10 columns.
+# 超過 Z 之後記法會變成 AA、AB。那段程式碼從來沒有被跑過：此處最寬的素材只有 10 欄。
+{
+  hdr=""; zh=""; row=""
+  for i in {1..30}; do
+    hdr+="c$i,"; zh+="欄$i,"; row+="v$i,"
+  done
+  print -r -- "${hdr%,}"
+  print -r -- "${zh%,}"
+  print -r -- "${row%,}"
+} > "$TMP/wide.csv2"
+a27=$("$CSV2" -contains v27 --a1 -i "$TMP/wide.csv2" 2>/dev/null | head -1 | cut -f1)
+a28=$("$CSV2" -contains v28 --a1 -i "$TMP/wide.csv2" 2>/dev/null | head -1 | cut -f1)
+a26=$("$CSV2" -contains v26 --a1 -i "$TMP/wide.csv2" 2>/dev/null | head -1 | cut -f1)
+if [[ "$a26" == "1:26 [Z1]" && "$a27" == "1:27 [AA1]" && "$a28" == "1:28 [AB1]" ]]; then
+    ok "T49c A1 notation past column Z gives Z, AA, AB / A1 記法在 Z 之後給出 Z、AA、AB"
+else
+    bad "T49c A1 past Z (got 26=$a26 27=$a27 28=$a28)"
+fi
+
+# T50 — -debug has five levels in the plan and had one in the CLI. TRACE was
+# unreachable, so it is asserted here as reachable AND as not firing without it.
+# T50 —— 計畫定義 -debug 有五個層級，CLI 只實作了一個，TRACE 無法達到。此處斷言它
+# 可被達到，也斷言未指定時不會出現。
+t_on=$("$CSV2" -head 2 -i "$PKG" -debug=trace 2>&1 >/dev/null | grep -c 'TRACE')
+t_off=$("$CSV2" -head 2 -i "$PKG" -debug 2>&1 >/dev/null | grep -c 'TRACE')
+if [[ "$t_on" -eq 2 && "$t_off" -eq 0 ]]; then
+    ok "T50 -debug=trace emits one line per record; plain -debug emits none / -debug=trace 每筆一行，單純的 -debug 不輸出"
+else
+    bad "T50 trace level (with=$t_on want 2, without=$t_off want 0)"
+fi
+
+# T51 — an index used to appear only as a side effect, so a user who only runs
+# -mid never got one. --build-index makes it askable, and must not break the
+# rule that the index is an optimisation: same output with and without.
+# T51 —— 索引原本只以副作用出現，於是只用 -mid 的使用者永遠得不到。--build-index 讓它
+# 可被要求，且不得破壞「索引是最佳化」這條規則：有無索引輸出必須相同。
+export CSV2_INDEX_MIN_BYTES=1000
+cp "$TMP/idx.csv2" "$TMP/bi.csv2"
+rm -f "$TMP/bi.csv2.index"
+before=$("$CSV2" -mid 1500,1502 -i "$TMP/bi.csv2" 2>/dev/null)
+assert_fails "T51a --verify-index fails when there is no index / 沒有索引時 --verify-index 失敗" -- \
+    "$CSV2" --verify-index -i "$TMP/bi.csv2"
+assert_succeeds "T51b --build-index creates one on demand / --build-index 可依需求建立" -- \
+    "$CSV2" --build-index -i "$TMP/bi.csv2"
+assert_succeeds "T51c and --verify-index then passes / 之後 --verify-index 通過" -- \
+    "$CSV2" --verify-index -i "$TMP/bi.csv2"
+after=$("$CSV2" -mid 1500,1502 -i "$TMP/bi.csv2" 2>/dev/null)
+if [[ "$before" == "$after" && -n "$before" ]]; then
+    ok "T51d building an index does not change the output / 建立索引不改變輸出"
+else
+    bad "T51d output changed after building an index / 建立索引後輸出改變了"
+fi
+assert_fails "T51e --build-index with --no-index is refused / --build-index 與 --no-index 併用被拒" -- \
+    "$CSV2" --build-index --no-index -i "$TMP/bi.csv2"
+unset CSV2_INDEX_MIN_BYTES
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

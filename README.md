@@ -12,7 +12,7 @@ and the macOS host it is built from.
 
 ```zsh
 ./compile_csv2.zsh       # build release/csv2
-./test/test_csv2.zsh    # 74 PASS, 0 FAIL, 1 SKIP on macOS (arm64, Swift 6.4)
+./test/test_csv2.zsh    # 85 PASS, 0 FAIL, 1 SKIP on macOS (arm64, Swift 6.4)
 ```
 
 | Works | Does not yet |
@@ -130,11 +130,16 @@ PROTECTION / 保護
 
 INDEX / 索引
   --no-index            never read or write a .index sidecar
+  --build-index         build the sidecar now. Otherwise one only appears as a
+                        SIDE EFFECT: a write builds one, and -tail builds one
+                        because it must read the whole file anyway -- so -mid
+                        alone would never produce one
   --verify-index        O(n) full check; the O(1) check on the normal path is
                         deliberately a heuristic, not a proof
 
 DIAGNOSTICS / 診斷
   -debug                diagnostics to stderr, including a metrics: line
+  -debug=trace          one level lower: every record's selection decision
   -log FILE             append a timestamped operation record
   --version  --help
 ```

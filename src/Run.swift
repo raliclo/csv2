@@ -141,6 +141,89 @@ func planIndex(_ o: Options, plan: InputPlan, lower: Int, upper: Int) -> IndexPl
     return out
 }
 
+/// Builds the sidecar on demand. Without this an index only ever appears as a
+/// SIDE EFFECT -- a write builds one, and `-tail` builds one because it has to
+/// read the whole file anyway -- so somebody who only ever runs `-mid` on a
+/// large file never gets one at all. `-mid` stops early by design and building
+/// there would cancel that out, which is correct per operation but leaves the
+/// user with no way to ask. `--verify-index` existing while nothing creates one
+/// made the gap plain.
+/// 依需求建立 sidecar。少了它，索引只會以「副作用」的方式出現——寫入時建一個、
+/// `-tail` 因為本來就要讀完整個檔案而建一個——於是只用 `-mid` 讀大檔的人根本不會
+/// 得到索引。`-mid` 的設計就是提前停止，在那裡建索引會抵銷掉它：就單一操作而言正確，
+/// 但使用者因此無從要求。「有 `--verify-index` 可驗證、卻沒有東西可建立」讓這個缺口
+/// 一目了然。
+///
+/// The rule this must not break: the index stays an OPTIMISATION and never a
+/// precondition. So this changes no output, and a directory it cannot write to
+/// is a warning, not a failure.
+/// 不可破壞的規則：索引維持是最佳化，永遠不是必要條件。因此本操作不改變任何輸出，
+/// 目錄不可寫時只警告、不失敗。
+func runBuildIndex(_ o: Options) throws {
+    guard let path = o.input else {
+        throw fault("--build-index needs -i FILE", "--build-index 需要 -i FILE")
+    }
+    let plan = try openInput(o)
+    defer { plan.source.close() }
+    try checkTornAppend(path: path, format: plan.format, truncatePartial: o.truncatePartial)
+
+    var headers: [Record] = []
+    var expectedFields = 0
+    var pendingError: Error?
+    let builder = IndexBuilder(isCSV2: plan.format == .csv2)
+
+    let parser = RecordParser(format: plan.format) { rec in
+        do {
+            if headers.count < plan.headerRows {
+                headers.append(rec)
+                if headers.count == plan.headerRows {
+                    try validateHeaders(headers, want: plan.headerRows, path: plan.describedPath)
+                    expectedFields = headers[0].count
+                    builder.headerEnded(at: UInt64(rec.offset + 1))
+                }
+                return true
+            }
+            var r = rec
+            r.number = rec.number - plan.headerRows
+            try checkFieldCount(r, expected: expectedFields,
+                                what: "record \(r.number) (line \(r.line))")
+            // A record that itself spans lines means a record number is no
+            // longer a line number, and the index stores bytes rather than
+            // lines -- so the seek path must refuse to use this index. Recorded
+            // here so the flag in the header is right.
+            // 自身跨行的紀錄會讓紀錄號不再等於行號，而索引存的是位元組而非行號
+            // ——因此 seek 路徑必須拒絕使用這份索引。在此記錄，讓檔頭的旗標正確。
+            builder.add(record: r.number, at: UInt64(r.offset),
+                        spansLines: rec.line != r.line || false)
+            return true
+        } catch {
+            pendingError = error
+            return false
+        }
+    }
+
+    while !parser.stopped, let chunk = plan.source.next() { try parser.feed(chunk) }
+    if !parser.stopped { try parser.finish() }
+    if let e = pendingError { throw e }
+    guard headers.count == plan.headerRows else {
+        throw fault("\(path): expected \(plan.headerRows) header row(s), found \(headers.count)",
+                    "\(path)：預期 \(plan.headerRows) 列標頭，實際只有 \(headers.count) 列")
+    }
+    guard let idx = builder.finish(dataPath: path) else {
+        throw fault("cannot stat \(path)", "無法取得 \(path) 的狀態")
+    }
+    let sink = ByteSink(stdout: 1 << 13)
+    if idx.save(dataPath: path) {
+        sink.write("index built: \(idx.records) records, stride \(idx.stride), \(idx.offsets.count) grid points\n")
+    } else {
+        // Not a failure: the index is an optimisation, so being unable to write
+        // one leaves everything else exactly as it was.
+        // 不算失敗：索引是最佳化，寫不出來也不影響其餘一切。
+        sink.write("index not written (directory not writable); nothing else changed\n")
+    }
+    try sink.close()
+}
+
 /// O(n), and the only thing here that is a proof rather than a heuristic.
 /// Offered because the O(1) validation deliberately is not one.
 /// O(n)，也是此處唯一構成證明而非啟發式的東西。之所以提供它，正因為 O(1) 的
@@ -285,6 +368,16 @@ func runSelect(_ o: Options) throws {
 
     func emitRecord(_ r: Record, matches: [Int]) throws {
         guard let c = ctx else { return }
+        // TRACE is per-record: the question it answers is "why was record N not
+        // in my output", which DEBUG would drown. This is the first thing in
+        // the tool worth a TRACE line, which is why the level had no way to be
+        // reached until now -- a flag that lowers the threshold to a level
+        // nothing logs at would have been an option that does nothing.
+        // TRACE 是逐筆的：它要回答的是「為什麼第 N 筆不在我的輸出裡」，而那個問題
+        // 會被 DEBUG 的量淹沒。這是本工具第一件值得寫成 TRACE 的事，也正是這個層級
+        // 在此之前無法被達到的原因——把門檻降到一個「沒有東西以它記錄」的層級，
+        // 會得到一個什麼也不做的選項。
+        Logger.shared.log(.trace, "select: record \(r.number) line \(r.line) emitted\(matches.isEmpty ? "" : ", matched fields \(matches.map { $0 + 1 })")")
         if lastEmitted != 0 && r.number > lastEmitted + 1 && (o.before > 0 || o.after > 0) {
             try emitter.gap(c)
         }

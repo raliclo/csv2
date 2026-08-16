@@ -73,9 +73,11 @@ struct Options {
     var assumeYes = false
 
     var debug = false
+    var trace = false
     var logPath: String?
     var noIndex = false
     var verifyIndex = false
+    var buildIndex = false
 }
 
 func usageError(_ en: String, _ zh: String) -> CSV2Error { fault(en, zh) }
@@ -200,9 +202,11 @@ func parseArgs(_ argv: [String]) throws -> Options {
                 "-key is not supported: a secret passed on the command line is visible in `ps` to every process on this machine and is kept in shell history. Use -keyfile <path>.",
                 "不支援 -key：命令列上的秘密在 `ps` 中對本機每個行程都可見，也會留在 shell 歷史中。請改用 -keyfile <path>。")
         case "debug": o.debug = true
+        case "debug=trace", "debug=TRACE": o.debug = true; o.trace = true
         case "log": o.logPath = try need(arg)
         case "no-index": o.noIndex = true
         case "verify-index": o.verifyIndex = true
+        case "build-index": o.buildIndex = true
         case "version", "V":
             print("csv2 \(CSV2_VERSION)")
             exit(0)
@@ -318,6 +322,15 @@ func validate(_ o: inout Options) throws {
     }
     if o.verifyIndex && o.input == nil {
         throw usageError("--verify-index needs -i FILE", "--verify-index 需要 -i FILE")
+    }
+    if o.buildIndex {
+        guard o.input != nil else {
+            throw usageError("--build-index needs -i FILE", "--build-index 需要 -i FILE")
+        }
+        if o.noIndex {
+            throw usageError("--build-index and --no-index contradict each other",
+                             "--build-index 與 --no-index 互相矛盾")
+        }
     }
     if o.head != nil && o.tail != nil {
         // Not interpreted as "the middle" or "both ends". There is no reading
@@ -695,13 +708,15 @@ func sanitizedCommandLine(_ argv: [String]) -> String {
 func main() -> Int32 {
     do {
         var o = try parseArgs(Array(CommandLine.arguments.dropFirst()))
-        if o.debug { Logger.shared.threshold = .debug }
+        if o.debug { Logger.shared.threshold = o.trace ? .trace : .debug }
         if let p = o.logPath { Logger.shared.openLog(path: p) }
         try validate(&o)
 
         Logger.shared.log(.info, "csv2 \(sanitizedCommandLine(Array(CommandLine.arguments.dropFirst())))")
 
-        if o.verifyIndex {
+        if o.buildIndex {
+            try runBuildIndex(o)
+        } else if o.verifyIndex {
             try runVerifyIndex(o)
         } else if !o.edits.isEmpty {
             if canUseAppendFastPath(o) {

@@ -35,8 +35,9 @@ It is never quietly dropped. A suite that hides what it did not run reports a
 coverage it does not have — which is the same failure mode as a script that
 exits zero after corrupting a file.
 
-Current state: **74 PASS, 0 FAIL, 1 SKIP** on macOS (arm64, Swift 6.4), and
-**72 PASS, 0 FAIL, 3 SKIP** inside the aarch64 Linux guest.
+Current state: **85 PASS, 0 FAIL, 1 SKIP** on macOS (arm64, Swift 6.4). The
+guest run is re-verified by the parent project after every change; at the last
+full run both sides reported the same totals.
 
 T47 is the skip on macOS, and it cannot be anything else here: the case asserts
 that the LINUX build produces identical output, so it is driven from the parent

@@ -12,7 +12,7 @@ English: [README.md](./README.md)
 
 ```zsh
 ./compile_csv2.zsh       # 建置 release/csv2
-./test/test_csv2.zsh    # macOS（arm64、Swift 6.4）上 74 通過、0 失敗、1 略過
+./test/test_csv2.zsh    # macOS（arm64、Swift 6.4）上 85 通過、0 失敗、1 略過
 ```
 
 | 可用 | 尚未做 |
@@ -120,11 +120,14 @@ Linux 上的 Foundation 是另一份實作，「在 macOS 上會過」對 Linux 
 
 索引
   --no-index            完全不讀也不寫 .index sidecar
+  --build-index         立即建立 sidecar。否則索引只會以「副作用」出現：寫入時建一個、
+                        -tail 因為本來就要讀完整檔而建一個——只用 -mid 的話永遠不會有
   --verify-index        O(n) 的完整比對；正常路徑上的 O(1) 檢查刻意只是啟發式，
                         不是證明
 
 診斷
   -debug                診斷訊息輸出到 stderr，含一行 metrics:
+  -debug=trace          再低一級：每一筆紀錄的選取決定
   -log FILE             追加帶時間戳的操作紀錄
   --version  --help
 ```
