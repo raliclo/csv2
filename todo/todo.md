@@ -7,6 +7,33 @@ Items that are decided but not yet designed in full. The design itself lives in
 
 ---
 
+## Where these came from / 這些項目的來源
+
+Items here are **decided but not yet designed in full**. Two other places hold
+different things, and mixing them up makes all three useless:
+
+此處的項目是**已確定要做、但尚未完整設計**的。另有兩處放的是不同的東西，混在一起會
+讓三者都失去作用：
+
+| Place | Holds |
+|---|---|
+| [`../plan/plan.md`](../plan/plan.md) phase checkboxes | what is built, ticked only when its test passes / 已完成的部分，測試通過才打勾 |
+| `plan.md` 待決問題 | questions with **no decision yet** -- not todos / 尚**未有決定**的問題，不是待辦 |
+| this file | decided, not yet designed / 已決定、尚未完整設計 |
+
+The 2026-08-16 code review (`sos/review.md`) raised two csv2 items, **both now
+closed**: the guest comparison swallowing csv2's exit status (fixed -- csv2 now
+runs on its own, its status is checked, and only stdout is hashed), and the work
+not being reproducible from parent HEAD (fixed -- both repositories are pushed
+and the gitlink is updated). Nothing from that review is outstanding for csv2.
+
+2026-08-16 的 code review（`sos/review.md`）提出兩項與 csv2 有關的問題，**兩項均已關閉**：
+guest 比對吞掉 csv2 的結束狀態（已修——csv2 單獨執行、檢查狀態，且只對 stdout 計算
+雜湊），以及工作無法由 parent HEAD 重現（已修——兩個 repo 都已推送、gitlink 已更新）。
+該次 review 中沒有任何 csv2 項目仍待處理。
+
+---
+
 ## 1. Install into the package manager's bin directory / 安裝到套件管理員的 bin 目錄
 
 **Status: to do. The drop-in half is now unblocked; the tap and the shim are
@@ -168,3 +195,121 @@ nothing, because it reports success.
 檢查「檔案有沒有放進去」對「實際會執行到哪一支 `csv2`」毫無證明力：那是由 `PATH`
 順序決定的，靜默、且沒有任何診斷訊息——而這正是計畫當初否決 `csv` 這個名字的理由之一。
 一個驗證了錯誤對象的安裝程式，比完全不驗證更糟，因為它會回報成功。
+
+
+---
+
+## 2. `--a1` and `--physical` have no test case / `--a1` 與 `--physical` 沒有測試案例
+
+**Status: to do. Both work; neither is asserted. / 狀態：待辦。兩者都能運作，但都沒有被斷言。**
+
+```sh
+csv2 -contains busybox --physical --a1 -i TARGET_PACKAGES.csv
+1:1@L2 [A1]	pkg_name	busybox
+```
+
+The plan specifies that both exist and why (`--physical` because a record can
+span several lines, so a record number is not a line number; `--a1` because
+spreadsheet users read `F12`, but it must never be the default since CSV need
+not have a header and its column count need not be constant). What the plan
+does **not** specify is the output shape. `12:6@L34` comes from the plan;
+`[A1]` appended after it was chosen during implementation with nothing to check
+it against.
+
+計畫載明了兩者的存在與理由（`--physical`：一筆紀錄可跨多行，紀錄號不等於行號；
+`--a1`：試算表使用者讀得懂 `F12`，但絕不能作為預設，因為 CSV 未必有標頭、欄數也未必
+一致）。計畫**沒有**規定的是輸出形狀：`12:6@L34` 出自計畫，而附在其後的 `[A1]` 是實作
+時自行決定的，沒有任何東西可以對照。
+
+So the first step is not a test but a decision: fix the shape in the plan, give
+the cases their T-numbers, then assert them. Writing a test against a shape
+nobody chose only freezes an accident.
+
+因此第一步不是寫測試而是做決定：先在計畫中訂下形狀、給案例編上 T 編號，再去斷言它。
+針對一個沒有人選擇過的形狀寫測試，只會把一次偶然固化下來。
+
+Worth checking while there: `--a1` past column Z becomes AA, AB. `a1Column()`
+handles it, and nothing has ever run it past 26 columns -- the widest fixture
+here has 10.
+
+順帶要查的：`--a1` 超過 Z 之後會變成 AA、AB。`a1Column()` 有處理，但從來沒有東西
+真的跑過 26 欄以上——此處最寬的素材只有 10 欄。
+
+## 3. `-debug` has one level, not five / `-debug` 只有一級，不是五級
+
+**Status: to do. / 狀態：待辦。**
+
+`plan.md` defines `ERROR > WARN > INFO > DEBUG > TRACE` and says `-debug` lowers
+the threshold to DEBUG, with "a form like `-debug=trace` able to lower it
+further". The levels exist in `Logger`; the CLI only implements the DEBUG step,
+so TRACE is unreachable.
+
+`plan.md` 定義了 `ERROR > WARN > INFO > DEBUG > TRACE`，並說明 `-debug` 把門檻降到
+DEBUG，而「`-debug=trace` 之類的形式可以再降」。層級在 `Logger` 中確實存在，但 CLI
+只實作了 DEBUG 那一階，TRACE 因此無法達到。
+
+Not urgent -- nothing currently logs at TRACE, so adding the flag before there
+is anything to see would produce an option that does nothing. The useful order
+is: find the first thing worth a TRACE line, then add both.
+
+不急——目前沒有任何東西以 TRACE 記錄，在有東西可看之前先加旗標，只會得到一個什麼也
+不做的選項。合理的順序是：先找到第一件值得寫成 TRACE 的事，再一起加上。
+
+## 4. An index can only be created as a side effect / 索引只能以副作用的方式產生
+
+**Status: to do. / 狀態：待辦。**
+
+An index appears in exactly two situations: a write path builds one while
+writing, and `-tail` builds one because it has to read the whole file anyway.
+There is no way to ask for one.
+
+索引只會在兩種情況下出現：寫入路徑邊寫邊建，以及 `-tail` 因為本來就必須讀完整個檔案
+而順手建立。沒有任何方式可以「要求」產生一個。
+
+That leaves a real gap. Someone who only ever runs `-mid` on a large `.csv2`
+never gets an index, because `-mid` deliberately stops early and building one
+there would cancel out the early stop -- correct per operation, but it means
+the sidecar never appears for that user at all. The workaround is to run a
+`-tail 1` for its side effect, which is not something anyone would guess.
+
+這留下一個真實的缺口：只用 `-mid` 讀大型 `.csv2` 的人永遠不會得到索引，因為 `-mid`
+刻意提前停止，在那裡建索引會抵銷掉提前停止——就單一操作而言是對的，但結果是那位使用者
+根本不會出現 sidecar。目前的變通方式是跑一次 `-tail 1` 取其副作用，而那不是任何人猜得到的。
+
+`--verify-index` already exists and requires an index to check, which makes the
+absence more obvious: there is a flag to verify one and none to make one.
+
+`--verify-index` 已經存在，而它需要一個索引才能檢查——這讓缺口更明顯：有旗標可以驗證
+索引，卻沒有旗標可以建立索引。
+
+The rule to preserve when adding it: **the index must stay an optimisation and
+never a precondition**, so an explicit build must still be optional, must not
+change any output, and must not fail an operation if the directory is
+unwritable.
+
+新增時要守住的規則：**索引必須維持是最佳化，永遠不是必要條件**——因此明示建立仍必須
+是選用的、不得改變任何輸出，也不得在目錄不可寫時使操作失敗。
+
+## 5. The UAX #11 width table is a hand-written subset / UAX #11 寬度表是手寫的子集
+
+**Status: accepted for now; recorded so it is not mistaken for complete.
+狀態：目前接受現狀；記錄在此以免被誤認為完整。**
+
+`src/Width.swift` carries about 90 ranges chosen to cover what this project
+actually stores: Han, Hangul, fullwidth forms, and the emoji blocks. It is not
+the full East Asian Width table and it does not track Unicode revisions, so an
+emoji added in a later Unicode version will be measured as width 1 and
+`--pretty` will misalign that row by one column.
+
+`src/Width.swift` 含約 90 個區間，涵蓋的是本專案實際會儲存的東西：漢字、諺文、全形
+形式與 emoji 區塊。它不是完整的 East Asian Width 表，也不追蹤 Unicode 修訂，因此在
+較新 Unicode 版本中新增的 emoji 會被算成寬度 1，`--pretty` 那一列就會歪一欄。
+
+Acceptable because `--pretty` is opt-in and the default minimal form needs no
+width information at all -- that is why the default is the minimal form. It
+becomes a real problem only if `--pretty` ever becomes the default, which it
+should not.
+
+之所以可接受：`--pretty` 是選擇加入的，而預設的最小形式完全不需要寬度資訊——那正是
+預設採用最小形式的理由。只有在 `--pretty` 變成預設時它才會成為真正的問題，而它不應該
+變成預設。
