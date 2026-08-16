@@ -961,7 +961,22 @@ plain_mit=$("$CSV2" -mid 1,1 -i "$TMP/t55_plain.csv" 2>/dev/null | cut -d, -f2)
 # that anyone reading the suite sees the exposure rather than inferring it.
 # 無金鑰形式就是該值的純 SHA-256，此處直接斷言「它就是」——讓讀測試的人看見這個
 # 暴露面，而不是自己去推論。
-want_sha=$(printf 'MIT' | shasum -a 256 | cut -d' ' -f1)
+# An INDEPENDENT SHA-256, so this assertion means something: computing it with
+# csv2 would only prove csv2 agrees with itself. macOS ships `shasum`, the
+# guest's busybox ships `sha256sum`, and neither ships both -- so pick whichever
+# is present rather than skipping the case on the platform that lacks one.
+# 使用「獨立的」SHA-256，這個斷言才有意義：用 csv2 自己算只能證明它與自己一致。
+# macOS 提供 `shasum`，guest 的 busybox 提供 `sha256sum`，兩邊都不會同時有——
+# 因此挑存在的那一個，而不是在缺少其一的平台上把案例略過。
+sha256_of() {
+    if (( $+commands[sha256sum] )); then
+        printf '%s' "$1" | sha256sum | cut -d' ' -f1
+    else
+        printf '%s' "$1" | shasum -a 256 | cut -d' ' -f1
+    fi
+}
+want_sha=$(sha256_of 'MIT')
+[[ -n "$want_sha" ]] || bad "T55a has no independent SHA-256 tool to check against / 沒有可用的獨立 SHA-256 工具可供比對"
 assert_eq "$plain_mit" "$want_sha" "T55a -hash without a key is plain SHA-256 of the value, dictionary-attackable / 無金鑰的 -hash 就是該值的純 SHA-256，可被字典攻擊"
 
 "$CSV2" -hash lic -keyfile "$TMP/t55.key" -i "$TMP/t55.csv" -o "$TMP/t55_keyed.csv" -t 2>/dev/null
