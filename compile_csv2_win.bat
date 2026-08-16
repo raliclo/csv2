@@ -1,0 +1,96 @@
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+chcp 65001 > nul
+:: compile_csv2_win.bat -- build csv2.exe on Windows
+::
+:: NOTE: comments in this file are English-only ON PURPOSE. Non-ASCII bytes on
+:: a comment line were found to corrupt cmd.exe's parsing of SUBSEQUENT lines
+:: in this environment, reproducibly and independent of chcp. This is the one
+:: file in csv2 that is not bilingual, and that is why. The Chinese
+:: explanation lives in README.zh-TW.md.
+::
+:: csv2 has no C dependencies -- Foundation only, no libraries to link, no
+:: module maps, no bridging header. That is the whole reason this file is
+:: short compared with swift_tar's equivalent: there is nothing to find but
+:: swiftc itself.
+::
+:: STATUS: NEVER COMPILED OR RUN. Written from the pattern in
+:: multissh/swift_tar/compile_tar-win.bat. Until it produces a csv2.exe that
+:: passes the suite, nothing in this repository should describe Windows as
+:: supported.
+::
+:: Output: release\csv2.exe
+
+cd /d "%~dp0"
+
+where swiftc.exe > nul 2>&1
+if errorlevel 1 (
+    echo [FAIL] swiftc.exe not on PATH. Install the Swift toolchain for Windows
+    echo        from swift.org, then open a new shell so PATH is picked up.
+    exit /b 1
+)
+
+:: Swift on Windows links against the MSVC runtime and needs the C++ build
+:: tools present, even for a project with no C of its own. vswhere is the
+:: supported way to locate them; hardcoding a Visual Studio path breaks on the
+:: next version, and on any machine that installed it elsewhere.
+set "_vswhere=C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+where cl.exe > nul 2>&1
+if errorlevel 1 (
+    if not exist "%_vswhere%" (
+        echo [FAIL] Neither cl.exe nor vswhere.exe found. Install Visual Studio
+        echo        with the "Desktop development with C++" workload.
+        exit /b 1
+    )
+    set "_vsroot="
+    for /f "usebackq delims=" %%I in (`"%_vswhere%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "_vsroot=%%I"
+    if not defined _vsroot (
+        echo [FAIL] MSVC C++ tools not found by vswhere.
+        exit /b 1
+    )
+    if not exist "!_vsroot!\VC\Auxiliary\Build\vcvars64.bat" (
+        echo [FAIL] vcvars64.bat not found under "!_vsroot!"
+        exit /b 1
+    )
+    call "!_vsroot!\VC\Auxiliary\Build\vcvars64.bat" > nul
+)
+
+:: ONE source list, read from src\sources.list, the same file the macOS and
+:: Linux builds read. Keeping a second copy here is how the Linux build once
+:: drifted: it was missing a file, and the failure named a missing SYMBOL
+:: rather than the missing FILE.
+set "_sources="
+for /f "usebackq tokens=* delims=" %%L in ("src\sources.list") do (
+    set "_line=%%L"
+    if not "!_line!"=="" (
+        if not "!_line:~0,1!"=="#" (
+            set "_win=!_line:/=\!"
+            set "_sources=!_sources! !_win!"
+        )
+    )
+)
+if not defined _sources (
+    echo [FAIL] src\sources.list produced no source files.
+    exit /b 1
+)
+
+if not exist release mkdir release
+
+echo Building csv2.exe
+swiftc -O %_sources% -o release\csv2.exe
+if errorlevel 1 (
+    echo [FAIL] swiftc failed.
+    exit /b 1
+)
+
+:: Verify by RUNNING it, not by checking the file exists. Whether the file
+:: landed proves nothing about whether it works -- the same rule the macOS and
+:: Linux builds follow.
+release\csv2.exe --version > nul
+if errorlevel 1 (
+    echo [FAIL] csv2.exe was produced but does not run.
+    exit /b 1
+)
+for /f "usebackq delims=" %%V in (`release\csv2.exe --version`) do set "_ver=%%V"
+echo OK: !_ver! -^> release\csv2.exe
+endlocal

@@ -1,0 +1,16 @@
+# The Windows batch file must reach Windows with CRLF endings and must not be
+# touched by any text filter: cmd.exe mis-parses a comment line containing
+# non-ASCII bytes, and what it corrupts is the lines AFTER it -- a failure that
+# looks like a bug in the build rather than in the file's encoding.
+# Windows 批次檔必須以 CRLF 抵達 Windows，且不得被任何文字 filter 動到：cmd.exe
+# 在註解含非 ASCII 位元組時會解析錯誤，而它弄壞的是「該行之後」的行——那個失敗
+# 看起來像建置的 bug，而不是檔案編碼的問題。
+*.bat text eol=crlf
+
+# Fixtures whose whole point is a specific byte sequence must never be
+# normalised. test_csv2.zsh generates most of them for this reason, but the
+# committed one is protected here too.
+# 重點就在特定位元組序列的 fixture 絕不可被正規化。test_csv2.zsh 為此在腳本內
+# 產生大多數素材，而已進版控的那一份在此一併保護。
+*.csv  -text
+*.csv2 -text

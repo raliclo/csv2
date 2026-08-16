@@ -19,11 +19,6 @@
 // =====================================================================
 
 import Foundation
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#endif
 
 // ---------------------------------------------------------------------
 // MARK: - On-disk layout / 磁碟上的格式
@@ -89,25 +84,16 @@ struct FileStamp {
     var hashTail: [UInt8]
 
     static func of(path: String) -> FileStamp? {
-        var st = stat()
-        guard stat(path, &st) == 0 else { return nil }
-        #if canImport(Darwin)
-        let sec = Int64(st.st_mtimespec.tv_sec)
-        let nsec = Int64(st.st_mtimespec.tv_nsec)
-        #else
-        let sec = Int64(st.st_mtim.tv_sec)
-        let nsec = Int64(st.st_mtim.tv_nsec)
-        #endif
-        let size = UInt64(st.st_size)
+        guard let id = Platform.fileIdentity(path: path) else { return nil }
         guard let h = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? h.close() }
         let head = [UInt8](h.readData(ofLength: 64))
         var tail = head
-        if size > 64 {
-            h.seek(toFileOffset: size - 64)
+        if id.size > 64 {
+            h.seek(toFileOffset: id.size - 64)
             tail = [UInt8](h.readData(ofLength: 64))
         }
-        return FileStamp(size: size, mtimeSec: sec, mtimeNsec: nsec,
+        return FileStamp(size: id.size, mtimeSec: id.mtimeSec, mtimeNsec: id.mtimeNsec,
                          hashHead: Array(SHA256.hash(head).prefix(8)),
                          hashTail: Array(SHA256.hash(tail).prefix(8)))
     }
@@ -267,7 +253,7 @@ final class CSVIndex {
         guard let fresh = FileStamp.of(path: dataPath) else { return false }
         stamp = fresh
         let p = CSVIndex.path(for: dataPath)
-        let tmp = p + ".tmp.\(getpid())"
+        let tmp = p + ".tmp.\(Platform.processID())"
         guard FileManager.default.createFile(atPath: tmp, contents: Data(encode())) else {
             // A directory we cannot write is a warning, once, and the
             // operation completes regardless.

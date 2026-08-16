@@ -4,11 +4,6 @@
 // =====================================================================
 
 import Foundation
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#endif
 
 // ---------------------------------------------------------------------
 // MARK: - Logging / 記錄
@@ -187,7 +182,7 @@ enum KeySource {
             if assumeYes {
                 Logger.shared.info("using the default multissh key at \(p) (--yes)")
             } else {
-                guard isatty(STDIN_FILENO) == 1 && isatty(STDERR_FILENO) == 1 else {
+                guard Platform.isTerminal(Platform.stdinFD) && Platform.isTerminal(Platform.stderrFD) else {
                     // A prompt that cannot be displayed must NEVER be treated
                     // as a yes; otherwise scripts and cron jobs silently adopt
                     // the default key, which is the exact thing the prompt is
@@ -329,39 +324,16 @@ enum Metrics {
     /// the kind of difference that only shows up when the guest runs it.
     /// 峰值常駐記憶體，單位為位元組。ru_maxrss 在 Darwin 上是 bytes、在 Linux
     /// 上是 KB——同一個欄位兩種單位，正是那種「只有在 guest 上跑才會現形」的差異。
-    static func peakRSSBytes() -> Int {
-        var usage = rusage()
-        // The `who` argument has a different TYPE on each platform, not just a
-        // different value: Darwin declares getrusage(Int32, ...) and glibc
-        // declares getrusage(__rusage_who_t, ...) while RUSAGE_SELF itself
-        // imports as `__rusage_who`. Passing it straight through compiles on
-        // macOS and fails on Linux with "cannot convert value of type
-        // '__rusage_who' to expected argument type '__rusage_who_t'".
-        // 這個 `who` 參數在兩個平台上「型別」就不同，不只是值不同：Darwin 宣告
-        // getrusage(Int32, ...)，glibc 宣告 getrusage(__rusage_who_t, ...)，
-        // 而 RUSAGE_SELF 本身被匯入為 `__rusage_who`。直接傳過去在 macOS 上
-        // 編譯得過，在 Linux 上會失敗。
-        #if canImport(Darwin)
-        let who: Int32 = RUSAGE_SELF
-        #else
-        let who: Int32 = Int32(RUSAGE_SELF.rawValue)
-        #endif
-        guard getrusage(who, &usage) == 0 else { return 0 }
-        // And the UNIT differs too: ru_maxrss is bytes on Darwin, kilobytes on
-        // Linux. The same struct field, two units -- exactly the kind of thing
-        // that only shows up when the guest runs it.
-        // 單位也不同：ru_maxrss 在 Darwin 是位元組，在 Linux 是 KB。同一個結構
-        // 欄位、兩種單位——正是那種「只有在 guest 上跑才會現形」的差異。
-        #if canImport(Darwin)
-        return Int(usage.ru_maxrss)
-        #else
-        return Int(usage.ru_maxrss) * 1024
-        #endif
-    }
+    static func peakRSSBytes() -> Int { Platform.peakRSSBytes() }
 
     /// One line, at DEBUG, in a shape a test can parse without guessing.
     /// 一行，DEBUG 層級，格式讓測試不必猜就能解析。
     static func report(bytesRead: Int, fileSize: Int) {
-        Logger.shared.debug("metrics: read_bytes=\(bytesRead) file_bytes=\(fileSize) peak_rss_bytes=\(peakRSSBytes())")
+        // The RSS figure is labelled when it comes from an unverified path, so
+        // a reader is never handed a number that looks measured but is not.
+        // RSS 數值在來自未經驗證的路徑時會被標示，讓讀者不會拿到一個「看起來像
+        // 量測、其實不是」的數字。
+        let rssNote = Platform.peakRSSIsVerified ? "" : " peak_rss_unverified_on=\(Platform.name)"
+        Logger.shared.debug("metrics: read_bytes=\(bytesRead) file_bytes=\(fileSize) peak_rss_bytes=\(peakRSSBytes())\(rssNote)")
     }
 }

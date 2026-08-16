@@ -4,11 +4,6 @@
 // =====================================================================
 
 import Foundation
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#endif
 
 // ---------------------------------------------------------------------
 // MARK: - Shared setup / 共用的前置

@@ -30,11 +30,6 @@
 
 import Foundation
 import Dispatch
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#endif
 
 /// Chunks are a FIXED small size with a work queue, never "file size / P".
 /// The latter would cut a 100 GiB file into eight 12.5 GiB pieces, and the

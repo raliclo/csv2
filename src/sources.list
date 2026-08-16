@@ -17,6 +17,7 @@
 # with that name, and the driver treats its position as significant.
 # main.swift 必須排最後：Swift 只允許該檔名含頂層敘述，且 driver 對它的位置敏感。
 src/Crypto.swift
+src/Platform.swift
 src/Core.swift
 src/Support.swift
 src/Width.swift

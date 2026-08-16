@@ -10,11 +10,6 @@
 // =====================================================================
 
 import Foundation
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#endif
 
 let CSV2_VERSION = "0.1.0"
 

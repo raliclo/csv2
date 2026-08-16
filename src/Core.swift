@@ -14,11 +14,6 @@
 // =====================================================================
 
 import Foundation
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#endif
 
 // ---------------------------------------------------------------------
 // MARK: - Errors / 錯誤
@@ -662,7 +657,7 @@ final class ByteSink {
         let dir = (path as NSString).deletingLastPathComponent
         let base = (path as NSString).lastPathComponent
         let dirPart = dir.isEmpty ? "." : dir
-        let tmp = "\(dirPart)/.\(base).csv2tmp.\(getpid())"
+        let tmp = "\(dirPart)/.\(base).csv2tmp.\(Platform.processID())"
         FileManager.default.createFile(atPath: tmp, contents: nil)
         guard let h = FileHandle(forWritingAtPath: tmp) else {
             throw fault("cannot create temporary file beside \(path)", "無法在 \(path) 旁建立暫存檔")
@@ -711,8 +706,8 @@ final class ByteSink {
             // swift-corelibs-foundation 中是另一份實作：在 Linux 上它讓目的檔
             // 維持不變，於是 --in-place 什麼也沒做卻以 0 結束。這是由 T28b 在
             // guest 內執行時抓到的，macOS 上沒有任何東西會發現。
-            if rename(tmp, final) != 0 {
-                let e = String(cString: strerror(errno))
+            if !Platform.replaceFile(tmp, final) {
+                let e = Platform.lastErrorText()
                 try? FileManager.default.removeItem(atPath: tmp)
                 throw fault("cannot rename \(tmp) onto \(final): \(e)",
                             "無法將 \(tmp) rename 為 \(final)：\(e)")

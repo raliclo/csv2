@@ -4,11 +4,6 @@
 // =====================================================================
 
 import Foundation
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#endif
 
 // ---------------------------------------------------------------------
 // MARK: - Byte search / 位元組搜尋

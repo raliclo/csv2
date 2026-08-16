@@ -1,7 +1,7 @@
-# Build output. The binary is derived from src/ and compile_csv2.sh; keeping it
+# Build output. The binary is derived from src/ and compile_csv2.zsh; keeping it
 # in git would put a 5 MB blob in every clone for something a build reproduces
 # in seconds.
-# 建置產物。執行檔可由 src/ 與 compile_csv2.sh 重現，放進 git 只會讓每個 clone
+# 建置產物。執行檔可由 src/ 與 compile_csv2.zsh 重現，放進 git 只會讓每個 clone
 # 多帶一個 5 MB 的 blob，換取幾秒鐘的建置。
 release/
 
