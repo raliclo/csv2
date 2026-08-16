@@ -12,7 +12,7 @@ English: [README.md](./README.md)
 
 ```zsh
 ./compile_csv2.zsh       # 建置 release/csv2
-./test/test_csv2.zsh    # macOS（arm64、Swift 6.4）上 88 通過、0 失敗、1 略過
+./test/test_csv2.zsh    # macOS（arm64、Swift 6.4）上 94 通過、0 失敗、1 略過
 ```
 
 | 可用 | 尚未做 |
@@ -158,10 +158,25 @@ csv2 -update 12:6 "新的值" -i a.csv2 -o b.csv2
 $ csv2 -contains busybox -i TARGET_PACKAGES.csv
 1:1	pkg_name	busybox
 1:4	source	fork raliclo/busybox branch develop; upstream git.busybox.net
+1:6	status_notes	CORRECTED 2026-08-10 after reading the generated…
+6:6	status_notes	Added 2026-08-09. Fills the busybox zstd gap.…
+13:6	status_notes	Required because compile.zsh is zsh-only (${0:A:h}…
 ```
 
-三個欄位以 **TAB** 分隔，每個命中的**儲存格**一行：位址、欄名、值。同一筆有兩欄命中就
-印兩行；同一格內出現兩次只印一行。在腳本裡就是 `cut -f1`、`cut -f2`、`cut -f3`。
+五行，因為有五個**儲存格**命中——過長的值是為了排版在此以 `…` 截短的，不是 csv2 截的。
+
+三個欄位以 **TAB** 分隔：位址、欄名、值。每個命中的**儲存格**一行，因此同一筆有兩欄
+命中就印兩行，而同一格內出現兩次只印一行。在腳本裡就是 `cut -f1`、`cut -f2`、`cut -f3`。
+
+**值會被跳脫**，使用與 `.csv2` 相同的反斜線慣例再加上 `\t`：字面的 tab 變成 `\t`、
+換行變成 `\n`、CR 變成 `\r`、反斜線變成 `\\`。少了它，含 tab 或換行的儲存格會破壞
+報告自己承諾的格式——而「同時含有這兩者的帶引號散文」正是這支工具當初為之而寫的資料。
+
+比對是**區分大小寫**的，且沒有旗標可以改變。`--normalize` 只影響 Unicode 正規化，
+與大小寫無關。
+
+**沒有欄位投影**：沒有任何東西可以「只取 license 那一欄」。要取單一值，請用 `--json`
+讀出你要的欄位，或用 `-contains` 取 `cut -f3`。
 
 ```console
 $ csv2 -contains busybox --filter -i TARGET_PACKAGES.csv
@@ -183,6 +198,22 @@ JSON Lines。**第一行**是 metadata，帶出 csv2「認為」自己正在讀�
 斷言 `headers` 是否符合預期，而不是默默接受一個猜錯的解析。**最後一行**帶總數：它們
 無法放進第一行，除非先讀完整份輸入才開始輸出，而那正是串流保證的反面。
 
+那兩個數字要精確理解。`records` 是**讀到**幾筆資料，不是檔案裡有幾筆——在 21 筆的檔案上
+`-mid 5,5` 會回報 5，因為它讀到那裡就停了。`matched` 數的是命中的**紀錄**數，而兩個
+metadata 之間的每一行對應一個命中的**儲存格**——因此只要有紀錄在多欄命中，兩個數字就
+不一樣。
+
+「選取」而非「搜尋」時輸出的是另一種物件，每筆一個：
+
+```console
+$ csv2 -mid 5,5 --json -i TARGET_PACKAGES.csv
+{"meta":{"format":"csv","headers":1,"fields":7}}
+{"record":5,"line":6,"fields":{"pkg_name":"zlib (libzlib)","version":"1.3.2…",…}}
+{"meta":{"records":5,"matched":0}}
+```
+
+`fields` 以欄名為鍵，那是「不必數欄位就能取出某一欄」的方式。
+
 `-md` 產生 Markdown 表格，且是單向的——csv2 無法把它讀回來。
 
 ### 結束狀態
@@ -190,8 +221,12 @@ JSON Lines。**第一行**是 metadata，帶出 csv2「認為」自己正在讀�
 成功為 `0`，任何錯誤為非零，沒有第三種情況：csv2 不會「部分成功」。失敗的執行不會
 在 `-o` 留下任何東西，因為輸出寫的是暫存檔，一切都成功之後才 rename。
 
-錯誤訊息走 stderr，並指出是哪一筆、哪一欄。正常路徑上完全不輸出任何訊息——它必須能
-放進管線。
+錯誤訊息走 stderr，恰好**兩行**（英文一行、中文一行），並指出是哪一筆、哪一欄。
+給了 `-log FILE` 時，同一個失敗會另外帶時間戳追加到該檔；沒給則不會再印任何東西。
+正常路徑上完全不輸出任何訊息——它必須能放進管線。
+
+**參數**本身的錯誤是在 `-log` 被讀到之前就丟出的，因此它會到 stderr 但不會進 log 檔：
+要寫進哪個 log，正來自那批解析失敗的參數。
 
 ### 會被拒絕的組合，以及為什麼
 
@@ -210,6 +245,7 @@ JSON Lines。**第一行**是 metadata，帶出 csv2「認為」自己正在讀�
 | `-delete 12:6` | 那是儲存格位址；請加 `-cell`，或改給紀錄號 |
 | `-insert -cell` | 在一列中間插入儲存格，會把該列後面的欄位全部往後推一格 |
 | 在 21 筆的檔案上 `-update 99:3` | 越界是錯誤，絕不是「自動長大」 |
+| 在 7 欄的檔案上 `-append 'a,b,c'` | 欄數必須與標頭相符；csv2 不會補空或截斷來湊合 |
 | `-encrypt` 未給 `-keyfile` 且沒有 tty | 無法顯示的提示絕不視為「是」 |
 | 未知旗標 | 絕不被當成別的東西吞掉 |
 

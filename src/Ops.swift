@@ -143,6 +143,41 @@ final class CSVEmitter: RecordEmitter {
     func end(_ ctx: EmitContext, records: Int, matched: Int) throws {}
 }
 
+/// The report is TAB-separated, one line per matching cell, and a value is
+/// arbitrary CSV content -- so a cell containing a TAB or a newline would break
+/// the very format the report promises. It did: three matching cells produced
+/// four lines, `cut -f1` returned a fragment of prose where an address belongs,
+/// and csv2 exited 0. That is this project's signature failure -- a plausible
+/// but wrong result reported as success -- happening in the tool's own
+/// recommended script interface, on quoted prose, which is the column type that
+/// caused the incident csv2 was built after.
+/// 報告以 TAB 分隔、每個命中的儲存格一行，而「值」是任意的 CSV 內容——因此含有 TAB
+/// 或換行的儲存格會破壞報告自己承諾的格式。它確實破壞了：三個命中的儲存格產生四行、
+/// `cut -f1` 在該是位址的地方回傳一段散文，而 csv2 以 0 結束。那正是本專案的招牌
+/// 失敗——看似合理但錯誤的結果以成功回報——而且發生在工具自己推薦的腳本介面上，
+/// 就在「帶引號的散文」這個當初引發事故的欄位型別上。
+///
+/// Escaped with the SAME backslash convention `.csv2` already uses, plus `\t`
+/// because TAB is this format's own delimiter. Reusing the convention rather
+/// than inventing one means a reader who knows the file format already knows
+/// how to read the report.
+/// 以 `.csv2` 既有的反斜線慣例跳脫，另加 `\t`——因為 TAB 是這個格式自己的分隔符。
+/// 沿用既有慣例而非發明新的，讓看得懂檔案格式的人不必再學一套就能讀報告。
+func reportEscape(_ s: String) -> String {
+    var out = ""
+    out.reserveCapacity(s.count)
+    for ch in s {
+        switch ch {
+        case "\\": out += "\\\\"
+        case "\t": out += "\\t"
+        case "\n": out += "\\n"
+        case "\r": out += "\\r"
+        default: out.append(ch)
+        }
+    }
+    return out
+}
+
 final class ReportEmitter: RecordEmitter {
     private let sink: ByteSink
     private let needle: [UInt8]
@@ -161,8 +196,12 @@ final class ReportEmitter: RecordEmitter {
             var addr = "\(label):\(idx + 1)"
             if ctx.physical { addr += "@L\(r.line)" }
             if ctx.a1 { addr += " [\(a1Column(idx))\(r.number)]" }
-            let name = columnLabel(ctx, idx)
-            let value = echoValue(r.fields[idx].value, limit: 200)
+            // Both fields are escaped: a header name can contain a TAB just as
+            // a value can, and one bad name would shift every column.
+            // 兩個欄位都要跳脫：欄名與值一樣可能含 TAB，而一個壞掉的欄名會讓
+            // 每一欄都位移。
+            let name = reportEscape(columnLabel(ctx, idx))
+            let value = reportEscape(echoValue(r.fields[idx].value, limit: 200))
             sink.write("\(addr)\t\(name)\t\(value)\n")
         }
     }

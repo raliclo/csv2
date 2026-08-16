@@ -735,7 +735,14 @@ func main() -> Int32 {
         // 以非零結束，並指出是哪一筆、哪一欄。錯的 CSV 不會被下一個工具發現，
         // 而是在數個月後才被發現——如果還有機會被發現的話。
         FileHandle.standardError.write(Data("csv2: \(e.message)\ncsv2：\(e.messageZh)\n".utf8))
-        Logger.shared.log(.error, e.message)
+        // Recorded in the -log FILE, not echoed to stderr again. ERROR is above
+        // the default WARN threshold, so routing it through Logger printed the
+        // same failure a third time, with a timestamp, even when no -log was
+        // asked for. A script capturing stderr got the message twice.
+        // 只記入 -log 指定的檔案，不再往 stderr 回顯一次。ERROR 高於預設的 WARN
+        // 門檻，因此走 Logger 會把同一個失敗第三次印出來、還帶時間戳，即使根本
+        // 沒有要求 -log。捕捉 stderr 的腳本會拿到重複的訊息。
+        Logger.shared.logToFileOnly(.error, e.message)
         Logger.shared.close()
         return 1
     } catch {

@@ -12,7 +12,7 @@ and the macOS host it is built from.
 
 ```zsh
 ./compile_csv2.zsh       # build release/csv2
-./test/test_csv2.zsh    # 88 PASS, 0 FAIL, 1 SKIP on macOS (arm64, Swift 6.4)
+./test/test_csv2.zsh    # 94 PASS, 0 FAIL, 1 SKIP on macOS (arm64, Swift 6.4)
 ```
 
 | Works | Does not yet |
@@ -172,12 +172,31 @@ easiest mistake to make: `-contains` prints a **report**, not CSV.
 $ csv2 -contains busybox -i TARGET_PACKAGES.csv
 1:1	pkg_name	busybox
 1:4	source	fork raliclo/busybox branch develop; upstream git.busybox.net
+1:6	status_notes	CORRECTED 2026-08-10 after reading the generated…
+6:6	status_notes	Added 2026-08-09. Fills the busybox zstd gap.…
+13:6	status_notes	Required because compile.zsh is zsh-only (${0:A:h}…
 ```
 
-Three fields separated by a **TAB**, one line per matching **cell**: the
-address, the column name, the value. Two matching columns in one record print
-two lines; the same string twice inside one cell prints one. In a script,
+Five lines, because five **cells** match — the long values are cut short here
+with `…` for the page, not by csv2.
+
+Three fields separated by a **TAB**: the address, the column name, the value.
+One line per matching **cell**, so two matching columns in one record print two
+lines, while the same string twice inside one cell prints one. In a script,
 `cut -f1`, `cut -f2`, `cut -f3`.
+
+**Values are escaped**, using the same backslash convention `.csv2` uses plus
+`\t`: a literal tab becomes `\t`, a newline `\n`, a carriage return `\r`, a
+backslash `\\`. Without that a cell containing a tab or a newline would break
+the format the report promises — and quoted prose containing both is exactly
+the data this tool was written for.
+
+Matching is **case-sensitive** and there is no flag to change that.
+`--normalize` affects Unicode normalisation only, not case.
+
+There is **no column projection**: nothing selects "just the license column".
+To get one value, use `--json` and read the field you want, or `-contains` and
+take `cut -f3`.
 
 ```console
 $ csv2 -contains busybox --filter -i TARGET_PACKAGES.csv
@@ -201,6 +220,24 @@ accepting a wrong guess. The **last** line carries the counts: they cannot be
 in the first line without reading the whole input before emitting anything,
 which is the streaming guarantee.
 
+Read those two counts precisely. `records` is how many data records were
+**read**, not how many the file holds — `-mid 5,5` on a 21-record file reports
+5, because it stopped there. `matched` counts matching **records**, while the
+lines between the two meta lines are one per matching **cell**, so the two
+numbers differ whenever a record matches in more than one column.
+
+A selection rather than a search emits a different object, one per record:
+
+```console
+$ csv2 -mid 5,5 --json -i TARGET_PACKAGES.csv
+{"meta":{"format":"csv","headers":1,"fields":7}}
+{"record":5,"line":6,"fields":{"pkg_name":"zlib (libzlib)","version":"1.3.2…",…}}
+{"meta":{"records":5,"matched":0}}
+```
+
+`fields` is keyed by column name, which is the way to pull one column out
+without counting.
+
 `-md` emits a Markdown table and is one-way — csv2 cannot read it back.
 
 ### Exit status
@@ -209,8 +246,14 @@ which is the streaming guarantee.
 not partially succeed. A run that fails writes nothing to `-o`, because output
 goes to a temp file that is renamed only after everything else worked.
 
-Errors go to stderr and name the record and field. On the normal path csv2
-prints nothing at all — it has to work inside a pipeline.
+Errors go to stderr as exactly **two** lines, English then Chinese, and name the
+record and field. With `-log FILE` the same failure is also appended there with
+a timestamp; without it nothing else is printed. On the normal path csv2 prints
+nothing at all — it has to work inside a pipeline.
+
+An error in the **arguments** is thrown before `-log` has been read, so it
+reaches stderr but not the log file: the path to log to came from the same
+arguments that failed to parse.
 
 ### What it refuses, and why
 
@@ -229,6 +272,7 @@ Each of these exits non-zero with a message saying why:
 | `-delete 12:6` | that is a cell address; add `-cell`, or give a record number |
 | `-insert -cell` | inserting a cell mid-record shifts every later field one column along |
 | `-update 99:3` on a 21-record file | out of range is an error, never "grow the file to fit" |
+| `-append 'a,b,c'` on a 7-column file | the field count must match the header; csv2 will not pad or truncate to fit |
 | `-encrypt` with no `-keyfile` and no tty | a prompt that cannot be shown is never a yes |
 | unknown flag | never swallowed as something else |
 

@@ -874,6 +874,72 @@ else
     bad "T52c a failed run left $TMP/t52.csv behind / 失敗的執行留下了輸出檔"
 fi
 
+# T53 — the locating report must survive the values it reports.
+#
+# The report is TAB-separated, one line per matching cell, and a value is
+# arbitrary CSV content. Before this case existed, three matching cells whose
+# values contained a TAB and a newline produced FOUR lines, `cut -f1` returned
+# a fragment of prose where an address belongs, and csv2 exited 0. Found by a
+# fresh agent given only the README, not by these tests -- every case here fed
+# the report values that happened to contain neither character.
+# T53 —— 定位報告必須撐得住它所回報的值。
+# 報告以 TAB 分隔、每個命中的儲存格一行，而「值」是任意的 CSV 內容。在這個案例存在
+# 之前，三個值含 TAB 與換行的命中儲存格產生了「四」行，`cut -f1` 在該是位址的地方
+# 回傳一段散文，而 csv2 以 0 結束。這是一個「只讀 README」的全新 agent 發現的，不是
+# 這份測試——此處每一個案例餵給報告的值，恰好都不含那兩個字元。
+printf 'k,v\n' > "$TMP/t53.csv"
+printf 'r1,"a|b needle"\n' >> "$TMP/t53.csv"
+printf 'r2,"x\ty needle"\n' >> "$TMP/t53.csv"
+printf 'r3,"line1\nline2 needle"\n' >> "$TMP/t53.csv"
+
+lines=$("$CSV2" -contains needle -i "$TMP/t53.csv" 2>/dev/null | wc -l | tr -d ' ')
+assert_eq "$lines" "3" "T53a three matching cells give three lines, whatever they contain / 三個命中的儲存格就是三行，不論內容為何"
+
+# Every first field must be an address. A value leaking into column 1 is the
+# failure that makes a downstream script read prose as a record number.
+# 每一行的第一欄都必須是位址。值溢出到第 1 欄，正是讓下游腳本把散文讀成紀錄號的那個失敗。
+bad_addr=$("$CSV2" -contains needle -i "$TMP/t53.csv" 2>/dev/null | cut -f1 | grep -cv '^[0-9]*:[0-9]*$' || true)
+assert_eq "$bad_addr" "0" "T53b every first field is an address, never a fragment of a value / 第一欄一律是位址，絕不是值的碎片"
+
+# The value is escaped with the same backslash convention .csv2 uses, plus \t,
+# so cut -f3 yields the whole cell on one line and it is unambiguous.
+# 值以 .csv2 既有的反斜線慣例加 \t 跳脫，因此 cut -f3 會在一行內取得完整的儲存格，
+# 且沒有歧義。
+v2=$("$CSV2" -contains needle -i "$TMP/t53.csv" 2>/dev/null | sed -n 2p | cut -f3)
+v3=$("$CSV2" -contains needle -i "$TMP/t53.csv" 2>/dev/null | sed -n 3p | cut -f3)
+if [[ "$v2" == 'x\ty needle' && "$v3" == 'line1\nline2 needle' ]]; then
+    ok "T53c TAB and newline are escaped, so cut -f3 gets the whole cell / TAB 與換行被跳脫，cut -f3 取得完整儲存格"
+else
+    bad "T53c report escaping (f3 line2='$v2' line3='$v3')"
+fi
+
+# T54 — a failure prints exactly two lines, English then Chinese. It used to
+# print three: ERROR is above the default WARN threshold, so routing the fatal
+# error through the logger echoed it again with a timestamp even when no -log
+# was asked for, and a script capturing stderr got it twice.
+# T54 —— 失敗恰好印兩行，英文一行、中文一行。它原本印三行：ERROR 高於預設的 WARN
+# 門檻，因此把致命錯誤送進 logger 會帶著時間戳再印一次——即使根本沒有要求 -log——
+# 捕捉 stderr 的腳本會拿到重複的訊息。
+n=$("$CSV2" --nonesuch -i "$PKG" 2>&1 >/dev/null | wc -l | tr -d ' ')
+assert_eq "$n" "2" "T54a a failure prints exactly two stderr lines, not a duplicated third / 失敗恰好印兩行，沒有重複的第三行"
+# A RUNTIME error, not an argument error. An unknown flag is thrown while the
+# arguments are still being parsed, so the -log path -- which comes from those
+# same arguments -- has not been read yet and no file is open. That is correct,
+# and the first version of this case asserted the opposite.
+# 這裡用的是「執行期」錯誤而非參數錯誤。未知旗標是在參數還在解析時就丟出的，
+# 而 -log 的路徑正來自同一批參數、當時還沒被讀到，檔案根本還沒開。那是正確行為，
+# 而本案例的第一版斷言了相反的事。
+rm -f "$TMP/t54.log"
+"$CSV2" -update '99:3' 'x' -i "$PKG" -o "$TMP/t54.csv" -log "$TMP/t54.log" >/dev/null 2>&1
+if [[ -s "$TMP/t54.log" ]] && grep -q 'ERROR' "$TMP/t54.log"; then
+    ok "T54b a runtime error still reaches -log, where the record belongs / 執行期錯誤仍會進入 -log，紀錄該在的地方"
+else
+    bad "T54b the error did not reach the log file / 錯誤沒有進入 log 檔"
+fi
+
+n2=$("$CSV2" -update '99:3' 'x' -i "$PKG" -o "$TMP/t54b.csv" 2>&1 >/dev/null | wc -l | tr -d ' ')
+assert_eq "$n2" "2" "T54c a runtime failure also prints exactly two lines / 執行期失敗同樣恰好印兩行"
+
 # T50 — -debug has five levels in the plan and had one in the CLI. TRACE was
 # unreachable, so it is asserted here as reachable AND as not firing without it.
 # T50 —— 計畫定義 -debug 有五個層級，CLI 只實作了一個，TRACE 無法達到。此處斷言它

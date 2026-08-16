@@ -108,6 +108,16 @@ final class Logger {
         }
     }
 
+    /// For a failure the caller has already printed. It belongs in the log file
+    /// -- that is the record someone reads later -- but printing it again on
+    /// stderr just duplicates it.
+    /// 給「呼叫端已經印過」的失敗使用。它該進 log 檔——那是日後有人會讀的紀錄——
+    /// 但再往 stderr 印一次只是重複。
+    func logToFileOnly(_ level: LogLevel, _ message: String) {
+        guard let h = logHandle else { return }
+        h.write(Data("\(Logger.timestamp()) \(level.label) \(message)\n".utf8))
+    }
+
     func debug(_ m: String) { log(.debug, m) }
     func info(_ m: String) { log(.info, m) }
     func warn(_ m: String) { log(.warn, m) }
