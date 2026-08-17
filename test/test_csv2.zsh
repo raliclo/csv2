@@ -1147,6 +1147,124 @@ assert_fails "T51e --build-index with --no-index is refused / --build-index 與 
     "$CSV2" --build-index --no-index -i "$TMP/bi.csv2"
 unset CSV2_INDEX_MIN_BYTES
 
+# ---------------------------------------------------------------------
+# T57 -- deleting a whole column. Open question 5, decided yes on 2026-08-18.
+#
+# This is the mirror image of the `-insert -cell` refusal: inserting a field
+# mid-record shifts every later field one column along, and removing one does
+# the same in the other direction. Removing it from every record AND both
+# header rows together is the only form of it that keeps alignment, which is
+# why it is a whole-file verb and not a cell modifier.
+#
+# T57 —— 刪除一整欄。待決問題 5，2026-08-18 決定採用。
+# 這是 `-insert -cell` 那條拒絕的鏡像：在一列中間插入欄位會讓後面每一欄往後位移一格，
+# 移除一欄則在另一個方向上做同樣的事。唯有「每一筆與兩列標頭一起移除」才能保持對齊，
+# 這也正是它是一個作用於整檔的動詞、而非儲存格修飾詞的原因。
+# ---------------------------------------------------------------------
+echo
+echo "--- T57: deleting a whole column / 刪除一整欄 ---"
+
+printf 'pkg,version,notes,license\n套件,版本,註記,授權\nbusybox,1.37.0,"fork raliclo/busybox, branch develop",GPL\nzlib,1.3.1,plain,Zlib\n' > "$TMP/dc.csv2"
+
+assert_eq "$("$CSV2" -delete -col 3 -i "$TMP/dc.csv2" -so)" \
+'pkg,version,license
+套件,版本,授權
+busybox,1.37.0,GPL
+zlib,1.3.1,Zlib' \
+    "T57a -delete -col N removes the column from every record and BOTH header rows / -delete -col N 從每一筆與兩列標頭中移除該欄"
+
+assert_eq "$("$CSV2" -delete -col notes -i "$TMP/dc.csv2" -so)" \
+    "$("$CSV2" -delete -col 3 -i "$TMP/dc.csv2" -so)" \
+    "T57b by name and by number are the same column / 以名稱與以編號指的是同一欄"
+
+# Two columns at once, addressed against the INPUT. Removing them one at a time
+# would make the second index refer to the row as it stands after the first
+# removal -- the off-by-one that makes 2 and 4 delete 2 and 5.
+# 一次移除兩欄，索引都指向「輸入」。逐一移除會讓第二個索引指向第一次移除之後的那一列
+# ——正是那種讓「2 和 4」刪成「2 和 5」的偏移。
+assert_eq "$("$CSV2" -delete -col 2 -delete -col license -i "$TMP/dc.csv2" -so | head -2)" \
+'pkg,notes
+套件,註記' \
+    "T57c two columns are resolved against the input, not one after the other / 兩欄都對輸入解析，而非逐一套用"
+
+# The quoted field containing a comma is the one that caused the incident csv2
+# was built after. It has to survive being shifted left by a column.
+# 那個含逗號的引號欄位，正是引發 csv2 被建立之事故的那一種。它必須能在往左位移一欄之後
+# 依然完好。
+assert_contains "$("$CSV2" -delete -col 2 -delete -col license -i "$TMP/dc.csv2" -so)" \
+    'busybox,"fork raliclo/busybox, branch develop"' \
+    "T57d a quoted field containing a comma survives the shift / 含逗號的引號欄位在位移後仍完好"
+
+assert_eq "$("$CSV2" -delete -col b -i "$TMP/dc.csv2" -so 2>&1 >/dev/null | head -1)" \
+    'csv2: no column named "b"; the columns are: pkg, version, notes, license' \
+    "T57e an unknown column name names the columns that do exist / 未知的欄位名稱會列出實際存在的欄位"
+
+assert_fails "T57f removing every column is refused: a file with no columns is not a CSV file / 移除全部欄位被拒：沒有欄位的檔案不是 CSV 檔" -- \
+    "$CSV2" -delete -col 1 -delete -col 2 -delete -col 3 -delete -col 4 -i "$TMP/dc.csv2" -so
+
+# An edit aimed at a column that is being removed does nothing and reports that
+# it did -- this project's signature failure. It is refused rather than ordered.
+# 針對正被移除之欄位的編輯不會有效果，卻會回報它做了——本專案的招牌失敗。此處是拒絕，
+# 而不是替它排出一個順序。
+assert_fails "T57g -update on a column being removed is refused / 對正被移除之欄位下 -update 會被拒" -- \
+    "$CSV2" -delete -col notes -update 1:notes X -i "$TMP/dc.csv2" -so
+assert_fails "T57h -delete -cell on a column being removed is refused / 對正被移除之欄位下 -delete -cell 會被拒" -- \
+    "$CSV2" -delete -col notes -delete -cell 1:notes -i "$TMP/dc.csv2" -so
+assert_fails "T57i -hash on a column being removed is refused / 對正被移除之欄位下 -hash 會被拒" -- \
+    "$CSV2" -delete -col license -hash license -i "$TMP/dc.csv2" -so
+
+assert_fails "T57j -delete -col with -append is refused: the literal row would have to match two shapes / -delete -col 與 -append 併用被拒：那列字面值得同時符合兩種形狀" -- \
+    "$CSV2" -delete -col notes -append 'a,b,c,d' -i "$TMP/dc.csv2" -so
+assert_fails "T57k -cell and -col together are refused: they are opposites / -cell 與 -col 併用被拒：兩者是相反的" -- \
+    "$CSV2" -delete -cell -col 3 -i "$TMP/dc.csv2" -so
+
+# The modifier belongs to ONE verb. Before this was fixed, the second -delete
+# inherited -col and removed COLUMN 1 while record 1 survived -- wrong in two
+# directions, at rc=0. Asserted in both orders, because a fix that only works
+# when the modified verb comes first is not a fix.
+# 修飾詞屬於「一個」動詞。在修正之前，第二個 -delete 會繼承 -col 而移除「第 1 欄」，
+# 那筆紀錄卻還在——在兩個方向上都錯，且 rc=0。兩種順序都斷言，因為一個只在「帶修飾詞的
+# 動詞排前面」時才成立的修正，不算修正。
+printf 'a,b,c\n1,2,3\n4,5,6\n' > "$TMP/dc1.csv"
+assert_eq "$("$CSV2" -delete -col b -delete 1 -i "$TMP/dc1.csv" -so)" \
+'a,c
+4,6' \
+    "T57l -col does not leak onto the next -delete / -col 不會沾染到下一個 -delete"
+assert_eq "$("$CSV2" -delete 1 -delete -col b -i "$TMP/dc1.csv" -so)" \
+'a,c
+4,6' \
+    "T57m and the same holds in the other order / 反過來的順序也一樣"
+assert_eq "$("$CSV2" -delete -cell 1:2 -delete 2 -i "$TMP/dc1.csv" -so)" \
+'a,b,c
+1,,3' \
+    "T57n -cell does not leak either: cell 1:2 is blanked and record 2 is deleted / -cell 同樣不會沾染：1:2 被清空、第 2 筆被刪除"
+assert_fails "T57o -insert -cell is still refused after the modifier became per-verb / 修飾詞改為逐動詞之後，-insert -cell 仍被拒" -- \
+    "$CSV2" -insert -cell 1 'x,y,z' -i "$TMP/dc1.csv" -so
+
+# Single-row .csv has one header row to narrow, not two. The verb has to read
+# the format rather than assume the file it was designed against.
+# 單列標頭的 .csv 只有一列標頭要收窄，不是兩列。這個動詞必須依格式行事，而不是假設
+# 它當初是對著哪一種檔案設計的。
+assert_eq "$("$CSV2" -delete -col b -i "$TMP/dc1.csv" -so)" \
+'a,c
+1,3
+4,6' \
+    "T57p .csv narrows its single header row / .csv 收窄它那一列標頭"
+
+cp "$TMP/dc.csv2" "$TMP/dc_ip.csv2"
+assert_succeeds "T57q --in-place removes the column in the file itself / --in-place 直接在檔案本身移除該欄" -- \
+    "$CSV2" -delete -col license -i "$TMP/dc_ip.csv2" --in-place
+assert_eq "$(head -1 "$TMP/dc_ip.csv2")" 'pkg,version,notes' \
+    "T57r and the file on disk is the narrowed one / 而磁碟上的檔案就是收窄後的那一份"
+
+# A record whose field count disagrees with the header is still an error. The
+# new verb must not become a way to reshape a file that was already malformed.
+# 欄數與標頭不符的紀錄仍然是錯誤。這個新動詞不能變成「把本來就格式錯誤的檔案重塑一遍」
+# 的途徑。
+printf 'a,b,c\n1,2\n' > "$TMP/dc_rag.csv"
+assert_fails "T57s a ragged record is still refused, not narrowed into agreement / 欄數不符的紀錄仍被拒，不會被收窄成剛好相符" -- \
+    "$CSV2" -delete -col b -i "$TMP/dc_rag.csv" -so
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

@@ -22,6 +22,7 @@ enum EditVerb {
     case append(row: String)
     case deleteRange(from: Int, to: Int)
     case deleteCell(record: Int, column: String)
+    case deleteColumn(column: String)
     case update(record: Int, column: String, value: String)
 }
 
@@ -60,6 +61,7 @@ struct Options {
 
     var edits: [EditVerb] = []
     var cellModifier = false
+    var colModifier = false
     var truncatePartial = false
 
     var encryptCols: String?
@@ -111,11 +113,13 @@ func parseArgs(_ argv: [String]) throws -> Options {
         // `-cell` 是修飾詞，寫在動詞與位址之間才自然：`-delete -cell 12:6`。
         // 把它當成值會使位址變成「-cell」，接著以一個在講位址的訊息失敗——
         // 而那不是實際發生的事。
-        while argv[i] == "-cell" || argv[i] == "--cell" {
-            o.cellModifier = true
+        while argv[i] == "-cell" || argv[i] == "--cell"
+                || argv[i] == "-col" || argv[i] == "--col" {
+            let mod = argv[i]
+            if mod.hasSuffix("cell") { o.cellModifier = true } else { o.colModifier = true }
             i += 1
             guard i < argv.count else {
-                throw usageError("\(flag) needs a value after -cell", "\(flag) 在 -cell 之後仍需要一個值")
+                throw usageError("\(flag) needs a value after \(mod)", "\(flag) 在 \(mod) 之後仍需要一個值")
             }
         }
         return argv[i]
@@ -193,20 +197,44 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "zh": o.zh = true; o.enOnly = false
         case "en": o.enOnly = true; o.zh = false
         case "cell": o.cellModifier = true
+        case "col": o.colModifier = true
         case "truncate-partial": o.truncatePartial = true
+        // A modifier belongs to ONE verb and is cleared once that verb has
+        // consumed it. Leaving it set made it sticky: in
+        // `-delete -col b -delete 1` the second -delete inherited -col and
+        // removed COLUMN 1 while the record survived -- an output that is
+        // wrong in two ways at rc=0. `-cell` had the same defect and was only
+        // hidden by r:c shape validation rejecting a bare record number; -col
+        // accepts any column token, so nothing caught it.
+        // 修飾詞屬於「一個」動詞，該動詞取用後即清除。留著不清會讓它變得黏著：
+        // 在 `-delete -col b -delete 1` 中，第二個 -delete 繼承了 -col，移除了
+        // 「第 1 欄」而那筆紀錄還在——一份在兩個方向上都錯、且 rc=0 的輸出。
+        // `-cell` 有同樣的缺陷，只是被 r:c 的形狀檢查擋下（純紀錄號會被拒），
+        // 而 -col 接受任何欄位標記，因此沒有東西攔得住。
         case "insert":
             let at = try intVal(arg, try need(arg))
-            o.edits.append(.insert(at: at, row: try need(arg)))
+            let row = try need(arg)
+            if o.cellModifier {
+                throw usageError(
+                    "-insert -cell does not exist: inserting a cell mid-record pushes every later field one column along, so status_notes ends up under license. To add a column, every record and both header rows have to change together.",
+                    "沒有 -insert -cell：在一列中間插入儲存格會把該列後面的欄位全部往後推一格，於是 status_notes 跑到 license 底下。要新增一欄，必須每一列與兩列標頭一起改。")
+            }
+            o.edits.append(.insert(at: at, row: row))
+            o.cellModifier = false; o.colModifier = false
         case "append":
             o.edits.append(.append(row: try need(arg)))
+            o.cellModifier = false; o.colModifier = false
         case "delete":
             let spec = try need(arg)
-            o.edits.append(try parseDelete(spec, cell: o.cellModifier, argvTail: argv, index: i))
+            o.edits.append(try parseDelete(spec, cell: o.cellModifier, col: o.colModifier,
+                                           argvTail: argv, index: i))
+            o.cellModifier = false; o.colModifier = false
         case "update":
             let addr = try need(arg)
             let val = try need(arg)
             let (r, c) = try parseCellAddress(addr, flag: arg)
             o.edits.append(.update(record: r, column: c, value: val))
+            o.cellModifier = false; o.colModifier = false
         case "encrypt": o.encryptCols = try need(arg)
         case "decrypt": o.decryptCols = try need(arg)
         case "hash": o.hashCols = try need(arg)
@@ -271,7 +299,21 @@ func parseMid(_ s: String) throws -> (Int, Int?) {
     return (a, b)
 }
 
-func parseDelete(_ spec: String, cell: Bool, argvTail: [String], index: Int) throws -> EditVerb {
+func parseDelete(_ spec: String, cell: Bool, col: Bool, argvTail: [String], index: Int) throws -> EditVerb {
+    // -cell and -col are opposites: one keeps the field and empties it, the
+    // other removes the field from every record. Given both, there is no
+    // reading that satisfies each, and picking one would make the other
+    // silently ignored.
+    // -cell 與 -col 是相反的：一個保留欄位並清空它，另一個把該欄位從每一筆中移除。
+    // 兩個都給時不存在同時滿足的解釋，而選其中一個會讓另一個被靜默忽略。
+    if cell && col {
+        throw usageError(
+            "-delete takes -cell or -col, not both: -cell blanks one field and keeps the column, -col removes the column from every record",
+            "-delete 只能用 -cell 或 -col 其中之一：-cell 清空一格但保留該欄，-col 則把該欄從每一筆中移除")
+    }
+    if col {
+        return .deleteColumn(column: spec)
+    }
     let looksLikeCell = spec.contains(":")
     // The `:` alone could tell these apart, but then "delete a whole record"
     // and "blank one cell" -- two very different things -- would differ by one
@@ -394,12 +436,23 @@ func validate(_ o: inout Options) throws {
         throw usageError("-md needs -t: a Markdown table has no shape without a header row",
                          "-md 需要 -t：沒有標頭列就渲染不出 Markdown 表格")
     }
-    if o.cellModifier {
+    // `-delete -col` changes the SHAPE of every record, and `-insert`/`-append`
+    // carry a literal row that has to match a shape. Which one -- the input's,
+    // or the output's one column shorter? Both readings are defensible, so
+    // whichever were chosen would quietly be wrong for half the people writing
+    // the line. Two commands, one shape each.
+    // `-delete -col` 會改變每一筆的「形狀」，而 `-insert`／`-append` 帶著一列必須符合
+    // 某個形狀的字面值。是哪一個——輸入的，還是少一欄的輸出的？兩種讀法都說得通，
+    // 因此無論選哪一個，對寫下這行的人裡有一半而言都會是靜默的錯。分成兩道指令，
+    // 各自只有一個形狀。
+    if o.edits.contains(where: { if case .deleteColumn = $0 { return true }; return false }) {
         for e in o.edits {
-            if case .insert = e {
+            switch e {
+            case .insert, .append:
                 throw usageError(
-                    "-insert -cell does not exist: inserting a cell mid-record pushes every later field one column along, so status_notes ends up under license. To add a column, every record and both header rows have to change together.",
-                    "沒有 -insert -cell：在一列中間插入儲存格會把該列後面的欄位全部往後推一格，於是 status_notes 跑到 license 底下。要新增一欄，必須每一列與兩列標頭一起改。")
+                    "-delete -col cannot be combined with -insert or -append: the literal row would have to match either the old shape or the new one, and there is no way to tell which was meant. Run them as two commands.",
+                    "-delete -col 不可與 -insert／-append 併用：那一列字面值必須符合舊形狀或新形狀其中之一，而無法判斷是哪一個。請分成兩道指令執行。")
+            default: break
             }
         }
     }
@@ -749,6 +802,8 @@ func printHelp() {
       -append ROW        add at the end (O(1) when writing in place)
       -delete N | a,b    delete record N, or records a through b
       -delete -cell r:c  BLANK that cell; the field count never changes
+      -delete -col N     remove column N from every record AND both header
+                         rows. The one deletion that keeps alignment.
       -update r:c VAL    set that cell
       --truncate-partial drop a trailing incomplete record instead of failing
       All indexes refer to the INPUT and are applied in one pass.

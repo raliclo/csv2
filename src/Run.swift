@@ -554,6 +554,7 @@ func runEdit(_ o: Options) throws {
     var deletes: [(Int, Int)] = []
     var updates: [Int: [(String, String)]] = [:]
     var blanks: [Int: [String]] = [:]
+    var dropTokens: [String] = []
 
     for e in o.edits {
         switch e {
@@ -562,6 +563,7 @@ func runEdit(_ o: Options) throws {
         case .deleteRange(let a, let b): deletes.append((a, b))
         case .update(let r, let c, let v): updates[r, default: []].append((c, v))
         case .deleteCell(let r, let c): blanks[r, default: []].append(c)
+        case .deleteColumn(let c): dropTokens.append(c)
         }
     }
 
@@ -575,6 +577,26 @@ func runEdit(_ o: Options) throws {
     var total = 0
     var pendingError: Error?
     var touched = Set<Int>()
+    // Resolved once, against the INPUT header, and then applied to every
+    // record. Re-resolving per record would let a name refer to different
+    // columns in the same run once earlier columns had been removed.
+    // 對「輸入」的標頭解析一次，之後套用到每一筆。若逐筆重新解析，同一次執行中
+    // 一個名稱會在先前欄位被移除後指向不同的欄。
+    var drop = Set<Int>()
+
+    /// Removing several columns at once, by rebuilding rather than removing in
+    /// place: `remove(at:)` twice would make the second index refer to the row
+    /// as it stands after the first removal, which is the same off-by-one the
+    /// `-delete 3 -delete 4` comment above describes.
+    /// 一次移除多欄時採「重建」而非就地刪除：連續兩次 `remove(at:)` 會讓第二個索引
+    /// 指向第一次移除後的那一列，正是上面 `-delete 3 -delete 4` 註解所描述的偏移。
+    func dropColumns(_ r: inout Record) {
+        guard !drop.isEmpty else { return }
+        var kept: [Field] = []
+        kept.reserveCapacity(r.fields.count - drop.count)
+        for (i, f) in r.fields.enumerated() where !drop.contains(i) { kept.append(f) }
+        r.fields = kept
+    }
 
     // The write path already knows where every record starts -- it is about to
     // write it. Noting the offsets costs no extra scan, which is why building
@@ -622,6 +644,48 @@ func runEdit(_ o: Options) throws {
                     expectedFields = headers[0].count
                     transform = try buildTransform(o, headers: headers)
                     markHeaders(&headers, transform: transform)
+                    if !dropTokens.isEmpty {
+                        for token in dropTokens {
+                            drop.insert(try resolveColumn(token, header: headers[0]))
+                        }
+                        // A file with no columns is not a CSV file, and an
+                        // empty output would be produced with rc=0 -- the
+                        // shape of failure this project exists to refuse.
+                        // 沒有任何欄位的檔案不是 CSV 檔，而那會產生一個 rc=0 的空
+                        // 輸出——正是本專案存在的目的所要拒絕的那種失敗形狀。
+                        if drop.count == expectedFields {
+                            throw fault(
+                                "-delete -col would remove all \(expectedFields) columns; a file with no columns is not a CSV file",
+                                "-delete -col 會移除全部 \(expectedFields) 欄；沒有任何欄位的檔案不是 CSV 檔")
+                        }
+                        // An edit aimed at a column that is being removed does
+                        // nothing, and reports that it did. Refusing is the
+                        // whole point: the alternative is a log line saying the
+                        // cell was updated and an output where it is gone.
+                        // 針對一個正被移除的欄位所做的編輯不會有任何效果，卻會回報它做了。
+                        // 拒絕正是重點所在：另一個選擇是一行說「該格已更新」的日誌，
+                        // 以及一份那一格根本不存在的輸出。
+                        var clash: [String] = []
+                        for (rn, ups) in updates {
+                            for (c, _) in ups where drop.contains(try resolveColumn(c, header: headers[0])) {
+                                clash.append("-update \(rn):\(c)")
+                            }
+                        }
+                        for (rn, cols) in blanks {
+                            for c in cols where drop.contains(try resolveColumn(c, header: headers[0])) {
+                                clash.append("-delete -cell \(rn):\(c)")
+                            }
+                        }
+                        for c in transform.columns where drop.contains(c) {
+                            clash.append("\(transform.flagName) \(baseName(headerName(headers[0].fields[c])))")
+                        }
+                        if !clash.isEmpty {
+                            throw fault(
+                                "\(clash.sorted().joined(separator: ", ")) targets a column that -delete -col is removing; the edit would have no effect and would still be reported as done",
+                                "\(clash.sorted().joined(separator: "、")) 指向一個正被 -delete -col 移除的欄位；該編輯不會有任何效果，卻仍會被回報為已完成")
+                        }
+                        for i in headers.indices { dropColumns(&headers[i]) }
+                    }
                     // An edit rewrites the whole file, so the header always
                     // goes out. `-t` is about selections, which produce a
                     // fragment; this produces a file.
@@ -688,6 +752,13 @@ func runEdit(_ o: Options) throws {
                 }
             }
             try applyTransform(transform, to: &r, header: headers[0])
+            // Last, so that every index above still refers to the input. The
+            // field-count check, the column names in the log, and the
+            // transform all read the original shape; only what is written out
+            // is narrower.
+            // 放在最後，讓上面每一個索引都仍指向輸入。欄位數檢查、日誌裡的欄位名稱、
+            // 以及轉換全都依原本的形狀讀取；只有真正寫出去的東西變窄。
+            dropColumns(&r)
             emitData(r)
             return true
         } catch {

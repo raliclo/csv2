@@ -20,7 +20,7 @@ and the macOS host it is built from.
 | RFC 4180 parsing, quotes, embedded commas and newlines, CRLF, BOM | shipping in the rootfs, `install.zsh` (phase 7) |
 | `-r`, `-contains`, `-A`/`-B`/`-C`, `-head`/`-tail`/`-mid`, `-rownum` | |
 | two-row `.csv2` headers, `--json`, `-md`, `--pretty` (UAX #11 widths) | |
-| `-insert`/`-append`/`-delete`/`-update`, `-delete -cell` | |
+| `-insert`/`-append`/`-delete`/`-update`, `-delete -cell`, `-delete -col` | |
 | `-hash`, `-encrypt`, `-decrypt`, `-keyfile`, `-debug`, `-log` | |
 | the `-append` O(1) fast path | |
 | `.csv.index` / `.csv2.index` sidecars, `--verify-index` | |
@@ -166,6 +166,8 @@ EDITING / 編輯
   -append ROW           append at the end (O(1) when writing in place)
   -delete a[,b]         delete record a, or records a through b
   -delete -cell r:c     clear one cell (the field count never changes)
+  -delete -col N|NAME   remove that column from every record AND from both
+                        header rows -- the one deletion that keeps alignment
   -update r:c VAL       update one cell
   --truncate-partial    drop a trailing incomplete record instead of failing
 
@@ -336,6 +338,10 @@ Each of these exits non-zero with a message saying why:
 | `-mid 7,3` | `a > b`; not swapped for you, because a range written backwards usually means the logic is backwards too |
 | `-i x -o x` without `--in-place` | opening the output truncates it before the input has been read |
 | `-delete 12:6` | that is a cell address; add `-cell`, or give a record number |
+| `-delete -cell -col 3` | they are opposites: `-cell` blanks a field and keeps the column, `-col` removes the column |
+| `-delete -col` removing every column | a file with no columns is not a CSV file |
+| `-delete -col X` with `-update`/`-delete -cell`/`-encrypt`/`-hash` on X | the edit would have no effect and would still be reported as done |
+| `-delete -col` with `-insert`/`-append` | the literal row would have to match either the old shape or the new one, and there is no way to tell which was meant |
 | `-insert -cell` | inserting a cell mid-record shifts every later field one column along |
 | `-update 99:3` on a 21-record file | out of range is an error, never "grow the file to fit" |
 | `-append 'a,b,c'` on a 7-column file | the field count must match the header; csv2 will not pad or truncate to fit |

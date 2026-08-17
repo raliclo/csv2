@@ -424,6 +424,30 @@ enum CellTransform {
     /// 確定性，它可被字典攻擊。給了金鑰則是 HMAC-SHA256：同樣是確定性的，但沒有
     /// 金鑰的攻擊者建不出那份字典。
     case hash(columns: [Int], key: [UInt8]?, fingerprint: String?)
+
+    /// The columns this transform touches, whichever it is. Used to refuse a
+    /// transform aimed at a column `-delete -col` is removing -- a check that
+    /// would otherwise have to repeat the case list and would fall out of date
+    /// the first time a fourth transform is added.
+    /// 不論是哪一種轉換，它所觸及的欄位。用於拒絕「針對正被 -delete -col 移除之欄位」
+    /// 的轉換——否則那個檢查得把 case 列表再抄一次，而在加入第四種轉換的當下就會過時。
+    var columns: [Int] {
+        switch self {
+        case .none: return []
+        case .encrypt(let c, _, _, _, _): return c
+        case .decrypt(let c, _, _): return c
+        case .hash(let c, _, _): return c
+        }
+    }
+
+    var flagName: String {
+        switch self {
+        case .none: return ""
+        case .encrypt: return "-encrypt"
+        case .decrypt: return "-decrypt"
+        case .hash: return "-hash"
+        }
+    }
 }
 
 /// Ciphertext must become text, since CSV is a text format. base64's alphabet

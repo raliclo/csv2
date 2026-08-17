@@ -20,7 +20,7 @@ English: [README.md](./README.md)
 | RFC 4180 解析、引號、內嵌逗號與換行、CRLF、BOM | 隨 rootfs 出貨、`install.zsh`（第 7 階段） |
 | `-r`、`-contains`、`-A`/`-B`/`-C`、`-head`/`-tail`/`-mid`、`-rownum` | |
 | `.csv2` 兩列標頭、`--json`、`-md`、`--pretty`（UAX #11 寬度） | |
-| `-insert`/`-append`/`-delete`/`-update`、`-delete -cell` | |
+| `-insert`/`-append`/`-delete`/`-update`、`-delete -cell`、`-delete -col` | |
 | `-hash`、`-encrypt`、`-decrypt`、`-keyfile`、`-debug`、`-log` | |
 | `-append` 的 O(1) 快路徑 | |
 | `.csv.index` / `.csv2.index` sidecar、`--verify-index` | |
@@ -149,6 +149,7 @@ $ csv2 -r --json -i example.csv2 | head -1
   -append ROW           加在最後（就地寫入時為 O(1)）
   -delete a[,b]         刪除第 a 筆，或第 a 到第 b 筆
   -delete -cell r:c     清空一個儲存格（欄數不變）
+  -delete -col N|名稱   從每一筆與兩列標頭中移除該欄——唯一能保持對齊的刪除
   -update r:c VAL       更新一個儲存格
   --truncate-partial    丟棄結尾不完整的紀錄，而非以錯誤結束
 
@@ -298,6 +299,10 @@ $ csv2 -mid 5,5 --json -i TARGET_PACKAGES.csv
 | `-mid 7,3` | `a > b`；不替你對調，因為範圍寫反通常表示別處的邏輯也反了 |
 | `-i x -o x` 未給 `--in-place` | 開啟輸出會在輸入讀完前把它截斷 |
 | `-delete 12:6` | 那是儲存格位址；請加 `-cell`，或改給紀錄號 |
+| `-delete -cell -col 3` | 兩者是相反的：`-cell` 清空一格並保留該欄，`-col` 則移除整欄 |
+| `-delete -col` 移除全部欄位 | 沒有任何欄位的檔案不是 CSV 檔 |
+| `-delete -col X` 同時對 X 下 `-update`／`-delete -cell`／`-encrypt`／`-hash` | 該編輯不會有效果，卻仍會被回報為已完成 |
+| `-delete -col` 與 `-insert`／`-append` 併用 | 那列字面值必須符合舊形狀或新形狀其中之一，而無法判斷是哪一個 |
 | `-insert -cell` | 在一列中間插入儲存格，會把該列後面的欄位全部往後推一格 |
 | 在 21 筆的檔案上 `-update 99:3` | 越界是錯誤，絕不是「自動長大」 |
 | 在 7 欄的檔案上 `-append 'a,b,c'` | 欄數必須與標頭相符；csv2 不會補空或截斷來湊合 |
