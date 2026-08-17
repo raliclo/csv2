@@ -136,6 +136,14 @@ struct Record {
     var line: Int = 1
     /// 1-based data record number; 0 for header rows. / 1-based 資料紀錄號，標頭為 0。
     var number: Int = 0
+    /// Which header row this is, when it is one: 0 for the English row, 1 for
+    /// the Traditional Chinese row. nil for data. The report needs to tell them
+    /// apart -- printing `0` for both made two identical lines that no reader
+    /// could use, which is what `0a` / `0b` in the plan is for.
+    /// 這是第幾列標頭（若它是標頭）：0 為英文列、1 為繁體中文列；資料為 nil。
+    /// 報告必須能分辨兩者——兩列都印 `0` 會產生兩行完全相同、讀者無從使用的輸出，
+    /// 而那正是計畫中 `0a` / `0b` 要解決的。
+    var headerRow: Int? = nil
 
     var count: Int { fields.count }
 }
@@ -314,6 +322,7 @@ final class RecordParser {
     /// 任何一個位元組——那正是它在巨大檔案上最便宜的原因。
     private let sink: (Record) throws -> Bool
     private(set) var stopped = false
+    private let truncatePartial: Bool
 
     /// `firstRecordNumber`, `firstOffset` and `firstLine` let parsing resume
     /// at an index grid point while producing exactly the numbers a full scan
@@ -322,10 +331,20 @@ final class RecordParser {
     /// `firstRecordNumber`、`firstOffset` 與 `firstLine` 讓解析能從索引格點恢復，
     /// 同時產生與完整掃描完全相同的編號。有無索引的輸出必須逐位元相同，而紀錄號
     /// 就是輸出的一部分。
-    init(format: Format, sink: @escaping (Record) throws -> Bool,
-         firstRecordNumber: Int = 1, firstOffset: Int = 0, firstLine: Int = 1) {
+    /// `sink` is LAST so every call site can use trailing-closure syntax while
+    /// the rest keep their defaults. Swift matches a trailing closure to the
+    /// final parameter, so putting anything after it forces every caller to
+    /// spell out `sink:`.
+    /// `sink` 放在最後，讓每個呼叫端都能使用 trailing closure，其餘參數維持預設值。
+    /// Swift 會把 trailing closure 對應到最後一個參數，因此在它之後再放任何參數，
+    /// 都會迫使每個呼叫端把 `sink:` 寫出來。
+    init(format: Format,
+         firstRecordNumber: Int = 1, firstOffset: Int = 0, firstLine: Int = 1,
+         truncatePartial: Bool = false,
+         sink: @escaping (Record) throws -> Bool) {
         self.format = format
         self.sink = sink
+        self.truncatePartial = truncatePartial
         self.recordsEmitted = firstRecordNumber - 1
         self.offset = firstOffset
         self.recOffset = firstOffset
@@ -537,9 +556,70 @@ final class RecordParser {
                 "this file uses CR line endings (the pre-OS X Mac convention), which CSV does not support; convert it first with: tr '\\r' '\\n' < file > file.lf",
                 "本檔案使用 CR 行尾（OS X 之前的 Mac 慣例），非 CSV 所支援；請先轉換：tr '\\r' '\\n' < file > file.lf")
         }
-        if recordDirty || !fields.isEmpty || !rawBuf.isEmpty || !valBuf.isEmpty {
-            try endRecord()
+        let pending = recordDirty || !fields.isEmpty || !rawBuf.isEmpty || !valBuf.isEmpty
+        guard pending else { return }
+
+        // The input ran out mid-record. Two ways that is genuinely incomplete,
+        // and one way it is not:
+        //
+        //   * still inside a quoted field -- the closing quote never arrived.
+        //     Incomplete in ANY format. csv2 used to close the quote itself and
+        //     emit the record at rc=0, which is this project's own definition of
+        //     the worst kind of bug: a plausible record nobody wrote.
+        //   * `.csv2` with no trailing newline -- that format guarantees one
+        //     record per line, LF-terminated, so a missing final LF is the
+        //     signature of a torn write.
+        //   * `.csv` with no trailing newline is NOT incomplete. Plenty of tools
+        //     emit a final line without one, and treating that as damage would
+        //     reject perfectly good files.
+        //
+        // 輸入在一筆紀錄中途結束。有兩種情況是真的不完整，一種不是：
+        //   * 還在引號欄位內——收尾的引號從未出現。這在「任何」格式下都不完整。
+        //     csv2 原本會自己把引號收掉並以 rc=0 吐出那筆紀錄，而那正是本專案自己
+        //     定義的最糟一類缺陷：一筆看似合理、卻沒有人寫過的紀錄。
+        //   * `.csv2` 沒有結尾換行——該格式保證一筆一行且以 LF 結尾，缺少結尾 LF
+        //     就是撕裂寫入的信號。
+        //   * `.csv` 沒有結尾換行「不是」不完整。很多工具產生的最後一行本來就沒有，
+        //     把它當成損壞會拒絕掉完全正常的檔案。
+        // `.quoted` only. `.quotedQuote` means a quote was just seen INSIDE a
+        // quoted field and the parser does not yet know whether it closes the
+        // field or is the first half of an escaped `""`. At end of input that
+        // question is answered: it closed the field, and the record is
+        // complete. Treating it as unterminated rejected every well-formed row
+        // ending in a quoted value -- caught by T46a, where -append of
+        // `zz,last,"note, appended"` started failing.
+        // 只有 `.quoted`。`.quotedQuote` 表示剛在引號欄位「內」看到一個引號，解析器
+        // 還不知道它是收尾、還是跳脫 `""` 的前半。到了輸入結束，那個問題就有答案了：
+        // 它收尾了，紀錄是完整的。把它當成未閉合，會拒絕每一列「以引號值結尾」的
+        // 合法資料——由 T46a 抓到，那裡 `zz,last,"note, appended"` 的追加開始失敗。
+        let insideQuote = (state == .quoted)
+        let incomplete = insideQuote || format == .csv2
+
+        if incomplete {
+            if truncatePartial {
+                // Dropping a record the user may believe was written is never
+                // done on csv2's own initiative -- only when asked for by name.
+                // 丟棄一筆使用者可能以為已寫入的紀錄，絕不由 csv2 自行決定，
+                // 只有在被指名要求時才做。
+                Logger.shared.info("--truncate-partial: discarded an incomplete trailing record at byte \(recOffset)")
+                fields = []
+                rawBuf = []
+                valBuf = []
+                recordDirty = false
+                return
+            }
+            if insideQuote {
+                throw fault(
+                    "record \(recordsEmitted + 1): the input ends inside a quoted field -- the closing quote is missing. The record is incomplete; pass --truncate-partial to discard it.",
+                    "第 \(recordsEmitted + 1) 筆：輸入在引號欄位內就結束了——缺少收尾的引號。該紀錄不完整；要丟棄它請給 --truncate-partial。")
+            }
+            // `.csv2` without a trailing newline is reported by checkTornAppend
+            // before parsing begins, so reaching here means the caller chose to
+            // continue; emit it rather than inventing a second error.
+            // `.csv2` 缺少結尾換行，在解析開始前就由 checkTornAppend 回報過了，
+            // 因此走到這裡表示呼叫端選擇繼續；照常吐出，不要再造一個錯誤。
         }
+        try endRecord()
     }
 }
 

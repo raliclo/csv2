@@ -59,6 +59,7 @@ struct EmitContext {
     var physical: Bool
     var a1: Bool
     var jsonASCII: Bool
+    var enOnly: Bool
     var preserveRaw: Bool
 }
 
@@ -187,10 +188,27 @@ final class ReportEmitter: RecordEmitter {
         // 每個命中的儲存格印一行，因為單位是儲存格。同一筆有兩欄命中就印兩行，
         // 那是兩個不同的位置；同一儲存格內出現兩次是同一個位置，只印一次。
         for idx in matches {
-            let label = r.number == 0 ? "0" : "\(r.number)"
+            // `0a` / `0b` for the two header rows, as the plan specifies. The
+            // header does not take a data record number, so "record N" always
+            // means the Nth record of DATA.
+            // 兩列標頭分別是 `0a` / `0b`，如計畫所定。標頭不佔用資料的編號，
+            // 因此「第 N 筆」永遠指第 N 筆資料。
+            let label: String
+            if let hr = r.headerRow {
+                label = ctx.headers.count > 1 ? "0\(hr == 0 ? "a" : "b")" : "0"
+            } else {
+                label = "\(r.number)"
+            }
             var addr = "\(label):\(idx + 1)"
             if ctx.physical { addr += "@L\(r.line)" }
-            if ctx.a1 { addr += " [\(a1Column(idx))\(r.number)]" }
+            // The A1 row is the PHYSICAL line, because that is what a
+            // spreadsheet calls a row. Using the record number made csv2 print
+            // [A1] for a cell that any spreadsheet would call A3, and [E0] for a
+            // header -- and A1 notation has no row 0.
+            // A1 的列號取「物理行號」，因為試算表所稱的列就是那個。用紀錄號會讓
+            // csv2 對一個任何試算表都會叫作 A3 的儲存格印出 [A1]，並對標頭印出
+            // [E0]——而 A1 記法沒有第 0 列。
+            if ctx.a1 { addr += " [\(a1Column(idx))\(r.line)]" }
             // Both fields are escaped: a header name can contain a TAB just as
             // a value can, and one bad name would shift every column.
             // 兩個欄位都要跳脫：欄名與值一樣可能含 TAB，而一個壞掉的欄名會讓
@@ -319,7 +337,12 @@ final class MarkdownEmitter: RecordEmitter {
             let en = MarkdownOut.cell(ctx.headers[0].fields[i].value)
             if ctx.headers.count > 1 && i < ctx.headers[1].count {
                 let zh = MarkdownOut.cell(ctx.headers[1].fields[i].value)
-                names.append(ctx.zh ? zh : "\(en)<br>\(zh)")
+                // --zh Chinese only, --en English only, neither merges both.
+                // `--en` used to be indistinguishable from giving no flag at
+                // all, which made it look implemented when it was not.
+                // --zh 只取中文、--en 只取英文，都不給則兩者合併。`--en` 原本與
+                // 「完全不給旗標」逐位元相同，讓它看起來已實作，其實沒有。
+                names.append(ctx.zh ? zh : (ctx.enOnly ? en : "\(en)<br>\(zh)"))
             } else {
                 names.append(en)
             }

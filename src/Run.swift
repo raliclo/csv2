@@ -167,7 +167,7 @@ func runBuildIndex(_ o: Options) throws {
     var pendingError: Error?
     let builder = IndexBuilder(isCSV2: plan.format == .csv2)
 
-    let parser = RecordParser(format: plan.format) { rec in
+    let parser = RecordParser(format: plan.format, truncatePartial: o.truncatePartial) { rec in
         do {
             if headers.count < plan.headerRows {
                 headers.append(rec)
@@ -235,7 +235,7 @@ func runVerifyIndex(_ o: Options) throws {
     var headers: [Record] = []
     var n = 0
     var mismatches: [String] = []
-    let parser = RecordParser(format: plan.format) { rec in
+    let parser = RecordParser(format: plan.format, truncatePartial: o.truncatePartial) { rec in
         if headers.count < plan.headerRows { headers.append(rec); return true }
         n = rec.number - plan.headerRows
         if (n - 1) % idx.stride == 0 {
@@ -388,7 +388,7 @@ func runSelect(_ o: Options) throws {
         ctx = EmitContext(
             format: plan.format, headers: headers, withHeader: o.withHeader,
             rownum: o.rownum, zh: o.zh, physical: o.physical, a1: o.a1,
-            jsonASCII: o.jsonASCII, preserveRaw: true)
+            jsonASCII: o.jsonASCII, enOnly: o.enOnly, preserveRaw: true)
         try emitter.begin(ctx!)
         if searching && o.includeHeaders {
             for (i, h) in headers.enumerated() {
@@ -396,6 +396,7 @@ func runSelect(_ o: Options) throws {
                 if !hits.isEmpty {
                     var hh = h
                     hh.number = 0
+                    hh.headerRow = i
                     // Header hits are reported as 0a / 0b: the header does not
                     // take a data record number, so "record N" always means the
                     // Nth record of DATA.
@@ -418,7 +419,11 @@ func runSelect(_ o: Options) throws {
     // 的原因。
     let firstLine = resuming ? ip.resumeRecord + plan.headerRows : 1
 
-    let parser = RecordParser(format: plan.format, sink: { rec in
+    let parser = RecordParser(format: plan.format,
+                              firstRecordNumber: firstRecord,
+                              firstOffset: Int(ip.resumeOffset ?? 0),
+                              firstLine: firstLine,
+                              truncatePartial: o.truncatePartial) { rec in
         do {
             if !resuming && headers.count < plan.headerRows {
                 var h = rec
@@ -493,7 +498,7 @@ func runSelect(_ o: Options) throws {
             pendingError = error
             return false
         }
-    }, firstRecordNumber: firstRecord, firstOffset: Int(ip.resumeOffset ?? 0), firstLine: firstLine)
+    }
 
     while !parser.stopped, let chunk = plan.source.next() {
         try parser.feed(chunk)
@@ -606,7 +611,7 @@ func runEdit(_ o: Options) throws {
         outOffset += bytes.count
     }
 
-    let parser = RecordParser(format: plan.format) { rec in
+    let parser = RecordParser(format: plan.format, truncatePartial: o.truncatePartial) { rec in
         do {
             if headers.count < plan.headerRows {
                 var h = rec

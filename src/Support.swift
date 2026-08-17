@@ -89,9 +89,20 @@ final class Logger {
 
     func log(_ level: LogLevel, _ message: String) {
         let line = "\(Logger.timestamp()) \(level.label) \(message)\n"
-        if let h = logHandle {
+        // The log FILE is an operation record: what was done, to what, with
+        // what result. DEBUG and TRACE are for someone chasing a problem right
+        // now -- high volume, thrown away when done -- and letting them into
+        // the file drowns the history in the debugging, which is the exact
+        // reason -debug and -log are two flags and not one. They reach the file
+        // only when -debug asked for them.
+        // log「檔案」是操作紀錄：做了什麼、對什麼、結果如何。DEBUG 與 TRACE 是給
+        // 「現在正在查一個問題」的人看的——量大、用完即棄——讓它們進入檔案會把歷史
+        // 淹沒在除錯輸出裡，而那正是 -debug 與 -log 是兩個旗標而不是一個的理由。
+        // 只有在 -debug 明確要求時，它們才會進入檔案。
+        let belongsInFile = level >= .info || threshold <= .debug
+        if let h = logHandle, belongsInFile {
             h.write(Data(line.utf8))
-        } else if logPath != nil {
+        } else if logPath != nil && belongsInFile {
             warnLogUnavailable()
         }
         if level >= threshold {

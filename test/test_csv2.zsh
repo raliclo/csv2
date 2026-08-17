@@ -823,8 +823,15 @@ fi
 # 計畫規定了 --physical 的 `12:6@L34`，並說明 --a1 是「額外輸出」、絕不作為預設
 # （因為 CSV 未必有標頭、欄數也未必一致）。計畫沒有規定 A1 那一段的形狀；此處與
 # 計畫一併訂為在其後附加 ` [F12]`。
+# The A1 ROW is the physical line, not the record number. Record 1 of a
+# one-header-row CSV sits on physical line 2, and every spreadsheet calls that
+# cell A2. This case asserted [A1] until 2026-08-18, which pinned a wrong
+# answer: it also meant a header printed [E0], and A1 notation has no row 0.
+# A1 的「列」取物理行號，不是紀錄號。一列標頭的 CSV，其第 1 筆位於實體第 2 行，
+# 任何試算表都會叫那一格 A2。本案例在 2026-08-18 之前斷言的是 [A1]，那釘住了一個
+# 錯誤答案：它同時意味著標頭會印出 [E0]，而 A1 記法沒有第 0 列。
 addr=$("$CSV2" -contains busybox --physical --a1 -i "$PKG" 2>/dev/null | head -1 | cut -f1)
-assert_eq "$addr" "1:1@L2 [A1]" "T49a --physical and --a1 compose as record:field@Lline [A1] / --physical 與 --a1 組成 record:field@Lline [A1]"
+assert_eq "$addr" "1:1@L2 [A2]" "T49a --a1 uses the physical line as the spreadsheet row / --a1 以物理行號作為試算表列號"
 
 plain=$("$CSV2" -contains busybox -i "$PKG" 2>/dev/null | head -1 | cut -f1)
 assert_eq "$plain" "1:1" "T49b neither is on by default / 兩者預設都不啟用"
@@ -844,7 +851,9 @@ assert_eq "$plain" "1:1" "T49b neither is on by default / 兩者預設都不啟�
 a27=$("$CSV2" -contains v27 --a1 -i "$TMP/wide.csv2" 2>/dev/null | head -1 | cut -f1)
 a28=$("$CSV2" -contains v28 --a1 -i "$TMP/wide.csv2" 2>/dev/null | head -1 | cut -f1)
 a26=$("$CSV2" -contains v26 --a1 -i "$TMP/wide.csv2" 2>/dev/null | head -1 | cut -f1)
-if [[ "$a26" == "1:26 [Z1]" && "$a27" == "1:27 [AA1]" && "$a28" == "1:28 [AB1]" ]]; then
+# Two header rows here, so record 1 is on physical line 3 -> row 3.
+# 此處有兩列標頭，因此第 1 筆位於實體第 3 行 → 第 3 列。
+if [[ "$a26" == "1:26 [Z3]" && "$a27" == "1:27 [AA3]" && "$a28" == "1:28 [AB3]" ]]; then
     ok "T49c A1 notation past column Z gives Z, AA, AB / A1 記法在 Z 之後給出 Z、AA、AB"
 else
     bad "T49c A1 past Z (got 26=$a26 27=$a27 28=$a28)"
@@ -1030,6 +1039,76 @@ if [[ "$m_keyed" == *'"protected":{"lic":"hmac"}'* && "$m_clean" != *protected* 
 else
     bad "T55f json protected meta (keyed='${m_keyed:0:90}')"
 fi
+
+# T56 — the six defects a read_easy pass found on 2026-08-16, every one of
+# which happened silently at rc=0. Recorded as cases so they cannot come back;
+# the reproductions are in todo/known-defects.md.
+# T56 —— 2026-08-16 一次 read_easy 檢視找到的六項缺陷，每一項都在 rc=0 下靜默發生。
+# 寫成案例以免它們回來；重現步驟在 todo/known-defects.md。
+
+# 1. The salt and key fingerprint live ONLY in the header marker, and the salt
+#    is fresh每run. Emitting ciphertext without its header made data that
+#    nobody -- including its author -- could ever decrypt.
+# 1. salt 與金鑰指紋只存在於標頭標記中，而 salt 每次執行都重新產生。不帶標頭寫出
+#    密文，等於造出「任何人（含作者本人）都永遠解不開」的資料。
+printf 'id,lic\na,MIT\nb,GPL\n' > "$TMP/t56.csv"
+head -c 64 /dev/urandom > "$TMP/t56.key"
+"$CSV2" -encrypt lic -keyfile "$TMP/t56.key" -head 1 -i "$TMP/t56.csv" > "$TMP/t56_enc.csv" 2>/dev/null
+if head -1 "$TMP/t56_enc.csv" | grep -q ':enc:'; then
+    ok "T56a -encrypt with a selection still writes the header that carries the salt / -encrypt 搭配選取仍會寫出承載 salt 的標頭"
+else
+    bad "T56a the salt marker is missing; the output is unrecoverable / salt 標記不見了，輸出不可還原"
+fi
+"$CSV2" -decrypt lic -keyfile "$TMP/t56.key" -i "$TMP/t56_enc.csv" -so > "$TMP/t56_dec.csv" 2>/dev/null
+assert_contains "$(cat $TMP/t56_dec.csv)" "MIT" "T56b and the result decrypts back / 而且解得回來"
+
+# 2/3. The suffix DECLARES the format. --headers contradicting it, or an output
+#      suffix wanting a different header-row count, used to be accepted and
+#      silently shifted the data by a row.
+# 2/3. 副檔名「宣告」格式。--headers 與之牴觸、或輸出副檔名要求不同的標頭列數，
+#      原本都會被接受，並靜默地把資料錯開一列。
+assert_fails "T56c --headers contradicting the suffix is refused / --headers 與副檔名牴觸即拒絕" -- \
+    "$CSV2" -r --headers 1 -i "$TMP/idx.csv2" -so
+assert_fails "T56d .csv to .csv2 is refused rather than losing a record / .csv 轉 .csv2 即拒絕，而非少一筆" -- \
+    "$CSV2" -r -t -i "$PKG" -o "$TMP/t56_conv.csv2"
+assert_succeeds "T56e a matching suffix still works / 副檔名相符時照常可用" -- \
+    "$CSV2" -r -t -i "$PKG" -o "$TMP/t56_same.csv"
+
+# 4. Ending inside a quoted field means the closing quote never arrived. csv2
+#    used to close it itself and emit a record nobody wrote, at rc=0.
+# 4. 在引號欄位內結束，代表收尾的引號從未出現。csv2 原本會自己把它收掉，並在 rc=0
+#    下吐出一筆沒有人寫過的紀錄。
+printf 'a,b\n1,"unterminated\n' > "$TMP/t56_q.csv"
+assert_fails "T56f an unterminated quote is an error, not an invented record / 未閉合引號是錯誤，不是憑空造出一筆" -- \
+    "$CSV2" -r -t -i "$TMP/t56_q.csv" -so
+n=$("$CSV2" -r -t --truncate-partial -i "$TMP/t56_q.csv" -so 2>/dev/null | wc -l | tr -d ' ')
+assert_eq "$n" "1" "T56g --truncate-partial actually discards it / --truncate-partial 真的會丟棄它"
+
+# 5. Both header rows reported as `0`, giving two identical lines no reader
+#    could tell apart.
+# 5. 兩列標頭都回報為 `0`，產生兩行完全相同、讀者無從分辨的輸出。
+n=$("$CSV2" -contains 值 --include-headers -i "$TMP/idx.csv2" 2>/dev/null | cut -f1 | grep -c '^0[ab]:' || true)
+assert_eq "$n" "1" "T56h header hits are addressed 0a / 0b, not both 0 / 標頭命中以 0a／0b 定址，不是兩個都 0"
+
+# 6. The lighter ones, all silent at rc=0.
+# 6. 較輕的幾項，同樣都在 rc=0 下靜默。
+if diff -q <("$CSV2" -head 1 -t -md --en -i "$TMP/idx.csv2" 2>/dev/null) \
+           <("$CSV2" -head 1 -t -md -i "$TMP/idx.csv2" 2>/dev/null) >/dev/null 2>&1; then
+    bad "T56i --en is byte-identical to giving no flag, so it does nothing / --en 與不給旗標逐位元相同，等於什麼都沒做"
+else
+    ok "T56i --en selects the English title only / --en 只取英文標題"
+fi
+rm -f "$TMP/t56.log"
+"$CSV2" -r -i "$PKG" -log "$TMP/t56.log" >/dev/null 2>&1
+if grep -qE 'DEBUG|TRACE' "$TMP/t56.log" 2>/dev/null; then
+    bad "T56j the log file holds DEBUG/TRACE without -debug / 未給 -debug，log 檔卻含 DEBUG/TRACE"
+else
+    ok "T56j the log holds the operation record, not the debugging / log 存的是操作紀錄，不是除錯輸出"
+fi
+assert_fails "T56k -head -1 is a typo, not a request for nothing / -head -1 是打錯字，不是「請給我空的」" -- \
+    "$CSV2" -head -1 -i "$PKG" -so
+assert_fails "T56l --physical without a locating report is refused / 沒有定位報告時 --physical 被拒" -- \
+    "$CSV2" -head 1 --physical -i "$PKG" -so
 
 # T50 — -debug has five levels in the plan and had one in the CLI. TRACE was
 # unreachable, so it is asserted here as reachable AND as not firing without it.

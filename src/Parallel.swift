@@ -227,7 +227,7 @@ func runParallelSearch(_ o: Options) throws {
     let ctx = EmitContext(
         format: plan.format, headers: headers, withHeader: o.withHeader,
         rownum: o.rownum, zh: o.zh, physical: o.physical, a1: o.a1,
-        jsonASCII: o.jsonASCII, preserveRaw: true)
+        jsonASCII: o.jsonASCII, enOnly: o.enOnly, preserveRaw: true)
 
     if o.json {
         let e = JSONEmitter(sink: outSink, reportMode: true)
@@ -281,7 +281,10 @@ func runParallelSearch(_ o: Options) throws {
                 // 紀錄號與行號直接交給解析器，因此一個區塊回報的位址與完整掃描
                 // 給出的完全相同。
                 var localError: Error?
-                let parser = RecordParser(format: plan.format, sink: { rec in
+                let parser = RecordParser(format: plan.format,
+                                          firstRecordNumber: span.firstRecord + plan.headerRows,
+                                          firstOffset: Int(span.start),
+                                          firstLine: span.firstRecord + plan.headerRows) { rec in
                     do {
                         var r = rec
                         r.number = rec.number - plan.headerRows
@@ -301,9 +304,7 @@ func runParallelSearch(_ o: Options) throws {
                         localError = error
                         return false
                     }
-                }, firstRecordNumber: span.firstRecord + plan.headerRows,
-                   firstOffset: Int(span.start),
-                   firstLine: span.firstRecord + plan.headerRows)
+                }
 
                 var remaining = Int(span.end - span.start)
                 while remaining > 0 {

@@ -14,6 +14,33 @@ All of them happen silently at `rc=0`.
 
 ---
 
+## 狀態：全部已修（2026-08-18）/ Status: all fixed
+
+十二項斷言涵蓋這六條，編號 **T56a–T56l**，macOS 與 aarch64 Linux 兩邊皆通過。
+本檔保留為紀錄：**重現步驟仍然有效**，只是現在每一條都會以非零結束或給出正確結果。
+
+Twelve assertions cover the six items, numbered **T56a-T56l**, passing on both
+macOS and the aarch64 Linux guest. This file is kept as the record: the
+reproductions still run, they now exit non-zero or produce the right answer.
+
+修法一覽 / what changed:
+
+| # | 修法 |
+|---|---|
+| 1 | 有轉換時**一律**寫出標頭。salt 只存在於標頭標記中且每次執行都不同，不帶標頭的密文任何人都解不開——沒有值得為它保留的第二種讀法，所以是「強制」而非「拒絕」 |
+| 2 | 副檔名與 `--headers` 牴觸即拒絕。副檔名「宣告」格式，`--headers` 是給沒有副檔名的輸入用的；兩者都發言且互斥時，csv2 分不出誰對，所以不猜 |
+| 3 | 守衛改為檢查「輸入的標頭列數是否等於輸出副檔名所宣告的」。csv2 不會自行轉換：一列變兩列要「發明」一列標題，而發明資料是這支工具絕不做的事 |
+| 4 | 解析器現在分辨「不完整」與「只是沒有結尾換行」。未閉合引號在任何格式下都是錯誤；`.csv` 沒有結尾換行則不是。`--truncate-partial` 真的會丟棄不完整的那一筆 |
+| 5 | 兩列標頭分別回報為 `0a` / `0b` |
+| 6 | `--en` 只取英文標題；`-log` 預設不再收 DEBUG/TRACE；`-head -1` 報錯；`--physical`／`--a1` 在沒有定位報告時被拒；`--a1` 的列號改用**物理行號**（試算表所稱的列就是那個） |
+
+**一個修正時自己踩到的坑**，記在此處因為它正是同一類問題：第一版把解析器的
+`.quotedQuote` 狀態也當成「還在引號內」。它其實是「剛看到一個引號，還不知道是收尾
+還是 `""` 跳脫」——在 EOF 時代表**欄位已完整**。那個版本會拒絕每一列「以引號值結尾」
+的合法資料，由 T46a 抓到。
+
+---
+
 ## 共用的測試前置 / shared setup
 
 ```zsh

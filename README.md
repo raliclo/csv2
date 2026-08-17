@@ -12,7 +12,7 @@ and the macOS host it is built from.
 
 ```zsh
 ./compile_csv2.zsh       # build release/csv2
-./test/test_csv2.zsh    # 100 PASS, 0 FAIL, 1 SKIP on macOS (arm64, Swift 6.4)
+./test/test_csv2.zsh    # 112 PASS, 0 FAIL, 1 SKIP on macOS (arm64, Swift 6.4)
 ```
 
 | Works | Does not yet |
@@ -80,36 +80,27 @@ byte in the file.
 The format is **declared by the suffix, never detected**. Detection guesses, and
 a wrong guess turns the first data record into a header — silently.
 
-**The one exception is `--headers 1|2`.** It is required for `-si`, and it is
-also accepted with `-i`, where it **overrides the suffix**. The override is never
-checked against the file name, so `--headers 1 -i a.csv2` is accepted and
-misparses the file exactly as a wrong guess would.
-
-The consequences are worse than a wrong read, because they are written back.
-Verified on `compare/vs-sqlite.csv2` (2026-08-16):
+**`--headers 1|2` is required for `-si`**, where stdin has no suffix to declare
+the format. With `-i` it is accepted only when it **agrees** with the suffix;
+disagreeing is refused:
 
 ```console
-$ csv2 -r --json -i vs-sqlite.csv2 | tail -1
-{"meta":{"records":22,"matched":0}}
-$ csv2 --headers 1 -delete 1 -i vs-sqlite.csv2 -o bad.csv2   # rc=0
-$ csv2 -r --json -i bad.csv2 | tail -1
-{"meta":{"records":21,"matched":0}}
+$ csv2 -r --headers 1 -i vs-sqlite.csv2
+csv2: vs-sqlite.csv2 declares 2 header row(s) by its suffix, but --headers says 1.
 ```
 
-Twenty-two records became twenty-one. The Traditional Chinese title row is gone
-and a **data** row has taken its place as the second header row — the file is
-still structurally valid and still reads without error. The same override edits
-the wrong cell: `--headers 2 -update 1:1 X -i a.csv` overwrites record 2, not
-record 1, at exit 0.
+Until 2026-08-18 the override was accepted unchecked, and the consequences were
+worse than a wrong read because they were written back: `--headers 1 -delete 1`
+on a two-header-row file turned 22 records into 21 at rc=0, discarding the
+Traditional Chinese title row and promoting a **data** row in its place — a file
+still structurally valid and still reading without error. It also defeated the
+check this document recommends, since `--json` would then report
+`{"format":"csv2","headers":1}`, a self-contradiction that an assertion would
+happily pass. Both are now refused; T56c covers it.
 
-**And it defeats the check this document recommends.** The `--json` metadata line
-is offered below as the way to assert the parse was what you expected — but
-`--headers` changes the number you would assert on, and the line then
-contradicts itself: `{"meta":{"format":"csv2","headers":1,…}}`. A `.csv2` with
-one header row does not exist. The assertion passes while the parse is wrong.
-
-Use `--headers` with `-i` only when the suffix is genuinely wrong, and never
-together with an edit verb.
+For the same reason csv2 will not convert between the two formats: writing a
+one-header-row input to a `.csv2` path is refused rather than silently losing a
+record to the missing second header row (T56d).
 
 The two-row form exists because this project's data files are bilingual, and
 carrying the Chinese column titles in the file beats keeping them in a separate
@@ -182,13 +173,12 @@ PROTECTION / 保護
   -hash COLS            mask columns, one way. Deterministic, so equal values
                         stay equal — and see the warning below
   -encrypt COLS         encrypt columns (ChaCha20-Poly1305, fresh nonce)
-                        ALWAYS pass -t. The key fingerprint and salt live in
-                        the header row; without them the ciphertext can never
-                        be decrypted, and the salt is new on every run so it
-                        cannot be reconstructed afterwards. Combining -encrypt
-                        with -head/-tail/-mid/--filter and no -t drops the
-                        header and still exits 0. This is a known defect
-                        (2026-08-16); until it is fixed in code, -t is on you.
+                        The header is ALWAYS written, with or without -t: the
+                        key fingerprint and salt live in it, the salt is new on
+                        every run, and ciphertext without them can never be
+                        decrypted by anyone. Combining -encrypt with a
+                        selection used to drop the header at rc=0; fixed
+                        2026-08-18, asserted by T56a/T56b.
   -decrypt COLS         decrypt; COLS may be `all` to take every marked column
   -keyfile PATH         key file; defaults to multissh's private key.
                         With -hash it selects HMAC over plain SHA-256

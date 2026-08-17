@@ -56,6 +56,7 @@ struct Options {
     var json = false
     var jsonASCII = false
     var zh = false
+    var enOnly = false
 
     var edits: [EditVerb] = []
     var cellModifier = false
@@ -127,6 +128,33 @@ func parseArgs(_ argv: [String]) throws -> Options {
         return n
     }
 
+    /// Counts are 1-based, like every index in this tool. `-head 0` and
+    /// `-head -1` quietly returned nothing, which reads as "the file is empty"
+    /// -- a wrong answer delivered as a successful one. They are typos, not
+    /// requests.
+    /// 計數是 1-based，與本工具所有索引一致。`-head 0` 與 `-head -1` 原本靜默回傳
+    /// 空結果，那讀起來像「檔案是空的」——一個以成功姿態送出的錯誤答案。它們是
+    /// 打錯字，不是請求。
+    func positiveInt(_ flag: String, _ s: String) throws -> Int {
+        let n = try intVal(flag, s)
+        guard n >= 1 else {
+            throw usageError("\(flag) \(n): a count must be at least 1",
+                             "\(flag) \(n)：計數至少必須是 1")
+        }
+        return n
+    }
+
+    /// Context may legitimately be 0; negative cannot.
+    /// 上下文可以是 0，但不可以是負數。
+    func nonNegativeInt(_ flag: String, _ s: String) throws -> Int {
+        let n = try intVal(flag, s)
+        guard n >= 0 else {
+            throw usageError("\(flag) \(n): context cannot be negative",
+                             "\(flag) \(n)：上下文不可為負數")
+        }
+        return n
+    }
+
     while i < argv.count {
         let arg = argv[i]
         guard arg.hasPrefix("-"), arg.count > 1 else {
@@ -140,13 +168,13 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "filter": o.filter = true
         case "include-headers": o.includeHeaders = true
         case "normalize": o.normalize = true
-        case "A": o.after = try intVal(arg, try need(arg))
-        case "B": o.before = try intVal(arg, try need(arg))
+        case "A": o.after = try nonNegativeInt(arg, try need(arg))
+        case "B": o.before = try nonNegativeInt(arg, try need(arg))
         case "C":
-            let n = try intVal(arg, try need(arg))
+            let n = try nonNegativeInt(arg, try need(arg))
             o.after = n; o.before = n
-        case "head": o.head = try intVal(arg, try need(arg))
-        case "tail": o.tail = try intVal(arg, try need(arg))
+        case "head": o.head = try positiveInt(arg, try need(arg))
+        case "tail": o.tail = try positiveInt(arg, try need(arg))
         case "mid": o.mid = try parseMid(try need(arg))
         case "t": o.withHeader = true
         case "rownum": o.rownum = true
@@ -162,8 +190,8 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "pretty": o.pretty = true
         case "json": o.json = true
         case "json-ascii": o.json = true; o.jsonASCII = true
-        case "zh": o.zh = true
-        case "en": o.zh = false
+        case "zh": o.zh = true; o.enOnly = false
+        case "en": o.enOnly = true; o.zh = false
         case "cell": o.cellModifier = true
         case "truncate-partial": o.truncatePartial = true
         case "insert":
@@ -410,16 +438,106 @@ func validate(_ o: inout Options) throws {
         if o.output == nil { o.output = inp }
     }
     if o.encryptCols != nil || o.decryptCols != nil || o.hashCols != nil {
-        if o.head == nil && o.tail == nil && o.mid == nil && o.contains == nil {
-            // -encrypt / -decrypt / -hash rewrite every record of the file, so
-            // what comes out IS a file, not a selection fragment. The -t rule
-            // exists to stop a fragment being written where a complete file is
-            // promised; it has nothing to refuse here.
-            // -encrypt / -decrypt / -hash 會改寫檔案的每一筆，因此產出的就是
-            // 一個完整檔案，不是選取的片段。-t 那條規則是為了阻止「片段被寫進
-            // 承諾了完整檔案的位置」，在這裡沒有東西要擋。
-            o.withHeader = true
+        // ALWAYS write the header, selection or not.
+        //
+        // For -encrypt this is not a convenience, it is the difference between
+        // recoverable and destroyed. The per-file salt and the key fingerprint
+        // live ONLY in the header marker (`col:enc:<fp>:<salt>`), and the salt
+        // is fresh on every run -- so ciphertext emitted without its header can
+        // never be decrypted by anyone, including the person who wrote it.
+        // Previously `-encrypt license -head 1` produced exactly that, at rc=0,
+        // with no warning.
+        //
+        // Forcing the header rather than refusing: for a transform there is no
+        // second reading. A headerless encrypted fragment has no use to refuse
+        // in favour of.
+        // 不論有沒有選取，一律寫出標頭。
+        //
+        // 對 -encrypt 而言這不是方便，而是「還原得回來」與「毀了」的差別。每檔的
+        // salt 與金鑰指紋只存在於標頭標記中（`col:enc:<指紋>:<salt>`），而 salt
+        // 每次執行都重新產生——因此不帶標頭寫出的密文，任何人都無法解密，包括寫
+        // 它的人自己。先前 `-encrypt license -head 1` 產生的正是那個，rc=0，
+        // 而且沒有任何警告。
+        //
+        // 選擇「強制」而非「拒絕」：對轉換而言沒有第二種合理讀法。一個不帶標頭的
+        // 加密片段，沒有任何值得為它保留的用途。
+        o.withHeader = true
+    }
+
+    // --- Defect 2: --headers overrode the suffix with no cross-check.
+    //
+    // `--headers 1` on a .csv2 file made csv2 report
+    // `{"format":"csv2","headers":1}` -- a self-contradiction, since a .csv2
+    // has two header rows by definition -- and read 22 records as 23, promoting
+    // the Chinese title row to data. An edit written back then deleted the
+    // wrong record and produced a structurally valid file with one header row
+    // missing.
+    //
+    // The suffix DECLARES the format; --headers exists for input that has no
+    // suffix to declare it. When both speak and disagree, one of them is wrong
+    // and csv2 cannot tell which -- so it refuses, the same way
+    // `--build-index --no-index` is refused for contradicting itself.
+    // 缺陷 2：--headers 會覆蓋副檔名，且不做交叉檢查。
+    //
+    // 對 .csv2 檔案給 `--headers 1`，csv2 會回報
+    // `{"format":"csv2","headers":1}`——那是自相矛盾，因為 .csv2 依定義就有兩列
+    // 標頭——並把 22 筆讀成 23 筆，將中文標題列升格為資料。據此寫回的編輯會刪錯
+    // 紀錄，並產生一個「結構合法但少了一列標頭」的檔案。
+    //
+    // 副檔名「宣告」格式；--headers 的存在是為了「沒有副檔名可宣告」的輸入。當兩者
+    // 都發言且互相牴觸時，其中一個是錯的而 csv2 分不出是哪一個——因此拒絕，與
+    // `--build-index --no-index` 因自相矛盾而被拒是同一條規則。
+    if let h = o.headersOverride, let inp = o.input, let fmt = Format.from(path: inp) {
+        if h != fmt.headerRows {
+            throw usageError(
+                "\(inp) declares \(fmt.headerRows) header row(s) by its suffix, but --headers says \(h). The suffix declares the format; --headers is for input with no suffix to declare it. Rename the file or drop --headers.",
+                "\(inp) 的副檔名宣告了 \(fmt.headerRows) 列標頭，但 --headers 說 \(h) 列。副檔名宣告格式，--headers 是給「沒有副檔名可宣告」的輸入用的。請改檔名，或拿掉 --headers。")
         }
+    }
+
+    // --- Defect 3: .csv -> .csv2 silently lost a record.
+    //
+    // `-r -t -i a.csv -o conv.csv2` wrote ONE header row into a path whose
+    // suffix promises two. Reading it back took the first data record as the
+    // second header row: 21 records became 20, and busybox became a column
+    // title. The existing guard only asked whether -t was given, never whether
+    // the header rows being written match what the output suffix declares.
+    //
+    // csv2 cannot convert between them on its own: going from one header row to
+    // two means inventing a row of Traditional Chinese titles, and inventing
+    // data is the one thing this tool must never do.
+    // 缺陷 3：.csv → .csv2 會靜默少一筆資料。
+    //
+    // `-r -t -i a.csv -o conv.csv2` 把「一列」標頭寫進一個副檔名承諾「兩列」的路徑。
+    // 讀回時第一筆資料被當成第二列標頭：21 筆變成 20 筆，busybox 變成了欄位標題。
+    // 原本的守衛只問「有沒有給 -t」，從未問「正在寫出的標頭列數是否符合輸出副檔名
+    // 所宣告的」。
+    //
+    // csv2 無法自行轉換：從一列標頭變成兩列，意味著要「發明」一列繁體中文標題，
+    // 而發明資料正是這支工具絕不能做的事。
+    if let out = o.output, let outFmt = Format.from(path: out) {
+        let inRows: Int
+        if let inp = o.input, let inFmt = Format.from(path: inp) {
+            inRows = o.headersOverride ?? inFmt.headerRows
+        } else {
+            inRows = o.headersOverride ?? 1
+        }
+        if inRows != outFmt.headerRows {
+            throw usageError(
+                "the input has \(inRows) header row(s) and \(out) declares \(outFmt.headerRows) by its suffix. csv2 will not convert between them: going to two rows would mean inventing a row of titles, and dropping to one would discard them. Choose an output suffix that matches, or write the header rows yourself.",
+                "輸入有 \(inRows) 列標頭，而 \(out) 的副檔名宣告 \(outFmt.headerRows) 列。csv2 不會替你轉換：轉成兩列意味著要發明一列標題，轉成一列則會丟掉它們。請改用相符的輸出副檔名，或自行寫出標頭列。")
+        }
+    }
+    if (o.physical || o.a1) && (o.contains == nil || o.filter || o.markdown || o.json) {
+        // Both add a part to an ADDRESS, and the locating report is the only
+        // output that prints one. Everywhere else they were accepted and did
+        // nothing, which is indistinguishable from "this flag is not working".
+        // 兩者都是在「位址」上附加資訊，而唯一會印出位址的輸出就是定位報告。
+        // 在其他地方它們會被接受卻毫無作用，那與「這個旗標壞了」無從分辨。
+        let which = [o.physical ? "--physical" : nil, o.a1 ? "--a1" : nil].compactMap { $0 }.joined(separator: " and ")
+        throw usageError(
+            "\(which) add to the address in the locating report, so they need -contains without --filter, -md or --json",
+            "\(which) 是附加在定位報告的位址上的，因此需要搭配 -contains，且不能同時給 --filter、-md 或 --json")
     }
     if o.contains == nil && o.filter && o.edits.isEmpty {
         throw usageError("--filter needs -contains", "--filter 需要搭配 -contains")
