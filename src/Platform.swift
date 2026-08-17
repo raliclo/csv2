@@ -74,6 +74,57 @@ enum Platform {
     }
 
     // -----------------------------------------------------------------
+    // MARK: - Durability / 落地
+    // -----------------------------------------------------------------
+
+    /// Force a file's data to the filesystem before it is renamed into place.
+    ///
+    /// rename(2) alone gives atomicity for CONCURRENT READERS -- a reader holds
+    /// either the old inode or the new one, never a half-written file. It does
+    /// NOT give durability across a crash: the rename can reach the disk while
+    /// the temp file's data blocks have not, leaving a file that exists, is
+    /// named correctly, and is empty or truncated.
+    ///
+    /// Those are two different guarantees and csv2's design conflated them. The
+    /// second is the one the plan leans on when it says this project's data
+    /// files are held up by "all-new or all-old", so it has to be real.
+    /// 在檔案被 rename 就位之前，強制把它的資料寫到檔案系統。
+    ///
+    /// 單靠 rename(2) 提供的是「並行讀者」的原子性——讀者持有的要嘛是舊 inode、
+    /// 要嘛是新的，絕不會是寫到一半的檔案。它「不」提供當機後的持久性：rename 可能
+    /// 已經落地，而暫存檔的資料區塊還沒有，留下一個存在、名字正確、但內容是空的或
+    /// 被截斷的檔案。
+    ///
+    /// 那是兩個不同的保證，而 csv2 的設計把它們混為一談。計畫說「這個專案的資料檔
+    /// 正是靠『要嘛全新、要嘛全舊』在支撐的」時，指的是第二個——所以它必須是真的。
+    ///
+    /// On Darwin plain fsync() only pushes data to the drive, which may still
+    /// hold it in a volatile write cache; F_FULLFSYNC is what actually flushes
+    /// that cache. Using the weaker one and calling it durable is the kind of
+    /// half-true claim this project exists to avoid.
+    /// 在 Darwin 上，單純的 fsync() 只把資料推給磁碟，而磁碟可能仍將它留在揮發性的
+    /// 寫入快取中；真正沖掉該快取的是 F_FULLFSYNC。用比較弱的那個、然後宣稱「已持久」，
+    /// 正是本專案要避免的那種半真陳述。
+    @discardableResult
+    static func flushToDisk(_ fd: Int32) -> Bool {
+        #if canImport(ucrt)
+        let handle = HANDLE(bitPattern: _get_osfhandle(fd))
+        guard let h = handle, h != INVALID_HANDLE_VALUE else { return false }
+        return FlushFileBuffers(h)
+        #elseif canImport(Darwin)
+        if fcntl(fd, F_FULLFSYNC) == 0 { return true }
+        // Some filesystems do not implement F_FULLFSYNC and return ENOTSUP.
+        // fsync is then the strongest thing available, and saying so beats
+        // failing the write over it.
+        // 有些檔案系統未實作 F_FULLFSYNC，會回傳 ENOTSUP。此時 fsync 就是可用的
+        // 最強手段，退回它並說明，好過為此讓寫入失敗。
+        return fsync(fd) == 0
+        #else
+        return fsync(fd) == 0
+        #endif
+    }
+
+    // -----------------------------------------------------------------
     // MARK: - Process and terminal / 行程與終端機
     // -----------------------------------------------------------------
 

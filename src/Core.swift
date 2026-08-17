@@ -768,6 +768,21 @@ final class ByteSink {
         closed = true
         flush()
         if let tmp = tmpPath, let final = finalPath {
+            // Data to disk BEFORE the rename, or the rename can land while the
+            // contents have not -- leaving a correctly named, empty file where
+            // the old one used to be. rename alone protects concurrent readers;
+            // it does not protect against a crash.
+            // 先讓資料落地，再 rename；否則 rename 可能已經生效而內容還沒有——
+            // 於是舊檔的位置上留下一個名字正確、內容是空的檔案。單靠 rename 保護的
+            // 是並行讀者，不是當機。
+            if !Platform.flushToDisk(handle.fileDescriptor) {
+                // A failed flush is not a reason to lose the write: report it
+                // and continue, because the alternative is discarding data the
+                // caller successfully produced.
+                // flush 失敗不是丟掉這次寫入的理由：回報並繼續，因為另一個選擇是
+                // 丟棄呼叫端已經成功產生的資料。
+                Logger.shared.warn("could not flush \(tmp) to disk before renaming; the write is atomic for readers but may not survive a crash")
+            }
             try? handle.close()
             // POSIX rename(2), not FileManager.replaceItemAt. rename is the
             // primitive the design actually calls for -- atomic within a
