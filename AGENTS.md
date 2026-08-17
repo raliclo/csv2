@@ -100,6 +100,32 @@ do not quietly implement something else.
   測試且要求輸出逐位元相同。Linux 的 Foundation 是 swift-corelibs-foundation，另一份
   實作——「macOS 會過」對 Linux 不構成證據。暫不隨 rootfs 出貨並不放寬這一點。
 
+## Who may call csv2 / 誰可以呼叫 csv2
+
+**Inside the LinuxCS project, only TEST scripts call csv2.** The build and
+maintenance scripts do not, and proposing to wire it into them is not a
+suggestion this project wants.
+
+**在 LinuxCS 專案內，只有「測試」腳本會呼叫 csv2。** 建置與維護腳本不會，也不要提議
+把它接進去。
+
+The reason is dependency direction: a script like `update_licenses.zsh` has to
+run in environments where csv2 has not been built, and csv2 is deliberately not
+shipped in the guest rootfs. A test script has no such problem -- it runs where
+csv2 has just been built.
+
+理由是相依性方向：`update_licenses.zsh` 這類腳本必須能在「csv2 尚未建置」的環境下執行，
+而 csv2 又刻意不進 guest rootfs。測試腳本沒有這個問題——它就在剛建好 csv2 的地方執行。
+
+So do not list "no real script uses it" as a gap. It is still true that csv2's
+verification comes entirely from its own tests, which is a real limitation --
+but the way past it here is changing the PLATFORM (phase 6) and changing the
+READER (`read_easy`), not changing the caller.
+
+因此不要把「沒有真實腳本在用它」列為缺口。「csv2 的驗證全部來自自己的測試」這件事仍然
+為真，也仍然是一項限制——但在這裡繞過它的方法是換平台（第 6 階段）與換讀者
+（`read_easy`），不是換呼叫者。
+
 ## The one rule that matters most / 最重要的一條規則
 
 **Fail loudly. Never produce half-correct output.**
