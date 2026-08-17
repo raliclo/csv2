@@ -1265,6 +1265,121 @@ printf 'a,b,c\n1,2\n' > "$TMP/dc_rag.csv"
 assert_fails "T57s a ragged record is still refused, not narrowed into agreement / 欄數不符的紀錄仍被拒，不會被收窄成剛好相符" -- \
     "$CSV2" -delete -col b -i "$TMP/dc_rag.csv" -so
 
+# ---------------------------------------------------------------------
+# T58 -- the README's worked error example is the REAL message.
+#
+# Found by a README-only reader on 2026-08-18: the console block showed one
+# line ending in a full stop, so it read as the complete message. The real
+# message has two further sentences and a second line in Chinese -- and the
+# README asserts elsewhere that errors are "exactly two lines, English then
+# Chinese", so its own example contradicted its own rule.
+#
+# Nobody would call that dangerous, which is exactly why it needs a test: a
+# quoted example drifts silently every time a message is improved, and each
+# drift is individually too small to notice. This asserts the README against
+# the binary rather than against someone remembering to update it.
+#
+# T58 —— README 中那個錯誤訊息範例就是「真正的」訊息。
+# 2026-08-18 由一位只讀 README 的讀者發現：那段 console 區塊只顯示一行、且以句號結尾，
+# 於是讀起來就像是完整的訊息。真正的訊息還有兩句，以及第二行中文——而 README 在別處
+# 主張錯誤「恰好兩行，英文在前中文在後」，因此它自己的範例牴觸了它自己的規則。
+# 沒有人會覺得那很危險，而那正是它需要一個測試的原因：被引用的範例會在每次改善訊息時
+# 靜默地飄移，而每一次飄移單獨看都小到不會被注意。這個案例把 README 對著執行檔斷言，
+# 而不是對著「有沒有人記得更新它」。
+# ---------------------------------------------------------------------
+echo
+echo "--- T58: the README's error example is the real message / README 的錯誤範例就是真正的訊息 ---"
+
+printf 'pkg,ver\n套件,版本\nzlib,1.3.2\n' > "$TMP/rm.csv2"
+"$CSV2" -r --headers 1 -i "$TMP/rm.csv2" 2> "$TMP/rm_err.txt" > "$TMP/rm_out.txt"
+# The fixture name differs from the README's, so compare with it substituted
+# back. Comparing anything less than the whole line would let the truncation
+# this case exists to catch pass again.
+# 這裡的檔名與 README 的不同，因此代換回去再比對。比對「不足一整行」的任何東西，都會讓
+# 本案例所要抓的那種截斷再次矇混過關。
+readme_en=$(grep -F 'declares 2 header row(s) by its suffix' "$ROOT/README.md" | head -1)
+actual_en=$(head -1 "$TMP/rm_err.txt" | sed "s|$TMP/rm.csv2|vs-sqlite.csv2|")
+assert_eq "$actual_en" "$readme_en" \
+    "T58a the README quotes the English error line in full, not truncated at the first full stop / README 完整引用了英文錯誤行，而非在第一個句號處截斷"
+
+readme_zh=$(grep -F '的副檔名宣告了 2 列標頭' "$ROOT/README.md" | head -1)
+actual_zh=$(sed -n 2p "$TMP/rm_err.txt" | sed "s|$TMP/rm.csv2|vs-sqlite.csv2|")
+assert_eq "$actual_zh" "$readme_zh" \
+    "T58b and the Chinese line too, so the example matches the two-line rule the README states / 中文行也在，使該範例符合 README 自己陳述的兩行規則"
+
+assert_eq "$(wc -l < "$TMP/rm_err.txt" | tr -d ' ')" "2" \
+    "T58c the message really is exactly two lines / 該訊息確實恰好兩行"
+assert_eq "$(wc -c < "$TMP/rm_out.txt" | tr -d ' ')" "0" \
+    "T58d and stdout stays empty, as the README promises for a failed run / 而 stdout 保持為空，正如 README 對失敗執行的承諾"
+
+# ---------------------------------------------------------------------
+# T59 -- `-t` gates SELECTIONS, never EDITS.
+#
+# Found by a README-only reader on 2026-08-18. The README documents that `-t`
+# is off by default and that writing headerless rows to a suffixed path is
+# refused, and shows `-head 3 -o out.csv2` being refused for exactly that. From
+# those two statements the reader concluded -- reasonably -- that editing a
+# .csv2 without `-t` would also be refused, and was surprised when it was not.
+# The behaviour was right and undocumented, which is the harder kind of gap to
+# see from the inside: nothing is broken, so nothing draws attention to it.
+#
+# The asymmetry is deliberate. A selection produces a FRAGMENT, so whether the
+# header goes with it is a question. An edit produces a FILE, so it is not one.
+#
+# T59 —— `-t` 管的是「選取」，從不管「編輯」。
+# 2026-08-18 由一位只讀 README 的讀者發現。README 寫著 `-t` 預設關閉、且把不帶標頭的
+# 資料列寫入有副檔名的路徑會被拒，並示範了 `-head 3 -o out.csv2` 正是因此被拒。讀者從
+# 這兩句推論——而且推得合理——編輯 `.csv2` 而不給 `-t` 也會被拒，結果並沒有，於是感到意外。
+# 行為是對的，只是沒有寫進文件；而那是從內部最難看見的一種缺口：沒有東西壞掉，因此沒有
+# 東西會引起注意。
+# 這個不對稱是刻意的：選取產生的是「片段」，標頭要不要跟著出去是一個問題；編輯產生的是
+# 一個「檔案」，那就不是問題。
+# ---------------------------------------------------------------------
+echo
+echo "--- T59: -t gates selections, never edits / -t 管選取，不管編輯 ---"
+
+printf 'pkg,ver,note\n套件,版本,備註\nzlib,1.3.2,a\nzstd,1.5.6,b\n' > "$TMP/t59.csv2"
+
+assert_fails "T59a a SELECTION into a .csv2 without -t is refused / 未給 -t 的「選取」寫入 .csv2 被拒" -- \
+    "$CSV2" -head 1 -i "$TMP/t59.csv2" -o "$TMP/t59_sel.csv2"
+
+assert_succeeds "T59b but an EDIT into a .csv2 without -t is not / 但未給 -t 的「編輯」寫入 .csv2 不會被拒" -- \
+    "$CSV2" -update 1:note X -i "$TMP/t59.csv2" -o "$TMP/t59_ed.csv2"
+assert_eq "$(head -2 "$TMP/t59_ed.csv2")" \
+'pkg,ver,note
+套件,版本,備註' \
+    "T59c and both header rows are there, which is why it need not be refused / 而且兩列標頭都在，這正是它不必被拒的原因"
+
+# The guarantee is only worth anything if the result reads back as the same
+# shape. A file that merely LOOKS like it has headers is what the refusal in
+# T59a exists to prevent.
+# 這條保證唯有在「讀得回同樣的形狀」時才有價值。一個只是「看起來有標頭」的檔案，
+# 正是 T59a 那條拒絕所要防止的東西。
+assert_eq "$("$CSV2" -r -i "$TMP/t59_ed.csv2" | wc -l | tr -d ' ')" "2" \
+    "T59d the edited file reads back as 2 data records, not 4 / 編輯後的檔案讀回來是 2 筆資料，不是 4 筆"
+
+# -delete -col is the verb that changes the shape, so it is the one where a
+# dropped header row would be hardest to notice: the file would still parse.
+# -delete -col 是會改變形狀的那個動詞，因此也是「少了一列標頭」最難被察覺的地方：
+# 那個檔案仍然解析得過。
+assert_succeeds "T59e -delete -col into a .csv2 without -t is not refused either / -delete -col 未給 -t 寫入 .csv2 同樣不被拒" -- \
+    "$CSV2" -delete -col ver -i "$TMP/t59.csv2" -o "$TMP/t59_col.csv2"
+assert_eq "$(head -2 "$TMP/t59_col.csv2")" \
+'pkg,note
+套件,備註' \
+    "T59f and both header rows were narrowed, not dropped / 兩列標頭都被收窄，而不是被丟掉"
+
+# --in-place has no -o to inspect, and the append fast path does not go through
+# the rewriting path at all -- so the guarantee has to be asserted there too.
+# --in-place 沒有 -o 可檢查，而追加快路徑根本不走重寫那條路——因此這條保證在那裡也要斷言。
+cp "$TMP/t59.csv2" "$TMP/t59_ap.csv2"
+assert_succeeds "T59g the -append fast path does not need -t either / -append 快路徑同樣不需要 -t" -- \
+    "$CSV2" -append 'x,9,c' -i "$TMP/t59_ap.csv2" --in-place
+assert_eq "$(head -2 "$TMP/t59_ap.csv2")" \
+'pkg,ver,note
+套件,版本,備註' \
+    "T59h and it leaves both header rows untouched / 而且兩列標頭原封不動"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

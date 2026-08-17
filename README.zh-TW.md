@@ -76,7 +76,10 @@ csv2，並逐一以 sha256 比對十二組呼叫。
 
 ```console
 $ csv2 -r --headers 1 -i vs-sqlite.csv2
-csv2：vs-sqlite.csv2 的副檔名宣告了 2 列標頭，但 --headers 說 1 列。
+csv2: vs-sqlite.csv2 declares 2 header row(s) by its suffix, but --headers says 1. The suffix declares the format; --headers is for input with no suffix to declare it. Rename the file or drop --headers.
+csv2：vs-sqlite.csv2 的副檔名宣告了 2 列標頭，但 --headers 說 1 列。副檔名宣告格式，--headers 是給「沒有副檔名可宣告」的輸入用的。請改檔名，或拿掉 --headers。
+$ echo $?
+1
 ```
 
 2026-08-18 之前，這個覆蓋不經檢查就被接受，而後果比「讀錯」更嚴重，因為它會被寫回去：
@@ -291,7 +294,7 @@ $ csv2 -mid 5,5 --json -i TARGET_PACKAGES.csv
 
 | 組合 | 為什麼被拒絕 |
 |---|---|
-| `-head 3 -o out.csv2`（未給 `-t`） | 把不帶標頭的資料列寫進一個「副檔名承諾了標頭」的路徑；下次讀取會把最前面的紀錄當成標頭吃掉 |
+| `-head 3 -o out.csv2`（未給 `-t`） | 把不帶標頭的資料列寫進一個「副檔名承諾了標頭」的路徑；下次讀取會把最前面的紀錄當成標頭吃掉。**這條適用於選取，不適用於編輯**——見下 |
 | `-md` 未給 `-t` | 沒有標頭列就渲染不出 Markdown 表格；自動補上會讓「預設不帶標頭」出現一個看不見的例外 |
 | `-md -o out.csv2` | 副檔名宣告的是 CSV，內容卻是 Markdown |
 | `-si` 未給 `--headers 1` 或 `2` | stdin 沒有副檔名，格式未被宣告；此處的預設值就是猜測 |
@@ -310,6 +313,29 @@ $ csv2 -mid 5,5 --json -i TARGET_PACKAGES.csv
 | 編輯時沒有給 `-o`、`-so` 或 `--in-place` | `-insert`/`-append`/`-delete`/`-update` 需要明確的目的地；沒有「隱含就地編輯」這回事 |
 | `-o /dev/stdout` | 輸出會先寫到目標旁的暫存檔再 rename，那需要一個一般檔案。請改用 `-so` |
 | 未知旗標 | 絕不被當成別的東西吞掉 |
+
+### `-t` 管的是選取，從不管編輯
+
+選取產生的是**片段**，因此「標頭要不要跟著出去」是一個問題，由 `-t` 回答。編輯產生的是
+一個**檔案**，因此那不是問題：標頭一律寫出，給不給 `-t` 都一樣；寫到 `.csv2` 目的地時
+兩列都寫。
+
+```console
+$ csv2 -head 1 -i pkgs.csv2 -o sel.csv2
+csv2: sel.csv2 declares a format with a header, so writing data rows there needs -t; without it the next read would take the first record(s) as the header
+csv2：sel.csv2 的副檔名宣告了帶標頭的格式，因此在此寫入資料列必須給 -t；否則下次讀取會把最前面的紀錄當成標頭
+$ echo $?
+1
+
+$ csv2 -update 1:note X -i pkgs.csv2 -o edited.csv2   # 沒給 -t，也沒有被拒
+$ head -2 edited.csv2
+pkg,ver,note
+套件,版本,備註
+```
+
+這個不對稱正是重點。拒絕編輯，會讓人根本無法在不記得某個旗標的情況下編輯 `.csv2`——
+而那個旗標一旦漏掉，唯一可能的產物就是一個壞掉的檔案；接受選取，產生的就正好是那個壞掉的
+檔案。由 T59 斷言。
 
 ### 遮蔽欄位：使用 `-hash` 之前請先讀這一段
 

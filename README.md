@@ -86,7 +86,10 @@ disagreeing is refused:
 
 ```console
 $ csv2 -r --headers 1 -i vs-sqlite.csv2
-csv2: vs-sqlite.csv2 declares 2 header row(s) by its suffix, but --headers says 1.
+csv2: vs-sqlite.csv2 declares 2 header row(s) by its suffix, but --headers says 1. The suffix declares the format; --headers is for input with no suffix to declare it. Rename the file or drop --headers.
+csv2：vs-sqlite.csv2 的副檔名宣告了 2 列標頭，但 --headers 說 1 列。副檔名宣告格式，--headers 是給「沒有副檔名可宣告」的輸入用的。請改檔名，或拿掉 --headers。
+$ echo $?
+1
 ```
 
 Until 2026-08-18 the override was accepted unchecked, and the consequences were
@@ -141,7 +144,9 @@ SELECTING / 選取
   -head N               first N records          (records, not lines)
   -tail N               last N records
   -mid a,b              records a through b, inclusive; `a,` and `,b` are open
-  -t                    include the header rows (off by default)
+  -t                    include the header rows (off by default). It applies
+                        to SELECTIONS only -- an edit rewrites the whole file
+                        and always writes the headers, with or without -t
   -rownum               prepend a record-number column
   --physical            also print the physical line the record starts on
   --a1                  also print spreadsheet A1 notation
@@ -330,7 +335,7 @@ Each of these exits non-zero with a message saying why:
 
 | Combination | Why it is refused |
 |---|---|
-| `-head 3 -o out.csv2` (no `-t`) | data rows without a header written to a path whose suffix promises one; the next read would eat the first records as the header |
+| `-head 3 -o out.csv2` (no `-t`) | data rows without a header written to a path whose suffix promises one; the next read would eat the first records as the header. **This applies to selections, not to edits** — see below |
 | `-md` without `-t` | a Markdown table has no shape without a header row, and silently adding one would make "no header by default" grow an invisible exception |
 | `-md -o out.csv2` | the suffix declares CSV, the content would be Markdown |
 | `-si` without `--headers 1` or `2` | stdin has no suffix, so the format is not declared; a default here would be a guess |
@@ -349,6 +354,31 @@ Each of these exits non-zero with a message saying why:
 | an edit with no `-o`, `-so` or `--in-place` | `-insert`/`-append`/`-delete`/`-update` need an explicit destination; there is no implied in-place |
 | `-o /dev/stdout` | output is written to a temp file beside the target and renamed, which needs a regular file. Use `-so` |
 | unknown flag | never swallowed as something else |
+
+### `-t` gates selections, never edits
+
+A selection produces a **fragment**, so whether the header goes with it is a
+question, and `-t` answers it. An edit produces a **file**, so it is not a
+question: the headers always go out, with or without `-t`, and to a `.csv2`
+destination both of them do.
+
+```console
+$ csv2 -head 1 -i pkgs.csv2 -o sel.csv2
+csv2: sel.csv2 declares a format with a header, so writing data rows there needs -t; without it the next read would take the first record(s) as the header
+csv2：sel.csv2 的副檔名宣告了帶標頭的格式，因此在此寫入資料列必須給 -t；否則下次讀取會把最前面的紀錄當成標頭
+$ echo $?
+1
+
+$ csv2 -update 1:note X -i pkgs.csv2 -o edited.csv2   # no -t, and no refusal
+$ head -2 edited.csv2
+pkg,ver,note
+套件,版本,備註
+```
+
+The asymmetry is the point. Refusing the edit would leave you no way to edit a
+`.csv2` at all without remembering a flag whose absence can only ever produce a
+broken file; accepting the selection would produce exactly that broken file.
+Asserted by T59.
 
 ### Masking a column: read this before using `-hash`
 
