@@ -22,7 +22,7 @@
 #
 # Usage / 用法:
 #   ./measure.zsh              measure with the defaults / 以預設值量測
-#   SIZE_MB=200 ./measure.zsh  bigger corpus / 更大的語料
+#   RECORDS=20000 ./measure.zsh   smaller corpus, for a slow guest / 較小的語料，供慢速 guest 使用
 # =====================================================================
 
 emulate -L zsh
@@ -37,7 +37,12 @@ zmodload zsh/datetime
 HERE=${0:A:h}
 ROOT=${HERE:h}
 : ${CSV2:=$ROOT/release/csv2}
-: ${SIZE_MB:=64}
+# Records, not megabytes. The corpus is built row by row, so the record count is
+# what is actually controlled; a size knob would have to be reported as an
+# estimate and would then disagree with the byte count printed below.
+# 以「筆數」而非 MB 為單位。語料是一列一列產生的，能被真正控制的是筆數；若以大小為
+# 旋鈕，它只能是估計值，並會與下方印出的實際位元組數不一致。
+: ${RECORDS:=200000}
 
 [[ -x $CSV2 ]] || { print -u2 -- "build first: $ROOT/compile_csv2.zsh"; exit 1 }
 
@@ -52,7 +57,6 @@ say "# csv2 measurements"
 say "date    : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 say "host    : $(uname -sm)"
 say "binary  : $($CSV2 --version)"
-say "corpus  : ${SIZE_MB} MiB"
 say ""
 
 # ---------------------------------------------------------------------
@@ -67,7 +71,7 @@ corpus=$TMP/big.csv2
   print -r -- 'pkg,version,size,source,purpose,notes,license'
   print -r -- '套件,版本,大小,來源,用途,註記,授權'
   i=0
-  while (( i < 200000 )); do
+  while (( i < RECORDS )); do
     print -r -- "pkg$i,1.$i.0,$((i % 900)) KiB,buildroot package,\"purpose, with a comma\",\"CORRECTED $i: prose with, commas and \"\"quotes\"\" in it\",MIT"
     (( i++ ))
   done
@@ -102,18 +106,34 @@ done
 mbs=$(( actual / 1048576.0 / best ))
 say "single-threaded : $(printf '%.3f' $best) s   $(printf '%.0f' $mbs) MiB/s"
 
-if [[ $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1) -gt 1 ]]; then
-    pbest=999999
-    for run in 1 2 3; do
-        s=$EPOCHREALTIME
-        CSV2_PARALLEL_MIN_BYTES=1000 $CSV2 -contains 'ZZ_NO_SUCH_STRING_ZZ' -i $corpus -so >/dev/null 2>&1
-        e=$EPOCHREALTIME
-        d=$(( e - s ))
-        (( d < pbest )) && pbest=$d
-    done
-    pmbs=$(( actual / 1048576.0 / pbest ))
-    say "parallel        : $(printf '%.3f' $pbest) s   $(printf '%.0f' $pmbs) MiB/s   speedup $(printf '%.2f' $(( best / pbest )))x"
-fi
+# The worker count comes from csv2's own -debug, not from `getconf
+# _NPROCESSORS_ONLN`. busybox has no getconf, so on the guest that call fails
+# and the fallback would silently report one core -- turning a measurement into
+# a guess that happens to look like a number. csv2 already knows how many
+# workers it started, and that is the figure the speedup should be divided by.
+# 工作者數量取自 csv2 自己的 -debug，而非 `getconf _NPROCESSORS_ONLN`。busybox 沒有
+# getconf，在 guest 上那個呼叫會失敗、退回值會靜默地宣稱「單核」——把一次量測變成一個
+# 長得像數字的猜測。csv2 本來就知道它啟動了幾個工作者，而加速比也該除以那個數字。
+pbest=999999
+for run in 1 2 3; do
+    s=$EPOCHREALTIME
+    CSV2_PARALLEL_MIN_BYTES=1000 $CSV2 -contains 'ZZ_NO_SUCH_STRING_ZZ' -i $corpus -so -debug \
+        >/dev/null 2>$TMP/dbg.txt
+    e=$EPOCHREALTIME
+    d=$(( e - s ))
+    (( d < pbest )) && pbest=$d
+done
+workers=$(grep -o '[0-9]* workers' $TMP/dbg.txt | head -1 | awk '{print $1}')
+: ${workers:=1}
+pmbs=$(( actual / 1048576.0 / pbest ))
+speedup=$(( best / pbest ))
+say "parallel        : $(printf '%.3f' $pbest) s   $(printf '%.0f' $pmbs) MiB/s   speedup $(printf '%.2f' $speedup)x on $workers workers"
+say "efficiency      : $(printf '%.0f' $(( speedup / workers * 100 )))% of linear"
+say "                  the boundary-finding pass is single-threaded, so this is"
+say "                  expected to be well under 100%; record it rather than"
+say "                  reading \"parallel\" as \"P times faster\"."
+say "                  找紀錄邊界的那一遍是單執行緒的，因此這個數字理應遠低於 100%；"
+say "                  把它記下來，不要把「平行」讀成「快 P 倍」。"
 say ""
 
 # ---------------------------------------------------------------------
@@ -162,6 +182,15 @@ for run in 1 2; do
 done
 wmbs=$(( actual / 1048576.0 / wbest ))
 say "rewrite whole   : $(printf '%.3f' $wbest) s   $(printf '%.0f' $wmbs) MiB/s"
+if (( RECORDS < 100000 )); then
+    say "                  NOTE: at RECORDS=$RECORDS the fixed costs above"
+    say "                  (process start, parse, flush) are a large share of"
+    say "                  this, so the MiB/s figure understates the steady"
+    say "                  rate. Only compare runs with the same RECORDS."
+    say "                  注意：在 RECORDS=$RECORDS 下，上面那些固定成本（行程啟動、"
+    say "                  解析、flush）佔了很大比例，因此 MiB/s 會低估穩態速率。"
+    say "                  只能與相同 RECORDS 的執行相比。"
+fi
 say ""
 
 # ---------------------------------------------------------------------
