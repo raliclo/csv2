@@ -2686,6 +2686,47 @@ printf 'caf\xc3\xa9,cafe\xcc\x81\nNFC,NFD\n' > "$TMP/t75_both.csv"
 assert_fails "T75g but two columns differing only in normalisation collide, and that is refused too / 但兩個只差在正規化形式的欄位會相撞，同樣會被拒" -- \
     "$CSV2" -get 1:$'caf\xc3\xa9' -i "$TMP/t75_both.csv"
 
+# T75h-T75k — the same root cause through a worse door, found by round 28.
+#
+# A record object keys `fields` by column name, and a JSON object cannot hold
+# two values under one key. csv2 emitted the duplicate key: legal per RFC 8259,
+# which leaves the interpretation unspecified, and collapsed by every parser in
+# use -- Python's json and JavaScript's JSON.parse keep the last and discard the
+# first. csv2's own bytes held both values; the reader's parser destroyed one
+# before the reader saw it.
+#
+# That is worse than the addressing bug above. There an address picked a column
+# silently; here a value is DESTROYED silently and cannot be recovered from the
+# parsed object by any means.
+#
+# T75h–T75k —— 同一個根本原因，透過一扇更糟的門，由第 28 回合發現。
+# 一筆紀錄的物件以欄名作為 `fields` 的鍵，而 JSON 物件無法在同一個鍵下放兩個值。csv2 照樣
+# 輸出了重複鍵：依 RFC 8259 合法（它把如何解讀列為未定義），而實際使用中的每一個解析器都會
+# 收合它——Python 的 json 與 JavaScript 的 JSON.parse 都留最後一個、丟第一個。csv2 自己的
+# 位元組裡兩個值都在；是讀者的解析器在讀者看到之前毀掉了其中一個。
+# 那比上面的定址缺陷更糟：那裡是一個位址靜默地挑了一欄，這裡是一個值被靜默地毀掉，
+# 而且從解析後的物件裡再也無法以任何方式取回。
+assert_fails "T75h record-shaped --json is refused when two columns share a name / 兩欄同名時，紀錄形狀的 --json 會被拒" -- \
+    "$CSV2" -r --json -i "$TMP/t75.csv"
+"$CSV2" -r --json -i "$TMP/t75.csv" 2>"$TMP/t75_j.txt" >/dev/null
+assert_contains "$(head -1 "$TMP/t75_j.txt")" "one value would be lost" \
+    "T75i and the message says what would happen, not just that it is refused / 而訊息說出會發生什麼事，不只是說被拒"
+
+# The report shape is not name-keyed, so two columns with one name are two
+# lines. It has to keep working, or the refusal above would leave no way to
+# read such a file as JSON at all.
+# 報告形狀不以名稱為鍵，因此兩個同名欄位是兩行。它必須繼續可用，否則上面那條拒絕會讓這種
+# 檔案完全沒有辦法以 JSON 讀取。
+assert_succeeds "T75j while -contains --json still works, reporting each hit separately / 而 -contains --json 仍可用，分別回報每一個命中" -- \
+    "$CSV2" -contains first --json -i "$TMP/t75.csv"
+
+# And an ordinary file must be untouched: this refusal keys off duplicate names,
+# not off --json.
+# 而一般檔案必須完全不受影響：這條拒絕的觸發條件是「名稱重複」，不是「用了 --json」。
+printf 'a,b\n1,2\n' > "$TMP/t75_ok.csv"
+assert_contains "$("$CSV2" -r --json -i "$TMP/t75_ok.csv" 2>/dev/null | sed -n 2p)" '"fields":{"a":"1","b":"2"}' \
+    "T75k and a file with distinct names is unaffected / 欄名不重複的檔案完全不受影響"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

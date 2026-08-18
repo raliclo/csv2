@@ -302,6 +302,48 @@ final class JSONEmitter: RecordEmitter {
     init(sink: ByteSink, reportMode: Bool) { self.sink = sink; self.reportMode = reportMode }
 
     func begin(_ ctx: EmitContext) throws {
+        // A record object keys `fields` by column name, and a JSON object
+        // cannot hold two values under one key. Emitting both anyway produces a
+        // duplicate key: syntactically permitted by RFC 8259, which leaves the
+        // interpretation unspecified, and collapsed by every parser anybody
+        // actually uses -- Python's json and JavaScript's JSON.parse both keep
+        // the last and discard the first. csv2's own bytes contain both values;
+        // the reader's parser destroys one before the reader ever sees it.
+        //
+        // That is worse than the duplicate-name bug fixed alongside it. There,
+        // an address picked a column silently. Here a value is DESTROYED
+        // silently, and it is unrecoverable from the parsed object by any
+        // means, so "fields is keyed by column name, which is the way to pull
+        // one column out without counting" is not merely ambiguous for such a
+        // file -- it is false.
+        //
+        // Refused, the same way an ambiguous address is refused, and pointing
+        // at the shapes that can carry it. The report shape is unaffected: it
+        // emits record, field, header_en and value per hit, so two columns with
+        // one name are two lines, not one lost key.
+        //
+        // 一筆紀錄的物件以「欄名」作為 `fields` 的鍵，而一個 JSON 物件無法在同一個鍵下
+        // 放兩個值。照樣輸出的結果是重複鍵：RFC 8259 在語法上允許（它把「如何解讀」列為
+        // 未定義），而實際上每一個有人在用的解析器都會把它收合——Python 的 json 與
+        // JavaScript 的 JSON.parse 都留下最後一個、丟掉第一個。csv2 自己的位元組裡兩個值
+        // 都在；是讀者的解析器在讀者看到之前就毀掉了其中一個。
+        // 那比與它一同修正的「同名欄位」缺陷更糟。那裡是一個位址靜默地挑了一欄；這裡是一個值
+        // 被靜默地「毀掉」，而且從解析後的物件裡再也無法以任何方式取回。因此「fields 以欄名
+        // 為鍵，那是不必數欄位就能取出某一欄的方法」對這種檔案而言不只是有歧義——它是假的。
+        // 因此拒絕，方式與拒絕一個有歧義的位址相同，並指出承載得了它的那些形狀。報告形狀
+        // 不受影響：它每個命中輸出 record、field、header_en 與 value，因此兩個同名欄位是
+        // 兩行，而不是一個被丟掉的鍵。
+        if !reportMode, let header = ctx.headers.first {
+            var seen = Set<String>()
+            for f in header.fields {
+                let n = baseName(headerName(f))
+                if !seen.insert(n).inserted {
+                    throw fault(
+                        "--json keys each record by column name, and \"\(n)\" names more than one column, so one value would be lost when the line is parsed; read it without --json, or use -contains --json which reports each hit separately",
+                        "--json 以欄名作為每一筆的鍵，而「\(n)」指向不只一個欄位，於是該行被解析時會遺失一個值；請不加 --json 讀取，或改用 -contains --json——它會分別回報每一個命中")
+                }
+            }
+        }
         // JSON Lines, not one big array, so it streams -- consistent with
         // `-so` promising not to buffer the whole output.
         // 採 JSON Lines 而非一個大陣列，如此才能串流——與 `-so` 承諾不緩衝整份

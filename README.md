@@ -510,7 +510,12 @@ $ csv2 -mid 5,5 --json -i TARGET_PACKAGES.csv
 ```
 
 `fields` is keyed by column name, which is the way to pull one column out
-without counting.
+without counting — and for the same reason, a record whose header has **two
+columns with one name cannot be emitted this way**: a JSON object cannot hold
+two values under one key, and every parser in use keeps the last and discards
+the first. csv2 refuses rather than emitting a line that loses data once it is
+parsed. Read it without `--json`, or use `-contains --json`, whose report shape
+gives each hit its own line and is unaffected. Asserted by T75.
 
 `-md` emits a Markdown table and is one-way — csv2 cannot read it back. Writing
 it to a `.csv`/`.csv2` path with `-o` is refused, and if you route around that
