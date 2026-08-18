@@ -2483,6 +2483,84 @@ assert_eq "$(print -r -- "$qpar" | grep -c '^20:')" "1" \
 assert_contains "$qpar" 'several, embedded, commas' \
     "T72j with its embedded commas intact / 其內嵌逗號完好無損"
 
+# ---------------------------------------------------------------------
+# T73 -- redaction follows the FILE's declaration, not the run's activity.
+#
+# Round 25 went at -log because it is the one feature that persists data to
+# disk with no documented content policy, and asked whether it reintroduces the
+# exposure the absent -key flag exists to avoid.
+#
+# It found the command echo redacted -- `-update 1:4 <value>` -- and the
+# operation line two lines below it printing the same string in the clear. Its
+# words: something decided the value should not appear, and something else
+# wrote it anyway.
+#
+# Verifying it showed worse. The redaction set was populated only by
+# buildTransform, from the columns being transformed IN THIS RUN. So `-hash
+# secret` redacted `secret` in its own log, and `-update 1:secret NEW` on the
+# resulting file -- whose header reads `secret:hmac:<fp>`, the file stating in
+# writing that the column is sensitive -- wrote NEW in the clear. The run that
+# put the secret in was protected. The run that changed it was not.
+#
+# T73 —— 遮蔽依據的是「檔案的宣告」，而非「本次執行在做什麼」。
+# 第 25 回合去查 -log，因為它是唯一一個「會把資料寫進磁碟、卻沒有任何內容政策記載」的功能，
+# 並提問：它是否重新引入了「刻意不提供 -key」所要避免的那種暴露。
+# 它發現指令列回顯被遮蔽了——`-update 1:4 <value>`——而兩行之下的操作紀錄，卻把同一個字串
+# 明文寫出。用它的話說：有東西決定了那個值不該出現，而另一個東西照樣把它寫了下去。
+# 查證之後發現更糟。遮蔽集合只由 buildTransform 依「本次要轉換的欄位」填入。於是
+# `-hash secret` 會在它自己的 log 裡遮蔽 secret，而對其產物執行 `-update 1:secret NEW`
+# ——那個檔案的標頭寫著 `secret:hmac:<fp>`，是檔案白紙黑字宣告該欄位敏感——卻會把 NEW
+# 明文寫出。放進秘密的那次執行受保護，改動它的那次執行不受保護。
+# ---------------------------------------------------------------------
+echo
+echo "--- T73: redaction follows the file, not the run / 遮蔽依據檔案，而非本次執行 ---"
+
+printf 'pkg,secret,license\na,s1,MIT\nb,s2,GPL\n' > "$TMP/t73.csv"
+head -c 32 /dev/urandom > "$TMP/t73.key"
+"$CSV2" -hash secret -keyfile "$TMP/t73.key" -i "$TMP/t73.csv" -o "$TMP/t73_h.csv" -t 2>/dev/null
+
+# The run that changes a protected cell performs no transform of its own.
+# 改動一個受保護儲存格的那次執行，自身完全沒有做任何轉換。
+rm -f "$TMP/t73.log"
+"$CSV2" -update 1:secret 'SUPER SECRET 12345' -i "$TMP/t73_h.csv" -o "$TMP/t73_o.csv" \
+    -log "$TMP/t73.log" 2>/dev/null
+if grep -q 'SUPER SECRET 12345' "$TMP/t73.log"; then
+    bad "T73a the log leaked a value written into a column the file marks protected / log 洩漏了一個寫入「檔案標記為受保護」欄位的值"
+else
+    ok "T73a a value written into a protected column stays out of the log / 寫入受保護欄位的值不會進入 log"
+fi
+assert_contains "$(grep -o 'update 1:secret.*' "$TMP/t73.log")" "<redacted>" \
+    "T73b and the line says so rather than omitting the record / 而那一行會明說，不是把紀錄整個略去"
+
+# The log must stay USEFUL. Redacting everything would be safe and worthless:
+# an audit trail that cannot say what changed is not one.
+# log 必須維持「有用」。全部遮蔽既安全又毫無價值：一份說不出改了什麼的稽核軌跡，不是稽核軌跡。
+rm -f "$TMP/t73b.log"
+"$CSV2" -update 1:license 'GPL-3.0' -i "$TMP/t73.csv" -o "$TMP/t73_o2.csv" \
+    -log "$TMP/t73b.log" 2>/dev/null
+assert_contains "$(grep -o 'update 1:license.*' "$TMP/t73b.log")" 'GPL-3.0' \
+    "T73c while an ordinary column still records what changed / 而一般欄位仍然記錄了改了什麼"
+
+# The value must really be in the OUTPUT -- redaction is about the log, not
+# about refusing the edit. Without this, T73a could pass by the write failing.
+# 那個值必須真的在「輸出」裡——遮蔽針對的是 log，不是拒絕該次編輯。少了這一條，T73a 可能
+# 因為「寫入失敗」而通過。
+assert_eq "$("$CSV2" -get 1:secret -i "$TMP/t73_o.csv" 2>/dev/null)" 'SUPER SECRET 12345' \
+    "T73d and the value really was written to the file / 而那個值確實已寫入檔案"
+
+# Key bytes never appear, whatever else does.
+# 不論別的如何，金鑰位元組永不出現。
+rm -f "$TMP/t73c.log"
+"$CSV2" -hash secret -keyfile "$TMP/t73.key" -i "$TMP/t73.csv" -o "$TMP/t73_h2.csv" -t \
+    -log "$TMP/t73c.log" 2>/dev/null
+if grep -qa "$(head -c 8 "$TMP/t73.key" | od -An -tx1 | tr -d ' \n')" "$TMP/t73c.log"; then
+    bad "T73e key bytes appear in the log / 金鑰位元組出現在 log 中"
+else
+    ok "T73e key bytes never appear in the log / 金鑰位元組不會出現在 log 中"
+fi
+assert_contains "$(cat "$TMP/t73c.log")" "fingerprint" \
+    "T73f but the fingerprint does, which identifies the key without being it / 但指紋會出現——它標識金鑰而不是金鑰本身"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

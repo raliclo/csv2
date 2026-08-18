@@ -614,6 +614,37 @@ func applyTransform(_ t: CellTransform, to record: inout Record, header: Record)
     }
 }
 
+/// Any column the FILE says is protected joins the redaction set, whatever this
+/// run is doing.
+///
+/// Before 2026-08-18 the set was populated only by buildTransform, from the
+/// columns being transformed right now. So `-hash secret` redacted `secret` in
+/// its own log, and `-update 1:secret NEW` on the resulting file -- a header
+/// reading `secret:hmac:d6c8da42`, the file declaring in writing that the
+/// column is sensitive -- wrote NEW to the log in the clear. The run that put
+/// the value in was protected; the run that changed it was not.
+///
+/// The header is the file's own statement about which columns hold secrets. It
+/// outlives any single invocation, and it is the only thing that can be right
+/// about a file the caller did not create.
+///
+/// 任何「檔案自己說它受保護」的欄位都會進入遮蔽集合，不論這次執行在做什麼。
+/// 2026-08-18 之前，這個集合只由 buildTransform 依「本次要轉換的欄位」填入。於是
+/// `-hash secret` 會在它自己的 log 裡遮蔽 secret，而對其產物執行 `-update 1:secret NEW`
+/// ——那個檔案的標頭寫著 `secret:hmac:d6c8da42`，是這個檔案白紙黑字宣告該欄位敏感——卻會把
+/// NEW 明文寫進 log。放進那個值的那次執行受保護，改動它的那次執行不受保護。
+/// 標頭是檔案自己對「哪些欄位存放秘密」的陳述。它比任何單次呼叫都活得久，而且它是唯一
+/// 可能對「一個不是呼叫者建立的檔案」說得準的東西。
+func redactColumnsDeclaredByHeader(_ header: Record) {
+    for f in header.fields {
+        let n = headerName(f)
+        let isProtected = EncMarker.parse(n) != nil
+            || n.hasSuffix(":hash")
+            || n.range(of: ":hmac:", options: .backwards) != nil
+        if isProtected { Logger.shared.redactedColumns.insert(baseName(n)) }
+    }
+}
+
 func markHeaders(_ headers: inout [Record], transform: CellTransform) {
     switch transform {
     case .encrypt(let cols, _, let fp, let salt, let names):

@@ -336,6 +336,36 @@ letter comes from the field number the same way: field 3 is `C`.
 `-contains` and are refused with `-r`, `--filter`, `-md` and `--json` — those do
 not emit an address for anything to be added to.
 
+### What `-log` writes, and what it does not
+
+`-log FILE` appends a timestamped record of the operation. It is an audit trail,
+so it records what changed — which means it has to be explicit about what it
+will not record:
+
+| | In the log |
+|---|---|
+| the invocation | yes, but values are replaced: `-update 1:6 <value>`, `-insert 3 <row>` |
+| key **bytes** | never |
+| the keyfile **path**, and the key fingerprint | yes — they identify which key, not what it is |
+| old and new values in an **ordinary** column | in full; that is the point of an audit trail |
+| old and new values in a **protected** column | `<redacted>` |
+
+A column counts as protected when **the file's own header says so** — a header
+reading `secret:hmac:d6c8da42` or `secret:enc:…` marks it — not merely when the
+current run is the one encrypting or hashing it. So editing a cell in an
+already-protected column redacts, even though that run performs no transform of
+its own:
+
+```console
+$ csv2 -update 1:secret "new value" -i pkgs.csv -o out.csv -log app.log
+$ grep update app.log
+INFO  update 1:secret: <redacted> -> <redacted>
+```
+
+**The log is a file on disk with normal permissions.** Redaction keeps secrets
+out of it; it is not a reason to put the log somewhere careless. Asserted by
+T40 and T73.
+
 ### Two numberings, and where they disagree
 
 `-rownum` prepends a column. Everything else keeps the numbering it had:

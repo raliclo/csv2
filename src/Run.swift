@@ -402,7 +402,12 @@ func runSelect(_ o: Options) throws {
     func headersComplete() throws {
         try validateHeaders(headers, want: plan.headerRows, path: plan.describedPath)
         expectedFields = headers[0].count
-        transform = try buildTransform(o, headers: headers)
+        // Before buildTransform, so a column the file already marks is redacted even
+                    // when this run performs no transform at all.
+                    // 放在 buildTransform 之前，好讓「檔案已標記的欄位」即使在本次完全沒有
+                    // 轉換時也會被遮蔽。
+                    redactColumnsDeclaredByHeader(headers[0])
+                    transform = try buildTransform(o, headers: headers)
         markHeaders(&headers, transform: transform)
         ctx = EmitContext(
             format: plan.format, headers: headers, withHeader: o.withHeader,
@@ -662,6 +667,11 @@ func runEdit(_ o: Options) throws {
                 if headers.count == plan.headerRows {
                     try validateHeaders(headers, want: plan.headerRows, path: plan.describedPath)
                     expectedFields = headers[0].count
+                    // Before buildTransform, so a column the file already marks is redacted even
+                    // when this run performs no transform at all.
+                    // 放在 buildTransform 之前，好讓「檔案已標記的欄位」即使在本次完全沒有
+                    // 轉換時也會被遮蔽。
+                    redactColumnsDeclaredByHeader(headers[0])
                     transform = try buildTransform(o, headers: headers)
                     markHeaders(&headers, transform: transform)
                     if !dropTokens.isEmpty {
