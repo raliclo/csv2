@@ -845,6 +845,49 @@ fi
 assert_eq "$("$CSV2" -tail 1 -i "$TMP/big.csv" 2>/dev/null)" 'ap3,v,s,src,purpose,note,MIT' \
     "T43c with the last appended record where it belongs / 而最後追加的那一筆就在它該在的位置"
 
+# T43d-T43f — the fast path is scoped to --in-place, and the scope is required
+# by another guarantee rather than being an oversight.
+#
+# The README says "O(1) WHEN WRITING IN PLACE". Round 30 tested the boundary and
+# it holds sharply: -o on a 207 MB file took 5.8 s against 4 ms in place,
+# scaling with size, because it rewrites. That is not a missed optimisation. -o
+# promises that a run which fails writes nothing to it, which needs temp+rename;
+# an append that extends the destination directly cannot offer that, because a
+# failure halfway leaves the destination longer than it started.
+#
+# Asserted through the log rather than a clock: the two paths say different
+# things, and timing assertions are the kind that fail on a loaded machine for
+# reasons unrelated to the code.
+#
+# T43d–T43f —— 快路徑的適用範圍限於 --in-place，而那個範圍是「另一條保證」所要求的，
+# 不是疏漏。
+# README 寫的是「就地寫入時為 O(1)」。第 30 回合測了那條界線，而它守得很利落：對一個
+# 207 MB 的檔案使用 -o 要 5.8 秒，就地則是 4 毫秒，且隨大小成長——因為它會重寫。
+# 那不是一個被漏掉的最佳化。-o 承諾「失敗的執行不會在它上面留下任何東西」，那需要
+# temp+rename；而一個「直接把目的地延長」的追加做不到這件事，因為中途失敗會留下一個
+# 比原本更長的目的地。
+# 以 log 而非碼錶斷言：兩條路徑說的話不同，而計時斷言正是那種會在機器忙碌時、因為與程式碼
+# 無關的理由而失敗的東西。
+cp "$TMP/big.csv" "$TMP/big_o.csv"
+rm -f "$TMP/a3.log" "$TMP/a4.log"
+"$CSV2" -append 'zz,v,s,src,purpose,note,MIT' -i "$TMP/big_o.csv" -o "$TMP/big_o_out.csv" \
+    -log "$TMP/a3.log" 2>/dev/null
+"$CSV2" -append 'zz,v,s,src,purpose,note,MIT' -i "$TMP/big_o.csv" --in-place \
+    -log "$TMP/a4.log" 2>/dev/null
+
+if grep -q 'append fast path' "$TMP/a4.log"; then
+    ok "T43d --in-place takes the fast path, and says so / --in-place 走快路徑，而且它會這樣說"
+else
+    bad "T43d expected the fast path with --in-place / 預期 --in-place 走快路徑"
+fi
+if grep -q 'append fast path' "$TMP/a3.log"; then
+    bad "T43e -o must NOT take the fast path: it could not then promise that a failed run writes nothing / -o 不該走快路徑：那樣它就無法承諾「失敗的執行不留下任何東西」"
+else
+    ok "T43e while -o rewrites instead, which is what lets it promise a failed run writes nothing / 而 -o 改為重寫，那正是它得以承諾「失敗的執行不留下任何東西」的原因"
+fi
+assert_contains "$(cat "$TMP/a3.log")" 'atomic rename OK' \
+    "T43f and -o reports the rename, the guarantee it is paying for / 而 -o 會回報那次 rename，也就是它付出代價換來的那條保證"
+
 # T44 — a .csv with no trailing newline must become TWO records, not one
 # record glued onto the tail of the last.
 cp "$TMP/nonl2.csv" "$TMP/t44.csv"
