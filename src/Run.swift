@@ -388,7 +388,8 @@ func runSelect(_ o: Options) throws {
         ctx = EmitContext(
             format: plan.format, headers: headers, withHeader: o.withHeader,
             rownum: o.rownum, zh: o.zh, physical: o.physical, a1: o.a1,
-            jsonASCII: o.jsonASCII, enOnly: o.enOnly, preserveRaw: true)
+            jsonASCII: o.jsonASCII, enOnly: o.enOnly, preserveRaw: true,
+            contextActive: o.after > 0 || o.before > 0)
         try emitter.begin(ctx!)
         if searching && o.includeHeaders {
             for (i, h) in headers.enumerated() {

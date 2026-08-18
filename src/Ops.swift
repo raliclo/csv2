@@ -61,6 +61,17 @@ struct EmitContext {
     var jsonASCII: Bool
     var enOnly: Bool
     var preserveRaw: Bool
+    /// True when -A/-B/-C is in force. Those flags imply --filter, and a
+    /// filtered stream of records normally needs no marking because every
+    /// record in it matched. With context it does: the emitted records are a
+    /// mixture, and without a mark the only trace that a match happened at all
+    /// is the trailing `matched` count -- a bare number with nothing to attach
+    /// it to.
+    /// -A/-B/-C 生效時為 true。那些旗標隱含 --filter，而經過篩選的紀錄串流通常不需要
+    /// 標記，因為裡面每一筆都是命中。有了上下文就需要了：送出的紀錄是混在一起的，
+    /// 而少了標記，「曾經有命中」這件事唯一的痕跡就是末行的 matched 計數——一個沒有東西
+    /// 可以掛上去的裸數字。
+    var contextActive: Bool = false
 }
 
 protocol RecordEmitter: AnyObject {
@@ -277,6 +288,16 @@ final class JSONEmitter: RecordEmitter {
             return
         }
         var parts = ["\"record\":\(r.number)", "\"line\":\(r.line)"]
+        // Only when context is on. Without it every emitted record matched, so
+        // the key would be constant true on every line -- noise that a consumer
+        // has to read and can never learn anything from, and a change to output
+        // that is already documented and tested.
+        // 只在有上下文時加。沒有上下文時，送出的每一筆都是命中，這個鍵會在每一行都是
+        // 固定的 true——那是消費端必須讀、卻永遠學不到東西的雜訊，也會更動一份已經被
+        // 記載且被測試的輸出。
+        if ctx.contextActive {
+            parts.append("\"match\":\(matches.isEmpty ? "false" : "true")")
+        }
         var cells: [String] = []
         for (i, f) in r.fields.enumerated() {
             let key = ctx.headers.first.map { i < $0.count ? baseName(headerName($0.fields[i])) : "\(i + 1)" } ?? "\(i + 1)"

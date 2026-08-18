@@ -277,6 +277,31 @@ header rows too — and see the refusals below for when `-t` is not optional.
 so there is nothing for a cell report to say about it. Blocks that are not
 adjacent are separated by `--`, as in grep.
 
+**"As in grep" is about the `--` separator, not about grep's `-`/`:` line
+markers.** grep marks a context line differently from a matched one; the CSV
+output cannot, because a marker in a CSV row would be a field, and a row with an
+extra field is a broken record. So with `-A`/`-B`/`-C` the CSV output is a
+mixture of matches and context that nothing distinguishes — and `-contains`
+exists precisely to give you the `record:field` address, so if you need the
+address, run it once without context to get the addresses and once with context
+to read around them.
+
+`--json` has no such constraint and does mark them, but only when context is on
+— without it, every emitted record matched and the key would be a constant:
+
+```console
+$ csv2 -contains zstd -C 1 --json -i pkgs.csv
+{"meta":{"format":"csv","headers":1,"fields":2}}
+{"record":2,"line":3,"match":false,"fields":{"pkg":"zlib","ver":"2"}}
+{"record":3,"line":4,"match":true,"fields":{"pkg":"zstd","ver":"3"}}
+{"record":4,"line":5,"match":false,"fields":{"pkg":"ncurses","ver":"4"}}
+{"meta":{"records":4,"matched":1}}
+```
+
+The trailing `matched` is a count, not an index — before 2026-08-18 it was the
+only surviving trace that a match had happened, with nothing to attach it to.
+A README-only reader found that. Asserted by T63.
+
 ```console
 $ csv2 -contains busybox --json -i TARGET_PACKAGES.csv
 {"meta":{"format":"csv","headers":1,"fields":7}}

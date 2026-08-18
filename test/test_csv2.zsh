@@ -68,6 +68,68 @@ assert_contains() { # haystack needle desc
 }
 # assert_fails DESC -- cmd...  — the command MUST exit non-zero
 # assert_fails 說明 -- 指令...  —— 該指令必須以非零結束
+# One cell, extracted with csv2 rather than with `cut -d,`.
+#
+# The suite used `cut -d, -fN` on csv2's own output in twelve places. On this
+# project's own fixture that is demonstrably wrong: TARGET_PACKAGES.csv has
+# quoted commas in status_notes, and `cut -d, -f6` on record 1 returns a
+# fragment of prose beginning mid-value. The encrypted variant happened to come
+# out right only because `purpose` has no comma in that one record -- correct by
+# luck, and correct until somebody edits the fixture.
+#
+# A test suite proving that comma splitting is unsafe, while splitting on commas
+# to check its own results, is not a contradiction that can be left standing:
+# the day the fixture changes, the check breaks in exactly the way the tool
+# exists to prevent, and it breaks silently.
+#
+# Implemented by projection -- delete every other column, then take the record.
+# That uses only operations csv2 defines, so the accessor is as correct as the
+# parser it is testing. Test scripts are the one place in this tree permitted to
+# invoke csv2 for this.
+#
+# 用 csv2 而不是 `cut -d,` 取出一格。
+# 這份測試在十二處對 csv2 自己的輸出使用 `cut -d, -fN`。在本專案自己的 fixture 上，那是
+# 可以實證的錯誤：TARGET_PACKAGES.csv 的 status_notes 含有引號內的逗號，對第 1 筆下
+# `cut -d, -f6` 會回傳一段從值中間開始的散文碎片。加密後的版本之所以剛好正確，只因為那一筆
+# 的 purpose 沒有逗號——正確得靠運氣，而且只正確到有人動了 fixture 為止。
+# 一份證明「逗號切割不安全」的測試，自己卻用逗號切割來檢查結果，這個矛盾不能留著：fixture
+# 改動的那一天，這個檢查會以這支工具存在所要防止的那種方式壞掉，而且是靜默地壞掉。
+# 作法是「投影」——刪掉其餘每一欄，再取那一筆。它只用到 csv2 自己定義的操作，因此這個存取子
+# 與它所測試的解析器一樣正確。測試腳本是這棵樹裡唯一被允許為此呼叫 csv2 的地方。
+_project() {  # _project <file> <column-number> -> path to a one-column copy
+    local f=$1 c=$2 i
+    local n=$("$CSV2" -head 1 -t --json -i "$f" 2>/dev/null | head -1 \
+              | grep -o '"fields":[0-9]*' | cut -d: -f2)
+    local -a drop
+    for i in {1..$n}; do (( i == c )) || drop+=(-delete -col $i); done
+    "$CSV2" $drop -i "$f" -o "$TMP/.cell.$$.csv" 2>/dev/null || return 1
+    print -r -- "$TMP/.cell.$$.csv"
+}
+
+# Returns the field AS CSV ENCODES IT: a value containing a comma, quote or
+# newline comes back quoted. Decoding it here would mean writing a second
+# parser inside the tests for the parser.
+# 回傳的是「CSV 編碼後」的欄位：含逗號、引號或換行的值會帶著引號回來。在此解碼等於在
+# 「解析器的測試」裡再寫一個解析器。
+cell() {   # cell <file> <record> <column-number>
+    local p=$(_project "$1" "$3") || return 1
+    "$CSV2" -mid "$2,$2" -i "$p" 2>/dev/null
+    rm -f "$p" "$p.index"
+}
+
+# The header cell, by the same projection. `head -1 | cut -d, -f2` was the last
+# comma split left, and a header name is no safer than a value: it is a CSV
+# field and may be quoted and contain a comma. After projection the whole line
+# IS the field, so no split is needed at all.
+# 標頭那一格，用同樣的投影取得。`head -1 | cut -d, -f2` 是最後殘留的逗號切割，而標頭名稱
+# 並不比值安全：它就是一個 CSV 欄位，同樣可以帶引號並含有逗號。投影之後整行「就是」那個
+# 欄位，於是根本不需要切割。
+header_cell() {  # header_cell <file> <column-number>
+    local p=$(_project "$1" "$2") || return 1
+    head -1 "$p"
+    rm -f "$p" "$p.index"
+}
+
 assert_fails() {
     local desc="$1"; shift; [[ "$1" == "--" ]] && shift
     local out
@@ -484,9 +546,9 @@ echo "--- Phase 4: editing, encryption, logging / 第 4 階段：編輯、加密
 
 # T27 — the whole point of "all indexes refer to the input".
 "$CSV2" -delete 3 -delete 4 -i "$PKG" -o "$TMP/t27.csv" 2>/dev/null
-orig3=$("$CSV2" -mid 3,3 -i "$PKG" 2>/dev/null | cut -d, -f1)
-orig5=$("$CSV2" -mid 5,5 -i "$PKG" 2>/dev/null | cut -d, -f1)
-new3=$("$CSV2" -mid 3,3 -i "$TMP/t27.csv" 2>/dev/null | cut -d, -f1)
+orig3=$(cell "$PKG" 3 1)
+orig5=$(cell "$PKG" 5 1)
+new3=$(cell "$TMP/t27.csv" 3 1)
 if [[ "$new3" == "$orig5" && "$new3" != "$orig3" ]]; then
     ok "T27 -delete 3 -delete 4 deletes INPUT records 3 and 4 / 刪的是輸入的第 3、4 筆"
 else
@@ -498,7 +560,7 @@ cp "$PKG" "$TMP/t28.csv"
 assert_fails "T28a -i and -o the same path is refused by default / 同路徑預設拒絕" -- \
     "$CSV2" -update '1:1' 'zzz' -i "$TMP/t28.csv" -o "$TMP/t28.csv"
 "$CSV2" -update '1:1' 'zzz' -i "$TMP/t28.csv" --in-place 2>/dev/null
-v=$("$CSV2" -mid 1,1 -i "$TMP/t28.csv" 2>/dev/null | cut -d, -f1)
+v=$(cell "$TMP/t28.csv" 1 1)
 assert_eq "$v" "zzz" "T28b --in-place edits via temp file and rename / --in-place 以暫存檔加 rename 完成"
 cp "$PKG" "$TMP/t28c.csv"
 "$CSV2" -update '99:1' 'zzz' -i "$TMP/t28c.csv" --in-place 2>/dev/null
@@ -554,7 +616,7 @@ assert_same "$PKG" "$TMP/dec.csv" "T34a encrypt then decrypt restores every byte
 # would land in the license column and prove nothing about the AEAD.
 # 在加密的儲存格「內部」改一個字元。改行尾會落在 license 欄，對 AEAD 什麼都
 # 證明不了。
-ct=$("$CSV2" -mid 1,1 -i "$TMP/enc.csv" 2>/dev/null | cut -d, -f6)
+ct=$(cell "$TMP/enc.csv" 1 6)
 flip=$(print -r -- "$ct" | sed 's/^A/B/; t; s/^./A/')
 "$CSV2" -update '1:6' "$flip" -i "$TMP/enc.csv" -o "$TMP/tamper.csv" 2>/dev/null
 assert_fails "T34b a tampered ciphertext fails to decrypt / 密文被竄改即解密失敗" -- \
@@ -995,7 +1057,7 @@ head -c 64 /dev/urandom > "$TMP/t55.key"
 head -c 64 /dev/urandom > "$TMP/t55b.key"
 
 "$CSV2" -hash lic -i "$TMP/t55.csv" -o "$TMP/t55_plain.csv" -t 2>/dev/null
-plain_mit=$("$CSV2" -mid 1,1 -i "$TMP/t55_plain.csv" 2>/dev/null | cut -d, -f2)
+plain_mit=$(cell "$TMP/t55_plain.csv" 1 2)
 # The unkeyed form is plain SHA-256 of the value, and this asserts it IS -- so
 # that anyone reading the suite sees the exposure rather than inferring it.
 # 無金鑰形式就是該值的純 SHA-256，此處直接斷言「它就是」——讓讀測試的人看見這個
@@ -1019,7 +1081,7 @@ want_sha=$(sha256_of 'MIT')
 assert_eq "$plain_mit" "$want_sha" "T55a -hash without a key is plain SHA-256 of the value, dictionary-attackable / 無金鑰的 -hash 就是該值的純 SHA-256，可被字典攻擊"
 
 "$CSV2" -hash lic -keyfile "$TMP/t55.key" -i "$TMP/t55.csv" -o "$TMP/t55_keyed.csv" -t 2>/dev/null
-keyed_mit=$("$CSV2" -mid 1,1 -i "$TMP/t55_keyed.csv" 2>/dev/null | cut -d, -f2)
+keyed_mit=$(cell "$TMP/t55_keyed.csv" 1 2)
 if [[ "$keyed_mit" != "$want_sha" && -n "$keyed_mit" ]]; then
     ok "T55b -hash with a key is not the plain SHA-256, so the dictionary does not apply / 有金鑰的 -hash 不是純 SHA-256，字典因此失效"
 else
@@ -1030,9 +1092,9 @@ fi
 # Losing that would make the feature pointless, keyed or not.
 # 選擇雜湊而非加密的全部理由，就是相等的值仍然相等。失去它，這個功能不論有沒有金鑰
 # 都失去意義。
-a=$("$CSV2" -mid 1,1 -i "$TMP/t55_keyed.csv" 2>/dev/null | cut -d, -f2)
-c=$("$CSV2" -mid 3,3 -i "$TMP/t55_keyed.csv" 2>/dev/null | cut -d, -f2)
-b=$("$CSV2" -mid 2,2 -i "$TMP/t55_keyed.csv" 2>/dev/null | cut -d, -f2)
+a=$(cell "$TMP/t55_keyed.csv" 1 2)
+c=$(cell "$TMP/t55_keyed.csv" 3 2)
+b=$(cell "$TMP/t55_keyed.csv" 2 2)
 if [[ "$a" == "$c" && "$a" != "$b" ]]; then
     ok "T55c keyed hashing keeps equal values equal and unequal values unequal / 有金鑰的雜湊：相等仍相等、不等仍不等"
 else
@@ -1049,8 +1111,8 @@ fi
 # The file records WHICH form was used. Without that a reader cannot tell a
 # dictionary-attackable column from a protected one.
 # 檔案記錄用的是哪一種形式。少了它，讀者分不出「可被字典攻擊的欄位」與「受保護的欄位」。
-h_plain=$(head -1 "$TMP/t55_plain.csv" | cut -d, -f2)
-h_keyed=$(head -1 "$TMP/t55_keyed.csv" | cut -d, -f2)
+h_plain=$(header_cell "$TMP/t55_plain.csv" 2)
+h_keyed=$(header_cell "$TMP/t55_keyed.csv" 2)
 if [[ "$h_plain" == "lic:hash" && "$h_keyed" == lic:hmac:* ]]; then
     ok "T55e the header records which form was used / 標頭記錄了使用的是哪一種形式"
 else
@@ -1659,6 +1721,129 @@ assert_eq "$(wc -c < "$TMP/t62_rw.txt" | tr -d ' ')" "0" \
     "T62i and replacing an index says nothing on stderr either / 替換索引時 stderr 同樣不說話"
 
 unset CSV2_INDEX_MIN_BYTES
+
+# ---------------------------------------------------------------------
+# T63 -- with context on, --json says which record matched.
+#
+# Round 13 of the blind testing. -A/-B/-C imply --filter, and the reader
+# noticed that the emitted stream is then a MIXTURE of matches and context with
+# nothing separating them. grep distinguishes the two; the README says "as in
+# grep" right next to the context flags, which invited exactly that expectation.
+#
+# The CSV output genuinely cannot mark them -- a marker in a CSV row is a field,
+# and a row with an extra field is a broken record, so the tool would be
+# corrupting its own format to be helpful. That half is documented instead.
+# --json has no such constraint and now carries "match":true|false, but ONLY
+# when context is on: without it every emitted record matched, so the key would
+# be a constant on every line and a change to an output already documented and
+# tested.
+#
+# T63 —— 有上下文時，--json 會說出是哪一筆命中。
+# 盲測第 13 回合。-A/-B/-C 隱含 --filter，而讀者注意到送出的串流因此是命中與上下文的
+# 「混合」，兩者之間沒有任何區別。grep 會區分這兩者；而 README 就在上下文旗標旁邊寫著
+# 「和 grep 一樣」，正好招致了那個期待。
+# CSV 輸出確實無法標記——在 CSV 列裡加標記就等於多一個欄位，而多一欄的列是壞掉的紀錄，
+# 工具會為了幫忙而破壞自己的格式。那一半改以文件說明。--json 沒有這個限制，現在會帶
+# "match":true|false，但「只在有上下文時」：否則送出的每一筆都是命中，那個鍵會在每一行
+# 都是常數，同時也會更動一份已被記載且被測試的輸出。
+# ---------------------------------------------------------------------
+echo
+echo "--- T63: context marks the match in --json / 有上下文時 --json 標出命中 ---"
+
+printf 'pkg,ver\nbusybox,1\nzlib,2\nzstd,3\nncurses,4\n' > "$TMP/t63.csv"
+"$CSV2" -contains zstd -C 1 --json -i "$TMP/t63.csv" > "$TMP/t63.json" 2>/dev/null
+
+assert_eq "$(grep -c '"match":' "$TMP/t63.json" | tr -d ' ')" "3" \
+    "T63a every record emitted under context carries a match key / 上下文模式下送出的每一筆都帶 match 鍵"
+assert_eq "$(grep -c '"match":true' "$TMP/t63.json" | tr -d ' ')" "1" \
+    "T63b exactly one is the match / 恰好一筆是命中"
+assert_contains "$(grep '"match":true' "$TMP/t63.json")" '"record":3' \
+    "T63c and it is record 3, the one that contains the needle / 而且是第 3 筆，也就是含有該字串的那一筆"
+assert_contains "$(grep '"record":2' "$TMP/t63.json")" '"match":false' \
+    "T63d the record before it is marked context, not match / 它前面那一筆被標為上下文而非命中"
+
+# The count in the trailing meta is a COUNT. It agreeing with the number of
+# marked matches is what makes it readable as anything at all.
+# 末行 meta 裡的是「計數」。它與被標記為命中的筆數相符，才使它讀起來有意義。
+assert_contains "$(tail -1 "$TMP/t63.json")" '"matched":1' \
+    "T63e and the trailing count agrees with the marks / 末行的計數與標記相符"
+
+# Without context the key must NOT appear: every record emitted is a match, so
+# a constant true on every line is noise, and adding it would change output that
+# is already documented.
+# 沒有上下文時這個鍵不該出現：送出的每一筆都是命中，每行固定 true 是雜訊，而加上它會更動
+# 一份已被記載的輸出。
+"$CSV2" -contains zstd --filter --json -i "$TMP/t63.csv" > "$TMP/t63b.json" 2>/dev/null
+assert_eq "$(grep -c '"match":' "$TMP/t63b.json" | tr -d ' ')" "0" \
+    "T63f without context the key is absent, since every record emitted matched / 沒有上下文時該鍵不出現，因為送出的每一筆都是命中"
+
+# And the CSV side stays valid CSV: three records, two fields each, no marker
+# smuggled in as a field.
+# CSV 那一側仍然是合法的 CSV：三筆、每筆兩欄，沒有任何標記被偷渡成欄位。
+"$CSV2" -contains zstd -C 1 -i "$TMP/t63.csv" > "$TMP/t63.csv.out" 2>/dev/null
+assert_eq "$(wc -l < "$TMP/t63.csv.out" | tr -d ' ')" "3" \
+    "T63g the CSV output is three records / CSV 輸出是三筆紀錄"
+# Counted by csv2, not by awk -F, -- the field count of a CSV file is exactly
+# the thing a comma split gets wrong, and a test that uses the broken method to
+# check the correct one proves nothing on the day it matters. Test scripts are
+# the one place in this tree permitted to invoke csv2 for this.
+# 由 csv2 來數，而不是 awk -F,——一個 CSV 檔的欄數，正是逗號切割會弄錯的那個東西；用壞掉
+# 的方法去檢查正確的方法，在真正出事的那天什麼也證明不了。測試腳本是這棵樹裡唯一被允許
+# 為此呼叫 csv2 的地方。
+nf=$("$CSV2" -si --headers 1 -r --json < "$TMP/t63.csv.out" 2>/dev/null | head -1 | grep -o '"fields":[0-9]*' | cut -d: -f2)
+assert_eq "$nf" "2" \
+    "T63h each still has two fields: no marker smuggled in as a field / 每筆仍是兩欄：沒有標記被偷渡成欄位"
+
+# ---------------------------------------------------------------------
+# T64 -- the suite's own cell accessor is not decorative.
+#
+# Twelve places in this file used `cut -d, -fN` on csv2's output. They were
+# replaced with cell(), which projects the column with -delete -col and then
+# takes the record. This case asserts the replacement was NECESSARY rather than
+# tidy: on this project's own fixture, the two disagree.
+#
+# If they ever agree, the fixture has lost the quoted comma that makes it a
+# realistic test of a CSV parser, and several other cases quietly became weaker
+# at the same moment. This is the tripwire for that.
+#
+# T64 —— 這份測試自己的取格存取子不是裝飾。
+# 本檔案有十二處對 csv2 的輸出使用 `cut -d, -fN`，已改為 cell()——它以 -delete -col 投影出
+# 該欄，再取那一筆。這個案例斷言那次替換是「必要的」而不只是整潔：在本專案自己的 fixture 上，
+# 兩者的結果並不相同。
+# 若哪天兩者一致了，代表 fixture 已失去那個「引號內的逗號」——而正是它使這份 fixture 成為
+# 對 CSV 解析器有意義的測試；在同一刻，另外幾個案例也悄悄變弱了。這個案例就是那條絆線。
+# ---------------------------------------------------------------------
+echo
+echo "--- T64: the cell accessor is necessary / 取格存取子是必要的 ---"
+
+by_csv2=$(cell "$PKG" 1 6)
+by_cut=$("$CSV2" -mid 1,1 -i "$PKG" 2>/dev/null | cut -d, -f6)
+if [[ "$by_csv2" != "$by_cut" ]]; then
+    ok "T64a cut -d, -f6 and csv2 disagree on the fixture, which is why cell() exists / cut -d, -f6 與 csv2 在 fixture 上結果不同，這正是 cell() 存在的理由"
+else
+    bad "T64a they agree; the fixture has lost its quoted comma and several cases just got weaker / 兩者一致了：fixture 已失去引號內的逗號，數個案例同時變弱"
+fi
+
+# And name what the wrong one actually returns, so the failure is legible rather
+# than merely unequal: a comma split does not error, it hands back a fragment.
+# 並指出「錯的那個」實際回傳了什麼，讓失敗看得懂而不只是「不相等」：逗號切割不會報錯，
+# 它會交還一段碎片。
+assert_contains "$by_cut" 'CORRECTED' \
+    "T64b and the comma split returns a fragment of prose, not an error / 而逗號切割回傳的是一段散文碎片，不是錯誤"
+# cell() returns the field as CSV ENCODES it, so a value containing commas
+# comes back quoted. That is the honest answer -- the alternative is a decoder
+# in the test suite, which would be a second implementation of the thing under
+# test. Call sites compare names, base64 and hex digests, none of which quote.
+# cell() 回傳的是 CSV「編碼後」的欄位，因此含逗號的值會帶著引號回來。那是誠實的答案——
+# 另一個選擇是在測試裡放一個解碼器，而那等於為受測物再寫一份實作。各呼叫點比較的是名稱、
+# base64 與十六進位摘要，都不會被加引號。
+assert_eq "${by_csv2:0:10}" '"CORRECTED' \
+    "T64c while csv2 returns the whole cell, quoted as CSV encodes it / csv2 回傳的則是完整儲存格，並帶著 CSV 的引號"
+if (( ${#by_csv2} > ${#by_cut} )); then
+    ok "T64d the whole cell is longer than the fragment (${#by_csv2} vs ${#by_cut} bytes) / 完整儲存格比碎片長"
+else
+    bad "T64d expected the whole cell to be longer than the fragment / 預期完整儲存格比碎片長"
+fi
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"

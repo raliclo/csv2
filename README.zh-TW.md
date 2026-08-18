@@ -244,6 +244,27 @@ busybox,fce9d7f35ea3 (submodule),896 KiB,fork raliclo/busybox branch develop,…
 `-A`、`-B`、`-C` **隱含 `--filter`**：上下文紀錄沒有命中的儲存格，儲存格報告對它無話
 可說。不相鄰的區塊之間以 `--` 分隔，與 grep 相同。
 
+**「和 grep 一樣」指的是 `--` 分隔線，不是 grep 的 `-`／`:` 行標記。** grep 會把上下文行
+與命中行標示成不同樣子；CSV 輸出做不到，因為在 CSV 列裡加標記就等於多一個欄位，而多一欄
+的列是一筆壞掉的紀錄。因此加了 `-A`／`-B`／`-C` 之後，CSV 輸出是命中與上下文的混合，沒有
+任何東西能區分它們——而 `-contains` 存在的目的正是給你 `record:field` 位址；若你需要位址，
+就跑兩次：一次不帶上下文取得位址，一次帶上下文讀它周圍。
+
+`--json` 沒有這個限制，因此它會標記，但只在有上下文時才標——沒有上下文時，送出的每一筆
+都是命中，那個鍵會是個常數：
+
+```console
+$ csv2 -contains zstd -C 1 --json -i pkgs.csv
+{"meta":{"format":"csv","headers":1,"fields":2}}
+{"record":2,"line":3,"match":false,"fields":{"pkg":"zlib","ver":"2"}}
+{"record":3,"line":4,"match":true,"fields":{"pkg":"zstd","ver":"3"}}
+{"record":4,"line":5,"match":false,"fields":{"pkg":"ncurses","ver":"4"}}
+{"meta":{"records":4,"matched":1}}
+```
+
+末行的 `matched` 是「計數」而不是「索引」——在 2026-08-18 之前，它是「曾經有命中」這件事
+唯一殘存的痕跡，而且沒有任何東西可以掛上去。這是一位只讀 README 的讀者發現的。由 T63 斷言。
+
 ```console
 $ csv2 -contains busybox --json -i TARGET_PACKAGES.csv
 {"meta":{"format":"csv","headers":1,"fields":7}}
