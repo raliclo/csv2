@@ -622,7 +622,7 @@ $ csv2 -head 1 -t --json -i masked.csv
 | `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | 設成大於檔案大小即可強制走單執行緒 |
 | `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | 調小可讓小檔案也切出多個區塊，區塊邊界才真的被測到 |
 | `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `-md --pretty` 超過此值時拒絕，而不是被 OOM 殺掉 |
-| `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | `-tail N` 與 `-B N` 的上限 |
+| `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | `-tail N` 與 `-B N` 的上限。要求超過此值會被**拒絕，而不是截斷**——一個看起來像完整答案的短答案，正是這支工具存在所要避免的失敗。訊息會指出請求值、上限值與該變數 |
 
 **平行化只適用於 `-contains`，別的都不適用**，而且必須以下每一項都成立。單是設定上面那兩個
 旋鈕，並不會讓一次執行變成平行的：

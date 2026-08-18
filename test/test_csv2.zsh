@@ -2792,6 +2792,56 @@ assert_eq "$("$CSV2" -delete -col 1 -delete -col 3 -i "$TMP/t75.csv" -so 2>/dev/
 assert_eq "$("$CSV2" -delete -col 3 -i "$TMP/t75.csv" -so 2>/dev/null | head -1)" 'note,ver' \
     "T75m and so can just one of them / 也可以只移除其中一個"
 
+# ---------------------------------------------------------------------
+# T76 -- an over-limit -tail is refused, not quietly shortened.
+#
+# Round 31 pointed out that "upper bound on -tail N and -B N" is compatible
+# with three different behaviours: refuse, silently cap the result to the
+# limit, or apply only to some internal thing a request that size never
+# reaches. Only one of them cannot produce a silently short answer, and the
+# phrase did not say which one it was.
+#
+# The tool already refused. What was missing was any statement of it, and any
+# assertion -- so a later change that capped instead of refusing would have
+# been a silent regression with nothing to catch it, in the exact shape this
+# project exists to prevent: a partial answer wearing the clothes of a whole one.
+#
+# T76 —— 超過上限的 -tail 會被拒絕，而不是被悄悄縮短。
+# 第 31 回合指出，「-tail N 與 -B N 的上限」這句話可以對應到三種不同的行為：拒絕、把結果
+# 靜默地截到上限、或只作用於某個「這種大小的請求根本碰不到」的內部東西。其中只有一種不會
+# 產生「靜默變短的答案」，而那句話並沒有說是哪一種。
+# 工具本來就是拒絕的。缺的是「沒有任何地方這樣寫」，也沒有任何斷言——因此日後若有人把它
+# 改成「截斷而非拒絕」，那會是一次無人攔截的靜默退步，而且形狀正是本專案存在所要防止的：
+# 一個穿著完整答案外衣的部分答案。
+# ---------------------------------------------------------------------
+echo
+echo "--- T76: an over-limit -tail is refused / 超過上限的 -tail 會被拒絕 ---"
+
+{ print -r -- 'a,b'; for i in {1..20}; do print -r -- "$i,v$i"; done } > "$TMP/t76.csv"
+
+assert_eq "$(CSV2_MAX_BUFFER_RECORDS=5 "$CSV2" -tail 10 -i "$TMP/t76.csv" 2>/dev/null | wc -l | tr -d ' ')" "0" \
+    "T76a nothing is emitted when the request exceeds the limit / 請求超過上限時不輸出任何東西"
+assert_fails "T76b and the run fails rather than returning the 5 it could hold / 該次執行失敗，而不是回傳它裝得下的那 5 筆" -- \
+    env CSV2_MAX_BUFFER_RECORDS=5 "$CSV2" -tail 10 -i "$TMP/t76.csv"
+
+CSV2_MAX_BUFFER_RECORDS=5 "$CSV2" -tail 10 -i "$TMP/t76.csv" 2>"$TMP/t76_err.txt" >/dev/null
+e=$(head -1 "$TMP/t76_err.txt")
+assert_contains "$e" "-tail 10" "T76c the message names what was asked for / 訊息指出被要求的是什麼"
+assert_contains "$e" "(5)"      "T76d and the limit in force / 以及當下生效的上限"
+assert_contains "$e" "CSV2_MAX_BUFFER_RECORDS" \
+    "T76e and the variable that changes it / 以及可以改變它的那個變數"
+
+# Under the limit it must still work, or the refusal would be indistinguishable
+# from -tail being broken.
+# 在上限之內必須照常可用，否則這條拒絕會與「-tail 壞了」無法區分。
+assert_eq "$(CSV2_MAX_BUFFER_RECORDS=5 "$CSV2" -tail 3 -i "$TMP/t76.csv" 2>/dev/null | wc -l | tr -d ' ')" "3" \
+    "T76f while a request within the limit is served normally / 而在上限之內的請求照常服務"
+
+# -B is bounded by the same variable and must refuse the same way.
+# -B 受同一個變數約束，必須以同樣的方式拒絕。
+assert_fails "T76g -B is bounded by the same variable and refuses too / -B 受同一個變數約束，同樣會拒絕" -- \
+    env CSV2_MAX_BUFFER_RECORDS=5 "$CSV2" -contains v7 -B 10 -i "$TMP/t76.csv"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

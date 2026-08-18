@@ -708,7 +708,7 @@ cannot be lowered can only be exercised by building a 16 MiB fixture.
 | `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | set above the file size to force the single-threaded path |
 | `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | smaller values make a small file yield many chunks, so chunk boundaries are actually exercised |
 | `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `-md --pretty` refuses above this rather than being OOM-killed |
-| `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | upper bound on `-tail N` and `-B N` |
+| `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | upper bound on `-tail N` and `-B N`. Asking for more is **refused, not truncated** — a short answer that looks like a whole one is the failure this tool exists to avoid. The message names the request, the limit and the variable |
 
 **Parallelism applies to `-contains` and to nothing else**, and only when every
 one of these holds. Setting the two knobs above does not by itself make a run
