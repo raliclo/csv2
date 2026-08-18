@@ -820,6 +820,31 @@ else
     bad "T43 append bytes (small=$w1 into $s1, big=$w2 into $s2)"
 fi
 
+# T43b — writing few bytes and leaving the file alone are different claims.
+# A fast path could write little and still rewrite what was already there; T43
+# would not notice, because it measures the write, not the file. Round 24 of the
+# blind testing checked the prefix with cmp after twenty in-place appends to a
+# 207 MB file and found it byte-identical -- "fast for the reason claimed", as
+# it put it. That check belongs here rather than in one person's transcript.
+# T43b —— 「寫得少」與「沒動到原有內容」是兩個不同的宣稱。
+# 一條快路徑可以寫得很少，卻仍然重寫了原本就在那裡的東西；T43 不會發現，因為它量的是
+# 「寫入」而不是「檔案」。盲測第 24 回合在對一個 207 MB 的檔案做了二十次就地追加之後，
+# 用 cmp 檢查了前綴，發現逐位元相同——用它的話說，是「因為所宣稱的理由而快」。
+# 那個檢查該放在這裡，而不是留在某一個人的紀錄裡。
+cp "$TMP/big.csv" "$TMP/big_before.csv"
+before_bytes=$(wc -c < "$TMP/big_before.csv" | tr -d ' ')
+for i in 1 2 3; do
+    "$CSV2" -append "ap$i,v,s,src,purpose,note,MIT" -i "$TMP/big.csv" --in-place 2>/dev/null
+done
+head -c "$before_bytes" "$TMP/big.csv" > "$TMP/big_prefix.csv"
+if cmp -s "$TMP/big_before.csv" "$TMP/big_prefix.csv"; then
+    ok "T43b and leaves every byte that was already there untouched / 而且原本就在那裡的每一個位元組都原封不動"
+else
+    bad "T43b -append altered bytes before the appended records / -append 動到了新增紀錄之前的位元組"
+fi
+assert_eq "$("$CSV2" -tail 1 -i "$TMP/big.csv" 2>/dev/null)" 'ap3,v,s,src,purpose,note,MIT' \
+    "T43c with the last appended record where it belongs / 而最後追加的那一筆就在它該在的位置"
+
 # T44 — a .csv with no trailing newline must become TWO records, not one
 # record glued onto the tail of the last.
 cp "$TMP/nonl2.csv" "$TMP/t44.csv"
