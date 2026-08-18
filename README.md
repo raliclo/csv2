@@ -285,6 +285,18 @@ two columns called `note` is an error naming both positions — address it by
 number. Two columns differing only in Unicode form collide the same way, and
 those do not look identical in a hex dump. Asserted by T75.
 
+### A BOM is stripped, and never reaches a column name
+
+A file that opens with a UTF-8 BOM — anything exported by Excel, typically —
+has it removed on read and not written back. What matters more than either is
+where it does **not** end up: the first column's name is `pkg_name`, never
+`\ufeffpkg_name`.
+
+That distinction is the whole point. A BOM absorbed into the first header would
+make `-update 1:pkg_name` fail to resolve a column that is visibly right there,
+and a name-based address is the thing this tool asks you to build scripts on.
+Asserted by T7.
+
 There is **no column projection**: nothing selects "just the license column".
 For one value at an address you already have, use `-get`:
 
