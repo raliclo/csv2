@@ -1845,6 +1845,57 @@ else
     bad "T64d expected the whole cell to be longer than the fragment / 預期完整儲存格比碎片長"
 fi
 
+# ---------------------------------------------------------------------
+# T65 -- the workaround the README recommends works on the shape it is
+#        recommended FOR, and the shape next to it is a trap.
+#
+# Round 14. The README's advice for getting one value used to read "or
+# -contains and take cut -f3", sitting a few lines above a --filter example
+# whose output is CSV. `cut -f3` cuts on TAB and is right for the locating
+# report; the same reflex applied to the CSV output beside it returns a
+# fragment. A reader skimming had no way to see which shape the advice was for.
+#
+# Both halves are asserted here, because documenting only the safe one leaves
+# the trap in place for whoever misreads it next.
+#
+# T65 —— README 建議的替代作法，在「它所建議的那個形狀」上有效，而旁邊那個形狀是陷阱。
+# 第 14 回合。README 取單一值的建議原本寫作「或用 -contains 再 cut -f3」，而它上方幾行就是
+# 一個輸出為 CSV 的 --filter 範例。`cut -f3` 切的是 TAB，對定位報告是正確的；同一個反射動作
+# 用在旁邊那份 CSV 輸出上，回傳的是一段碎片。只是略讀的人，無從看出那個建議是給哪個形狀的。
+# 兩半都在此斷言，因為只記載安全的那一半，等於把陷阱留給下一個讀錯的人。
+# ---------------------------------------------------------------------
+echo
+echo "--- T65: the documented workaround, and the trap beside it / 文件建議的作法，以及它旁邊的陷阱 ---"
+
+want=$(cell "$PKG" 1 6)
+# The report route the README recommends: TAB-separated, values escaped.
+# README 建議的報告路線：TAB 分隔、值有跳脫。
+got=$("$CSV2" -contains 'CORRECTED' -i "$PKG" 2>/dev/null | head -1 | cut -f3)
+if [[ -n "$got" && "${#got}" -gt 100 ]]; then
+    ok "T65a cut -f3 on the locating report returns a whole cell (${#got} bytes) / 對定位報告下 cut -f3 取得的是完整儲存格"
+else
+    bad "T65a cut -f3 on the report returned ${#got} bytes: '$got' / 對報告下 cut -f3 只取得 ${#got} 位元組"
+fi
+
+# The report escapes, so the value it hands over survives a TAB cut whatever it
+# contains -- that is what makes the recommendation safe rather than lucky.
+# 報告會跳脫，因此它交出的值不論內容為何都能撐過一次 TAB 切割——正是這一點讓那個建議「安全」
+# 而不是「幸運」。
+if [[ "$got" != *$'\t'* && "$got" != *$'\n'* ]]; then
+    ok "T65b and the report's escaping means that cut cannot be broken by the value / 報告的跳脫使該 cut 不會被值本身弄壞"
+else
+    bad "T65b the report handed over a raw TAB or newline, which breaks cut -f / 報告交出了原始 TAB 或換行，會弄壞 cut -f"
+fi
+
+# The trap: same reflex, CSV output, silent fragment at rc=0.
+# 陷阱：同一個反射動作、CSV 輸出、rc=0 下的靜默碎片。
+trap_got=$("$CSV2" -contains 'CORRECTED' --filter -i "$PKG" 2>/dev/null | head -1 | cut -d, -f6)
+if (( ${#trap_got} < ${#want} )); then
+    ok "T65c while cut -d, -f6 on --filter output truncates (${#trap_got} of ${#want} bytes), which is why the README now says not to / 而對 --filter 輸出下 cut -d, -f6 會截斷，這正是 README 現在明說不要這樣做的原因"
+else
+    bad "T65c expected the comma split to truncate; it returned ${#trap_got} of ${#want} bytes / 預期逗號切割會截斷，實得 ${#trap_got}／${#want}"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

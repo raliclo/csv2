@@ -261,9 +261,23 @@ the data this tool was written for.
 Matching is **case-sensitive** and there is no flag to change that.
 `--normalize` affects Unicode normalisation only, not case.
 
-There is **no column projection**: nothing selects "just the license column".
-To get one value, use `--json` and read the field you want, or `-contains` and
-take `cut -f3`.
+There is **no column projection**: nothing selects "just the license column",
+and there is no address-based *read* either — `record:field` composes with
+`-update` and `-delete -cell`, which are both writes. To get one value out, use
+`--json` and read the field by name, or take the third column of the locating
+report:
+
+```console
+$ csv2 -contains busybox -i pkgs.csv | cut -f3
+```
+
+**That `cut -f3` has no `-d`, and the omission is the whole point.** It is
+cutting on TAB, because the locating report is TAB-separated with its values
+escaped. Do not reach for `cut` against `--filter` or `-mid` output: that is
+CSV, a value may contain a comma, and `cut -d, -f3` will hand you a fragment
+of one — silently, at exit 0. On this project's own fixture it returns 104
+bytes of a 515-byte cell. That failure is why csv2 exists; getting it from
+csv2's own output would be a poor joke. Asserted by T65.
 
 ```console
 $ csv2 -contains busybox --filter -i TARGET_PACKAGES.csv

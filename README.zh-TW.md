@@ -230,8 +230,19 @@ $ csv2 -contains busybox -i TARGET_PACKAGES.csv
 比對是**區分大小寫**的，且沒有旗標可以改變。`--normalize` 只影響 Unicode 正規化，
 與大小寫無關。
 
-**沒有欄位投影**：沒有任何東西可以「只取 license 那一欄」。要取單一值，請用 `--json`
-讀出你要的欄位，或用 `-contains` 取 `cut -f3`。
+**沒有欄位投影**：沒有任何東西可以「只取 license 那一欄」，也沒有「依位址讀取」——
+`record:field` 能與 `-update` 和 `-delete -cell` 組合，而那兩個都是寫入。要取出單一值，
+請用 `--json` 以欄名讀取，或取定位報告的第三欄：
+
+```console
+$ csv2 -contains busybox -i pkgs.csv | cut -f3
+```
+
+**那個 `cut -f3` 沒有 `-d`，而少掉的正是重點。** 它切的是 TAB，因為定位報告是 TAB 分隔、
+值有跳脫的。不要對 `--filter` 或 `-mid` 的輸出動用 `cut`：那是 CSV，值裡可能有逗號，而
+`cut -d, -f3` 會交給你其中一段碎片——靜默地，以 0 結束。在本專案自己的 fixture 上，它會從
+一個 515 位元組的儲存格裡取回 104 位元組。那個失敗正是 csv2 存在的理由；從 csv2 自己的輸出
+上再遇到它一次，會是個很差的笑話。由 T65 斷言。
 
 ```console
 $ csv2 -contains busybox --filter -i TARGET_PACKAGES.csv
