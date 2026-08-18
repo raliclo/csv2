@@ -186,7 +186,14 @@ PROTECTION / 保護
                         every run, and ciphertext without them can never be
                         decrypted by anyone. The header is written with or
                         without -t, including under a selection.
-  -decrypt COLS         decrypt; COLS may be `all` to take every marked column
+  -decrypt COLS         decrypt; COLS may be `all` to take every marked column.
+                        A column that is not marked encrypted is REFUSED by
+                        name -- plaintext is never fed to the cipher, so you
+                        get "not marked as encrypted" rather than an
+                        authentication failure. `all` refuses too when nothing
+                        in the file is marked. A HASHED column is not
+                        encrypted and cannot be decrypted by anything:
+                        hashing is one-way
   -keyfile PATH         key file; defaults to multissh's private key.
                         With -hash it selects HMAC over plain SHA-256
   --yes                 accept the default key without a prompt

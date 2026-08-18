@@ -2842,6 +2842,67 @@ assert_eq "$(CSV2_MAX_BUFFER_RECORDS=5 "$CSV2" -tail 3 -i "$TMP/t76.csv" 2>/dev/
 assert_fails "T76g -B is bounded by the same variable and refuses too / -B 受同一個變數約束，同樣會拒絕" -- \
     env CSV2_MAX_BUFFER_RECORDS=5 "$CSV2" -contains v7 -B 10 -i "$TMP/t76.csv"
 
+# ---------------------------------------------------------------------
+# T77 -- -decrypt refuses at the MARKER, never at the cipher.
+#
+# Round 32 asked what `-decrypt COLS` does when the column is not actually
+# encrypted, and listed the three readings its one-line description admits:
+# refuse, attempt it anyway and surface a ChaCha20-Poly1305 authentication
+# failure, or pass the column through unchanged. Each leads a caller somewhere
+# different, and the sentence chose none of them.
+#
+# The tool refuses by name, which is the friendly one: plaintext never reaches
+# the cipher, so the message is about the file rather than about cryptography.
+# A caller who mistypes a column name gets told they mistyped a column name.
+#
+# Also pinned here, which the round did not try: a HASHED column is refused
+# too. Hashing is one-way, and "undo the masking" is a natural thing to attempt
+# on a column that visibly holds digests.
+#
+# T77 —— -decrypt 在「標記」這一層拒絕，絕不會拖到密碼演算法那一層。
+# 第 32 回合追問：當某欄其實沒有被加密時，`-decrypt COLS` 會怎樣？並列出它那一行說明所允許
+# 的三種解讀：拒絕、照樣嘗試而拋出 ChaCha20-Poly1305 的驗證失敗、或原樣放行。三者會把呼叫端
+# 帶往不同的地方，而那句話一種都沒有選。
+# 工具的做法是「以名稱拒絕」，也就是友善的那一種：明文永遠不會抵達密碼演算法，因此訊息談的是
+# 這個檔案，而不是密碼學。打錯欄名的人，得到的是「你打錯了欄名」。
+# 另外在此釘住該回合沒有試的一項：被「雜湊」的欄位同樣會被拒絕。雜湊是單向的，而對一個
+# 明顯裝著摘要的欄位嘗試「把遮蔽解開」，是很自然的舉動。
+# ---------------------------------------------------------------------
+echo
+echo "--- T77: -decrypt refuses at the marker / -decrypt 在標記層拒絕 ---"
+
+head -c 32 /dev/urandom > "$TMP/t77.key"
+
+"$CSV2" -decrypt license -keyfile "$TMP/t77.key" -i "$PKG" -o "$TMP/t77_a.csv" 2>"$TMP/t77_a.txt"
+assert_eq "$?" "1" "T77a decrypting an unmarked column fails / 對未標記的欄位解密會失敗"
+assert_contains "$(head -1 "$TMP/t77_a.txt")" "not marked as encrypted" \
+    "T77b naming the marker, not a cipher error / 訊息談的是標記，不是密碼演算法的錯誤"
+if grep -qiE 'authentic|tag|poly1305|chacha' "$TMP/t77_a.txt"; then
+    bad "T77c plaintext reached the cipher / 明文抵達了密碼演算法"
+else
+    ok "T77c so plaintext never reached the cipher / 因此明文從未抵達密碼演算法"
+fi
+assert_succeeds "T77d and no output file was written / 而且沒有寫出輸出檔" -- \
+    test ! -f "$TMP/t77_a.csv"
+
+assert_fails "T77e -decrypt all refuses when the file has nothing marked / 檔案裡什麼都沒標記時，-decrypt all 會拒絕" -- \
+    "$CSV2" -decrypt all -keyfile "$TMP/t77.key" -i "$PKG" -o "$TMP/t77_b.csv"
+
+# A hashed column is not an encrypted one. Hashing is one-way, so this refusal
+# is the only honest answer -- there is nothing to return.
+# 被雜湊的欄位不是被加密的欄位。雜湊是單向的，因此這條拒絕是唯一誠實的答案——沒有東西可以還。
+"$CSV2" -hash license -keyfile "$TMP/t77.key" -i "$PKG" -o "$TMP/t77_h.csv" -t 2>/dev/null
+assert_fails "T77f a hashed column cannot be decrypted, because hashing is one-way / 被雜湊的欄位解不開，因為雜湊是單向的" -- \
+    "$CSV2" -decrypt license -keyfile "$TMP/t77.key" -i "$TMP/t77_h.csv" -o "$TMP/t77_hd.csv"
+
+# And the case that must keep working, or the refusals above would be
+# indistinguishable from -decrypt being broken.
+# 以及那個必須繼續可用的案例，否則上面那些拒絕會與「-decrypt 壞了」無法區分。
+"$CSV2" -encrypt status_notes -keyfile "$TMP/t77.key" -i "$PKG" -o "$TMP/t77_e.csv" 2>/dev/null
+"$CSV2" -decrypt all -keyfile "$TMP/t77.key" -i "$TMP/t77_e.csv" -o "$TMP/t77_d.csv" 2>/dev/null
+assert_same "$PKG" "$TMP/t77_d.csv" \
+    "T77g while -decrypt all on a file that IS marked round-trips byte-identically / 而對「確實有標記」的檔案下 -decrypt all，可逐位元還原"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
