@@ -2423,6 +2423,41 @@ sin=$(CSV2_PARALLEL_MIN_BYTES=999999999 "$CSV2" -contains xyz -i "$TMP/t72.csv2"
 assert_eq "$par" "$sin" \
     "T72f parallel and single-threaded output are identical, and T72a/T72e prove they were different runs / 平行與單執行緒輸出相同，而 T72a／T72e 證明那是兩次不同的執行"
 
+# T72f's fixture has no quoted fields, so a chunk boundary never lands inside
+# one -- it tests that chunking preserves ORDER, not that it preserves quote
+# state. Round 23 built the harder fixture: a long quoted field packed with
+# embedded commas, sized so that boundaries cut straight through it. A chunk
+# that mishandled quote state would split that record or lose part of it, and
+# would look like ordinary CSV either way.
+# T72f 的 fixture 沒有任何引號欄位，因此分塊邊界永遠不會落在其中——它測的是「分塊保持順序」，
+# 不是「分塊保持引號狀態」。第 23 回合建了更難的 fixture：一個塞滿內嵌逗號的長引號欄位，
+# 長度足以讓邊界直接切過它。一個處理錯引號狀態的分塊，會把那筆紀錄切開或吃掉一部分，
+# 而兩種結果看起來都像是普通的 CSV。
+{
+  print -r -- 'id,note'
+  print -r -- '編號,註記'
+  for i in {1..40}; do
+      if (( i == 20 )); then
+          print -r -- "$i,\"quoted value with, several, embedded, commas, padding, padding, padding, padding, padding, padding, padding, padding\""
+      else
+          print -r -- "$i,plain padding value $i"
+      fi
+  done
+} > "$TMP/t72q.csv2"
+
+qpar=$(CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=256 "$CSV2" -contains padding -i "$TMP/t72q.csv2" 2>/dev/null)
+qsin=$(CSV2_PARALLEL_MIN_BYTES=999999999 "$CSV2" -contains padding -i "$TMP/t72q.csv2" 2>/dev/null)
+qpath=$(CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=256 path_of -contains padding -i "$TMP/t72q.csv2")
+
+assert_contains "$qpath" "parallel:" \
+    "T72g the comma-heavy fixture really does take the parallel path / 逗號密集的 fixture 確實走了平行路徑"
+assert_eq "$qpar" "$qsin" \
+    "T72h and a chunk boundary inside a quoted field changes nothing / 分塊邊界落在引號欄位內部也不改變任何結果"
+assert_eq "$(print -r -- "$qpar" | grep -c '^20:')" "1" \
+    "T72i the straddling record appears exactly once, not split or dropped / 那筆被切過的紀錄恰好出現一次，沒有被切開或丟失"
+assert_contains "$qpar" 'several, embedded, commas' \
+    "T72j with its embedded commas intact / 其內嵌逗號完好無損"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
