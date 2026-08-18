@@ -2235,6 +2235,46 @@ assert_fails "T70l -get with an edit is refused / -get 與編輯併用被拒" --
 assert_fails "T70m -get into a .csv path is refused: one value is not a CSV file / -get 寫入 .csv 路徑被拒：一個值不是一個 CSV 檔" -- \
     "$CSV2" -get 1:1 -i "$PKG" -o "$TMP/t70_out.csv"
 
+# -get is -mid r,r with a different emitter, so the paths where it could
+# silently DIVERGE from -mid are the ones worth pinning: stdin, a column whose
+# header carries a transform marker, the index seek, and a file where a record
+# spans lines so that record number and line number stop agreeing.
+# -get 就是「-mid r,r 換一個輸出器」，因此值得釘住的，是那些它可能「靜默偏離 -mid」的路徑：
+# stdin、標頭帶有轉換標記的欄位、索引 seek，以及「紀錄跨行、於是紀錄號與行號不再一致」的檔案。
+assert_eq "$(cat "$PKG" | "$CSV2" -get 1:1 -si --headers 1 2>/dev/null)" "busybox" \
+    "T70n -get works on stdin, where the format has to come from --headers / -get 可用於 stdin，此時格式必須由 --headers 提供"
+
+"$CSV2" -hash license -keyfile "$TMP/t70.key" -i "$PKG" -o "$TMP/t70_h.csv" 2>/dev/null \
+    || head -c 32 /dev/urandom > "$TMP/t70.key"
+head -c 32 /dev/urandom > "$TMP/t70.key"
+"$CSV2" -hash license -keyfile "$TMP/t70.key" -i "$PKG" -o "$TMP/t70_h.csv" 2>/dev/null
+d=$("$CSV2" -get 1:license -i "$TMP/t70_h.csv" 2>/dev/null)
+assert_eq "${#d}" "64" \
+    "T70o a column is addressable by its BASE name after a transform marks its header / 標頭被轉換標記之後，該欄仍可用「基本名稱」定址"
+
+# The index decides where the read lands. If -get used it differently from -mid,
+# this is where a one-record offset would appear -- and it would look like a
+# perfectly ordinary value.
+# 索引決定一次讀取落在哪裡。若 -get 使用索引的方式與 -mid 不同，差一筆的偏移就會出現在這裡
+# ——而它看起來會像一個再普通不過的值。
+export CSV2_INDEX_MIN_BYTES=1
+cp "$PKG" "$TMP/t70_ix.csv"; rm -f "$TMP/t70_ix.csv.index"
+"$CSV2" -tail 2 -i "$TMP/t70_ix.csv" >/dev/null 2>&1
+assert_eq "$("$CSV2" -get 12:1 -i "$TMP/t70_ix.csv" 2>/dev/null)" \
+    "$("$CSV2" --no-index -get 12:1 -i "$TMP/t70_ix.csv" 2>/dev/null)" \
+    "T70p -get agrees with itself whether or not an index is used / 用不用索引，-get 都給出相同答案"
+rm -f "$TMP/t70_ix.csv.index"
+unset CSV2_INDEX_MIN_BYTES
+
+# A record containing a newline makes record number and line number diverge.
+# Addressing is by RECORD, so record 2 here is the one after the two-line one.
+# 含換行的紀錄會讓紀錄號與行號分歧。定址依「紀錄」，因此這裡的第 2 筆是那個佔兩行者的下一筆。
+printf 'a,b,c\n1,"two\nlines",3\n9,x,y\n' > "$TMP/t70_sp.csv"
+assert_eq "$("$CSV2" -get 2:1 -i "$TMP/t70_sp.csv" 2>/dev/null)" "9" \
+    "T70q -get counts RECORDS, not lines, when one record spans two / 紀錄跨兩行時，-get 數的是「紀錄」而不是行"
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t70_sp.csv" 2>/dev/null | wc -l | tr -d ' ')" "2" \
+    "T70r and the spanning cell comes back with its newline intact / 而那個跨行的儲存格，換行原封不動地回來"
+
 # ---------------------------------------------------------------------
 # T71 -- -get's trailing newline is a terminator, and the value is logical.
 #
