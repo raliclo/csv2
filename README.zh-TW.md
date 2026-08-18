@@ -238,6 +238,23 @@ $ csv2 -contains busybox -i TARGET_PACKAGES.csv
 $ csv2 -contains busybox -i pkgs.csv | cut -f3
 ```
 
+標頭列預設**對搜尋是不可見的**，即使它們的儲存格和其他儲存格一樣是文字。
+`--include-headers` 會把它們納入，第一列標頭定址為 `0a`、第二列為 `0b`——絕不會是單純的
+`0`，如此一來「命中英文標題列」與「命中中文標題列」才能區分：
+
+```console
+$ csv2 -contains note --include-headers -i pkgs.csv2
+0a:3	note	note
+$ csv2 -contains 備註 --include-headers -i pkgs.csv2
+0b:3	note	備註
+$ csv2 -contains 備註 --include-headers --zh -i pkgs.csv2
+0b:3	備註	備註
+```
+
+中間那一欄是該欄位**在你所要求的語言下**的名稱，而不是「命中的那一列標頭」的名稱。這正是
+第二行寫著 `note` 而旁邊的值是中文的原因：命中的是 `0b` 那一列，但這份報告並沒有被要求用
+中文名稱。`--zh` 只改變名稱，不改變其他任何東西。由 T66 斷言。
+
 **那個 `cut -f3` 沒有 `-d`，而少掉的正是重點。** 它切的是 TAB，因為定位報告是 TAB 分隔、
 值有跳脫的。不要對 `--filter` 或 `-mid` 的輸出動用 `cut`：那是 CSV，值裡可能有逗號，而
 `cut -d, -f3` 會交給你其中一段碎片——靜默地，以 0 結束。在本專案自己的 fixture 上，它會從

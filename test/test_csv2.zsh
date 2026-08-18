@@ -1896,6 +1896,54 @@ else
     bad "T65c expected the comma split to truncate; it returned ${#trap_got} of ${#want} bytes / 預期逗號切割會截斷，實得 ${#trap_got}／${#want}"
 fi
 
+# ---------------------------------------------------------------------
+# T66 -- --include-headers, and which language names the column.
+#
+# Round 15 found that --include-headers had exactly one sentence in the README
+# and no worked example, unlike every other addressing feature. The reader
+# predicted the line format correctly from general principles -- and got the
+# subtler part half right: they concluded the name column "always names the EN
+# header". It does by default, but it follows --zh, not the matched row.
+#
+# That distinction is the whole reason 0a and 0b are separate addresses. The
+# row that matched and the language the report is written in are two different
+# things, and a report that conflated them would make a 0b hit indistinguishable
+# from a 0a hit whenever the two titles happened to share a word.
+#
+# T66 —— --include-headers，以及是「哪一種語言」在為欄位命名。
+# 第 15 回合發現 --include-headers 在 README 裡只有一句話、沒有任何實例，與其他每一項定址
+# 功能都不同。讀者僅憑通則就正確預測了那一行的格式——但比較細的那一半只對了一半：他們的
+# 結論是名稱欄「一律使用英文標頭」。預設時確實如此，但它跟隨的是 --zh，而不是「命中的那一列」。
+# 這個區別正是 0a 與 0b 之所以是兩個不同位址的理由。「命中的是哪一列」與「這份報告以哪種
+# 語言書寫」是兩件事；若報告把兩者混為一談，只要兩個標題剛好共用一個詞，0b 的命中就會與
+# 0a 的命中無法區分。
+# ---------------------------------------------------------------------
+echo
+echo "--- T66: --include-headers and the naming language / --include-headers 與命名語言 ---"
+
+printf 'pkg,ver,note\n套件,版本,備註\nzlib,1.3.2,first\nzstd,1.5.6,second\n' > "$TMP/t66.csv2"
+
+assert_eq "$("$CSV2" -contains note -i "$TMP/t66.csv2" 2>/dev/null)" "" \
+    "T66a header text is invisible to search by default / 標頭文字預設對搜尋不可見"
+assert_eq "$("$CSV2" -contains note --include-headers -i "$TMP/t66.csv2" 2>/dev/null)" \
+    $'0a:3\tnote\tnote' \
+    "T66b a hit in the first header row is 0a / 命中第一列標頭時位址是 0a"
+assert_eq "$("$CSV2" -contains 備註 --include-headers -i "$TMP/t66.csv2" 2>/dev/null)" \
+    $'0b:3\tnote\t備註' \
+    "T66c a hit in the second is 0b, and the name column is still EN / 命中第二列時是 0b，而名稱欄仍是英文"
+assert_eq "$("$CSV2" -contains 備註 --include-headers --zh -i "$TMP/t66.csv2" 2>/dev/null)" \
+    $'0b:3\t備註\t備註' \
+    "T66d --zh changes the NAME, not the address / --zh 改變的是名稱，不是位址"
+
+# The name follows the flag rather than the matched row, so a DATA hit is named
+# in Chinese under --zh too. Without this the two behaviours could be told apart
+# only by reading the code.
+# 名稱跟隨旗標而非命中的那一列，因此在 --zh 之下，「資料列」的命中同樣以中文命名。少了這一條，
+# 這兩種行為只能靠讀原始碼才分得出來。
+assert_eq "$("$CSV2" -contains first --zh -i "$TMP/t66.csv2" 2>/dev/null)" \
+    $'1:3\t備註\tfirst' \
+    "T66e and a data hit is named in Chinese under --zh as well / 在 --zh 之下，資料列的命中同樣以中文命名"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

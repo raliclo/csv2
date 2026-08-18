@@ -271,6 +271,26 @@ report:
 $ csv2 -contains busybox -i pkgs.csv | cut -f3
 ```
 
+By default the header rows are **invisible to search**, even though their cells
+are text like any other. `--include-headers` includes them, addressed `0a` for
+the first header row and `0b` for the second — never plain `0`, so that a hit in
+the English title row and one in the Chinese title row are distinguishable:
+
+```console
+$ csv2 -contains note --include-headers -i pkgs.csv2
+0a:3	note	note
+$ csv2 -contains 備註 --include-headers -i pkgs.csv2
+0b:3	note	備註
+$ csv2 -contains 備註 --include-headers --zh -i pkgs.csv2
+0b:3	備註	備註
+```
+
+The middle field is the column's name **in the language you asked for**, not the
+name from whichever header row matched. That is why the second line says `note`
+while the value beside it is Chinese: the row that matched was `0b`, but the
+report was not asked for Chinese names. `--zh` changes the name and nothing
+else. Asserted by T66.
+
 **That `cut -f3` has no `-d`, and the omission is the whole point.** It is
 cutting on TAB, because the locating report is TAB-separated with its values
 escaped. Do not reach for `cut` against `--filter` or `-mid` output: that is
