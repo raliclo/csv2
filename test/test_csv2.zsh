@@ -1612,6 +1612,30 @@ assert_eq "$after" "$before" \
 assert_eq "$rc" "0" "T62e and is not an error / 而且不是錯誤"
 assert_eq "$(wc -c < "$TMP/t62_err.txt" | tr -d ' ')" "0" \
     "T62f and says nothing on stderr, since a fallback is not news / stderr 也不說話，因為「退回掃描」不是需要通知的事"
+
+# Rewriting an index that ALREADY EXISTS is a different code path from writing
+# the first one, and it is the one that broke: it went through
+# FileManager.replaceItemAt, which fails on Linux. Nothing produced wrong data
+# -- a stale index is discarded in favour of a scan -- so the only visible
+# symptoms were a warning on stderr and an optimisation that silently never
+# worked again after its first write. Assert the replacement actually happens,
+# not merely that it is quiet about not happening.
+# 改寫一個「已經存在」的索引，和寫出第一個索引走的是不同的程式路徑，而壞掉的正是前者：
+# 它走的是 FileManager.replaceItemAt，在 Linux 上會失敗。沒有任何東西產生錯誤資料——過期
+# 的索引會被丟棄改用掃描——因此唯一看得見的症狀，是 stderr 上的一則警告，以及一項在第一次
+# 寫出之後就再也沒有生效的最佳化。這裡斷言「替換真的發生了」，而不只是「它安靜地沒發生」。
+rm -f "$TMP/t62.csv.index"
+"$CSV2" -tail 2 -i "$TMP/t62.csv" >/dev/null 2>&1
+assert_succeeds "T62g the first index is written / 第一個索引寫出成功" -- \
+    "$CSV2" --verify-index -i "$TMP/t62.csv"
+
+print -r -- '4,w' >> "$TMP/t62.csv"
+"$CSV2" -tail 2 -i "$TMP/t62.csv" >/dev/null 2>"$TMP/t62_rw.txt"
+assert_succeeds "T62h and a SECOND write replaces it, so the index is not left stale / 第二次寫出會替換它，索引不會停在過期狀態" -- \
+    "$CSV2" --verify-index -i "$TMP/t62.csv"
+assert_eq "$(wc -c < "$TMP/t62_rw.txt" | tr -d ' ')" "0" \
+    "T62i and replacing an index says nothing on stderr either / 替換索引時 stderr 同樣不說話"
+
 unset CSV2_INDEX_MIN_BYTES
 
 echo

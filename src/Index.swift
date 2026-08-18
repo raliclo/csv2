@@ -261,20 +261,43 @@ final class CSVIndex {
             Logger.shared.warn("cannot write index beside \(dataPath); continuing without one")
             return false
         }
-        do {
-            if FileManager.default.fileExists(atPath: p) {
-                _ = try FileManager.default.replaceItemAt(URL(fileURLWithPath: p),
-                                                          withItemAt: URL(fileURLWithPath: tmp))
-            } else {
-                try FileManager.default.moveItem(atPath: tmp, toPath: p)
-            }
+        // POSIX rename(2) via Platform.replaceFile, NOT
+        // FileManager.replaceItemAt -- and not the fileExists/moveItem pair
+        // either, since rename overwrites atomically and asking first only adds
+        // a race. Core.swift moved off replaceItemAt when it was found to leave
+        // the destination unchanged on Linux while reporting success; this file
+        // kept the old call, so the fix reached the data path and not the index
+        // beside it.
+        //
+        // The symptom was quiet and only visible on Linux: rewriting an index
+        // that already existed threw, the catch below warned, and the warning
+        // went to stderr on the NORMAL path -- breaking the one promise that
+        // lets csv2 sit in a pipeline. The index also silently stopped being
+        // updated, so the optimisation was permanently off after its first
+        // write. Nothing produced wrong data, which is why it survived a whole
+        // cross-platform run: a stale index is discarded in favour of a scan.
+        // Caught on 2026-08-18 by T62f, which asserts that a fallback says
+        // nothing on stderr.
+        //
+        // 使用 Platform.replaceFile（POSIX rename(2)），而非
+        // FileManager.replaceItemAt；也不用 fileExists 加 moveItem 的組合——rename 本身
+        // 就是原子覆寫，先問一次只是多製造一個 race。Core.swift 在發現 replaceItemAt 於
+        // Linux 上「回報成功卻沒有動到目的地」之後就換掉了它，而這個檔案留著舊呼叫，
+        // 於是修正只到了資料路徑，沒有到它旁邊的索引。
+        //
+        // 症狀很安靜，而且只在 Linux 上看得到：改寫一個已經存在的索引會丟出例外，下面的
+        // catch 發出警告，而那個警告出現在「正常路徑」的 stderr 上——破壞了讓 csv2 能待在
+        // 管線裡的那唯一一條承諾。索引也就此靜默地不再更新，因此第一次寫出之後，這項最佳化
+        // 就永久關閉了。沒有任何東西產生錯誤的資料，這正是它能撐過一整輪跨平台測試的原因：
+        // 過期的索引會被丟棄改用掃描。2026-08-18 由 T62f 抓到——那個案例斷言「退回掃描時
+        // stderr 不說話」。
+        if Platform.replaceFile(tmp, p) {
             Logger.shared.info("wrote index \(p): \(records) records, stride \(stride), \(offsets.count) entries")
             return true
-        } catch {
-            try? FileManager.default.removeItem(atPath: tmp)
-            Logger.shared.warn("cannot rename index into place beside \(dataPath); continuing without one")
-            return false
         }
+        try? FileManager.default.removeItem(atPath: tmp)
+        Logger.shared.warn("cannot rename index into place beside \(dataPath): \(Platform.lastErrorText()); continuing without one")
+        return false
     }
 
     // -----------------------------------------------------------------
