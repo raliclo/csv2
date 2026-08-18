@@ -286,8 +286,31 @@ an existing empty cell looks like, and the two have to be distinguishable.
 Header cells are not addressable: the locating report calls them `0a`/`0b`, but
 no verb can act on one, `-update` included.
 
-For many values at once, or where the value's own newlines matter, use `--json`
-and read the fields by name, or take the third column of the locating report:
+**`-get` always ends with exactly one newline, and that is a terminator, not
+data.** A value that itself ends in a newline therefore comes back with two, and
+nothing marks which is which — `$(csv2 -get …)` then eats both, because command
+substitution strips every trailing newline, not one:
+
+```console
+$ csv2 -get 1:2 -i pkgs.csv | od -c | tail -2      # cell is "value ends here\n"
+0000000   v   a   l   u   e       e   n   d   s       h   e   r   e  \n
+0000020  \n
+
+$ csv2 -mid 1,1 --json -i pkgs.csv                 # the same cell, unambiguous
+{"record":1,"line":2,"fields":{"a":"x","b":"value ends here\n"}}
+```
+
+Newlines *inside* a value are fine — they come back as themselves. It is only a
+**trailing** newline that cannot be distinguished from the terminator. When that
+distinction matters, `--json` is the shape that carries it. Asserted by T71.
+
+`-get` returns the **logical value**, not the bytes on disk. A `.csv2` file
+stores an embedded newline as the two characters `\n`; `-get` gives you the
+newline, the same as it would from a `.csv` file holding a real one. The two
+formats differ in how they store a value, not in what the value is.
+
+For many values at once, use `--json` and read the fields by name, or take the
+third column of the locating report:
 
 ```console
 $ csv2 -contains busybox -i pkgs.csv | cut -f3

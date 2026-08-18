@@ -2235,6 +2235,71 @@ assert_fails "T70l -get with an edit is refused / -get 與編輯併用被拒" --
 assert_fails "T70m -get into a .csv path is refused: one value is not a CSV file / -get 寫入 .csv 路徑被拒：一個值不是一個 CSV 檔" -- \
     "$CSV2" -get 1:1 -i "$PKG" -o "$TMP/t70_out.csv"
 
+# ---------------------------------------------------------------------
+# T71 -- -get's trailing newline is a terminator, and the value is logical.
+#
+# Round 21: the reader attacked -get, which exists because of their own round-14
+# argument, and went at the hardest place for a "prints the value and nothing
+# else" promise to hold. Two results.
+#
+# The behaviour is right in both. What was missing was the mechanism: the README
+# said "where the value's own newlines matter, use --json" without saying why,
+# and a reader wiring -get into a script needs to know that the failure mode is
+# SILENT LOSS of a trailing newline, not garbled output and not an error.
+#
+# T71 —— -get 的結尾換行是「終止符」，而它交出的是「邏輯值」。
+# 第 21 回合：讀者去攻擊 -get——那是因它自己第 14 回合的論證而存在的東西——並且挑了「印出
+# 值、別的什麼都不印」這個承諾最難守住的地方下手。兩個結果。
+# 兩者的行為都是對的。缺的是「機制」：README 只說「值本身的換行有意義時請用 --json」，
+# 卻沒說為什麼；而要把 -get 接進腳本的人需要知道，失敗的形態是「結尾換行被靜默吃掉」，
+# 不是輸出亂掉，也不是報錯。
+# ---------------------------------------------------------------------
+echo
+echo "--- T71: -get's terminator and logical value / -get 的終止符與邏輯值 ---"
+
+printf 'a,b\nx,"line one\nline two"\n'      > "$TMP/t71_in.csv"
+printf 'a,b\nA,B\nx,line one\\nline two\n' > "$TMP/t71_in.csv2"
+printf 'a,b\nx,"value ends here\n"\n'       > "$TMP/t71_tail.csv"
+
+# A newline INSIDE a value survives as itself: two lines out, plus nothing else.
+# 值「內部」的換行原樣存活：輸出兩行，別無其他。
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t71_in.csv" 2>/dev/null | wc -l | tr -d ' ')" "2" \
+    "T71a a newline inside a value comes back as itself / 值內部的換行原樣回來"
+
+# .csv2 stores that newline as the two characters \n. -get gives the VALUE, so
+# both formats produce identical bytes. The formats differ in how they store a
+# value, not in what the value is -- asserted rather than assumed, because the
+# reader had to guess it.
+# .csv2 以 \n 兩個字元儲存那個換行。-get 交出的是「值」，因此兩種格式產生完全相同的位元組。
+# 兩種格式的差別在於「如何儲存一個值」，不在於「那個值是什麼」——這裡改為斷言而非假定，
+# 因為讀者當時只能靠猜。
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t71_in.csv2" 2>/dev/null)" \
+    "$("$CSV2" -get 1:2 -i "$TMP/t71_in.csv" 2>/dev/null)" \
+    "T71b .csv and .csv2 give the same value, though they store it differently / .csv 與 .csv2 給出相同的值，儘管儲存方式不同"
+
+# The collision: one newline is the value's, one is the terminator, and nothing
+# marks the boundary. Counted in BYTES, because $(...) would hide it -- which is
+# the whole point.
+# 那個碰撞：一個換行是值的、一個是終止符，沒有東西標示邊界。以「位元組」計數，因為
+# $(...) 會把它藏起來——而那正是重點所在。
+n=$("$CSV2" -get 1:2 -i "$TMP/t71_tail.csv" 2>/dev/null | wc -c | tr -d ' ')
+assert_eq "$n" "17" \
+    "T71c a value ending in a newline yields two: its own and the terminator / 以換行結尾的值會產生兩個換行：它自己的與終止符"
+
+# And command substitution eats both, silently. This is the failure the README
+# now names, so it is asserted rather than described.
+# 而命令替換會把兩個都吃掉，靜默地。這正是 README 現在點名的那個失敗，因此改為斷言而非描述。
+v=$("$CSV2" -get 1:2 -i "$TMP/t71_tail.csv" 2>/dev/null)
+assert_eq "${#v}" "15" \
+    "T71d and \$(...) strips both, losing the value's own / 而 \$(...) 會把兩個都剝掉，連值自己的那個也失去"
+
+# --json is the shape that keeps them apart, which is why the README points
+# there rather than at a flag.
+# --json 才是能把兩者分開的形狀，這也是 README 指向它而不是指向某個旗標的原因。
+assert_contains "$("$CSV2" -mid 1,1 --json -i "$TMP/t71_tail.csv" 2>/dev/null | sed -n 2p)" \
+    'value ends here\n' \
+    "T71e --json carries the trailing newline unambiguously / --json 明確無歧義地承載了那個結尾換行"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

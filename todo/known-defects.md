@@ -278,6 +278,7 @@ documentation defects, and two defects in the test suite itself.
 | M | 測試套件自己在 12 處用 `cut -d,` 切 CSV | **測試** | T64a–T64d |
 | N | T58 grep 一個 guest 內不存在的 README，拿空字串比對 | **測試** | T58z |
 | O | 五個檔案裡七個過期的 PASS 數字（74／112／25），其中 README 的那個被當成「驗證工具能用」的方法提供 | 文件 | T69a–T69b |
+| P | `-get` 的結尾換行是終止符，與「值自己的結尾換行」無法區分，`$(...)` 會靜默吃掉；且「交出邏輯值而非磁碟位元組」未記載 | 文件 | T71a–T71e |
 
 ---
 
