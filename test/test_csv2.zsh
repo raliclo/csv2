@@ -814,11 +814,33 @@ while IFS= read -r ln; do
 done < "$TMP/w.md"
 # header + 7 samples; column width is 8, set by 套件名稱.
 # widths per the plan: ok 2, 套件名稱 8, and every emoji sample 2.
-if [[ ${#wpad} -eq 8 && ${wpad[2]} -eq 6 && ${wpad[3]} -eq 0 && ${wpad[4]} -eq 6 \
-      && ${wpad[5]} -eq 6 && ${wpad[6]} -eq 6 && ${wpad[7]} -eq 6 && ${wpad[8]} -eq 6 ]]; then
-    ok "T48 display widths match the plan's measured table (ok 2, 套件名稱 8, every emoji 2) / 顯示寬度與計畫實測的表相符"
+#
+# One assertion PER SAMPLE, not one for the table. These eight used to collapse
+# into a single if, so a failure said the table was wrong without saying which
+# row -- and the rows fail for different reasons. A ZWJ family summed per scalar
+# gives 8; a skin-tone pair summed per codepoint gives 4; a flag counted as
+# clusters gives 1. Told which row moved, you know which of those it is; told
+# only "the table is wrong", you start over.
+#
+# 一個樣本一個斷言，而不是整張表一個。這八個原本擠在同一個 if 裡，於是失敗時只說「表錯了」
+# 卻不說是哪一列——而各列失敗的原因並不相同：ZWJ 家庭以 scalar 加總會得到 8、膚色配對以
+# 碼位加總會得到 4、旗幟以 cluster 計數會得到 1。知道是哪一列動了，就知道是其中哪一種；
+# 只被告知「表錯了」，就得從頭查起。
+typeset -a wname wwant
+wname=('header 寬' 'ok' '套件名稱' '😀' '👍🏽 skin-tone (2 codepoints, 1 cluster)' \
+       '👨‍👩‍👧‍👦 ZWJ family (7 scalars, 1 cluster)' '🇹🇼 flag (2 scalars, 1 cluster)' \
+       '1️⃣ keycap (3 scalars, 1 cluster)')
+wwant=(6 6 0 6 6 6 6 6)
+if (( ${#wpad} != 8 )); then
+    bad "T48 expected 8 rows of padding, got ${#wpad}: $wpad / 預期 8 列的補白，實得 ${#wpad}"
 else
-    bad "T48 width table (padding per row: $wpad, want 6 0 6 6 6 6 6 after the header)"
+    for i in {2..8}; do
+        if (( wpad[i] == wwant[i] )); then
+            ok "T48/$i ${wname[i]} pads $wpad[i], so it measures $(( 8 - wpad[i] )) columns / 補白 $wpad[i]，即量得 $(( 8 - wpad[i] )) 欄"
+        else
+            bad "T48/$i ${wname[i]} padded $wpad[i], want $wwant[i] (measured $(( 8 - wpad[i] )) columns, want $(( 8 - wwant[i] ))) / 補白 $wpad[i]，預期 $wwant[i]"
+        fi
+    done
 fi
 
 # T49 — the locating report's optional address parts.
