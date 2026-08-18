@@ -129,7 +129,8 @@ $ csv2 -r --json -i example.csv2 | head -1
   -tail N               後 N 筆
   -mid a,b              第 a 到第 b 筆，含兩端；`a,` 與 `,b` 為開放端
   -t                    輸出帶上標頭列（預設不帶）
-  -rownum               最前面加一欄紀錄號
+  -rownum               最前面加一欄紀錄號。它不會重新編號任何東西：見下方
+                        「兩套編號」
   --physical            額外輸出該紀錄起始的物理行號
   --a1                  額外輸出試算表的 A1 記法
 
@@ -237,6 +238,37 @@ $ csv2 -contains busybox -i TARGET_PACKAGES.csv
 ```console
 $ csv2 -contains busybox -i pkgs.csv | cut -f3
 ```
+
+### 兩套編號，以及它們不一致的地方
+
+`-rownum` 會在最前面加一欄。其餘一切維持原本的編號：
+
+```console
+$ csv2 -contains busybox -i pkgs.csv
+1:1	pkg_name	busybox
+$ csv2 -contains busybox -rownum -i pkgs.csv
+1:1	pkg_name	busybox
+
+$ csv2 -r -t -rownum -i pkgs.csv
+rownum,pkg_name,version,source,license
+1,busybox,1.37.0,"fork raliclo/busybox, branch develop",GPL-2.0
+```
+
+位址 `1:1` 在兩次執行中都仍然代表 `pkg_name`。但在印出來的那一列裡，`pkg_name` 現在是
+**第二個**實體欄位。**只要開了 `-rownum`，位址編號與實體欄位位置就差一格**，而輸出裡沒有
+任何東西會告訴你這件事。
+
+位址保持穩定是刻意的：你先前找到的位址、或從 bug 回報裡抄下來的位址，必須不論後續執行用了
+哪些顯示旗標都仍指向同一格。`-update 1:1` 編輯的都是 `pkg_name`，與找到它的那次執行有沒有
+給 `-rownum` 無關。
+
+代價在另一個方向。**任何「依欄位位置」讀取輸出的東西——另一支程式、試算表匯入、`cut`——
+看到的是位置 1 是 `rownum`，其餘全部往右位移一格。** 因此不要把兩者混用：位址對位址、
+位置對位置。
+
+rownum 那一欄也**永遠不會被搜尋**：`-contains 4` 不會只因為某筆「是第四筆」就命中它。
+它的值是由顯示產生的，不是你檔案裡的資料；讓它可被比對，等於讓一次執行的輸出改變那次執行
+找得到什麼。由 T15 斷言。
 
 標頭列預設**對搜尋是不可見的**，即使它們的儲存格和其他儲存格一樣是文字。
 `--include-headers` 會把它們納入，第一列標頭定址為 `0a`、第二列為 `0b`——絕不會是單純的

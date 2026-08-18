@@ -349,6 +349,23 @@ assert_eq "$b" "$a" "T15a -rownum does not change record:field addressing / -row
 c=$("$CSV2" -contains "1" -rownum -i "$PKG" 2>/dev/null | cut -f1 | cut -d: -f2 | sort -u | grep -c '^0$' || true)
 assert_eq "$c" "0" "T15b the rownum column is never searched / rownum 欄不參與比對"
 
+# The other half of the same fact, and the half that bites. Addresses stay put
+# BECAUSE the printed row moves: with -rownum, pkg_name is address 1 and
+# physical column 2. Round 16 of the blind testing found this documented
+# nowhere -- the tool did the right thing and never said which numbering
+# applied where, so anything reading the output by position gets everything
+# shifted one right while every address it holds still means the old column.
+# 同一件事的另一半，也是會咬人的那一半。位址之所以不動，正是因為印出來的那一列動了：
+# 開了 -rownum 之後，pkg_name 的位址是 1、實體欄位是 2。盲測第 16 回合發現這件事在任何地方
+# 都沒有被記載——工具做的是對的，卻從未說明哪一套編號適用於何處；於是任何「依位置」讀取
+# 輸出的東西，看到的每一欄都往右移了一格，而它手上的每一個位址仍指向原本那一欄。
+first_col=$("$CSV2" -head 1 -t -rownum -i "$PKG" 2>/dev/null | head -1 | cut -d, -f1)
+assert_eq "$first_col" "rownum" \
+    "T15c with -rownum the FIRST physical column is rownum / 開了 -rownum 之後，第一個實體欄位是 rownum"
+addr_col=$("$CSV2" -contains "busybox" -rownum -i "$PKG" 2>/dev/null | head -1 | cut -f2)
+assert_eq "$addr_col" "pkg_name" \
+    "T15d while address 1 still names pkg_name: the two numberings differ by one / 而位址 1 仍指向 pkg_name：兩套編號差一格"
+
 # T16 — context is counted in RECORDS and blocks are separated by --.
 n0=$("$CSV2" -contains "invalid option" --filter -i "$PKG" 2>/dev/null | wc -l | tr -d ' ')
 n=$("$CSV2" -contains "invalid option" -A 2 -i "$PKG" 2>/dev/null | wc -l | tr -d ' ')
