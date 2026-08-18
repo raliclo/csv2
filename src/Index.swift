@@ -55,7 +55,14 @@ import Foundation
 //  磁碟讀取，與它省下的整檔讀取相比可以忽略。
 
 let INDEX_MAGIC: [UInt8] = Array("CSV2IDX\0".utf8)
-let INDEX_VERSION: UInt32 = 1
+/// 2 since 2026-08-18: the header gained a checksum over the index's own bytes.
+/// A version 1 index has zeros where the checksum belongs and is discarded on
+/// sight, which is the correct outcome -- it was written by a build that could
+/// not detect corruption in itself.
+/// 自 2026-08-18 起為 2：檔頭新增了一個「涵蓋索引自身位元組」的檢查碼。版本 1 的索引在
+/// 該欄位處是零，會被直接丟棄，而那是正確的結果——它是由一個「無法偵測自身損毀」的版本
+/// 寫出來的。
+let INDEX_VERSION: UInt32 = 2
 let INDEX_HEADER_SIZE = 88
 let INDEX_DEFAULT_STRIDE = 256
 
@@ -118,6 +125,35 @@ struct FileStamp {
     var v: UInt32 = 0
     for i in 0..<4 { v |= UInt32(a[off + i]) << (8 * UInt32(i)) }
     return v
+}
+
+/// Offset of the checksum inside the header, in the 8 bytes that were reserved
+/// and unused until 2026-08-18.
+/// 檢查碼在檔頭中的位移，位於 2026-08-18 之前保留而未使用的那 8 個位元組。
+let INDEX_SUM_OFFSET = 80
+
+/// FNV-1a over the whole index with the checksum field itself read as zero.
+///
+/// This detects CORRUPTION -- a flipped bit, a short write, a partially
+/// overwritten file. It is not a signature and does not pretend to be: anyone
+/// who can rewrite the offsets can rewrite eight more bytes. Against that,
+/// --verify-index is the answer, and it is O(n) for the reason that it has to
+/// be. FNV-1a rather than something stronger because the cost falls on every
+/// indexed read and the threat is a bit flip, not an adversary.
+///
+/// 以 FNV-1a 計算整份索引，並把檢查碼欄位本身當成零。
+/// 它偵測的是「損毀」——翻轉的位元、寫入不完整、被部分覆寫的檔案。它不是簽章，也不假裝是：
+/// 能改寫偏移量的人，同樣能改寫另外八個位元組。對付那種情況的答案是 --verify-index，
+/// 而它之所以是 O(n)，正因為它非得是不可。選 FNV-1a 而非更強的演算法，是因為這個成本落在
+/// 每一次「用到索引的讀取」上，而威脅是一個位元翻轉，不是一個對手。
+func indexChecksum(_ b: [UInt8]) -> UInt64 {
+    var h: UInt64 = 0xcbf2_9ce4_8422_2325
+    for i in 0..<b.count {
+        let byte = (i >= INDEX_SUM_OFFSET && i < INDEX_SUM_OFFSET + 8) ? 0 : b[i]
+        h ^= UInt64(byte)
+        h = h &* 0x1000_0000_01b3
+    }
+    return h
 }
 
 // ---------------------------------------------------------------------
@@ -185,6 +221,26 @@ final class CSVIndex {
         let hashHead = Array(b[64..<72])
         let hashTail = Array(b[72..<80])
 
+        // The stamp checks above all describe the DATA file. Nothing described
+        // the index itself, so a flipped bit in an offset passed every one of
+        // them: the stamp still matched, the entry count still matched, and the
+        // wrong offset was used. On 2026-08-18 a reader corrupted a single byte
+        // and `-mid 1,1` returned a fragment beginning mid-field, presented as a
+        // record, at rc=0 -- while `-r` on the same file was correct, because it
+        // does not consult the index. That is the case the design calls "far
+        // worse than no index", produced by the one thing nothing was checking.
+        //
+        // 上面那些戳記檢查描述的全是「資料檔」。沒有任何東西描述索引本身，因此偏移量裡
+        // 一個翻轉的位元能通過其中每一項：戳記仍然相符、項目數仍然相符，於是那個錯誤的
+        // 偏移量被採用了。2026-08-18，一位讀者改動了一個位元組，`-mid 1,1` 便回傳了一段
+        // 從欄位中間開始的碎片，並以「一筆紀錄」的身分呈現，rc=0——而同一個檔案的 `-r`
+        // 是正確的，因為它不使用索引。那正是本設計所稱「比沒有索引糟得多」的情況，
+        // 而它出自那個唯一沒有被檢查的東西。
+        guard getU64(b, INDEX_SUM_OFFSET) == indexChecksum(b) else {
+            Logger.shared.info("index \(p): checksum mismatch, ignoring and scanning")
+            return nil
+        }
+
         guard let now = FileStamp.of(path: dataPath) else { return nil }
         guard now.size == dataSize, now.mtimeSec == mtimeSec, now.mtimeNsec == mtimeNsec,
               now.hashHead == hashHead, now.hashTail == hashTail else {
@@ -238,6 +294,14 @@ final class CSVIndex {
         b.append(contentsOf: stamp.hashTail)
         b.append(contentsOf: [UInt8](repeating: 0, count: 8))
         for o in offsets { putU64(o, into: &b) }
+        // Computed last, over everything including the offsets, and written
+        // back into the reserved field. Computing it over the header alone
+        // would leave the offsets -- the part that decides where a read lands
+        // -- exactly as unprotected as before.
+        // 最後才計算，涵蓋包含偏移量在內的全部內容，再寫回那個保留欄位。只對檔頭計算的話，
+        // 偏移量——也就是決定一次讀取會落在哪裡的那一部分——會和先前一樣毫無保護。
+        let sum = indexChecksum(b)
+        for i in 0..<8 { b[INDEX_SUM_OFFSET + i] = UInt8((sum >> (8 * UInt64(i))) & 0xFF) }
         return b
     }
 

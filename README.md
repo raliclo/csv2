@@ -639,7 +639,20 @@ Each of these is argued in full in [plan/plan.md](./plan/plan.md).
 - **The index is always an optimisation and never a precondition.** With no
   index, behaviour is identical. Stale, truncated, corrupt, wrong version — all
   are discarded in favour of a scan, none is an error. An index that quickly
-  gives you the wrong data is far worse than no index. The sidecar for
+  gives you the wrong data is far worse than no index. **Until 2026-08-18 this
+  was not true of the index's own contents**: every check described the data
+  file — size, mtime, the hashes of its first and last bytes, the entry count —
+  and nothing described the index, so one flipped bit in an offset passed all of
+  them and `-mid 1,1` returned a fragment beginning mid-field, as a record, at
+  rc=0. The header now carries a checksum over the whole index, offsets
+  included. A corrupt index is discarded, and the next operation that reads the
+  whole file writes a good one back. Asserted by T68.
+  **What the checksum is not:** it catches corruption — a flipped bit, a short
+  write, a partially overwritten file — and is not a signature. Anyone who can
+  rewrite the offsets can rewrite eight more bytes. It also cannot help when the
+  *data* file changes without changing size, mtime or its first and last bytes;
+  that is what the O(1) check has always been, a heuristic. For a proof, run
+  `--verify-index`, which is O(n) because it has to be. The sidecar for
   `packages.csv` is `packages.csv.index` — the whole filename plus `.index`, so
   `foo.csv` and `foo.csv2` never collide. That is the line to put in
   `.gitignore`: it is derived from the data file and is never the source of

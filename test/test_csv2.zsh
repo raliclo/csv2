@@ -2014,6 +2014,107 @@ assert_fails "T67e --a1 without a locating report is refused / 沒有定位報�
 assert_fails "T67f and --a1 with --filter is refused too, for the same reason / 與 --filter 併用同樣被拒，理由相同" -- \
     "$CSV2" -contains zlib --filter --a1 -i "$TMP/t67.csv2"
 
+# ---------------------------------------------------------------------
+# T68 -- a corrupt index must be DISCARDED, including corruption inside the
+#        index itself.
+#
+# Round 18 of the blind testing, and the only TOOL BROKEN of the run. Round 10
+# had already shown that an index full of garbage is caught. This went further
+# and asked whether a PLAUSIBLE corruption gets through -- one that still
+# passes the O(1) staleness check.
+#
+# It did. Every check described the DATA file: its size, its mtime, the hashes
+# of its first and last bytes, and the number of entries. Nothing described the
+# index. So a single flipped bit in an offset passed all of them, and the wrong
+# offset was used: `-mid 1,1` returned a fragment beginning mid-field, presented
+# as a record, at rc=0, while `-r` on the same file was correct because it never
+# consults the index. `-tail` silently returned one record fewer.
+#
+# The README's own words for that outcome are "far worse than no index". It was
+# produced by the one thing nothing was checking.
+#
+# T68 —— 損毀的索引必須被「丟棄」，包括索引自身內部的損毀。
+# 盲測第 18 回合，也是整輪唯一一個 TOOL BROKEN。第 10 回合已證明「整份垃圾」的索引會被
+# 攔下。這一回合更進一步，問的是「合理的」損毀能不能通過——一個仍然能通過 O(1) 過期檢查的
+# 損毀。它通過了。所有檢查描述的都是「資料檔」：大小、mtime、首尾位元組的雜湊、項目數。
+# 沒有任何東西描述索引本身。於是偏移量裡一個翻轉的位元通過了全部檢查，那個錯誤的偏移量被
+# 採用：`-mid 1,1` 回傳了一段從欄位中間開始的碎片，以「一筆紀錄」呈現，rc=0；而同一個檔案的
+# `-r` 是正確的，因為它從不使用索引。`-tail` 則安靜地少回傳一筆。
+# README 對這種結果的用語是「比沒有索引糟得多」。而它出自那個唯一沒有被檢查的東西。
+# ---------------------------------------------------------------------
+echo
+echo "--- T68: corruption INSIDE the index is discarded / 索引「內部」的損毀會被丟棄 ---"
+
+export CSV2_INDEX_MIN_BYTES=1
+printf 'pkg,ver,note\nbusybox,1,a\nzlib,2,b\nzstd,3,c\nncurses,4,d\n' > "$TMP/t68.csv"
+rm -f "$TMP/t68.csv.index"
+"$CSV2" -tail 4 -i "$TMP/t68.csv" >/dev/null 2>&1
+assert_succeeds "T68a an index was built to corrupt / 已建立可供破壞的索引" -- \
+    test -f "$TMP/t68.csv.index"
+
+# The truth, taken without the index so it cannot be the thing under test.
+# 不經索引取得的真值，以免它本身就是受測物。
+want1=$("$CSV2" --no-index -mid 1,1 -i "$TMP/t68.csv" 2>/dev/null)
+wantn=$("$CSV2" --no-index -tail 4 -i "$TMP/t68.csv" 2>/dev/null | wc -l | tr -d ' ')
+
+# Byte 88 is the low byte of the first offset entry: the header is 88 bytes, so
+# this is the field that says where record 1 begins. Changing 13 to 26 points it
+# at the middle of record 2 -- a value that is plausible, in range, and wrong.
+# dd rather than a scripting language: the guest runs this suite and has neither
+# python nor perl.
+# 第 88 個位元組是第一個偏移量項目的低位位元組：檔頭是 88 bytes，因此這個欄位說的是「第 1 筆
+# 從哪裡開始」。把 13 改成 26，會讓它指向第 2 筆的中間——一個合理、在範圍內、而且錯誤的值。
+# 用 dd 而不是腳本語言：guest 也會跑這份測試，而那裡既沒有 python 也沒有 perl。
+printf '\032' | dd of="$TMP/t68.csv.index" bs=1 seek=88 conv=notrunc 2>/dev/null
+
+got1=$("$CSV2" -mid 1,1 -i "$TMP/t68.csv" 2>"$TMP/t68_err.txt")
+rc=$?
+assert_eq "$got1" "$want1" \
+    "T68b a corrupted offset does not change the answer / 被破壞的偏移量不改變答案"
+assert_eq "$rc" "0" "T68c and is not an error / 而且不是錯誤"
+assert_eq "$(wc -c < "$TMP/t68_err.txt" | tr -d ' ')" "0" \
+    "T68d and says nothing on stderr / stderr 也不說話"
+assert_eq "$("$CSV2" -tail 4 -i "$TMP/t68.csv" 2>/dev/null | wc -l | tr -d ' ')" "$wantn" \
+    "T68e -tail returns every record, not one fewer / -tail 回傳每一筆，不會少一筆"
+
+# The -tail above REPLACED the corrupt index: it reads the whole file anyway, so
+# it writes a fresh one. That is worth asserting on its own -- a corrupt index
+# is not merely ignored, it is repaired by the next operation that has the
+# information to do so. The corruption has to be reapplied before anything can
+# be checked against it.
+# 上面那個 -tail 已經「替換」了損毀的索引：它本來就要讀完整個檔案，因此會順手寫出一份新的。
+# 這件事本身就值得斷言——損毀的索引不只是被忽略，而是被「下一個握有足夠資訊的操作」修好。
+# 因此要再檢查任何東西之前，必須先把損毀重新施加一次。
+healed=$("$CSV2" --verify-index -i "$TMP/t68.csv" >/dev/null 2>&1; print $?)
+assert_eq "$healed" "0" \
+    "T68f a full read replaced the corrupt index with a good one / 一次完整讀取以一份好的索引替換了損毀的那份"
+
+printf '\032' | dd of="$TMP/t68.csv.index" bs=1 seek=88 conv=notrunc 2>/dev/null
+assert_fails "T68f2 and with the corruption reapplied, --verify-index refuses / 重新施加損毀後，--verify-index 拒絕" -- \
+    "$CSV2" --verify-index -i "$TMP/t68.csv"
+
+# An index written by a version that could not detect corruption in itself is
+# discarded on sight rather than trusted.
+# 由「無法偵測自身損毀」的版本寫出的索引，會被直接丟棄而不是被信任。
+rm -f "$TMP/t68.csv.index"
+"$CSV2" -tail 4 -i "$TMP/t68.csv" >/dev/null 2>&1
+printf '\001' | dd of="$TMP/t68.csv.index" bs=1 seek=8 conv=notrunc 2>/dev/null
+assert_eq "$("$CSV2" -mid 1,1 -i "$TMP/t68.csv" 2>/dev/null)" "$want1" \
+    "T68g an older index version is discarded, not trusted / 較舊版本的索引會被丟棄而非信任"
+
+# Corruption anywhere, not just in the offsets: the header carries the record
+# count and the stride, and a wrong one of those misdirects a read just as well.
+# 損毀可能發生在任何地方，不只偏移量：檔頭帶著紀錄數與 stride，其中任何一個錯了，同樣
+# 會把一次讀取導向錯的位置。
+rm -f "$TMP/t68.csv.index"
+"$CSV2" -tail 4 -i "$TMP/t68.csv" >/dev/null 2>&1
+printf '\007' | dd of="$TMP/t68.csv.index" bs=1 seek=56 conv=notrunc 2>/dev/null
+assert_eq "$("$CSV2" -mid 1,1 -i "$TMP/t68.csv" 2>/dev/null)" "$want1" \
+    "T68h corruption in the header is caught too, not only in the offsets / 檔頭的損毀同樣會被攔下，不只偏移量"
+
+rm -f "$TMP/t68.csv.index"
+unset CSV2_INDEX_MIN_BYTES
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
