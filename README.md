@@ -309,20 +309,64 @@ without counting.
 
 `-md` emits a Markdown table and is one-way — csv2 cannot read it back.
 
+### In a pipeline
+
+`-si` and `-so` compose with every verb; there is nothing special about a
+pipeline except that stdin has no suffix, so `--headers` has to say what the
+format is:
+
+```console
+$ cat packages.csv | csv2 -si --headers 1 -contains busybox --filter -so
+busybox,1.37.0,"fork raliclo/busybox, branch develop",GPL-2.0
+```
+
+**It streams, but stdout is buffered in 64 KiB blocks — not by line.** "Without
+buffering the whole file" is a statement about memory, and it is true: on a
+stream that keeps coming, the first output appears immediately and memory stays
+flat. But under 64 KiB of output nothing appears until the run ends, so piping
+csv2 into something you are watching live will look like it has hung when in
+fact it has nothing to flush yet. If you need each record as it is produced,
+you need a tool that line-buffers; csv2 is built for throughput in a pipeline,
+not for interactive tailing. Measured, not assumed: 8 000 records out and the
+first bytes arrive in 0.01 s while input runs for 3 s; 2 000 records out and
+nothing arrives until close. Asserted by T61.
+
 ### Exit status
 
 `0` on success, non-zero on any error, and there is no third case: csv2 does
 not partially succeed. A run that fails writes nothing to `-o`, because output
 goes to a temp file that is renamed only after everything else worked.
 
+**The same holds for `--in-place`, where it matters more:** a failed in-place
+edit leaves the original **byte-for-byte unchanged**, and leaves no temp file
+beside it. This is the one guarantee with no fallback — with `-o` you still have
+the input if the output is wrong, and with `--in-place` the input *is* the
+output. It was inferable from "`--in-place` … via temp file + rename" plus the
+sentence above, but inferable is not stated; a README-only reader flagged having
+to work it out on 2026-08-18. Asserted by T28c.
+
 `--build-index` and `--verify-index` each print one line to **stdout** — they
 are explicit administrative actions, not the normal path, but if you pipe them
 anywhere that line is in your stream.
 
-Errors go to stderr as exactly **two** lines, English then Chinese, and name the
-record and field. With `-log FILE` the same failure is also appended there with
-a timestamp; without it nothing else is printed. On the normal path csv2 prints
-nothing at all — it has to work inside a pipeline.
+Errors go to stderr as exactly **two** lines, English then Chinese. With
+`-log FILE` the same failure is also appended there with a timestamp; without it
+nothing else is printed. On the normal path csv2 prints nothing at all — it has
+to work inside a pipeline.
+
+**How much of a location an error carries depends on how much there is.** Do not
+write a script that expects to find `record N, field M` in every message:
+
+| The fault is | The message names | Example |
+|---|---|---|
+| at one cell | `record N, field M` | `record 3, field 2: undefined escape sequence \q; .csv2 defines only \n, \r and \\` |
+| at one record, but no single field | `record N` | `record 1 (line 2) has 2 fields but the header has 3` |
+| in the arguments | neither — it is thrown before any record is read | `unknown flag --nope` |
+| in the file as a whole | neither — there is no record to name | `cannot open input file: /nope.csv` |
+
+Until 2026-08-18 this section claimed errors "name the record and field"
+unconditionally. One error in eight does; the rest name the record, or nothing,
+because there is nothing else true to name. Asserted by T60.
 
 An error in the **arguments** is thrown before `-log` has been read, so it
 reaches stderr but not the log file: the path to log to came from the same

@@ -503,6 +503,14 @@ assert_eq "$v" "zzz" "T28b --in-place edits via temp file and rename / --in-plac
 cp "$PKG" "$TMP/t28c.csv"
 "$CSV2" -update '99:1' 'zzz' -i "$TMP/t28c.csv" --in-place 2>/dev/null
 assert_same "$PKG" "$TMP/t28c.csv" "T28c a failed in-place edit leaves the original intact / 失敗時原檔完好"
+# And leaves nothing beside it. A stray temp file next to a data file is the
+# kind of debris a later glob picks up as if it were input -- the failure is
+# then not the edit, it is whatever reads the directory next.
+# 而且旁邊什麼都不留。資料檔旁的暫存殘骸，正是日後某個 glob 會當成輸入撿起來的那種東西
+# ——屆時失敗的不是那次編輯，而是下一個讀取該目錄的東西。
+stray=$(ls "$TMP" | grep -c "^t28c\.csv\." || true)
+assert_eq "$stray" "0" \
+    "T28d and leaves no temp file beside it / 且旁邊不留暫存檔"
 
 # T29 — out of range is an error, never "grow the file to fit".
 assert_fails "T29 -update 99:3 on a 21-record file is an error / 越界即錯誤" -- \
@@ -1379,6 +1387,158 @@ assert_eq "$(head -2 "$TMP/t59_ap.csv2")" \
 'pkg,ver,note
 套件,版本,備註' \
     "T59h and it leaves both header rows untouched / 而且兩列標頭原封不動"
+
+# ---------------------------------------------------------------------
+# T60 -- an error carries as much location as there IS, and the README says so.
+#
+# Round 6 of the blind testing passed, but the reader quoted a README sentence
+# that turned out to be false: "Errors go to stderr as exactly two lines,
+# English then Chinese, and name the record and field." The two-line half is
+# true. The location half was an unconditional promise that one error in eight
+# keeps -- the message the reader had just received named only `record 3`.
+#
+# An overclaim like this is worse than saying nothing, because it is exactly
+# specific enough to write a script against: `cut` the address out of every
+# error and you get a fragment of prose on the majority of them.
+#
+# T60 —— 錯誤帶的位置資訊「有多少帶多少」，而 README 據實陳述。
+# 盲測第 6 回合通過了，但讀者引用的那句 README 後來證實為假：「錯誤訊息走 stderr，
+# 恰好兩行，並指出是哪一筆、哪一欄。」兩行那半是真的；位置那半是一個無條件的承諾，
+# 而八則錯誤中只有一則守得住——讀者當下收到的那則就只指出了 `record 3`。
+# 這種過度宣稱比什麼都不說更糟，因為它「剛好具體到可以拿來寫腳本」：把位址從每則錯誤
+# 中 cut 出來，多數情況下你會得到一段散文的碎片。
+# ---------------------------------------------------------------------
+echo
+echo "--- T60: errors name as much location as exists / 錯誤有多少位置就帶多少 ---"
+
+printf 'a,b\nA,B\n1,\\q\n' > "$TMP/t60_cell.csv2"
+printf 'a,b,c\n1,2\n' > "$TMP/t60_rec.csv"
+printf 'a,b\n1,2\n' > "$TMP/t60_ok.csv"
+
+# At one cell: record AND field, because both are true.
+# 錯在某一格：紀錄與欄位都指出，因為兩者都為真。
+"$CSV2" -r -i "$TMP/t60_cell.csv2" 2> "$TMP/t60_a.txt" >/dev/null
+assert_contains "$(head -1 "$TMP/t60_a.txt")" "record 3, field 2" \
+    "T60a a fault at one cell names the record and the field / 錯在某一格時，紀錄與欄位都會指出"
+
+# At one record, but no single field owns it: record only. Naming a field here
+# would mean inventing one.
+# 錯在某一筆、但不屬於任何單一欄位：只指出紀錄。在此指出欄位等於捏造一個。
+"$CSV2" -r -i "$TMP/t60_rec.csv" 2> "$TMP/t60_b.txt" >/dev/null
+assert_contains "$(head -1 "$TMP/t60_b.txt")" "record 1 (line 2)" \
+    "T60b a fault at one record names the record / 錯在某一筆時會指出該筆"
+if grep -q 'field [0-9]' "$TMP/t60_b.txt"; then
+    bad "T60c a record-level fault must not invent a field number / 紀錄層級的錯誤不應捏造欄位號"
+else
+    ok "T60c and does not invent a field number / 且不會捏造欄位號"
+fi
+
+# In the arguments: neither, because it is thrown before a record is read.
+# 錯在參數：兩者都不指出，因為它在讀到任何一筆之前就被丟出。
+"$CSV2" --nope -i "$TMP/t60_ok.csv" 2> "$TMP/t60_c.txt" >/dev/null
+if grep -qE 'record [0-9]' "$TMP/t60_c.txt"; then
+    bad "T60d an argument error must not name a record / 參數錯誤不應指出紀錄"
+else
+    ok "T60d an argument error names no record, having read none / 參數錯誤不指出紀錄，因為它一筆都還沒讀"
+fi
+
+# Whole-file: neither. There is no record to name.
+# 整個檔案層級：兩者都不指出，沒有紀錄可指。
+"$CSV2" -r -i "$TMP/t60_nosuch.csv" 2> "$TMP/t60_e.txt" >/dev/null
+if grep -qE 'record [0-9]' "$TMP/t60_e.txt"; then
+    bad "T60e a whole-file error must not name a record / 檔案層級的錯誤不應指出紀錄"
+else
+    ok "T60e a whole-file error names no record either / 檔案層級的錯誤同樣不指出紀錄"
+fi
+
+# Whatever the category, the two-line rule holds -- that half of the sentence
+# was always true and stays asserted.
+# 不論屬於哪一類，兩行規則都成立——那半句一直為真，並持續被斷言。
+for f in t60_a t60_b t60_c t60_e; do
+    n=$(wc -l < "$TMP/$f.txt" | tr -d ' ')
+    if [[ "$n" == "2" ]]; then
+        ok "T60f/$f exactly two lines / 恰好兩行"
+    else
+        bad "T60f/$f expected 2 stderr lines, got $n / 預期 2 行，得到 $n 行"
+    fi
+done
+
+# ---------------------------------------------------------------------
+# T61 -- -si/-so really streams, and stdout is buffered in 64 KiB blocks.
+#
+# Round 9 of the blind testing pointed out that "without buffering the whole
+# file" had never been demonstrated -- a pipeline that completes before you can
+# watch it proves correctness, not streaming. It is measured here instead:
+# the producer emits enough to exceed the buffer, then STALLS, and the test
+# asserts output has already arrived while the input is still open.
+#
+# The complementary half matters just as much. Under 64 KiB nothing appears
+# until the run ends, so piping csv2 into something watched live looks like a
+# hang. That is worth asserting precisely because it is the behaviour someone
+# will otherwise report as a bug.
+#
+# T61 —— -si/-so 確實是串流的，而 stdout 以 64 KiB 為單位緩衝。
+# 盲測第 9 回合指出「不緩衝整個檔案」從未被實際展示過——一條在你來得及觀察之前就跑完的
+# 管線，證明的是正確性而不是串流性。這裡改用量的：產生端先送出超過緩衝區的量，然後
+# 「停住」，測試斷言在輸入仍開著的時候輸出就已經到了。
+# 另一半同樣要緊：不足 64 KiB 時，要到執行結束才會有東西出現，因此把 csv2 接進一個
+# 正在被盯著看的東西，看起來就像卡住。正因為那是別人否則會當成 bug 回報的行為，才值得斷言。
+# ---------------------------------------------------------------------
+echo
+echo "--- T61: -si/-so streams, in 64 KiB blocks / -si/-so 是串流的，以 64 KiB 為單位 ---"
+
+# Built by doubling rather than by looping 8192 times: the guest runs this
+# suite too, and a zsh loop of that length there is slow enough to matter.
+# 以「倍增」而非「迴圈 8192 次」產生：guest 也會跑這份測試，而在那裡跑那麼長的 zsh 迴圈
+# 慢到會造成影響。
+print -r -- '1,padpadpadpadpadpadpadpadpad' > "$TMP/t61_big"
+repeat 13; do
+    cat "$TMP/t61_big" "$TMP/t61_big" > "$TMP/t61_big2"
+    mv "$TMP/t61_big2" "$TMP/t61_big"
+done
+big_bytes=$(wc -c < "$TMP/t61_big" | tr -d ' ')
+
+rm -f "$TMP/t61.fifo"; mkfifo "$TMP/t61.fifo"
+{ print -r -- 'a,b'; cat "$TMP/t61_big"; sleep 2; print -r -- '9,end' } > "$TMP/t61.fifo" &
+"$CSV2" -si --headers 1 -r -so < "$TMP/t61.fifo" > "$TMP/t61.out" 2>/dev/null &
+sleep 1
+during=$(wc -c < "$TMP/t61.out" | tr -d ' ')
+wait
+after=$(wc -c < "$TMP/t61.out" | tr -d ' ')
+
+if (( during > 0 && during < after )); then
+    ok "T61a output arrives while the input is still open ($during of $after bytes at t=1s, from a ${big_bytes}B stream) / 輸入還開著時輸出就已到達"
+else
+    bad "T61a expected partial output at t=1s, got $during of $after bytes / 預期 t=1 秒時已有部分輸出，實得 $during／$after"
+fi
+
+# Same shape, under the buffer: nothing until close. 2000 records of ~29 bytes
+# is ~58 KB, below 64 KiB.
+# 同樣的形狀，但在緩衝區以下：直到結束前都沒有東西。2000 筆 × 約 29 位元組約 58 KB，
+# 低於 64 KiB。
+head -2000 "$TMP/t61_big" > "$TMP/t61_small"
+rm -f "$TMP/t61b.fifo"; mkfifo "$TMP/t61b.fifo"
+{ print -r -- 'a,b'; cat "$TMP/t61_small"; sleep 2; print -r -- '9,end' } > "$TMP/t61b.fifo" &
+"$CSV2" -si --headers 1 -r -so < "$TMP/t61b.fifo" > "$TMP/t61b.out" 2>/dev/null &
+sleep 1
+small_during=$(wc -c < "$TMP/t61b.out" | tr -d ' ')
+wait
+assert_eq "$small_during" "0" \
+    "T61b and under 64 KiB nothing arrives until the run ends, which is why it can look like a hang / 而不足 64 KiB 時要到執行結束才有東西，這正是它看起來像卡住的原因"
+
+# The point of streaming is that memory does not track input size. T9 asserts
+# this for a file; this asserts the pipeline the README's example actually uses.
+# 串流的重點是記憶體不隨輸入大小成長。T9 對檔案斷言過這件事，這裡斷言的是 README 範例
+# 實際使用的那條管線。
+assert_eq "$(cat "$TMP/t61b.out" | wc -l | tr -d ' ')" "2001" \
+    "T61c and the streamed output is complete: 2000 records plus the stalled one / 串流輸出是完整的：2000 筆加上停頓後那一筆"
+
+# The worked pipeline example the README now shows has to actually work.
+# README 現在展示的那條管線範例，必須真的能跑。
+printf 'pkg_name,version\nbusybox,1.37.0\nzlib,1.3.2\n' > "$TMP/t61_pkg.csv"
+assert_eq "$(cat "$TMP/t61_pkg.csv" | "$CSV2" -si --headers 1 -contains busybox --filter -so)" \
+    'busybox,1.37.0' \
+    "T61d -si/-so compose with a search verb, as the README's pipeline example shows / -si/-so 可與搜尋動詞組合，正如 README 的管線範例所示"
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
