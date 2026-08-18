@@ -2727,6 +2727,28 @@ printf 'a,b\n1,2\n' > "$TMP/t75_ok.csv"
 assert_contains "$("$CSV2" -r --json -i "$TMP/t75_ok.csv" 2>/dev/null | sed -n 2p)" '"fields":{"a":"1","b":"2"}' \
     "T75k and a file with distinct names is unaffected / 欄名不重複的檔案完全不受影響"
 
+# T75l-T75m — the escape the refusal points at has to be complete, or the
+# refusal takes away expressiveness instead of returning it.
+#
+# Round 29 asked why -delete -col refuses at all, since "remove the note column"
+# has an unambiguous reading when there are two: remove both. The answer is in
+# plan.md, and it turns on the ambiguity being in the caller's BELIEF rather
+# than in the outcome -- someone typing that almost certainly thinks there is
+# one, and deleting both would leave that belief intact for every command they
+# write next. But the answer only holds if addressing by number really does
+# reach every arrangement, so that is asserted here rather than assumed.
+#
+# T75l–T75m —— 拒絕所指出的那條出路必須是完整的，否則這條拒絕是在收走表達力，而不是把它交還。
+# 第 29 回合追問 -delete -col 為何也要拒絕，既然「移除 note 那一欄」在有兩個時有一個沒有歧義
+# 的讀法：兩個都移除。答案寫在 plan.md，關鍵在於有歧義的是呼叫者的「認知」而不是「結果」
+# ——會這樣打的人幾乎必然以為只有一個，而刪掉兩個會讓那個認知原封不動地留到他接下來寫的
+# 每一行指令裡。但這個答案唯有在「以欄號定址真的到得了每一種安排」時才站得住，因此在此斷言
+# 而非假定。
+assert_eq "$("$CSV2" -delete -col 1 -delete -col 3 -i "$TMP/t75.csv" -so 2>/dev/null | head -1)" 'ver' \
+    "T75l both duplicated columns can be removed deliberately, by number / 兩個同名欄位都可以用欄號刻意移除"
+assert_eq "$("$CSV2" -delete -col 3 -i "$TMP/t75.csv" -so 2>/dev/null | head -1)" 'note,ver' \
+    "T75m and so can just one of them / 也可以只移除其中一個"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
