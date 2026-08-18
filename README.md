@@ -285,6 +285,31 @@ two columns called `note` is an error naming both positions — address it by
 number. Two columns differing only in Unicode form collide the same way, and
 those do not look identical in a hex dump. Asserted by T75.
 
+### `--zh` on a file with one header row
+
+`--zh` falls back to the only header row there is, and says nothing. That is
+deliberate, and it is the one silent substitution in this tool, so here is the
+reasoning rather than just the behaviour.
+
+`--zh` is a **display preference**, not a selector over data. Refusing would
+break any script that walks a mix of `.csv` and `.csv2` files for a purely
+cosmetic reason, forcing it to branch on format to ask for a nicety. And the
+fallback cannot be mistaken for success: you asked for Chinese column names and
+the output visibly contains English ones — different, not plausible-but-wrong.
+
+**If what you actually want is to assert the file is bilingual, `--zh` is the
+wrong instrument and `--json` is the right one:**
+
+```console
+$ csv2 -head 1 -t --json -i pkgs.csv | head -1
+{"meta":{"format":"csv","headers":1,"fields":2}}
+$ csv2 -head 1 -t --json -i pkgs.csv2 | head -1
+{"meta":{"format":"csv2","headers":2,"fields":2}}
+```
+
+That first line exists precisely so a caller can assert what it is reading
+instead of accepting a wrong guess. Asserted by T78.
+
 ### A BOM is stripped, and never reaches a column name
 
 A file that opens with a UTF-8 BOM — anything exported by Excel, typically —

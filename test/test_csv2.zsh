@@ -2930,6 +2930,63 @@ assert_fails "T77f a hashed column cannot be decrypted, because hashing is one-w
 assert_same "$PKG" "$TMP/t77_d.csv" \
     "T77g while -decrypt all on a file that IS marked round-trips byte-identically / 而對「確實有標記」的檔案下 -decrypt all，可逐位元還原"
 
+# ---------------------------------------------------------------------
+# T78 -- --zh falls back on a one-header file, and --json is how you assert.
+#
+# Round 35 found the one silent substitution left in this tool: --zh on a .csv
+# produces output byte-identical to --en, with no signal that the Chinese row
+# it asked for does not exist. Its framing was the right one -- the silence
+# should be a decision rather than an omission.
+#
+# The decision is to keep it. --zh is a DISPLAY preference, not a selector over
+# data: refusing would break any script walking a mix of .csv and .csv2 for a
+# cosmetic reason. And it cannot be mistaken for success -- you asked for
+# Chinese names and the output visibly holds English ones, which is different
+# rather than plausible-but-wrong, unlike every defect this session has fixed.
+#
+# What the round was really reaching for -- asserting a file is bilingual --
+# already has an instrument, and --zh was never it. Both are pinned here so the
+# fallback stays a decision.
+#
+# T78 —— 對只有一列標頭的檔案，--zh 會退回；而「斷言」該用 --json。
+# 第 35 回合找到了這支工具裡僅存的一處靜默替代：對 .csv 使用 --zh，輸出與 --en 逐位元相同，
+# 而它所要求的那一列中文標頭並不存在，卻沒有任何訊號。它的措辭是對的——那份沉默應該是一個
+# 決定，而不是一個疏漏。
+# 決定是「保留」。--zh 是一種「顯示」偏好，不是對資料的選取：拒絕它會為了美觀的理由弄壞任何
+# 走遍 .csv 與 .csv2 混合檔案的腳本。而它也不會被誤認為成功——你要求中文欄名，輸出裡明顯是
+# 英文欄名，那是「不一樣」而不是「看起來對但其實錯」，與這一輪修掉的每一個缺陷都不同。
+# 而該回合真正想做的事——斷言一個檔案是雙語的——本來就有對應的工具，而那從來不是 --zh。
+# 兩者都在此釘住，好讓這個退回保持為一個「決定」。
+# ---------------------------------------------------------------------
+echo
+echo "--- T78: --zh falls back; --json asserts / --zh 會退回；--json 才是斷言的工具 ---"
+
+printf 'pkg,ver\nzlib,1\n' > "$TMP/t78_one.csv"
+printf 'pkg,ver\n套件,版本\nzlib,1\n' > "$TMP/t78_two.csv2"
+
+assert_eq "$("$CSV2" -contains zlib --zh -i "$TMP/t78_one.csv" 2>/dev/null)" \
+    "$("$CSV2" -contains zlib --en -i "$TMP/t78_one.csv" 2>/dev/null)" \
+    "T78a --zh on a one-header file falls back to the row that exists / 對只有一列標頭的檔案，--zh 退回到那唯一存在的列"
+assert_succeeds "T78b and does not fail, because it is a display preference / 而且不會失敗，因為那是顯示偏好" -- \
+    "$CSV2" -contains zlib --zh -i "$TMP/t78_one.csv"
+
+# The fallback is visible, not plausible: English names where Chinese were
+# asked for. That is what makes it different from the defects this session
+# fixed, and it is the load-bearing half of the decision.
+# 這個退回是「看得見」的，不是「看似合理」的：要求中文卻得到英文欄名。那正是它與這一輪修掉的
+# 那些缺陷不同的地方，也是這個決定裡承重的那一半。
+assert_contains "$("$CSV2" -contains zlib --zh -i "$TMP/t78_one.csv" 2>/dev/null)" 'pkg' \
+    "T78c the fallback is visible in the output, not disguised / 那個退回在輸出裡看得見，沒有被偽裝"
+assert_contains "$("$CSV2" -contains zlib --zh -i "$TMP/t78_two.csv2" 2>/dev/null)" '套件' \
+    "T78d while a real .csv2 still gets its Chinese names / 而真正的 .csv2 仍然拿到中文欄名"
+
+# The instrument that DOES answer "is this file bilingual".
+# 真正能回答「這個檔案是不是雙語的」的那個工具。
+assert_contains "$("$CSV2" -head 1 -t --json -i "$TMP/t78_one.csv" 2>/dev/null | head -1)" '"headers":1' \
+    "T78e --json meta reports one header row / --json 的 meta 回報一列標頭"
+assert_contains "$("$CSV2" -head 1 -t --json -i "$TMP/t78_two.csv2" 2>/dev/null | head -1)" '"headers":2' \
+    "T78f and two for a .csv2, which is how a caller asserts bilinguality / 對 .csv2 則回報兩列，那才是呼叫端斷言雙語的方式"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
