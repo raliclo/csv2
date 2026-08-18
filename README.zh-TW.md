@@ -581,6 +581,38 @@ $ csv2 -head 1 -t --json -i masked.csv
 | `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `-md --pretty` 超過此值時拒絕，而不是被 OOM 殺掉 |
 | `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | `-tail N` 與 `-B N` 的上限 |
 
+**平行化只適用於 `-contains`，別的都不適用**，而且必須以下每一項都成立。單是設定上面那兩個
+旋鈕，並不會讓一次執行變成平行的：
+
+| 條件 | 理由 |
+|---|---|
+| 是搜尋，且未給 `--filter` 或 `-md` | 那兩者會送出紀錄，而分塊會讓紀錄失序 |
+| 沒有 `-A`/`-B`/`-C`，沒有 `-head`/`-tail`/`-mid` | 上下文與位置是相對於「一個分塊看不到的串流」而言的 |
+| 沒有轉換、沒有編輯 | 那些會寫入，而寫入端不分塊 |
+| `-i FILE`，不是 stdin | 分塊需要 seek |
+| 不只一個核心 | |
+| 至少 `CSV2_PARALLEL_MIN_BYTES` 那麼大 | |
+| **一筆一行** | `.csv2` 保證了這件事。`.csv` 只有在「有一份掃描過該檔、並記下沒有內嵌換行的索引」時才符合——用 `--build-index` 建立一份 |
+
+最後一列才是會令人意外的那一條。**一個含有內嵌換行的 `.csv` 永遠走不到平行路徑**——而那正是
+「想構造一個跨越分塊邊界的測試」時最想拿來用的案例。
+
+**`-debug` 一律會說出走的是哪一條路**，包括走的是普通那一條時，以及為什麼：
+
+```console
+$ csv2 -contains xyz -i pkgs.csv2 -debug     # 2>&1
+DEBUG parallel: 9 chunks, 10 workers, chunk 512 bytes
+$ csv2 -contains xyz -i pkgs.csv -debug
+DEBUG single-threaded: .csv with no index proving one record per line; build one with --build-index
+$ csv2 -r -i pkgs.csv2 -debug
+DEBUG single-threaded: not a search; parallelism applies to -contains only
+```
+
+只回報「有趣的那一種」會讓沉默變得有歧義，而那個歧義正好咬在這裡：拿一次「平行」執行去比對
+一次單執行緒執行，若兩者其實悄悄走了同一條路，那什麼也證明不了——而「輸出相同」看起來
+恰恰就是那個樣子。由 T72 斷言。
+
+
 ## 讀程式碼前值得先知道的幾項決定
 
 以下每一項在 [plan/plan.md](./plan/plan.md) 中都有完整論證。

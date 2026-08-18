@@ -2275,6 +2275,20 @@ assert_eq "$("$CSV2" -get 2:1 -i "$TMP/t70_sp.csv" 2>/dev/null)" "9" \
 assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t70_sp.csv" 2>/dev/null | wc -l | tr -d ' ')" "2" \
     "T70r and the spanning cell comes back with its newline intact / 而那個跨行的儲存格，換行原封不動地回來"
 
+# A flag that shapes output is meaningless with -get, which has exactly one
+# shape. Accepting one silently is worse than meaningless: `-get 1:2 --json` is
+# a natural thing to type, because the README sends you to --json when a value's
+# own newlines matter -- and for its first day this returned the plain value at
+# rc=0 with the flag discarded. Found by self-review the day after -get landed.
+# 「決定輸出形狀」的旗標對 -get 沒有意義，因為它只有一種形狀。安靜地接受比沒有意義更糟：
+# `-get 1:2 --json` 是很自然會打出來的東西，因為 README 在「值本身的換行有意義」時就是叫你
+# 去用 --json——而它上線的第一天，會在 rc=0 下回傳純粹的值並把那個旗標丟掉。由 -get 落地
+# 隔天的自我檢視發現。
+for f in --json --pretty -t -rownum; do
+    assert_fails "T70s -get with $f is refused, not silently ignored / -get 搭配 $f 會被拒，而不是被靜默忽略" -- \
+        "$CSV2" -get 1:1 $f -i "$PKG"
+done
+
 # ---------------------------------------------------------------------
 # T71 -- -get's trailing newline is a terminator, and the value is logical.
 #
@@ -2339,6 +2353,75 @@ assert_eq "${#v}" "15" \
 assert_contains "$("$CSV2" -mid 1,1 --json -i "$TMP/t71_tail.csv" 2>/dev/null | sed -n 2p)" \
     'value ends here\n' \
     "T71e --json carries the trailing newline unambiguously / --json 明確無歧義地承載了那個結尾換行"
+
+# ---------------------------------------------------------------------
+# T72 -- which path ran is observable from outside, including when it is the
+#        ordinary one.
+#
+# Round 22 set out to prove "parallel output is byte-identical to
+# single-threaded" using the environment knobs the README provides for exactly
+# that. It built the hardest fixture it could -- a chunk boundary falling inside
+# a quoted field with an embedded comma AND an embedded newline -- got
+# byte-identical output, and then refused to call it a pass, because nothing in
+# -debug said whether the parallel path had run at all.
+#
+# That refusal was right, and sharper than the reader could see: an embedded
+# newline in a .csv is precisely what DISQUALIFIES a file from the parallel
+# path. The fixture built to stress chunk boundaries was one the parallel path
+# is designed never to see. Both runs were single-threaded, and identical output
+# is exactly what that looks like.
+#
+# So the reason is now reported. A test that compares two runs has to be able to
+# prove they were two different runs.
+#
+# T72 —— 走的是哪一條路，從外面看得出來，包括走的是普通那一條時。
+# 第 22 回合想用 README 為此提供的環境旋鈕，證明「平行輸出與單執行緒逐位元相同」。它建了
+# 能想到最難的 fixture——讓分塊邊界落在一個「同時含逗號與換行」的引號欄位裡——得到逐位元
+# 相同的輸出，然後拒絕把那稱為通過，因為 -debug 裡沒有任何東西說明平行路徑到底有沒有跑。
+# 那個拒絕是對的，而且比讀者看得到的更尖銳：`.csv` 裡的內嵌換行，正是「取消該檔案走平行路徑
+# 資格」的那個東西。那個為了施壓分塊邊界而建的 fixture，恰好是平行路徑依設計永遠不會看到的。
+# 兩次執行都是單執行緒的，而「輸出相同」看起來恰恰就是那個樣子。
+# 因此現在會回報理由。一個比對兩次執行的測試，必須有辦法證明那真的是兩次不同的執行。
+# ---------------------------------------------------------------------
+echo
+echo "--- T72: the path taken is observable / 走的是哪一條路，看得出來 ---"
+
+{ print -r -- 'a,b'; print -r -- 'A,B'
+  for i in {1..200}; do print -r -- "$i,value with xyz $i"; done } > "$TMP/t72.csv2"
+printf 'a,b\n1,"two\nlines"\n' > "$TMP/t72_nl.csv"
+
+path_of() {  # path_of <args...> -> the debug line saying which path ran
+    "$CSV2" "$@" -debug 2>&1 >/dev/null | grep -oE 'parallel: [0-9]+ chunks|single-threaded: .*' | head -1
+}
+
+p=$(CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=512 path_of -contains xyz -i "$TMP/t72.csv2")
+assert_contains "$p" "parallel:" \
+    "T72a a .csv2 search over the threshold reports the parallel path / 超過門檻的 .csv2 搜尋會回報平行路徑"
+
+p=$(CSV2_PARALLEL_MIN_BYTES=1 path_of -r -i "$TMP/t72.csv2")
+assert_contains "$p" "not a search" \
+    "T72b a plain read says parallelism does not apply, rather than saying nothing / 單純讀取會說「平行化不適用」，而不是什麼都不說"
+
+p=$(CSV2_PARALLEL_MIN_BYTES=1 path_of -contains xyz -i "$TMP/t72_nl.csv")
+assert_contains "$p" "one record per line" \
+    "T72c a .csv with an embedded newline says WHY it cannot parallelise / 含內嵌換行的 .csv 會說出它為何無法平行化"
+
+p=$(CSV2_PARALLEL_MIN_BYTES=1 path_of -contains xyz --filter -i "$TMP/t72.csv2")
+assert_contains "$p" "single-threaded: --filter" \
+    "T72d --filter names itself as the reason / --filter 會指名自己是理由"
+
+p=$(CSV2_PARALLEL_MIN_BYTES=999999999 path_of -contains xyz -i "$TMP/t72.csv2")
+assert_contains "$p" "under CSV2_PARALLEL_MIN_BYTES" \
+    "T72e and a file under the threshold says so, with the threshold / 未達門檻的檔案會這樣說，並附上門檻值"
+
+# The claim the reader could not prove, now provable: run it both ways, confirm
+# from -debug that the two runs really were different, and compare the bytes.
+# 讀者當時無法證明的那個宣稱，現在證明得了：兩種方式各跑一次，先從 -debug 確認那真的是
+# 兩次不同的執行，再比對位元組。
+par=$(CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=512 "$CSV2" -contains xyz -i "$TMP/t72.csv2" 2>/dev/null)
+sin=$(CSV2_PARALLEL_MIN_BYTES=999999999 "$CSV2" -contains xyz -i "$TMP/t72.csv2" 2>/dev/null)
+assert_eq "$par" "$sin" \
+    "T72f parallel and single-threaded output are identical, and T72a/T72e prove they were different runs / 平行與單執行緒輸出相同，而 T72a／T72e 證明那是兩次不同的執行"
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"

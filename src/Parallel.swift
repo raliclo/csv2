@@ -83,23 +83,50 @@ func workerCount() -> Int {
 /// 只有定位報告走平行。它的輸出是每個命中儲存格一行短文字，因此區塊在處理中時
 /// 保留在記憶體裡的片段很小。`--filter` 輸出的是完整紀錄，可能等於整個檔案的
 /// 副本——那是拿記憶體上界去換速度，而在一台只有 2–4 GiB 的機器上，那是錯的交換。
-func canRunParallelSearch(_ o: Options, format: Format) -> Bool {
-    guard o.contains != nil, !o.filter, !o.markdown else { return false }
-    guard o.after == 0, o.before == 0 else { return false }
-    guard o.head == nil, o.tail == nil, o.mid == nil else { return false }
-    guard o.encryptCols == nil, o.decryptCols == nil, o.hashCols == nil else { return false }
-    guard o.edits.isEmpty, let path = o.input else { return false }
-    guard workerCount() > 1 else { return false }
-    guard let st = FileStamp.of(path: path), st.size >= UInt64(parallelMinBytes()) else {
-        return false
+/// Returns the reason parallelism was declined, or nil when it can run.
+///
+/// A REASON rather than a bare false, because "did the parallel path run?"
+/// cannot be answered from outside the process otherwise. The acceptance
+/// condition for parallelism is that its output is byte-identical to
+/// single-threaded, and the environment knobs exist so that condition can be
+/// tested on a small file -- but a test that compares two runs proves nothing
+/// if both silently took the same path, and identical output is exactly what
+/// that looks like. Reported through -debug so the difference is observable.
+/// Found on 2026-08-18 by a reader who set the knobs, got byte-identical
+/// output, and correctly refused to call it a pass.
+///
+/// 回傳「拒絕平行化的理由」，能夠平行時回傳 nil。
+/// 是「理由」而不是單純的 false，因為否則「平行路徑到底有沒有跑」從行程外面無法回答。
+/// 平行化的驗收條件是「輸出與單執行緒逐位元相同」，而那些環境變數的存在，正是為了讓這個
+/// 條件能在小檔案上被測試——但若兩次執行其實都走了同一條路，比對兩者什麼也證明不了，
+/// 而「輸出相同」看起來就正是那個樣子。透過 -debug 回報，使這個差別可被觀察。
+/// 2026-08-18 由一位讀者發現：他設了那些旋鈕、得到逐位元相同的輸出，並且正確地拒絕
+/// 把那稱為通過。
+func parallelDeclineReason(_ o: Options, format: Format) -> String? {
+    if o.contains == nil { return "not a search; parallelism applies to -contains only" }
+    if o.filter { return "--filter" }
+    if o.markdown { return "-md" }
+    if o.after != 0 || o.before != 0 { return "-A/-B/-C" }
+    if o.head != nil || o.tail != nil || o.mid != nil { return "-head/-tail/-mid" }
+    if o.encryptCols != nil || o.decryptCols != nil || o.hashCols != nil { return "a transform" }
+    if !o.edits.isEmpty { return "an edit" }
+    guard let path = o.input else { return "stdin (the file must be seekable)" }
+    if workerCount() <= 1 { return "one core" }
+    guard let st = FileStamp.of(path: path) else { return "the file could not be stamped" }
+    if st.size < UInt64(parallelMinBytes()) {
+        return "file is \(st.size) bytes, under CSV2_PARALLEL_MIN_BYTES (\(parallelMinBytes()))"
     }
     // One record per line is the precondition. `.csv2` guarantees it; a `.csv`
     // is only trusted when an index that was built by scanning says so.
     // 前提是一筆一行。`.csv2` 保證了這一點；`.csv` 只有在「由掃描建立的索引這麼說」
     // 時才被信任。
-    if format == .csv2 { return true }
-    if let idx = CSVIndex.load(dataPath: path), idx.noEmbeddedNewlines { return true }
-    return false
+    if format == .csv2 { return nil }
+    if let idx = CSVIndex.load(dataPath: path), idx.noEmbeddedNewlines { return nil }
+    return ".csv with no index proving one record per line; build one with --build-index"
+}
+
+func canRunParallelSearch(_ o: Options, format: Format) -> Bool {
+    parallelDeclineReason(o, format: format) == nil
 }
 
 private struct ChunkSpan {

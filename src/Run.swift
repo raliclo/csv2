@@ -264,6 +264,17 @@ func runVerifyIndex(_ o: Options) throws {
 }
 
 func runSelect(_ o: Options) throws {
+    // Say which path was taken, always -- including when it is the ordinary
+    // one. Reporting only the interesting case makes silence ambiguous, and
+    // "parallel produced identical output" is indistinguishable from "parallel
+    // never ran" precisely when the output is identical.
+    // 一律說出走的是哪一條路——包括走的是普通那一條時。只回報「有趣的那一種」會讓沉默變得
+    // 有歧義；而「平行產生了相同的輸出」與「平行根本沒跑」，恰恰在輸出相同時無法區分。
+    if let p = o.input, let why = parallelDeclineReason(o, format: Format.from(path: p) ?? .csv) {
+        Logger.shared.debug("single-threaded: \(why)")
+    } else if o.input == nil {
+        Logger.shared.debug("single-threaded: stdin")
+    }
     if let p = o.input, canRunParallelSearch(o, format: Format.from(path: p) ?? .csv) {
         try checkTornAppend(path: p, format: Format.from(path: p) ?? .csv,
                             truncatePartial: o.truncatePartial)

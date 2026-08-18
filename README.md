@@ -657,6 +657,42 @@ cannot be lowered can only be exercised by building a 16 MiB fixture.
 | `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `-md --pretty` refuses above this rather than being OOM-killed |
 | `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | upper bound on `-tail N` and `-B N` |
 
+**Parallelism applies to `-contains` and to nothing else**, and only when every
+one of these holds. Setting the two knobs above does not by itself make a run
+parallel:
+
+| Requirement | Why |
+|---|---|
+| a search, without `--filter` or `-md` | those emit records, and chunks would emit them out of order |
+| no `-A`/`-B`/`-C`, no `-head`/`-tail`/`-mid` | context and position are relative to a stream a chunk does not see |
+| no transform, no edit | those write, and writers do not chunk |
+| `-i FILE`, not stdin | chunking needs to seek |
+| more than one core | |
+| at least `CSV2_PARALLEL_MIN_BYTES` | |
+| **one record per line** | `.csv2` guarantees it. A `.csv` qualifies only with an index that scanned the file and recorded there are no embedded newlines — build one with `--build-index` |
+
+That last row is the one that surprises. A `.csv` containing an embedded
+newline can never take the parallel path, which is also the case a
+boundary-straddling test most wants to construct.
+
+**`-debug` says which path ran, always**, including when it is the ordinary one
+and why:
+
+```console
+$ csv2 -contains xyz -i pkgs.csv2 -debug     # 2>&1
+DEBUG parallel: 9 chunks, 10 workers, chunk 512 bytes
+$ csv2 -contains xyz -i pkgs.csv -debug
+DEBUG single-threaded: .csv with no index proving one record per line; build one with --build-index
+$ csv2 -r -i pkgs.csv2 -debug
+DEBUG single-threaded: not a search; parallelism applies to -contains only
+```
+
+Reporting only the interesting case would make silence ambiguous, and that
+ambiguity bites exactly here: comparing a "parallel" run against a
+single-threaded one proves nothing if both quietly took the same path — and
+identical output is precisely what that looks like. Asserted by T72.
+
+
 ## Design decisions worth knowing before reading the code
 
 Each of these is argued in full in [plan/plan.md](./plan/plan.md).

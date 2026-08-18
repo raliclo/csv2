@@ -504,6 +504,29 @@ func validate(_ o: inout Options) throws {
             throw usageError("-get addresses data records from 1; header cells (0a/0b in the locating report) are not addressable, the same as for -update",
                              "-get 從第 1 筆資料開始定址；標頭儲存格（定位報告中的 0a／0b）不可定址，與 -update 相同")
         }
+        // -get has exactly one output shape: the value. Every flag that shapes
+        // output is therefore meaningless with it, and accepting one silently
+        // is worse than meaningless -- `-get 1:2 --json` is a natural thing to
+        // type, because the README sends you to --json when a value's own
+        // newlines matter, and it used to return the plain value at rc=0 with
+        // the flag ignored. A flag the caller passed and the tool discarded is
+        // this project's failure in miniature.
+        // -get 只有一種輸出形狀：那個值。因此每一個「決定輸出形狀」的旗標對它都沒有意義，
+        // 而「安靜地接受」比沒有意義更糟——`-get 1:2 --json` 是很自然會打出來的東西，因為
+        // README 在「值本身的換行有意義」時就是叫你去用 --json；而它先前會在 rc=0 下回傳
+        // 純粹的值，並把那個旗標丟掉。一個呼叫端給了、而工具丟棄了的旗標，正是本專案要
+        // 消滅的失敗的縮影。
+        var shaping: [String] = []
+        if o.json { shaping.append("--json") }
+        if o.markdown { shaping.append("-md") }
+        if o.pretty { shaping.append("--pretty") }
+        if o.withHeader { shaping.append("-t") }
+        if o.rownum { shaping.append("-rownum") }
+        if !shaping.isEmpty {
+            throw usageError(
+                "-get prints one value and has no other shape, so \(shaping.joined(separator: ", ")) would be ignored; for a shaped record use -mid \(r),\(r) instead",
+                "-get 只印出一個值、沒有第二種形狀，因此 \(shaping.joined(separator: "、")) 會被忽略；需要帶形狀的紀錄請改用 -mid \(r),\(r)")
+        }
         // A one-cell value is not a CSV file and must not be written to a path
         // whose suffix promises one.
         // 一格的值不是一個 CSV 檔，不得寫入「副檔名承諾了 CSV」的路徑。
