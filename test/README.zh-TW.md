@@ -33,13 +33,14 @@ SKIP  T41 behaviour identical with no index (the .index sidecar is not implement
 絕不安靜地略過。一份隱藏「沒跑什麼」的測試，回報的是它並不具備的涵蓋率——
 那與「弄壞檔案之後仍以 0 結束的腳本」是同一種失敗模式。
 
-目前狀態：macOS（arm64、Swift 6.4）上 **112 PASS、0 FAIL、1 SKIP**。guest 端由母專案在
+目前狀態：macOS（arm64、Swift 6.4）上 **0 FAIL**，唯一的 SKIP 是 T47——它比對的是兩個
+平台，因此無法從其中一個平台內部執行。guest 端由母專案在
 每次變更後重新驗證；最近一次完整執行時兩邊回報相同的總數。
 
 T47 是 macOS 上那個 SKIP，而且在這裡也只能是 SKIP：該案例斷言的是「**Linux** 版產生
 相同的輸出」，因此它由母專案的 `../../test_submodules/run_csv2_test.zsh` 驅動——那支
 腳本在 guest 內建置 csv2，並逐一以 sha256 比對 12 組呼叫。該 runner 回報
-**25 PASS、0 FAIL**。
+**0 FAIL**。
 
 guest 內略過三項：T25 因為 guest 的 busybox 沒有可用的 `iconv` 來驗證 UTF-8；
 T42 因為那裡取不到 `getconf _NPROCESSORS_ONLN`，測試無法確認有多於一個核心；

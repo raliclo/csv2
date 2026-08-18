@@ -12,7 +12,8 @@ English: [README.md](./README.md)
 
 ```zsh
 ./compile_csv2.zsh       # 建置 release/csv2
-./test/test_csv2.zsh    # macOS（arm64、Swift 6.4）上 112 通過、0 失敗、1 略過
+./test/test_csv2.zsh    # 0 失敗。唯一的 SKIP 是 T47——它比對的是兩個平台，
+                        # 因此由母專案執行。
 ```
 
 | 可用 | 尚未做 |
@@ -229,9 +230,30 @@ $ csv2 -contains busybox -i TARGET_PACKAGES.csv
 比對是**區分大小寫**的，且沒有旗標可以改變。`--normalize` 只影響 Unicode 正規化，
 與大小寫無關。
 
-**沒有欄位投影**：沒有任何東西可以「只取 license 那一欄」，也沒有「依位址讀取」——
-`record:field` 能與 `-update` 和 `-delete -cell` 組合，而那兩個都是寫入。要取出單一值，
-請用 `--json` 以欄名讀取，或取定位報告的第三欄：
+**沒有欄位投影**：沒有任何東西可以「只取 license 那一欄」。若你手上已經有一個位址、
+想取出那一個值，用 `-get`：
+
+```console
+$ csv2 -get 12:6 -i pkgs.csv
+fork raliclo/busybox, branch develop
+```
+
+它只印出那一格，別的什麼都不印——沒有引號、沒有分隔符、沒有標頭、沒有位址——因此
+`$(csv2 -get …)` 就是那個值。刻意不是 CSV：只有一格的 CSV 列，在值含逗號時仍得加引號，
+於是呼叫端又得回頭解碼。它用的位址與 `-update` 相同，而那正是讓「搜尋、讀取、寫入」
+能夠組合起來的東西：
+
+```console
+$ csv2 -contains "old value" -i pkgs.csv    # -> 12:6
+$ csv2 -get 12:6 -i pkgs.csv                # 先看看現在是什麼
+$ csv2 -update 12:6 "new value" -i pkgs.csv --in-place
+```
+
+位址越界是**錯誤**，不是空輸出——空輸出正是「一個確實存在的空儲存格」的樣子，兩者必須
+能夠區分。標頭儲存格不可定址：定位報告稱它們為 `0a`／`0b`，但沒有任何動詞能作用其上，
+`-update` 也不行。
+
+要一次取出多個值，或值本身的換行有意義時，請用 `--json` 以欄名讀取，或取定位報告的第三欄：
 
 ```console
 $ csv2 -contains busybox -i pkgs.csv | cut -f3

@@ -35,7 +35,8 @@ It is never quietly dropped. A suite that hides what it did not run reports a
 coverage it does not have — which is the same failure mode as a script that
 exits zero after corrupting a file.
 
-Current state: **112 PASS, 0 FAIL, 1 SKIP** on macOS (arm64, Swift 6.4). The
+Current state: **0 FAIL** on macOS (arm64, Swift 6.4), with one SKIP — T47,
+which compares two platforms and therefore cannot run from inside one. The
 guest run is re-verified by the parent project after every change; at the last
 full run both sides reported the same totals.
 
@@ -43,7 +44,7 @@ T47 is the skip on macOS, and it cannot be anything else here: the case asserts
 that the LINUX build produces identical output, so it is driven from the parent
 project by `../../test_submodules/run_csv2_test.zsh`, which builds csv2 in the
 guest and compares 12 invocations sha256 by sha256. That runner reports
-**25 PASS, 0 FAIL**.
+**0 FAIL**.
 
 The guest skips three: T25 because the guest's busybox has no working `iconv`
 to validate UTF-8 with, T42 because `getconf _NPROCESSORS_ONLN` is unavailable

@@ -12,7 +12,8 @@ and the macOS host it is built from.
 
 ```zsh
 ./compile_csv2.zsh       # build release/csv2
-./test/test_csv2.zsh    # 112 PASS, 0 FAIL, 1 SKIP on macOS (arm64, Swift 6.4)
+./test/test_csv2.zsh    # 0 FAIL. The one SKIP is T47, which compares two
+                        # platforms and so runs from the parent project.
 ```
 
 | Works | Does not yet |
@@ -260,11 +261,33 @@ the data this tool was written for.
 Matching is **case-sensitive** and there is no flag to change that.
 `--normalize` affects Unicode normalisation only, not case.
 
-There is **no column projection**: nothing selects "just the license column",
-and there is no address-based *read* either — `record:field` composes with
-`-update` and `-delete -cell`, which are both writes. To get one value out, use
-`--json` and read the field by name, or take the third column of the locating
-report:
+There is **no column projection**: nothing selects "just the license column".
+For one value at an address you already have, use `-get`:
+
+```console
+$ csv2 -get 12:6 -i pkgs.csv
+fork raliclo/busybox, branch develop
+```
+
+It prints that cell and nothing else — no quoting, no delimiter, no header, no
+address — so `$(csv2 -get …)` is the value. Deliberately not CSV: a one-cell CSV
+row would need quoting whenever the value contained a comma, and the caller
+would be back to decoding. The address is the same one `-update` takes, which is
+what lets search, read and write compose:
+
+```console
+$ csv2 -contains "old value" -i pkgs.csv    # -> 12:6
+$ csv2 -get 12:6 -i pkgs.csv                # read what is there now
+$ csv2 -update 12:6 "new value" -i pkgs.csv --in-place
+```
+
+An address out of range is an **error**, not empty output — empty output is what
+an existing empty cell looks like, and the two have to be distinguishable.
+Header cells are not addressable: the locating report calls them `0a`/`0b`, but
+no verb can act on one, `-update` included.
+
+For many values at once, or where the value's own newlines matter, use `--json`
+and read the fields by name, or take the third column of the locating report:
 
 ```console
 $ csv2 -contains busybox -i pkgs.csv | cut -f3

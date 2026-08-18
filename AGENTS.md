@@ -7,11 +7,11 @@ Guidance for coding agents working in this repository.
 
 ```zsh
 ./compile_csv2.zsh      # builds release/csv2 with swiftc / 以 swiftc 建置 release/csv2
-./test/test_csv2.zsh    # 112 PASS, 0 FAIL, 1 SKIP on macOS / macOS 上 112 通過、0 失敗、1 略過
+./test/test_csv2.zsh    # 0 FAIL; the one SKIP is T47 / 0 失敗；唯一的 SKIP 是 T47
 
 # the Linux half, driven from the parent project (boots a guest VM)
 # Linux 那一半，由母專案驅動（會啟動 guest VM）
-../test_submodules/run_csv2_test.zsh   # 25 PASS, 0 FAIL
+../test_submodules/run_csv2_test.zsh   # 0 FAIL
 ```
 
 **The source list lives in `src/sources.list`, read by BOTH build scripts.**

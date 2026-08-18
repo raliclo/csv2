@@ -59,6 +59,12 @@ struct Options {
     var zh = false
     var enOnly = false
 
+    /// `-get r:c` -- the read that matches `-update r:c VAL`. Kept out of
+    /// `edits` because it writes nothing; it is a selection of exactly one cell.
+    /// `-get r:c`——與 `-update r:c VAL` 對稱的讀取。不放進 `edits`，因為它不寫入任何
+    /// 東西；它是一種「恰好一格」的選取。
+    var getCell: (Int, String)?
+
     var edits: [EditVerb] = []
     var cellModifier = false
     var colModifier = false
@@ -228,6 +234,22 @@ func parseArgs(_ argv: [String]) throws -> Options {
             let spec = try need(arg)
             o.edits.append(try parseDelete(spec, cell: o.cellModifier, col: o.colModifier,
                                            argvTail: argv, index: i))
+            o.cellModifier = false; o.colModifier = false
+        case "get":
+            let addr = try need(arg)
+            // 0a / 0b are well-formed ADDRESSES -- the locating report emits
+            // them -- they are simply not addresses any verb can act on. Caught
+            // here, before parseCellAddress, so the message is about what the
+            // address means rather than about its shape.
+            // 0a／0b 是格式正確的「位址」——定位報告就會產生它們——它們只是不是任何動詞
+            // 能作用的位址。在 parseCellAddress 之前攔下，讓訊息談的是這個位址的意義，
+            // 而不是它的形狀。
+            if addr.hasPrefix("0a:") || addr.hasPrefix("0b:") || addr.hasPrefix("0:") {
+                throw usageError(
+                    "-get addresses data records from 1; \(addr) names a header cell, and header cells are not addressable by any verb -- -update cannot write one either",
+                    "-get 從第 1 筆資料開始定址；\(addr) 指的是標頭儲存格，而標頭儲存格不是任何動詞可以定址的——-update 同樣寫不了它")
+            }
+            o.getCell = try parseCellAddress(addr, flag: arg)
             o.cellModifier = false; o.colModifier = false
         case "update":
             let addr = try need(arg)
@@ -454,6 +476,40 @@ func validate(_ o: inout Options) throws {
                     "-delete -col 不可與 -insert／-append 併用：那一列字面值必須符合舊形狀或新形狀其中之一，而無法判斷是哪一個。請分成兩道指令執行。")
             default: break
             }
+        }
+    }
+    if let (r, _) = o.getCell {
+        // -get is a selection of one cell, so it cannot be combined with the
+        // other selections or with an edit. Refusing rather than picking an
+        // order: `-get 1:1 -head 3` has two readings and neither is obviously
+        // the one intended.
+        // -get 是「恰好一格」的選取，因此不能與其他選取或編輯併用。這裡是拒絕而非替它
+        // 定一個順序：`-get 1:1 -head 3` 有兩種讀法，而沒有哪一種明顯就是使用者要的。
+        if o.head != nil || o.tail != nil || o.mid != nil || o.contains != nil {
+            throw usageError("-get selects one cell; it cannot be combined with -head/-tail/-mid/-contains",
+                             "-get 選取的是一格；不可與 -head／-tail／-mid／-contains 併用")
+        }
+        if !o.edits.isEmpty {
+            throw usageError("-get reads; it cannot be combined with an edit",
+                             "-get 是讀取；不可與編輯併用")
+        }
+        // The report addresses header cells as 0a / 0b, and -get takes the same
+        // r:c form as -update, which starts at record 1. Rejecting 0 with the
+        // reason rather than with "expected r:c" -- the address is well-formed,
+        // it just names something no edit verb can name either.
+        // 定位報告以 0a／0b 定址標頭，而 -get 採用與 -update 相同的 r:c 形式，從第 1 筆
+        // 開始。此處以「理由」拒絕 0 而非回以「需要 r:c」——那個位址格式正確，只是它指的
+        // 東西同樣不是任何編輯動詞能指的。
+        if r < 1 {
+            throw usageError("-get addresses data records from 1; header cells (0a/0b in the locating report) are not addressable, the same as for -update",
+                             "-get 從第 1 筆資料開始定址；標頭儲存格（定位報告中的 0a／0b）不可定址，與 -update 相同")
+        }
+        // A one-cell value is not a CSV file and must not be written to a path
+        // whose suffix promises one.
+        // 一格的值不是一個 CSV 檔，不得寫入「副檔名承諾了 CSV」的路徑。
+        if let out = o.output, Format.declaresFormat(path: out) {
+            throw usageError("-get writes one value, not a CSV file; do not send it to a .csv/.csv2 path",
+                             "-get 寫出的是一個值而不是 CSV 檔；請不要送往 .csv／.csv2 路徑")
         }
     }
     if !o.edits.isEmpty {
@@ -804,6 +860,8 @@ func printHelp() {
       -delete -cell r:c  BLANK that cell; the field count never changes
       -delete -col N     remove column N from every record AND both header
                          rows. The one deletion that keeps alignment.
+      -get r:c           print that cell's value and nothing else. The read
+                         that matches -update r:c VAL
       -update r:c VAL    set that cell
       --truncate-partial drop a trailing incomplete record instead of failing
       All indexes refer to the INPUT and are applied in one pass.

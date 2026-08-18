@@ -297,6 +297,12 @@ func runSelect(_ o: Options) throws {
     var lower = 1
     var upper = Int.max
     if let (a, b) = o.mid { lower = a; upper = b ?? Int.max }
+    // -get is -mid r,r with a different emitter: same seek, same stop, same
+    // index use. Implementing it separately would have given it its own
+    // off-by-one to get wrong.
+    // -get 就是「-mid r,r 換一個輸出器」：同樣的 seek、同樣的停止點、同樣使用索引。
+    // 另外實作一份，只會讓它多出一個屬於自己的差一錯誤。
+    if let (r, _) = o.getCell { lower = r; upper = r }
     if let n = o.head { upper = min(upper, n) }
 
     let ip = planIndex(o, plan: try openInput(o), lower: lower, upper: upper)
@@ -330,7 +336,9 @@ func runSelect(_ o: Options) throws {
     } ?? []
 
     var emitter: RecordEmitter
-    if o.json {
+    if let (_, col) = o.getCell {
+        emitter = CellEmitter(sink: sink, column: col)
+    } else if o.json {
         emitter = JSONEmitter(sink: sink, reportMode: reportMode)
     } else if o.markdown {
         emitter = MarkdownEmitter(sink: sink, pretty: o.pretty)

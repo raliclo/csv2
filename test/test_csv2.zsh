@@ -96,38 +96,35 @@ assert_contains() { # haystack needle desc
 # 改動的那一天，這個檢查會以這支工具存在所要防止的那種方式壞掉，而且是靜默地壞掉。
 # 作法是「投影」——刪掉其餘每一欄，再取那一筆。它只用到 csv2 自己定義的操作，因此這個存取子
 # 與它所測試的解析器一樣正確。測試腳本是這棵樹裡唯一被允許為此呼叫 csv2 的地方。
-_project() {  # _project <file> <column-number> -> path to a one-column copy
+# One cell, via `-get`. Until 2026-08-18 this needed a two-stage projection --
+# delete every other column into a temp file, then take the record -- because
+# there was no address-based read. The blind testing produced the flag; this is
+# the helper collapsing onto it.
+#
+# 用 `-get` 取出一格。在 2026-08-18 之前，這需要兩階段投影——把其餘每一欄刪進一個暫存檔，
+# 再取那一筆——因為當時沒有「依位址讀取」。盲測催生了那個旗標，而這個輔助函式就此塌縮成它。
+#
+# NOTE the difference from CSV output: -get returns the value RAW, so a value
+# containing a comma comes back without quotes. Call sites that used to compare
+# against a CSV-encoded field had to change with it.
+# 注意它與 CSV 輸出的差別：-get 回傳的是「原始值」，因此含逗號的值不會帶引號回來。
+# 原本拿 CSV 編碼欄位去比較的呼叫點，必須跟著改。
+cell() {   # cell <file> <record> <column-number-or-name>
+    "$CSV2" -get "$2:$3" -i "$1" 2>/dev/null
+}
+
+# The header cell. -get addresses data records only -- header cells are not
+# addressable by any verb -- so this still projects.
+# 標頭那一格。-get 只定址資料紀錄——標頭儲存格不是任何動詞能定址的——因此這裡仍用投影。
+header_cell() {  # header_cell <file> <column-number>
     local f=$1 c=$2 i
     local n=$("$CSV2" -head 1 -t --json -i "$f" 2>/dev/null | head -1 \
               | grep -o '"fields":[0-9]*' | cut -d: -f2)
     local -a drop
     for i in {1..$n}; do (( i == c )) || drop+=(-delete -col $i); done
     "$CSV2" $drop -i "$f" -o "$TMP/.cell.$$.csv" 2>/dev/null || return 1
-    print -r -- "$TMP/.cell.$$.csv"
-}
-
-# Returns the field AS CSV ENCODES IT: a value containing a comma, quote or
-# newline comes back quoted. Decoding it here would mean writing a second
-# parser inside the tests for the parser.
-# 回傳的是「CSV 編碼後」的欄位：含逗號、引號或換行的值會帶著引號回來。在此解碼等於在
-# 「解析器的測試」裡再寫一個解析器。
-cell() {   # cell <file> <record> <column-number>
-    local p=$(_project "$1" "$3") || return 1
-    "$CSV2" -mid "$2,$2" -i "$p" 2>/dev/null
-    rm -f "$p" "$p.index"
-}
-
-# The header cell, by the same projection. `head -1 | cut -d, -f2` was the last
-# comma split left, and a header name is no safer than a value: it is a CSV
-# field and may be quoted and contain a comma. After projection the whole line
-# IS the field, so no split is needed at all.
-# 標頭那一格，用同樣的投影取得。`head -1 | cut -d, -f2` 是最後殘留的逗號切割，而標頭名稱
-# 並不比值安全：它就是一個 CSV 欄位，同樣可以帶引號並含有逗號。投影之後整行「就是」那個
-# 欄位，於是根本不需要切割。
-header_cell() {  # header_cell <file> <column-number>
-    local p=$(_project "$1" "$2") || return 1
-    head -1 "$p"
-    rm -f "$p" "$p.index"
+    head -1 "$TMP/.cell.$$.csv"
+    rm -f "$TMP/.cell.$$.csv" "$TMP/.cell.$$.csv.index"
 }
 
 assert_fails() {
@@ -1847,15 +1844,16 @@ fi
 # 它會交還一段碎片。
 assert_contains "$by_cut" 'CORRECTED' \
     "T64b and the comma split returns a fragment of prose, not an error / 而逗號切割回傳的是一段散文碎片，不是錯誤"
-# cell() returns the field as CSV ENCODES it, so a value containing commas
-# comes back quoted. That is the honest answer -- the alternative is a decoder
-# in the test suite, which would be a second implementation of the thing under
-# test. Call sites compare names, base64 and hex digests, none of which quote.
-# cell() 回傳的是 CSV「編碼後」的欄位，因此含逗號的值會帶著引號回來。那是誠實的答案——
-# 另一個選擇是在測試裡放一個解碼器，而那等於為受測物再寫一份實作。各呼叫點比較的是名稱、
-# base64 與十六進位摘要，都不會被加引號。
-assert_eq "${by_csv2:0:10}" '"CORRECTED' \
-    "T64c while csv2 returns the whole cell, quoted as CSV encodes it / csv2 回傳的則是完整儲存格，並帶著 CSV 的引號"
+# cell() now returns the RAW value, because it is -get and -get hands over the
+# value rather than a CSV encoding of it. The quotes this used to expect were an
+# artefact of the old two-stage projection, and their disappearance is the
+# improvement, not a regression -- this assertion moved when the helper did,
+# which is how a contract change is supposed to announce itself.
+# cell() 現在回傳「原始值」，因為它就是 -get，而 -get 交出的是值本身而非它的 CSV 編碼。
+# 這裡原本預期的引號，是舊的兩階段投影留下的產物；它們消失是改善而不是退步——這條斷言隨著
+# 輔助函式一起改變，而「契約變更」本來就該用這種方式宣告自己。
+assert_eq "${by_csv2:0:9}" 'CORRECTED' \
+    "T64c while csv2 returns the whole cell, as its raw value / csv2 回傳的則是完整儲存格的原始值"
 if (( ${#by_csv2} > ${#by_cut} )); then
     ok "T64d the whole cell is longer than the fragment (${#by_csv2} vs ${#by_cut} bytes) / 完整儲存格比碎片長"
 else
@@ -2115,6 +2113,128 @@ assert_eq "$("$CSV2" -mid 1,1 -i "$TMP/t68.csv" 2>/dev/null)" "$want1" \
 rm -f "$TMP/t68.csv.index"
 unset CSV2_INDEX_MIN_BYTES
 
+# ---------------------------------------------------------------------
+# T69 -- no document quotes a test count.
+#
+# Round 20 found README.md still saying "112 PASS" after the suite had passed
+# through 143, 152, 153, 157, 164, 167, 173, 185, 188, 193, 195, 201 and 210.
+# Seven such numbers existed across five files, in three different states of
+# staleness -- one said 74. The block is offered as the way to verify the tool
+# works, so a reader who ran it saw a number that did not match and had no way
+# to know which of the two was wrong.
+#
+# The fix is not to update them. A number that decays with every commit will
+# decay again the moment attention moves. They are gone, and this case stops
+# them coming back: the docs say 0 FAIL and name the one SKIP, both of which
+# stay true as the suite grows.
+#
+# T69 —— 任何文件都不引用測試數量。
+# 第 20 回合發現 README.md 仍寫著「112 PASS」，而測試早已一路經過 143、152、153、157、
+# 164、167、173、185、188、193、195、201 到 210。五個檔案裡共有七個這樣的數字，處於三種
+# 不同的過期狀態——其中一個寫著 74。那段程式區塊是被當成「驗證這支工具能用」的方法提供的，
+# 因此照做的讀者會看到一個對不上的數字，而且無從判斷是哪一邊錯了。
+# 修法不是把它們更新。一個「每次提交都會衰減」的數字，在注意力移開的那一刻就會再次衰減。
+# 它們被移除了，而這個案例阻止它們回來：文件只說 0 FAIL 並指名唯一的那個 SKIP，兩者都會
+# 隨著測試增長而保持為真。
+# ---------------------------------------------------------------------
+echo
+echo "--- T69: no document quotes a test count / 任何文件都不引用測試數量 ---"
+
+typeset -a counted
+for f in README.md README.zh-TW.md AGENTS.md CLAUDE.md test/README.md test/README.zh-TW.md; do
+    [[ -f "$ROOT/$f" ]] || continue
+    # A digit immediately before PASS, in either language's phrasing. `0 FAIL`
+    # is fine and deliberate -- it does not grow.
+    # 兩種語言中「數字緊接在 PASS 之前」的寫法。`0 FAIL` 沒問題且是刻意的——它不會增長。
+    if grep -qE '[0-9]+ (PASS|通過)|PASS [0-9]+' "$ROOT/$f"; then
+        counted+=("$f")
+    fi
+done
+if (( ${#counted} == 0 )); then
+    ok "T69a no document quotes a PASS count, so none of them can go stale / 沒有任何文件引用 PASS 數量，因此它們都不會過期"
+else
+    bad "T69a these quote a PASS count and will go stale: ${counted} / 這些引用了 PASS 數量，將會過期：${counted}"
+fi
+
+# ---------------------------------------------------------------------
+# T70 -- -get r:c, the read that matches -update r:c VAL.
+#
+# Round 14 asked for one cell at a known address and found there was no way:
+# record:field composed only with WRITES. Reading it back took --json plus a
+# full-file selection plus an external parser -- and this suite's own cell()
+# helper needed two csv2 invocations and a temp file for the same thing.
+#
+# The strongest argument was that an address can arrive from OUTSIDE: typed by
+# a person from a bug report, or carried over from an earlier run. -contains
+# cannot serve that case at all, because it can only find a value you already
+# know is there.
+#
+# T70 —— `-get r:c`，與 `-update r:c VAL` 對稱的那個讀取。
+# 第 14 回合想取出一個已知位址的儲存格，發現辦不到：record:field 只與「寫入」組合。要把它
+# 讀回來，得動用 --json 加全檔選取加外部解析器——而這份測試自己的 cell() 輔助函式，為了同一件事
+# 也需要兩次 csv2 呼叫加一個暫存檔。
+# 最強的理由是：位址可能來自「外部」——有人從 bug 回報裡打進來，或是上一次執行留下的。
+# -contains 完全無法服務那個情境，因為它只能找「你已經知道在裡面」的值。
+# ---------------------------------------------------------------------
+echo
+echo "--- T70: -get r:c / -get r:c ---"
+
+# The cell that started this: 513 bytes of prose with quoted commas in it.
+# 引發這一切的那一格：513 位元組、內含引號逗號的散文。
+raw=$("$CSV2" -get 1:6 -i "$PKG" 2>/dev/null)
+assert_contains "$raw" "CORRECTED" \
+    "T70a -get returns the cell / -get 取回該儲存格"
+if (( ${#raw} > 400 )); then
+    ok "T70b and the WHOLE cell (${#raw} bytes), not a fragment / 而且是整格（${#raw} 位元組），不是碎片"
+else
+    bad "T70b -get returned ${#raw} bytes, expected the whole cell / -get 只回傳 ${#raw} 位元組"
+fi
+
+# Raw, not CSV-encoded. The point of an address-based read is to hand over the
+# VALUE; returning a quoted CSV field would put the caller back where round 14
+# started, needing a decoder.
+# 是原始值，不是 CSV 編碼。依位址讀取的意義就是交出「值」；回傳一個帶引號的 CSV 欄位，
+# 會把呼叫端送回第 14 回合的起點——還得再準備一個解碼器。
+printf 'a,b\nx,"has, comma"\n' > "$TMP/t70.csv"
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t70.csv" 2>/dev/null)" 'has, comma' \
+    "T70c the value comes back raw, not CSV-quoted / 值以原始形式回來，未加 CSV 引號"
+
+assert_eq "$("$CSV2" -get 1:b -i "$TMP/t70.csv" 2>/dev/null)" 'has, comma' \
+    "T70d and the column may be named instead of numbered / 欄位可用名稱而非編號"
+
+# The round trip the design was sold on: search gives an address, -get reads it,
+# -update writes it. Before this, the middle step did not exist.
+# 這份設計當初的賣點——搜尋給出位址、-get 讀它、-update 寫它。在此之前，中間那一步不存在。
+addr=$("$CSV2" -contains busybox -i "$PKG" 2>/dev/null | head -1 | cut -f1)
+assert_eq "$("$CSV2" -get "$addr" -i "$PKG" 2>/dev/null)" "busybox" \
+    "T70e an address from -contains feeds straight into -get / -contains 給出的位址可直接餵給 -get"
+
+# Out of range is an error, never an empty line. An empty line is what an
+# existing empty cell looks like, and a caller cannot tell those apart.
+# 越界是錯誤，絕不是一個空行。空行正是「確實存在的空儲存格」的樣子，呼叫端分不出兩者。
+assert_fails "T70f an out-of-range record is an error, not an empty line / 越界的紀錄是錯誤，不是空行" -- \
+    "$CSV2" -get 99:1 -i "$PKG"
+printf 'a,b\nx,\n' > "$TMP/t70e.csv"
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t70e.csv" 2>/dev/null)" "" \
+    "T70g while an existing EMPTY cell is empty output at rc=0 / 而確實存在的空儲存格是 rc=0 的空輸出"
+assert_succeeds "T70h and that really is rc=0, so the two are distinguishable / 那確實是 rc=0，因此兩者可以區分" -- \
+    "$CSV2" -get 1:2 -i "$TMP/t70e.csv"
+
+# Header cells are addressable by the locating report and by nothing else. The
+# refusal says so rather than complaining about the address's shape.
+# 標頭儲存格只有定位報告能定址，其他都不能。這條拒絕直說這件事，而不是抱怨位址的形狀。
+"$CSV2" -get 0a:3 -i "$PKG" 2>"$TMP/t70_hdr.txt" >/dev/null
+assert_eq "$?" "1" "T70i a header address is refused / 標頭位址被拒"
+assert_contains "$(head -1 "$TMP/t70_hdr.txt")" "header cell" \
+    "T70j and the message says why, not just 'expected r:c' / 而訊息說出了原因，不只是「需要 r:c」"
+
+assert_fails "T70k -get with a selection is refused / -get 與選取併用被拒" -- \
+    "$CSV2" -get 1:1 -head 3 -i "$PKG"
+assert_fails "T70l -get with an edit is refused / -get 與編輯併用被拒" -- \
+    "$CSV2" -get 1:1 -update 1:1 x -i "$PKG" --in-place
+assert_fails "T70m -get into a .csv path is refused: one value is not a CSV file / -get 寫入 .csv 路徑被拒：一個值不是一個 CSV 檔" -- \
+    "$CSV2" -get 1:1 -i "$PKG" -o "$TMP/t70_out.csv"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
@@ -2125,6 +2245,19 @@ echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # test_submodules/run_csv2_test.zsh 驅動——在 guest 內建置 csv2，並逐一以 sha256
 # 比對 12 組呼叫。這一行說明它在哪裡執行，而不是假裝這個案例不存在。
 skipt "T47 macOS and aarch64 Linux produce byte-identical output / mac 與 Linux 輸出逐位元相同 (runs from the parent project: test_submodules/run_csv2_test.zsh / 由母專案的 test_submodules/run_csv2_test.zsh 執行)"
+
+# T69b runs LAST because it counts something the suite produces: the docs now
+# say there is exactly one SKIP instead of quoting a PASS total, and a claim
+# that replaced a number has to be checked at the point where the number is
+# final. Asserting it earlier tested a counter that had not finished counting.
+# T69b 放在最後，因為它數的是「測試自己產生的東西」：文件現在說的是「恰好一個 SKIP」而不是
+# 引用 PASS 總數，而一個取代了數字的宣稱，必須在那個數字定案的位置檢查。放在更早的地方，
+# 測到的是一個還沒數完的計數器。
+if [[ "$skip" == "1" ]]; then
+    ok "T69b there really is exactly one SKIP, as the docs now say / 確實恰好只有一個 SKIP，與文件現在的說法相符"
+else
+    bad "T69b docs say one SKIP, the suite produced $skip / 文件說一個 SKIP，測試產生了 $skip 個"
+fi
 
 echo
 echo "====================================================================="

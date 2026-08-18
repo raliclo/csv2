@@ -185,6 +185,68 @@ func reportEscape(_ s: String) -> String {
     return out
 }
 
+/// `-get r:c` prints ONE cell's value and nothing else -- no quoting, no
+/// delimiter, no header, no address. The value as it was stored, decoded.
+///
+/// Not CSV, deliberately. A one-cell CSV row would need quoting whenever the
+/// value contained a comma, and the caller would then have to decode it: the
+/// exact detour that made reading a known address require --json plus a
+/// selection plus an external parser. What a caller wants from an address is
+/// the value.
+///
+/// A trailing newline, so `$(csv2 -get ...)` behaves like every other command
+/// substitution -- the shell strips it. A value containing newlines comes back
+/// containing them; nothing is escaped, because escaping would be a format, and
+/// this is deliberately not one. If you need a value whose own newlines matter,
+/// --json is the shape that can carry it unambiguously.
+///
+/// `-get r:c` 只印出「一格」的值，別的什麼都不印——沒有引號、沒有分隔符、沒有標頭、
+/// 沒有位址。就是儲存時的值，解碼後。
+/// 刻意不是 CSV。只有一格的 CSV 列，在值含逗號時仍需加引號，於是呼叫端還得再解碼一次
+/// ——那正是「讀取一個已知位址」原本得繞道 --json 加選取加外部解析器的那條彎路。
+/// 呼叫端要的是「值」。
+/// 結尾帶一個換行，讓 `$(csv2 -get ...)` 的行為與其他命令替換一致（shell 會去掉它）。
+/// 值本身含換行時就照樣帶著換行回來，不做任何跳脫——跳脫就是一種格式，而這裡刻意不是。
+/// 若你需要一個「自身換行有意義」的值，--json 才是能明確承載它的形狀。
+final class CellEmitter: RecordEmitter {
+    private let sink: ByteSink
+    private let column: String
+    private var wrote = false
+    init(sink: ByteSink, column: String) { self.sink = sink; self.column = column }
+
+    func begin(_ ctx: EmitContext) throws {}
+
+    func emit(_ r: Record, matches: [Int], ctx: EmitContext) throws {
+        guard let header = ctx.headers.first else {
+            throw fault("-get needs a header to resolve the column against",
+                        "-get 需要標頭才能解析欄位")
+        }
+        let c = try resolveColumn(column, header: header)
+        guard c < r.count else {
+            throw fault("record \(r.number) has \(r.count) fields; there is no field \(c + 1)",
+                        "第 \(r.number) 筆有 \(r.count) 欄；沒有第 \(c + 1) 欄")
+        }
+        sink.write(r.fields[c].value)
+        sink.write("\n")
+        wrote = true
+    }
+
+    func gap(_ ctx: EmitContext) throws {}
+
+    /// Out of range is an error, not an empty line. An empty line is what an
+    /// EXISTING empty cell looks like, and a caller cannot tell the two apart
+    /// -- so the one that means "your address was wrong" has to be the one that
+    /// exits non-zero.
+    /// 越界是錯誤，不是一個空行。空行正是「一個確實存在的空儲存格」的樣子，呼叫端分不出
+    /// 兩者——因此「你的位址是錯的」那一個，必須是以非零結束的那一個。
+    func end(_ ctx: EmitContext, records: Int, matched: Int) throws {
+        if !wrote {
+            throw fault("-get: no such record; the file has \(records) records",
+                        "-get：沒有這一筆；本檔案有 \(records) 筆紀錄")
+        }
+    }
+}
+
 final class ReportEmitter: RecordEmitter {
     private let sink: ByteSink
     private let needle: [UInt8]
