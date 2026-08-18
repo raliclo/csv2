@@ -195,7 +195,9 @@ COLS is a comma-separated list of column names, 1-based column numbers, or a
 mix: `-hash license`, `-hash 7`, `-hash 6,license`.
 
 INDEX / 索引
-  --no-index            never read or write a .index sidecar
+  --no-index            never read or write a .index sidecar. The sidecar is
+                        the whole filename plus ".index": packages.csv ->
+                        packages.csv.index, pkgs.csv2 -> pkgs.csv2.index
   --build-index         build the sidecar now. Otherwise one only appears as a
                         SIDE EFFECT: a write builds one, and -tail builds one
                         because it must read the whole file anyway -- so -mid
@@ -517,7 +519,11 @@ Each of these is argued in full in [plan/plan.md](./plan/plan.md).
 - **The index is always an optimisation and never a precondition.** With no
   index, behaviour is identical. Stale, truncated, corrupt, wrong version — all
   are discarded in favour of a scan, none is an error. An index that quickly
-  gives you the wrong data is far worse than no index.
+  gives you the wrong data is far worse than no index. The sidecar for
+  `packages.csv` is `packages.csv.index` — the whole filename plus `.index`, so
+  `foo.csv` and `foo.csv2` never collide. That is the line to put in
+  `.gitignore`: it is derived from the data file and is never the source of
+  truth, so it should not be committed and need not be backed up.
 - **Parallel output must be byte-identical to single-threaded.** That is the
   acceptance condition, not an aspiration: this project's failures are mostly
   silent, and parallelising is especially good at producing results that are

@@ -1305,6 +1305,17 @@ printf 'pkg,ver\n套件,版本\nzlib,1.3.2\n' > "$TMP/rm.csv2"
 # this case exists to catch pass again.
 # 這裡的檔名與 README 的不同，因此代換回去再比對。比對「不足一整行」的任何東西，都會讓
 # 本案例所要抓的那種截斷再次矇混過關。
+# Assert the file exists before grepping it. A missing README makes grep return
+# an empty string, and comparing against an empty string is a test that reports
+# on nothing -- which is how this case failed in the guest for a reason that had
+# nothing to do with the README's contents.
+# 先斷言檔案存在再 grep。README 不存在時 grep 會回傳空字串，而拿空字串去比對，是一個
+# 什麼都沒有回報的測試——這個案例就是這樣在 guest 內以一個與 README 內容毫無關係的理由失敗的。
+if [[ -f "$ROOT/README.md" ]]; then
+    ok "T58z the README is present to compare against / 有 README 可供比對"
+else
+    bad "T58z $ROOT/README.md is missing; T58 cannot compare against a file that is not there / README 不存在，T58 無法對照一個不在的檔案"
+fi
 readme_en=$(grep -F 'declares 2 header row(s) by its suffix' "$ROOT/README.md" | head -1)
 actual_en=$(head -1 "$TMP/rm_err.txt" | sed "s|$TMP/rm.csv2|vs-sqlite.csv2|")
 assert_eq "$actual_en" "$readme_en" \
@@ -1539,6 +1550,69 @@ printf 'pkg_name,version\nbusybox,1.37.0\nzlib,1.3.2\n' > "$TMP/t61_pkg.csv"
 assert_eq "$(cat "$TMP/t61_pkg.csv" | "$CSV2" -si --headers 1 -contains busybox --filter -so)" \
     'busybox,1.37.0' \
     "T61d -si/-so compose with a search verb, as the README's pipeline example shows / -si/-so 可與搜尋動詞組合，正如 README 的管線範例所示"
+
+# ---------------------------------------------------------------------
+# T62 -- the sidecar is named the whole filename plus ".index", and the README
+# now says so with a worked example.
+#
+# Round 10 attacked the "an index is never a precondition" claim with a
+# garbage-filled sidecar and could not break it. But the reader had to GUESS the
+# sidecar's filename to run the attack at all: the README referred to it only
+# abstractly. Someone adding it to .gitignore, or writing a cleanup script, was
+# in the same position.
+#
+# The naming rule matters beyond convenience: appending to the WHOLE filename is
+# what keeps foo.csv and foo.csv2 from sharing one sidecar. Replacing the
+# extension instead would give both files "foo.index", and the two formats have
+# different header counts -- so one file's index would describe the other's
+# records, which is precisely the "quickly gives you the wrong data" case the
+# README says is worse than no index at all.
+#
+# T62 —— sidecar 的名稱是「完整檔名加上 .index」，而 README 現在以實例寫出這件事。
+# 第 10 回合用一個塞滿垃圾的 sidecar 攻擊「索引絕不是必要條件」這個宣稱，攻不破。但讀者
+# 為了發動這個攻擊，必須先「猜」出 sidecar 的檔名：README 只以抽象方式提過它。想把它加進
+# .gitignore、或想寫一支清理腳本的人，處境完全相同。
+# 這條命名規則的意義不只是方便：附加在「完整檔名」之後，正是 foo.csv 與 foo.csv2 不會共用
+# 同一個 sidecar 的原因。若改成替換副檔名，兩者都會是 foo.index，而這兩種格式的標頭列數
+# 不同——於是其中一個檔案的索引會描述另一個檔案的紀錄，那正是 README 所說「很快給你錯資料」
+# 、比完全沒有索引更糟的那種情況。
+# ---------------------------------------------------------------------
+echo
+echo "--- T62: the sidecar is <filename>.index / sidecar 名稱是「完整檔名.index」 ---"
+
+export CSV2_INDEX_MIN_BYTES=1
+printf 'a,b\n1,x\n2,y\n3,z\n' > "$TMP/t62.csv"
+printf 'a,b\nA,B\n1,x\n2,y\n3,z\n' > "$TMP/t62.csv2"
+"$CSV2" -tail 2 -i "$TMP/t62.csv"  >/dev/null 2>&1
+"$CSV2" -tail 2 -i "$TMP/t62.csv2" >/dev/null 2>&1
+
+assert_succeeds "T62a the sidecar for x.csv is x.csv.index, the name the README now shows / x.csv 的 sidecar 就是 x.csv.index，即 README 現在寫出的那個名稱" -- \
+    test -f "$TMP/t62.csv.index"
+assert_succeeds "T62b and for x.csv2 it is x.csv2.index, so the two never collide / x.csv2 的則是 x.csv2.index，因此兩者永不相撞" -- \
+    test -f "$TMP/t62.csv2.index"
+
+# The collision this naming prevents would be silent: one format's index
+# describing the other's records, with different header counts.
+# 這個命名所防止的相撞會是靜默的：一種格式的索引描述著另一種格式的紀錄，而兩者標頭列數不同。
+if [[ -f "$TMP/t62.index" ]]; then
+    bad "T62c a shared x.index must not exist; that is the silent collision / 不應出現共用的 x.index，那正是那種靜默相撞"
+else
+    ok "T62c no shared x.index is produced / 不會產生共用的 x.index"
+fi
+
+# And the claim round 10 attacked, asserted rather than assumed: garbage in the
+# sidecar changes nothing and is not an error.
+# 以及第 10 回合所攻擊的那個宣稱，改為斷言而非假定：sidecar 塞垃圾不改變任何結果，也不是錯誤。
+before=$("$CSV2" -tail 2 -i "$TMP/t62.csv" 2>/dev/null)
+print -r -- 'GARBAGE NOT AN INDEX AT ALL 12345 !!!!' > "$TMP/t62.csv.index"
+after=$("$CSV2" -tail 2 -i "$TMP/t62.csv" 2>"$TMP/t62_err.txt")
+rc=$?
+assert_eq "$after" "$before" \
+    "T62d a garbage sidecar changes nothing / 塞了垃圾的 sidecar 不改變任何結果"
+assert_eq "$rc" "0" "T62e and is not an error / 而且不是錯誤"
+assert_eq "$(wc -c < "$TMP/t62_err.txt" | tr -d ' ')" "0" \
+    "T62f and says nothing on stderr, since a fallback is not news / stderr 也不說話，因為「退回掃描」不是需要通知的事"
+unset CSV2_INDEX_MIN_BYTES
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
