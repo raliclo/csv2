@@ -92,14 +92,9 @@ $ echo $?
 1
 ```
 
-Until 2026-08-18 the override was accepted unchecked, and the consequences were
-worse than a wrong read because they were written back: `--headers 1 -delete 1`
-on a two-header-row file turned 22 records into 21 at rc=0, discarding the
-Traditional Chinese title row and promoting a **data** row in its place — a file
-still structurally valid and still reading without error. It also defeated the
-check this document recommends, since `--json` would then report
-`{"format":"csv2","headers":1}`, a self-contradiction that an assertion would
-happily pass. Both are now refused; T56c covers it.
+The suffix is the declaration; `--headers` exists only for input that has no
+suffix to declare anything. Why it is checked rather than trusted is in
+[todo/known-defects.md](todo/known-defects.md).
 
 For the same reason csv2 will not convert between the two formats: writing a
 one-header-row input to a `.csv2` path is refused rather than silently losing a
@@ -188,9 +183,8 @@ PROTECTION / 保護
                         The header is ALWAYS written, with or without -t: the
                         key fingerprint and salt live in it, the salt is new on
                         every run, and ciphertext without them can never be
-                        decrypted by anyone. Combining -encrypt with a
-                        selection used to drop the header at rc=0; fixed
-                        2026-08-18, asserted by T56a/T56b.
+                        decrypted by anyone. The header is written with or
+                        without -t, including under a selection.
   -decrypt COLS         decrypt; COLS may be `all` to take every marked column
   -keyfile PATH         key file; defaults to multissh's private key.
                         With -hash it selects HMAC over plain SHA-256
@@ -392,9 +386,9 @@ $ csv2 -contains zstd -C 1 --json -i pkgs.csv
 {"meta":{"records":4,"matched":1}}
 ```
 
-The trailing `matched` is a count, not an index — before 2026-08-18 it was the
-only surviving trace that a match had happened, with nothing to attach it to.
-A README-only reader found that. Asserted by T63.
+The trailing `matched` is a count, not an index: it tells you how many records
+matched, not which of the objects above it they were. That is what `match` is
+for. Asserted by T63.
 
 ```console
 $ csv2 -contains busybox --json -i TARGET_PACKAGES.csv
@@ -462,9 +456,7 @@ goes to a temp file that is renamed only after everything else worked.
 edit leaves the original **byte-for-byte unchanged**, and leaves no temp file
 beside it. This is the one guarantee with no fallback — with `-o` you still have
 the input if the output is wrong, and with `--in-place` the input *is* the
-output. It was inferable from "`--in-place` … via temp file + rename" plus the
-sentence above, but inferable is not stated; a README-only reader flagged having
-to work it out on 2026-08-18. Asserted by T28c.
+output. Asserted by T28c.
 
 `--build-index` and `--verify-index` each print one line to **stdout** — they
 are explicit administrative actions, not the normal path, but if you pipe them
@@ -485,9 +477,8 @@ write a script that expects to find `record N, field M` in every message:
 | in the arguments | neither — it is thrown before any record is read | `unknown flag --nope` |
 | in the file as a whole | neither — there is no record to name | `cannot open input file: /nope.csv` |
 
-Until 2026-08-18 this section claimed errors "name the record and field"
-unconditionally. One error in eight does; the rest name the record, or nothing,
-because there is nothing else true to name. Asserted by T60.
+Only a fault located at one cell names both. The rest name the record, or
+nothing, because there is nothing else true to name. Asserted by T60.
 
 An error in the **arguments** is thrown before `-log` has been read, so it
 reaches stderr but not the log file: the path to log to came from the same
@@ -639,14 +630,10 @@ Each of these is argued in full in [plan/plan.md](./plan/plan.md).
 - **The index is always an optimisation and never a precondition.** With no
   index, behaviour is identical. Stale, truncated, corrupt, wrong version — all
   are discarded in favour of a scan, none is an error. An index that quickly
-  gives you the wrong data is far worse than no index. **Until 2026-08-18 this
-  was not true of the index's own contents**: every check described the data
-  file — size, mtime, the hashes of its first and last bytes, the entry count —
-  and nothing described the index, so one flipped bit in an offset passed all of
-  them and `-mid 1,1` returned a fragment beginning mid-field, as a record, at
-  rc=0. The header now carries a checksum over the whole index, offsets
-  included. A corrupt index is discarded, and the next operation that reads the
-  whole file writes a good one back. Asserted by T68.
+  gives you the wrong data is far worse than no index. That covers the index's
+  own contents too: the header carries a checksum over the whole index, offsets
+  included, so a damaged one is discarded rather than followed, and the next
+  operation that reads the whole file writes a good one back. Asserted by T68.
   **What the checksum is not:** it catches corruption — a flipped bit, a short
   write, a partially overwritten file — and is not a signature. Anyone who can
   rewrite the offsets can rewrite eight more bytes. It also cannot help when the
