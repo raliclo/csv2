@@ -149,8 +149,12 @@ SELECTING / 選取
                         and always writes the headers, with or without -t
   -rownum               prepend a record-number column. It does NOT renumber
                         anything: see "Two numberings" below
-  --physical            also print the physical line the record starts on
-  --a1                  also print spreadsheet A1 notation
+  --physical            also print the physical line the record starts on.
+                        Adds to the LOCATING REPORT, so it needs -contains
+                        without --filter/-md/--json
+  --a1                  also print spreadsheet A1 notation. Same restriction
+                        as --physical, and it counts the header rows: data
+                        record 1 is A2 in a .csv and A3 in a .csv2
 
 INPUT / OUTPUT
   -i FILE  -o FILE      file paths; -o writes a temp file and renames
@@ -271,6 +275,26 @@ report:
 ```console
 $ csv2 -contains busybox -i pkgs.csv | cut -f3
 ```
+
+### `--a1` counts the header rows
+
+`--a1` prints the cell as a spreadsheet would address it, which means the row
+number depends on how many header rows the format has — one for `.csv`, two for
+`.csv2`. The same data record is therefore a different spreadsheet row in each:
+
+```console
+$ csv2 -contains zlib --a1 -i pkgs.csv       # 1 header row
+1:1 [A2]	pkg	zlib
+$ csv2 -contains zlib --a1 -i pkgs.csv2      # 2 header rows
+1:1 [A3]	pkg	zlib
+```
+
+Both are data record 1. `A2` and `A3` are what you would click on. The column
+letter comes from the field number the same way: field 3 is `C`.
+
+`--a1` and `--physical` add to the **locating report**, so they need
+`-contains` and are refused with `-r`, `--filter`, `-md` and `--json` — those do
+not emit an address for anything to be added to.
 
 ### Two numberings, and where they disagree
 
@@ -488,6 +512,7 @@ Each of these exits non-zero with a message saying why:
 | `-delete -col` removing every column | a file with no columns is not a CSV file |
 | `-delete -col X` with `-update`/`-delete -cell`/`-encrypt`/`-hash` on X | the edit would have no effect and would still be reported as done |
 | `-delete -col` with `-insert`/`-append` | the literal row would have to match either the old shape or the new one, and there is no way to tell which was meant |
+| `--a1` or `--physical` without a locating report | they add a part to the report's address, and `-r`/`--filter`/`-md`/`--json` do not emit one; there would be nothing to add to |
 | `-insert -cell` | inserting a cell mid-record shifts every later field one column along |
 | `-update 99:3` on a 21-record file | out of range is an error, never "grow the file to fit" |
 | `-append 'a,b,c'` on a 7-column file | the field count must match the header; csv2 will not pad or truncate to fit |

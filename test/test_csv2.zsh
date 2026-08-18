@@ -1961,6 +1961,59 @@ assert_eq "$("$CSV2" -contains first --zh -i "$TMP/t66.csv2" 2>/dev/null)" \
     $'1:3\t備註\tfirst' \
     "T66e and a data hit is named in Chinese under --zh as well / 在 --zh 之下，資料列的命中同樣以中文命名"
 
+# ---------------------------------------------------------------------
+# T67 -- --a1 counts the header rows, so the same record is a different
+#        spreadsheet row in .csv and .csv2.
+#
+# Round 17 picked --a1 unprompted because it had one line in the README, no
+# example, and no statement of how the header count affects the row. That is
+# precisely the arithmetic a header-count-aware feature gets wrong: assume one
+# header row regardless of format and every .csv2 address is off by one -- and
+# still looks like a plausible cell reference, which is why nobody would notice.
+#
+# The tool was right. It was also undemonstrated, so being right was something a
+# reader had to take on faith or rediscover by testing, which is what happened.
+#
+# T67 —— --a1 會把標頭列算進去，因此同一筆紀錄在 .csv 與 .csv2 中落在不同的試算表列。
+# 第 17 回合在無人指定的情況下自己挑了 --a1，因為它在 README 裡只有一行、沒有實例，也沒有
+# 說明標頭列數如何影響列號。而那正是「會依標頭列數而變」的功能最容易算錯的地方：若不論格式
+# 一律假設一列標頭，那麼每一個 .csv2 的位址都會差一——而且看起來仍然是一個合理的儲存格參照，
+# 這正是沒有人會注意到的原因。
+# 工具是對的。但它也從未被示範過，於是「它是對的」這件事，讀者只能選擇相信，或自己測出來
+# ——而後者正是實際發生的事。
+# ---------------------------------------------------------------------
+echo
+echo "--- T67: --a1 counts the header rows / --a1 會把標頭列算進去 ---"
+
+printf 'pkg,ver\nzlib,1\nzstd,2\n' > "$TMP/t67.csv"
+printf 'pkg,ver\n套件,版本\nzlib,1\nzstd,2\n' > "$TMP/t67.csv2"
+
+assert_eq "$("$CSV2" -contains zlib --a1 -i "$TMP/t67.csv" 2>/dev/null)" \
+    $'1:1 [A2]\tpkg\tzlib' \
+    "T67a in a .csv, data record 1 is spreadsheet row 2 / 在 .csv 中，第 1 筆資料是試算表第 2 列"
+assert_eq "$("$CSV2" -contains zlib --a1 -i "$TMP/t67.csv2" 2>/dev/null)" \
+    $'1:1 [A3]\tpkg\tzlib' \
+    "T67b in a .csv2 it is row 3, because there are two header rows / 在 .csv2 中是第 3 列，因為標頭有兩列"
+assert_eq "$("$CSV2" -contains zstd --a1 -i "$TMP/t67.csv2" 2>/dev/null)" \
+    $'2:1 [A4]\tpkg\tzstd' \
+    "T67c and the offset holds for the next record / 位移對下一筆同樣成立"
+
+# The column letter comes from the field number, so a second-column hit is B --
+# checked because a row that is right with a column that is wrong is still a
+# wrong cell reference.
+# 欄位字母由欄號換算而來，因此命中第二欄就是 B——之所以要查，是因為「列對了但欄錯了」仍然
+# 是一個錯的儲存格參照。
+assert_eq "$("$CSV2" -contains 1 --a1 -i "$TMP/t67.csv2" 2>/dev/null)" \
+    $'1:2 [B3]\tver\t1' \
+    "T67d and the column letter follows the field number / 欄位字母跟隨欄號"
+
+# The refusal the reader hit first, which was asserted but never documented.
+# 讀者第一次就撞上的那條拒絕——它有被斷言，卻從未被記載。
+assert_fails "T67e --a1 without a locating report is refused / 沒有定位報告時 --a1 被拒" -- \
+    "$CSV2" -r --a1 -i "$TMP/t67.csv2"
+assert_fails "T67f and --a1 with --filter is refused too, for the same reason / 與 --filter 併用同樣被拒，理由相同" -- \
+    "$CSV2" -contains zlib --filter --a1 -i "$TMP/t67.csv2"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

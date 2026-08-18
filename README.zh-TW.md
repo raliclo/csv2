@@ -131,8 +131,10 @@ $ csv2 -r --json -i example.csv2 | head -1
   -t                    輸出帶上標頭列（預設不帶）
   -rownum               最前面加一欄紀錄號。它不會重新編號任何東西：見下方
                         「兩套編號」
-  --physical            額外輸出該紀錄起始的物理行號
-  --a1                  額外輸出試算表的 A1 記法
+  --physical            額外輸出該紀錄起始的物理行號。它加在「定位報告」上，
+                        因此需要 -contains 且不得搭配 --filter/-md/--json
+  --a1                  額外輸出試算表的 A1 記法。限制同 --physical，且它會把
+                        標頭列算進去：第 1 筆資料在 .csv 是 A2、在 .csv2 是 A3
 
 輸入／輸出
   -i FILE  -o FILE      檔案路徑；-o 會寫暫存檔再 rename
@@ -238,6 +240,24 @@ $ csv2 -contains busybox -i TARGET_PACKAGES.csv
 ```console
 $ csv2 -contains busybox -i pkgs.csv | cut -f3
 ```
+
+### `--a1` 會把標頭列算進去
+
+`--a1` 以試算表定址一格的方式印出位置，因此列號取決於該格式有幾列標頭——`.csv` 一列、
+`.csv2` 兩列。同一筆資料紀錄在兩者中因此落在不同的試算表列：
+
+```console
+$ csv2 -contains zlib --a1 -i pkgs.csv       # 一列標頭
+1:1 [A2]	pkg	zlib
+$ csv2 -contains zlib --a1 -i pkgs.csv2      # 兩列標頭
+1:1 [A3]	pkg	zlib
+```
+
+兩者都是第 1 筆資料。`A2` 與 `A3` 才是你實際會點下去的那一格。欄位字母也以同樣方式由欄號
+換算而來：第 3 欄是 `C`。
+
+`--a1` 與 `--physical` 是加在**定位報告**上的，因此需要 `-contains`，並且與 `-r`、
+`--filter`、`-md`、`--json` 併用會被拒——那些不產生位址，沒有東西可以加上去。
 
 ### 兩套編號，以及它們不一致的地方
 
@@ -426,6 +446,7 @@ busybox,1.37.0,"fork raliclo/busybox, branch develop",GPL-2.0
 | `-delete -col` 移除全部欄位 | 沒有任何欄位的檔案不是 CSV 檔 |
 | `-delete -col X` 同時對 X 下 `-update`／`-delete -cell`／`-encrypt`／`-hash` | 該編輯不會有效果，卻仍會被回報為已完成 |
 | `-delete -col` 與 `-insert`／`-append` 併用 | 那列字面值必須符合舊形狀或新形狀其中之一，而無法判斷是哪一個 |
+| `--a1` 或 `--physical` 而沒有定位報告 | 它們是在報告的位址上「加一段」，而 `-r`／`--filter`／`-md`／`--json` 不產生位址，沒有東西可加 |
 | `-insert -cell` | 在一列中間插入儲存格，會把該列後面的欄位全部往後推一格 |
 | 在 21 筆的檔案上 `-update 99:3` | 越界是錯誤，絕不是「自動長大」 |
 | 在 7 欄的檔案上 `-append 'a,b,c'` | 欄數必須與標頭相符；csv2 不會補空或截斷來湊合 |
