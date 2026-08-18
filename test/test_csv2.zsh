@@ -461,6 +461,33 @@ else
     bad "T20c --json-ascii (got: ${ja:0:200})"
 fi
 
+# T20d/T20e — the astral plane, which T20c does not reach. 套 is U+5957: one
+# \u escape, the easy case. A character above U+FFFF has no single \u form and
+# must be written as a UTF-16 surrogate PAIR, which is where a hand-rolled JSON
+# encoder classically breaks -- and it breaks silently, emitting something that
+# parses as a different character or as a lone surrogate.
+#
+# Asserted against the exact expected pair rather than by round-tripping
+# through a parser: the guest has no python, and the arithmetic is fixed.
+# U+1F680: high = 0xD800 + ((0x1F680-0x10000) >> 10) = 0xD83D
+#          low  = 0xDC00 + ((0x1F680-0x10000) & 0x3FF) = 0xDE80
+#
+# T20d／T20e —— 星光平面（astral plane），那是 T20c 沒有觸及的。套 是 U+5957：單一個 \u
+# 跳脫，簡單的那一種。U+FFFF 以上的字元沒有單一 \u 形式，必須寫成 UTF-16 的「代理對」，
+# 而那正是手寫的 JSON 編碼器經典的斷裂處——而且它是靜默地斷：輸出的東西仍然解析得過，
+# 只是變成另一個字元，或是一個落單的代理碼位。
+# 這裡以「預期的那一對」直接斷言，而不是丟進解析器 round-trip：guest 上沒有 python，
+# 而那個算術是固定的。
+printf 'pkg,note\nfoo,rocket \xf0\x9f\x9a\x80 emoji\n' > "$TMP/t20_astral.csv"
+astral=$("$CSV2" -r --json --json-ascii -i "$TMP/t20_astral.csv" 2>/dev/null | sed -n 2p)
+assert_contains "$astral" '\ud83d\ude80' \
+    "T20d --json-ascii writes U+1F680 as the correct surrogate pair / --json-ascii 以正確的代理對寫出 U+1F680"
+if [[ "$astral" == *$'\xf0\x9f\x9a\x80'* ]]; then
+    bad "T20e raw non-ASCII bytes survived --json-ascii / 原始的非 ASCII 位元組通過了 --json-ascii"
+else
+    ok "T20e and no raw non-ASCII byte survives, which is the flag's whole promise / 沒有任何原始非 ASCII 位元組留下，那正是這個旗標的全部承諾"
+fi
+
 # T21 — the backslash escaping is lossless, and an undefined escape is an
 # error rather than "keep it as written" (which would let two different
 # byte sequences read back as one value).
