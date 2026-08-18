@@ -2561,6 +2561,67 @@ fi
 assert_contains "$(cat "$TMP/t73c.log")" "fingerprint" \
     "T73f but the fingerprint does, which identifies the key without being it / 但指紋會出現——它標識金鑰而不是金鑰本身"
 
+# ---------------------------------------------------------------------
+# T74 -- "-md is one-way" has to be true, not merely intended.
+#
+# Round 26 attacked the claim and broke it. -md output redirected into a .csv
+# path is a valid ONE-COLUMN CSV whenever the data contains no commas, so every
+# line has one field, the field counts trivially agree, and csv2 read it back at
+# rc=0 -- handing over the Markdown separator row `|---|---|---|` as data
+# record 1.
+#
+# With commas in the data the counts disagree and it already failed loudly. The
+# check that saved that case is the one that had nothing to notice here. So the
+# guarantee held for the harder-looking input and failed for the simpler one:
+# any table of short plain values.
+#
+# That contradicts the promise this project opens with -- anything else must
+# fail loudly rather than silently emit a half-correct file -- and it did it on
+# a file csv2 had produced itself.
+#
+# T74 —— 「-md 是單向的」必須為真，而不能只是「本意如此」。
+# 第 26 回合攻擊了這個宣稱並且攻破了。把 -md 的輸出重導到 .csv 路徑，只要資料不含逗號，
+# 那就是一份合法的「單欄」CSV：每一行都只有一欄、欄數自然一致，於是 csv2 在 rc=0 下把它讀
+# 回來，並把 Markdown 分隔列 `|---|---|---|` 當成第 1 筆資料交出去。
+# 資料含逗號時欄數不符，它本來就會大聲失敗。救了那個案例的檢查，在這裡沒有東西可以察覺。
+# 於是這條保證在「看起來比較難」的輸入上成立，卻在比較單純的那一種上失效：任何一張由簡短
+# 純值構成的表格。
+# 那牴觸了本專案開宗明義的承諾——其餘一切都必須大聲失敗，而不是靜默產生一個半正確的檔案
+# ——而且它是在一個 csv2 自己產生的檔案上失敗的。
+# ---------------------------------------------------------------------
+echo
+echo "--- T74: -md really is one-way / -md 真的是單向的 ---"
+
+printf 'pkg,ver,note\nzlib,1.3.2,plain text no commas\nzstd,1.5.6,another plain value\n' > "$TMP/t74.csv"
+"$CSV2" -r -t -md -i "$TMP/t74.csv" -so > "$TMP/t74_md.csv" 2>/dev/null
+assert_contains "$(sed -n 2p "$TMP/t74_md.csv")" '|---|' \
+    "T74a the -md output really does contain a separator row / -md 的輸出確實含有一列分隔列"
+
+assert_fails "T74b and reading it back as CSV is refused, not silently misread / 把它當成 CSV 讀回來會被拒，而不是被靜默誤讀" -- \
+    "$CSV2" -r -i "$TMP/t74_md.csv"
+"$CSV2" -r -i "$TMP/t74_md.csv" 2>"$TMP/t74_err.txt" >/dev/null
+assert_contains "$(head -1 "$TMP/t74_err.txt")" "Markdown" \
+    "T74c and the message names Markdown, rather than talking about field counts / 而訊息會指名 Markdown，不是在談欄數"
+
+# The refusal must be narrow. A genuine one-column CSV is ordinary input and
+# must keep working; so must a multi-column file that merely contains such a
+# value, because there the file plainly is CSV.
+# 這條拒絕必須夠窄。一份真實的單欄 CSV 是很普通的輸入，必須照常可用；一個「只是剛好含有
+# 這種值」的多欄檔案也一樣——因為在那裡，那個檔案顯然就是 CSV。
+printf 'name\nalice\nbob\n' > "$TMP/t74_one.csv"
+assert_eq "$("$CSV2" -r -i "$TMP/t74_one.csv" 2>/dev/null | head -1)" "alice" \
+    "T74d a real one-column CSV still reads / 真實的單欄 CSV 仍讀得出來"
+printf 'a,b\n"|---|---|",x\n' > "$TMP/t74_two.csv"
+assert_succeeds "T74e and a multi-column file containing such a value is untouched / 含有這種值的多欄檔案完全不受影響" -- \
+    "$CSV2" -r -i "$TMP/t74_two.csv"
+
+# The case that already worked has to keep working, and for its own reason.
+# 原本就能運作的那個案例必須繼續運作，而且是基於它自己的理由。
+printf 'pkg,note\nzlib,"has, comma"\n' > "$TMP/t74_wc.csv"
+"$CSV2" -r -t -md -i "$TMP/t74_wc.csv" -so > "$TMP/t74_wc_md.csv" 2>/dev/null
+assert_fails "T74f comma-bearing -md output is still refused too / 含逗號的 -md 輸出同樣仍被拒" -- \
+    "$CSV2" -r -i "$TMP/t74_wc_md.csv"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

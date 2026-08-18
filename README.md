@@ -498,7 +498,11 @@ $ csv2 -mid 5,5 --json -i TARGET_PACKAGES.csv
 `fields` is keyed by column name, which is the way to pull one column out
 without counting.
 
-`-md` emits a Markdown table and is one-way — csv2 cannot read it back.
+`-md` emits a Markdown table and is one-way — csv2 cannot read it back. Writing
+it to a `.csv`/`.csv2` path with `-o` is refused, and if you route around that
+with `-so` and a shell redirect, reading it back is refused too: a one-column
+file whose record is a Markdown separator row is `-md` output, not CSV, and the
+message says so instead of complaining about field counts. Asserted by T74.
 
 ### In a pipeline
 

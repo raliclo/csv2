@@ -512,11 +512,55 @@ final class RecordParser {
         recordDirty = true
     }
 
+    /// A Markdown separator row -- `|---|---|---|`, or its `:--:` alignment
+    /// forms -- appearing as a record with exactly ONE field.
+    ///
+    /// `-md` output redirected into a `.csv` path is a valid one-column CSV
+    /// whenever the data happens to contain no commas, and csv2 read it back at
+    /// rc=0 with the separator row handed over as data record 1. That is the
+    /// failure this project's opening promise rules out: not a refusal, not a
+    /// crash, but a silently half-correct read of a file it had produced itself.
+    /// With commas in the data the field counts disagree and it already failed
+    /// loudly; without them nothing was left to notice.
+    ///
+    /// One field is required as well as the shape. A real one-column CSV whose
+    /// first value is exactly a row of dashes and pipes is conceivable and
+    /// essentially never written; a MULTI-column file containing such a value
+    /// is left alone entirely, because there the file plainly is CSV.
+    ///
+    /// 一列 Markdown 分隔列——`|---|---|---|`，或其 `:--:` 對齊形式——以「恰好一欄」的
+    /// 紀錄形式出現。
+    /// 把 `-md` 的輸出重導到 `.csv` 路徑，只要資料剛好不含逗號，那就是一份合法的單欄 CSV；
+    /// 而 csv2 會在 rc=0 下把它讀回來，並把分隔列當成第 1 筆資料交出去。那正是本專案開宗明義
+    /// 排除掉的那種失敗：不是拒絕、不是崩潰，而是對一個它自己產生的檔案，做出一次靜默的、
+    /// 半正確的讀取。資料含逗號時欄數不符，它本來就會大聲失敗；不含逗號時，就沒有東西還會
+    /// 察覺了。
+    /// 除了形狀之外還要求「恰好一欄」。一份真實的單欄 CSV，其首個值剛好是一整列破折號與豎線
+    /// ——可以想像，但幾乎不會有人這樣寫；而「多欄」檔案中含有這種值時完全不受影響，因為在
+    /// 那裡，那個檔案顯然就是 CSV。
+    private func looksLikeMarkdownSeparator(_ f: [UInt8]) -> Bool {
+        guard f.count >= 5, f.first == 0x7C, f.last == 0x7C else { return false }
+        var dashes = 0
+        for b in f {
+            switch b {
+            case 0x2D: dashes += 1            // -
+            case 0x7C, 0x3A, 0x20: break      // | : space
+            default: return false
+            }
+        }
+        return dashes >= 3
+    }
+
     private func endRecord() throws {
         try endField()
         var r = Record(fields: fields, offset: recOffset, line: recLine)
         recordsEmitted += 1
         r.number = recordsEmitted
+        if r.count == 1 && looksLikeMarkdownSeparator(r.fields[0].value) {
+            throw fault(
+                "record \(r.number) (line \(r.line)) is a Markdown separator row in a file with one column, so this is -md output rather than CSV; -md is one-way and csv2 cannot read it back",
+                "第 \(r.number) 筆（第 \(r.line) 行）是一列 Markdown 分隔列，且此檔只有一欄，因此這是 -md 的輸出而不是 CSV；-md 是單向的，csv2 讀不回來")
+        }
         fields = []
         recordDirty = false
         recOffset = offset
