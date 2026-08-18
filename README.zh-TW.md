@@ -144,7 +144,9 @@ $ csv2 -r --json -i example.csv2 | head -1
 輸出形狀
   -md [--pretty]        Markdown 表格；需要 -t。--pretty 以「顯示寬度」對齊，
                         因此放棄串流
-  --json                JSON Lines；--json-ascii 會跳脫非 ASCII
+  --json                JSON Lines；--json-ascii 會跳脫非 ASCII，包含 U+FFFF 以上
+                        的字元——JSON 沒有單一的 \uXXXX 形式可以表示它們，它們會
+                        成為 UTF-16 的代理對：U+1F680 寫作 \ud83d\ude80
   --en  --zh            以哪一列標頭命名欄位
 
 編輯

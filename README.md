@@ -164,7 +164,10 @@ INPUT / OUTPUT
 OUTPUT SHAPE / 輸出形狀
   -md [--pretty]        Markdown table; needs -t. --pretty aligns by DISPLAY
                         width and therefore gives up streaming
-  --json                JSON Lines; --json-ascii escapes non-ASCII
+  --json                JSON Lines; --json-ascii escapes non-ASCII, including
+                        characters above U+FFFF, which JSON has no single
+                        \uXXXX form for and which become UTF-16 surrogate
+                        pairs -- U+1F680 is written \ud83d\ude80
   --en  --zh            which header row names the columns
 
 EDITING / 編輯
