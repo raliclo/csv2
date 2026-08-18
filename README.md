@@ -261,6 +261,20 @@ the data this tool was written for.
 Matching is **case-sensitive** and there is no flag to change that.
 `--normalize` affects Unicode normalisation only, not case.
 
+**`--normalize` governs cell VALUES, not column names.** A column name is
+matched by canonical equivalence always: an NFC `café` typed on the command line
+finds a header stored as NFD, with or without the flag, because to everyone
+reading it that is the same name. A value is matched byte for byte unless you
+ask otherwise, because a value is data and changing what counts as equal would
+change what is in the file.
+
+One consequence is worth stating plainly: **a name that matches more than one
+column is refused, not resolved by position.** CSV does not forbid duplicate
+column names and spreadsheets produce them, so `-update 1:note X` on a file with
+two columns called `note` is an error naming both positions — address it by
+number. Two columns differing only in Unicode form collide the same way, and
+those do not look identical in a hex dump. Asserted by T75.
+
 There is **no column projection**: nothing selects "just the license column".
 For one value at an address you already have, use `-get`:
 

@@ -743,8 +743,41 @@ func resolveColumn(_ token: String, header: Record) throws -> Int {
         }
         return n - 1
     }
+    // Collect every match rather than returning the first.
+    //
+    // A file may legitimately carry two columns with the same name -- CSV does
+    // not forbid it and spreadsheets produce it -- and `-update 1:note X` used
+    // to edit whichever came first, at rc=0, with nothing said. The caller
+    // asked to change `note` and got one of two, chosen by position. That is
+    // the incident this project was built after, reproduced by the tool meant
+    // to prevent it.
+    //
+    // Comparison is by Swift's String ==, which is CANONICAL EQUIVALENCE: an
+    // NFC `café` and an NFD `café` are the same name here, even though they are
+    // different bytes. That is right for a name -- they are the same name to
+    // everyone who reads it -- but it also means two columns can collide
+    // without looking identical in a hex dump, which makes refusing the
+    // ambiguity matter more, not less.
+    //
+    // 收集「每一個」匹配，而不是回傳第一個。
+    // 一個檔案可以合法地帶有兩個同名欄位——CSV 並未禁止，而試算表就會產生——而
+    // `-update 1:note X` 先前會編輯位置在前的那一個，rc=0，什麼也不說。呼叫端要求修改
+    // `note`，拿到的是兩者之一，由位置決定。那正是本專案因之而生的那起事故，被那支
+    // 本該防止它的工具重現了一次。
+    // 比較用的是 Swift 的 String ==，也就是「正規等價」：NFC 的 café 與 NFD 的 café 在此
+    // 是同一個名字，儘管位元組不同。對「名字」而言那是對的——對每一個讀到它的人來說，
+    // 那就是同一個名字——但這也意味著兩個欄位可以在 hex dump 裡看起來不同卻相撞，
+    // 因此「拒絕這個歧義」更要緊，而不是更不要緊。
+    var hits: [Int] = []
     for (i, f) in header.fields.enumerated() where baseName(headerName(f)) == token {
-        return i
+        hits.append(i)
+    }
+    if hits.count == 1 { return hits[0] }
+    if hits.count > 1 {
+        let where_ = hits.map { "\($0 + 1)" }.joined(separator: ", ")
+        throw fault(
+            "\"\(token)\" names \(hits.count) columns (\(where_)); address it by number, because picking one for you would be a guess",
+            "「\(token)」指向 \(hits.count) 個欄位（第 \(where_) 欄）；請改用欄號定址，因為替你挑一個等於猜測")
     }
     let names = header.fields.map { baseName(headerName($0)) }.joined(separator: ", ")
     throw fault("no column named \"\(token)\"; the columns are: \(names)",

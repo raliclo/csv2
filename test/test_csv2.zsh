@@ -2622,6 +2622,70 @@ printf 'pkg,note\nzlib,"has, comma"\n' > "$TMP/t74_wc.csv"
 assert_fails "T74f comma-bearing -md output is still refused too / 含逗號的 -md 輸出同樣仍被拒" -- \
     "$CSV2" -r -i "$TMP/t74_wc_md.csv"
 
+# ---------------------------------------------------------------------
+# T75 -- an ambiguous column name is refused, not resolved by position.
+#
+# Round 27 asked whether --normalize governs COLUMN-NAME matching the way it
+# governs cell-value matching, and found it does not: an NFC-typed name matches
+# an NFD-stored header with or without the flag. The cause is that names are
+# compared with Swift's String ==, which is canonical equivalence, while values
+# are compared as bytes.
+#
+# That asymmetry is defensible -- NFC and NFD café are the same NAME to everyone
+# who reads it -- but chasing it down surfaced something the reader did not
+# reach: if two columns can be the same name, which one does an address mean?
+#
+# csv2 returned the first, at rc=0. `-update 1:note X` on a file with two
+# columns called `note` edited whichever came first and said nothing. CSV does
+# not forbid duplicate names and spreadsheets produce them. The caller asked to
+# change `note` and got one of two, chosen by position -- the incident this
+# project was built after, reproduced by the tool meant to prevent it.
+#
+# T75 —— 有歧義的欄位名稱會被拒絕，而不是依位置解析。
+# 第 27 回合詢問 --normalize 是否像管「儲存格值」那樣管「欄位名稱」的比對，發現並不是：
+# 以 NFC 打出的名稱，不論有沒有那個旗標，都能匹配到 NFD 儲存的標頭。原因是名稱以 Swift 的
+# String == 比較（正規等價），而值是以位元組比較。
+# 那個不對稱說得過去——對每個讀到它的人來說，NFC 與 NFD 的 café 就是同一個「名字」——但
+# 追查它的過程中，浮出一件讀者沒有走到的事：如果兩個欄位可以是同一個名字，那一個位址到底
+# 指的是哪一個？
+# csv2 回傳第一個，rc=0。在一個有兩個 `note` 欄位的檔案上，`-update 1:note X` 會編輯位置在前
+# 的那一個，什麼也不說。CSV 並未禁止重複名稱，而試算表就會產生。呼叫端要求修改 `note`，
+# 拿到的是兩者之一、由位置決定——那正是本專案因之而生的那起事故，被那支本該防止它的工具
+# 重現了一次。
+# ---------------------------------------------------------------------
+echo
+echo "--- T75: an ambiguous column name is refused / 有歧義的欄位名稱會被拒絕 ---"
+
+printf 'note,ver,note\nFIRST,1,SECOND\n' > "$TMP/t75.csv"
+
+assert_fails "T75a -update by a duplicated name is refused, not applied to the first / 以重複名稱下 -update 會被拒，而不是套用到第一個" -- \
+    "$CSV2" -update 1:note X -i "$TMP/t75.csv" -o "$TMP/t75_o.csv"
+"$CSV2" -update 1:note X -i "$TMP/t75.csv" -o "$TMP/t75_o.csv" 2>"$TMP/t75_err.txt"
+assert_contains "$(head -1 "$TMP/t75_err.txt")" 'names 2 columns (1, 3)' \
+    "T75b and the message says WHICH columns collide / 而訊息會說出是哪幾欄相撞"
+assert_fails "T75c -get is refused for the same reason / -get 因同樣的理由被拒" -- \
+    "$CSV2" -get 1:note -i "$TMP/t75.csv"
+assert_fails "T75d and so is -delete -col / -delete -col 同樣被拒" -- \
+    "$CSV2" -delete -col note -i "$TMP/t75.csv" -so
+
+# The escape is the one the message names, and it has to work.
+# 訊息指出的那條出路，必須真的可用。
+assert_eq "$("$CSV2" -get 1:3 -i "$TMP/t75.csv" 2>/dev/null)" "SECOND" \
+    "T75e while addressing by NUMBER reaches either column / 而以「欄號」定址則兩欄都到得了"
+
+# Names are compared by canonical equivalence, so an NFC argument finds an NFD
+# header. That is right for a name, and it is why the collision above can happen
+# between columns that are not byte-identical.
+# 名稱以正規等價比較，因此 NFC 的引數找得到 NFD 的標頭。對「名字」而言那是對的，
+# 而那也正是上面那種相撞可以發生在「位元組並不相同」的兩個欄位之間的原因。
+printf 'pkg,cafe\xcc\x81\nzlib,v1\n' > "$TMP/t75_nfd.csv"
+assert_eq "$("$CSV2" -get 1:$'caf\xc3\xa9' -i "$TMP/t75_nfd.csv" 2>/dev/null)" "v1" \
+    "T75f an NFC name finds an NFD header: they are the same name / 以 NFC 的名稱找得到 NFD 的標頭：那是同一個名字"
+
+printf 'caf\xc3\xa9,cafe\xcc\x81\nNFC,NFD\n' > "$TMP/t75_both.csv"
+assert_fails "T75g but two columns differing only in normalisation collide, and that is refused too / 但兩個只差在正規化形式的欄位會相撞，同樣會被拒" -- \
+    "$CSV2" -get 1:$'caf\xc3\xa9' -i "$TMP/t75_both.csv"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
