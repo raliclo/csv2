@@ -540,3 +540,143 @@ V 是「一個值被靜默地**毀掉**」——而且從解析後的物件裡�
 **修法**：紀錄形狀的 `--json` 在標頭有重複名稱時拒絕，訊息說出「會發生什麼事」而不只是
 「被拒絕」，並指出承載得了它的兩種形狀。**報告形狀不受影響**（T75j）——它每個命中各自成行，
 兩個同名欄位就是兩行。欄名不重複的檔案完全不受影響（T75k）。
+
+---
+
+# 第 37 回合驗證的三條，尚未修（2026-08-19）
+# Three verified by round 37, not yet fixed (2026-08-19)
+
+日期：2026-08-19。來源：一次 README-only 盲測（第 37 回合）。**下列每一條都由本 session
+親手重現過**，指令與輸出照抄在下面。同一輪還報了「串流不是有界的」，那一條已修（見
+`plan/plan.md`「串流的記憶體宣稱是假的」與 T9a–T9c），不列在此。
+
+Verified 2026-08-19 by hand, from a README-only blind pass. The streaming
+memory claim from the same round is already fixed and is not listed here.
+
+**共同特徵與 2026-08-16 那六條相同：全部在 `rc=0` 下靜默發生。** 而 W 更進一步——它的
+稽核紀錄會主動說出一件與事實不符的事。
+
+---
+
+## W. `-update` 寫進 `:enc:` 欄位 → 整欄永久無法解密，且 log 說 `<redacted>`
+
+**嚴重度：資料永久遺失，且稽核紀錄具誤導性。** 這是本檔案中最嚴重的一條。
+
+```zsh
+head -c 32 /dev/urandom > k.bin
+printf 'pkg,ver,secret\nbusybox,1.37.0,s1\nzlib,1.3.2,s2\nzstd,1.5.7,s3\n' > p.csv
+csv2 -encrypt secret -keyfile k.bin -i p.csv -o prot.csv -t
+# 標頭：pkg,ver,secret:enc:693c4537:d1KibM4UEel69jnnRKOt4g==
+
+csv2 -update 1:secret "newpass" -i prot.csv --in-place -log audit.log
+# rc=0
+```
+
+檔案現在是：
+
+```
+pkg,ver,secret:enc:693c4537:d1KibM4UEel69jnnRKOt4g==
+busybox,1.37.0,newpass          ← 明文，躺在一個標記為加密的欄位裡
+zlib,1.3.2,g0ineTAQuecnoDuZHm8d/9GvQ6sIm++xk0XWRIps
+zstd,1.5.7,Zp8pYnnvKTE35VANU4Fcf69Ebu/fM2A4odrSJC8l
+```
+
+```zsh
+csv2 -decrypt all -keyfile k.bin -i prot.csv -o back.csv -t
+# csv2: record 1, column secret: not a valid encrypted cell
+# rc=1
+```
+
+**受害的不只是被改的那一筆。** 第 2、3 筆從來沒有被碰過，它們的密文完好無損，但解密在第 1
+筆就停住，於是整欄都取不回來。
+
+而這件事在稽核紀錄裡看起來是這樣：
+
+```
+INFO  update 1:secret: <redacted> -> <redacted>
+```
+
+**遮蔽在此變成了掩蓋。** 遮蔽的規則是「依檔案的宣告」（見上方 2026-08-18 那一條的修法），
+而這裡檔案宣告該欄是加密的——所以寫進去的那個**明文**被當成機密遮蔽掉了。日後讀這行 log
+的人，會以為那裡發生的是一次正常的加密欄位更新。
+
+`:hmac:` / `:hash` 欄位同樣接受 `-update`，rc=0，明文就留在那裡，而雜湊欄位**連一個會失敗的
+驗證都沒有**，因此永遠不會有任何東西發現它。
+
+**修法方向（尚未實作）**：`-update` 與 `-delete -cell` 對帶有 `:enc:`／`:hmac:`／`:hash`
+標記的欄位必須拒絕，並在訊息裡說出唯一正確的做法（先解密、再改、再重新加密）。這與
+`-decrypt` 「在標記層拒絕、絕不拖到密碼演算法」是同一條原則的另一半。
+
+---
+
+## X. `-append --in-place` 不驗證既有檔案，`-append -o` 會驗證
+
+**嚴重度：產生一個 csv2 自己讀不了的檔案，rc=0。**
+
+```zsh
+printf 'pkg,ver,note\nbusybox,1.37.0,core\nzlib,1.3' > b6.csv   # 最後一筆只有 2 欄、無結尾換行
+csv2 -append 'zstd,1.5.7,compression' -i b6.csv --in-place
+# rc=0
+
+csv2 -r -t -i b6.csv
+# csv2: record 2 (line 3) has 2 fields but the header has 3
+# rc=1
+```
+
+**同一份輸入，換成 `-o` 就被正確拒絕**：
+
+```zsh
+csv2 -append 'zstd,1.5.7,compression' -i c6.csv -o c6out.csv
+# csv2: record 2 (line 3) has 2 fields but the header has 3
+# rc=1
+```
+
+同一個動詞、同一份資料、相反的結果，而兩者的差別在 README 裡只是一個 O(1) 的括號註記。
+`runAppendFast` 只在格式是 `.csv2` 時呼叫 `checkTornAppend`；`.csv` 缺少結尾換行被視為
+「只是不整齊」，而**一筆欄數不足的結尾紀錄根本沒有被檢查**。
+
+**這正是 README「Why this exists」描述的那個事故**——「成功執行、印出改了什麼的清單」——
+在這支為了防止它而寫的工具內部重現。
+
+**修法方向（尚未實作）**：快路徑在寫入之前，從檔尾讀回一段有界的位元組並驗證最後一筆是
+完整的、欄數正確的。那仍然是 O(1)（讀取量與檔案大小無關），因此不必放棄快路徑的承諾。
+
+---
+
+## Y. EOF 前未閉合的引號：`-append --in-place` 把新紀錄吞進那個欄位裡
+
+**嚴重度：追加靜默地沒有發生。**
+
+```zsh
+printf 'pkg,ver,note\nbusybox,1.37.0,core\nzlib,1.3.2,"unterminated prose' > e6.csv
+csv2 -append 'zstd,1.5.7,compression' -i e6.csv --in-place
+# rc=0
+```
+
+新的那一筆現在位於那個沒有收尾的引號欄位**內部**——它不是一筆紀錄。讀取時：
+
+```zsh
+csv2 -r -t -i e6.csv
+# csv2: record 3: the input ends inside a quoted field -- the closing quote is missing.
+```
+
+與 X 同一個根本原因（快路徑不驗證），但後果不同：X 產生一個壞檔案，Y 讓一次成功回報的
+寫入**實際上沒有發生**。
+
+---
+
+## 附帶：`--truncate-partial` 只做了一半
+
+不是新缺陷，是對既有描述的更正。README 寫的是「丟棄結尾不完整的紀錄」。實測：
+
+| 結尾的樣子 | `--truncate-partial` |
+|---|---|
+| 未閉合的引號 | **有效**，丟棄該筆，rc=0 |
+| 欄數不足的紀錄 | **完全無作用**，訊息與 rc 皆與不給時相同 |
+
+「欄數不足且無結尾換行」正是教科書上的「不完整的結尾紀錄」。這一條與 X 的修法應該一起做：
+快路徑要能分辨那種結尾，`--truncate-partial` 才有東西可以丟棄。
+
+（順帶更正一項舊的記載：全域 `CLAUDE.md` 的已知缺陷表說 `--truncate-partial` 完全無作用，
+以及 `--include-headers` 的 `0a`／`0b` 未實作。兩者現在都不對——前者對未閉合引號有效，
+後者實測輸出 `0a:4` 與 `0b:4`。）
