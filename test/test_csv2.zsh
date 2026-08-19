@@ -4222,6 +4222,73 @@ assert_eq "$("$CSV2" -r -i "$TMP/t99_mix.csv" 2>/dev/null | cut -d, -f1 | tr '\n
           "r1 X r2 r3 r4 r5 Z " \
     "T99g and -insert composes with -append in one run / 而 -insert 與 -append 可在同一次執行裡併用"
 
+# ---------------------------------------------------------------------
+# T100 -- the audit trail records unlocking, not only locking.
+#
+# Round 40. `-encrypt` and `-hash` each logged which key they used;
+# `-decrypt` logged only the invocation line. So the trail held every time a
+# column was closed and no record of any time one was opened -- which is the
+# wrong way round for an audit. Encrypting puts data away; decrypting takes it
+# out, and "who opened this column, with which key" is the line somebody comes
+# looking for. The README's log table promised the fingerprint and made no
+# exception for -decrypt.
+#
+# The fingerprint was already computed on that path -- it has to be, to refuse
+# a wrong key -- so nothing was hard about this except noticing.
+#
+# T100 —— 稽核軌跡要記下「開鎖」，不只是「上鎖」。
+# 第 40 回合。`-encrypt` 與 `-hash` 都記錄了自己用哪一把金鑰，`-decrypt` 只記了那行
+# invocation。於是軌跡裡有每一次把欄位關上、卻沒有任何一次把它打開——就稽核而言那是反的。
+# 加密是把資料收起來，解密是把它拿出來，而「誰用哪一把金鑰把這一欄打開了」正是日後有人會來
+# 找的那一行。README 的 log 表承諾了指紋，並未為 -decrypt 開例外。
+# 那個指紋在該路徑上本來就算好了——它必須算，否則無法拒絕錯的金鑰——所以這件事除了「注意到」
+# 之外沒有任何困難。
+# ---------------------------------------------------------------------
+echo
+echo "--- T100: a successful decrypt says which key opened it / 成功的解密會說出是哪一把金鑰打開的 ---"
+
+head -c 32 /dev/urandom > "$TMP/t100.key"
+printf 'pkg,secret\na,s1\nb,s2\n' > "$TMP/t100.csv"
+"$CSV2" -encrypt secret -keyfile "$TMP/t100.key" -i "$TMP/t100.csv" -o "$TMP/t100_e.csv" -t 2>/dev/null
+
+rm -f "$TMP/t100.log"
+"$CSV2" -decrypt all -keyfile "$TMP/t100.key" -i "$TMP/t100_e.csv" -o "$TMP/t100_b.csv" -t \
+    -log "$TMP/t100.log" 2>/dev/null
+assert_contains "$(cat "$TMP/t100.log")" "decrypting columns secret" \
+    "T100a a successful -decrypt records that it decrypted, and which column / 成功的 -decrypt 會記下它解了密、以及解了哪一欄"
+assert_contains "$(cat "$TMP/t100.log")" "fingerprint" \
+    "T100b with the key fingerprint, as the log table promises / 並附上金鑰指紋，一如 log 表所承諾"
+
+# The value must NOT be in there. Decrypting is the one operation that turns a
+# protected column back into plaintext, so this is the log line most able to
+# undo the redaction rule if it carried values.
+# 值**不得**出現在裡面。解密是唯一會把受保護欄位變回明文的操作，因此這一行是最有能力
+# 推翻遮蔽規則的一行——如果它帶著值的話。
+if grep -q 's1' "$TMP/t100.log"; then
+    bad "T100c the decrypt log carries the plaintext it recovered / 解密的 log 帶著它還原出來的明文"
+else
+    ok "T100c and none of the recovered plaintext / 而且不帶任何還原出來的明文"
+fi
+
+# The two fingerprints are different KINDS of number, which is why the README
+# now describes them separately. A :hmac: one is stable per key; a :enc: one is
+# per run, because the salt is.
+# 那兩個指紋是**不同種類**的數字，這也是 README 現在分開描述它們的原因。`:hmac:` 是每把金鑰
+# 穩定的；`:enc:` 是每次執行都變的，因為 salt 每次都變。
+"$CSV2" -encrypt secret -keyfile "$TMP/t100.key" -i "$TMP/t100.csv" -o "$TMP/t100_e2.csv" -t 2>/dev/null
+fp1=$(head -1 "$TMP/t100_e.csv"  | sed -n 's/.*:enc:\([0-9a-f]*\):.*/\1/p')
+fp2=$(head -1 "$TMP/t100_e2.csv" | sed -n 's/.*:enc:\([0-9a-f]*\):.*/\1/p')
+if [[ -n $fp1 && $fp1 != $fp2 ]]; then
+    ok "T100d two -encrypt runs with ONE key give different :enc: fingerprints, because the salt differs / 同一把金鑰的兩次 -encrypt 給出不同的 :enc: 指紋，因為 salt 不同"
+else
+    bad "T100d the :enc: fingerprint no longer varies per run ($fp1 vs $fp2) -- the README says it does / :enc: 指紋不再逐次變化（$fp1 對 $fp2）——而 README 說它會"
+fi
+
+"$CSV2" -hash secret -keyfile "$TMP/t100.key" -i "$TMP/t100.csv" -o "$TMP/t100_h1.csv" -t 2>/dev/null
+"$CSV2" -hash secret -keyfile "$TMP/t100.key" -i "$TMP/t100.csv" -o "$TMP/t100_h2.csv" -t 2>/dev/null
+assert_eq "$(head -1 "$TMP/t100_h1.csv")" "$(head -1 "$TMP/t100_h2.csv")" \
+    "T100e while two -hash runs with that key give the SAME :hmac: fingerprint / 而同一把金鑰的兩次 -hash 給出相同的 :hmac: 指紋"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

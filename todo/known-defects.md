@@ -1185,7 +1185,7 @@ T61a／T61c（MSYS 的 FIFO 對原生程式不存在）、T98a–T98g（UTF-16 �
 | # | 缺陷 | 類別 |
 |---|---|---|
 | MM | `install.zsh` 不認得 Windows 的安裝慣例，裝到一個不在 PATH 上的目錄 | **程式（安裝）**  — **已修** |
-| NN | 安裝後的驗證以「版本字串」判定身分，而版本字串分不出同版號的兩個建置 | **程式（驗證）** |
+| NN | 安裝後的驗證以「版本字串」判定身分，而版本字串分不出同版號的兩個建置 | **程式（驗證）**  — **已修** |
 
 ## MM. Windows 上 `install.zsh` 裝到了 shell 找不到的地方
 
@@ -1328,4 +1328,131 @@ csv2 -insert 2 A -i f.csv --in-place; csv2 -insert 4 B …; csv2 -insert 5 C …
 另外：bug 回報給的是 `F14`，而**沒有任何動詞能把 `F14` 變回 `13:6`**。`--a1` 只能為
 「你已經靠內容找到的儲存格」加註座標——對「我只有座標」這個情境是循環的。換算規則從
 `--a1` 那一段推導得出來，但 README 從未把它寫成規則。
+
+---
+
+# 第 40 回合（2026-08-20）—— 由一個真正的新 session 執行
+# Round 40 -- run from a genuinely fresh session
+
+**對照組成立。** 該 session 回報「沒有拿到任何缺陷表」——開新 session 確實關掉了第 39 回合
+那個洩漏。但它同時指出**洩漏沒有全關**：`CLAUDE.md` 仍然把介面交給它（`csv2 -r -i`、
+`-contains`、`-mid`、`-update … --in-place`、`--json`，以及若干行為宣稱）。那不是過期問題，
+是那份檔案本來就該有的內容——它存在的目的就是叫 agent 用 csv2。
+
+**所以：新 session 只修好「過期」那一半，修不好「盲測本來就不夠盲」那一半。**
+
+| # | 缺陷 | 類別 |
+|---|---|---|
+| TT | `:enc:` 的指紋每次執行都不同，而 README 說指紋「identify which key」 | **文件（安全相關）**  — **已修** |
+| UU | `-decrypt` 成功時不記錄金鑰指紋，而 README 的表承諾會記 | **程式（稽核相關）**  — **已修** |
+
+## TT. 同一把金鑰，七個指紋
+
+README:498 —— 「the keyfile **path**, and the key fingerprint | yes — they **identify which
+key**, not what it is」
+
+```sh
+for i in 1 2 3; do csv2 -encrypt secret -keyfile kA.bin -i s.csv -o e$i.csv -t; head -1 e$i.csv; done
+# pkg,secret:enc:d88cdbf1:...
+# pkg,secret:enc:e16b394a:...
+# pkg,secret:enc:869e54ce:...
+```
+
+**三次執行、同一把金鑰、三個指紋。** 它由金鑰**與 salt** 導出，而 salt 每次執行都不同。
+對照 `-hash`：
+
+```sh
+for i in 1 2 3; do csv2 -hash secret -keyfile kA.bin ... ; done   # 三次都是 secret:hmac:9acc9081
+csv2 -hash secret -keyfile kB.bin ...                             # 換金鑰才變：46eabf42
+```
+
+**`:hmac:` 是每把金鑰穩定的，`:enc:` 是每次執行都變的**，而 README 用同一句話描述兩者。
+
+**這一條的後果不是理論的。** 該回合的 agent 明白寫下：他在第一次拒絕時把「keyB 的指紋是
+81f52c56」記成了一個可以帶到下一個檔案的事實。**那不是關於 keyB 的事實。** 若他把它填進工單、
+再拿去比對第二個加密檔，會對同一把金鑰得到不符，並據此判定「金鑰又換了」。
+
+**機制本身是對的**：拒絕時做的是「同一個檔案內」的比較，而那個比較是有效的。錯的是描述——
+它讓一個「檔案內有效」的東西看起來像「跨檔案可攜」。
+
+**已定案（2026-08-20）：程式不動，改文件。** 程式碼給了答案：`fingerprint()` 取的是
+**推導後金鑰**的 SHA-256 前四位元組，而 `-hash` 以固定 salt（`csv2-hash`）推導、`-encrypt`
+每次抽新的 16 bytes salt 並存進標記。**因此那個指紋一直都在正確地識別「推導後的金鑰」**，
+而加密的推導後金鑰依設計就是每個檔案一把——那正是解密能以存下的 salt 重新推導的原因。
+
+錯的是那句描述：它用同一句話涵蓋兩種意思不同的指紋。兩份 README 現在分開說明，並明寫
+「不要把 `:enc:` 的指紋帶到另一個檔案」。
+
+## UU. 成功的 `-decrypt` 不留下它用了哪一把金鑰
+
+```sh
+csv2 -decrypt all -keyfile kA.bin -i e1.csv -o back.csv -t -log d.log    # rc=0
+cat d.log
+# 2026-08-20T... INFO  csv2 -decrypt all -keyfile kA.bin -i e1.csv -o back.csv -t -log d.log
+```
+
+**只有那行 invocation。** 而 `-encrypt` 與 `-hash` 都會記錄指紋：
+
+```
+INFO  encrypting columns purpose with key kA.bin (fingerprint a32e19bc)
+INFO  hashing columns with a key from kA.bin (fingerprint e7998971)
+```
+
+README 的稽核表承諾「the keyfile **path**, and the key fingerprint | yes」，沒有為 `-decrypt`
+開例外。而在稽核的意義上，**「誰用哪一把金鑰把這一欄解開了」正是最該留下的那一筆**——
+加密是把資料鎖上，解密是把它拿出來。
+
+## 第 40 回合的其餘八條（2026-08-20）
+
+該回合的第 4 類是空的——**「工具沒有壞。三項任務都沒有找到任何程式缺陷。」** 八條全是文件，
+而其中一條是 csv2 自己的訊息在誤導。
+
+| # | 缺陷 | 類別 |
+|---|---|---|
+| VV | `CSV2_PRETTY_MAX_BYTES` 的拒絕訊息說「未對齊的形式呈現結果完全相同」——對 Markdown 為真，對終端機為假，而訊息出現在終端機 | **訊息（誤導）**  — **已修** |
+| WW | **沒有任何方法可以量出顯示寬度**——`-debug` 報告每一個數字，就是不報那一個 | **缺少能力**  — **已修** |
+| XX | 文件說 `--pretty` 依 UAX #11 對齊；實作其實做了 grapheme clustering 與 emoji presentation，**比文件說的更好** | 文件（低估了正確的程式）  — **已修** |
+| YY | `-get` 不在旗標參考區塊裡（散文出現 14 次，區塊 0 次） | 文件  — **已修** |
+| ZZ | `-md` 對 `.csv2` 會輸出 `pkg<br>套件`，而 `br>` 在兩份 README 裡出現 0 次；`--zh`／`--en` 這條出路也沒寫 | 文件  — **已修** |
+| AB | 沒有記載「不分大小寫搜尋」的做法；可擴展的答案（`--json` 後自行折疊）每一塊都有記載，卻從未被指向這個問題 | 文件  — **已修** |
+| AC | `--normalize` 是否也正規化「搜尋字串」未記載（實測：會） | 文件  — **已修** |
+| AD | 錯誤金鑰的訊息指向 `mssh-keygen`，而「salt 被改壞、金鑰正確」會得到同一句話 | 訊息  — **已修** |
+
+## WW 是其中最要命的一條，而它要命的方式值得寫下來
+
+該 agent 的原話：
+
+> **這是我找到最要命的缺口：那個缺失的量測，差點讓我對正確的程式碼提出兩份不實的缺陷報告。**
+
+README 指名「顯示寬度」是第四個數字、是 `--pretty` 所依據的東西，然後**不提供任何觀察它的
+方法**——`-debug` 報 `read_bytes`、`file_bytes`、`peak_rss_bytes`、`fields`、`records`，
+唯獨不報那一個。於是他自己造了量測工具，**造錯了兩次**，才與 csv2 的答案一致。
+
+**一個宣稱了某個性質、卻不給你量它的工具，會把「驗證」變成「造一個你自己的實作再比對」**
+——而那個自造的實作出錯時，錯的看起來會是被測的那一方。這與本專案一路在修的東西是同一族：
+**能不能區分，比宣稱得對不對更根本。**
+
+## XX：文件低估了正確的程式，而那同樣是缺陷
+
+README 說 `--pretty` 依 **UAX #11** 對齊。實測：天真的「逐 code point 查 UAX #11」在九個
+測試值裡錯三個（`⚠️` 得 1、`👨‍👩‍👧` 得 6、`👍🏽` 得 4），而 **csv2 九個全對**——它做的是
+grapheme clustering 加 emoji presentation，不只是 UAX #11。
+
+**這一條的方向是反的：程式比文件承諾的更好。** 但它仍然是缺陷——任何想重新實作或驗證它的
+人，會照著文件寫出一個較差的東西，然後認為 csv2 錯了。該 agent 差點就是這樣。
+
+## VV：那句話在 Markdown 裡為真，而它印在終端機上
+
+```
+csv2: … drop --pretty (the unaligned form renders identically) …
+```
+
+```
+未對齊： |pkg<br>套件|note<br>說明|
+         |zlib|short|
+對齊：   | pkg<br>套件 | note<br>說明            |
+         | zlib        | short                   |
+```
+
+Markdown 算出來是同一張表，**終端機裡不是**。而使用者讀到這則訊息的地方，正是終端機。
 

@@ -20,7 +20,7 @@ English: [README.md](./README.md)
 |---|---|
 | RFC 4180 解析、引號、內嵌逗號與換行、CRLF、BOM | 隨 rootfs 出貨、`install.zsh`（第 7 階段） |
 | `-r`、`-contains`、`-A`/`-B`/`-C`、`-head`/`-tail`/`-mid`、`-rownum` | |
-| `.csv2` 兩列標頭、`--json`、`-md`、`--pretty`（UAX #11 寬度） | |
+| `.csv2` 兩列標頭、`--json`、`-md`、`--pretty`（顯示寬度） | |
 | `-insert`/`-append`/`-delete`/`-update`、`-delete -cell`、`-delete -col` | |
 | `-hash`、`-encrypt`、`-decrypt`、`-keyfile`、`-debug`、`-log` | |
 | `-append` 的 O(1) 快路徑 | |
@@ -131,6 +131,9 @@ $ csv2 -r --json -i example.csv2 | head -1
 ```
 選取
   -r                    讀取
+  -get r:c              印出「一格」的值，原樣——與 -update r:c VAL 對稱的那個讀取。
+                        要寫腳本就用這個動詞：能組合的是「位址」，而這是值從報告
+                        走到編輯的那條路
   -contains S           輸出每個含有 S 的「儲存格」，形式為 紀錄:欄位
   --filter              與 -contains 併用時，改為輸出命中的紀錄
   --include-headers     一併搜尋標頭列（回報為紀錄 0a／0b）
@@ -158,8 +161,16 @@ $ csv2 -r --json -i example.csv2 | head -1
   --in-place            就地編輯 -i，同樣走暫存檔加 rename
 
 輸出形狀
-  -md [--pretty]        Markdown 表格；需要 -t。--pretty 以「顯示寬度」對齊，
-                        因此放棄串流
+  -md [--pretty]        Markdown 表格；需要 -t。對 `.csv2` 而言，兩列標頭會以
+                        <br> 併成一個 Markdown 標頭儲存格——`pkg<br>套件`——因為
+                        Markdown 只有一列標頭而資料有兩列；要一列乾淨的標頭，
+                        請用 --en 或 --zh。
+                        --pretty 以「顯示寬度」對齊，因而放棄串流。那個寬度是
+                        「grapheme cluster 加上 emoji presentation」，**不是**逐
+                        code point 查 UAX #11：後者會把 ZWJ 家庭、膚色修飾符與
+                        帶變體選擇器的 emoji 算錯。
+                        `-debug` 會印出算出來的欄寬，因此對齊可以用「量的」來檢查，
+                        不必用眼睛數
   --json                JSON Lines；--json-ascii 會跳脫非 ASCII，包含 U+FFFF 以上
                         的字元——JSON 沒有單一的 \uXXXX 形式可以表示它們，它們會
                         成為 UTF-16 的代理對：U+1F680 寫作 \ud83d\ude80
@@ -274,7 +285,26 @@ csv2 -update "$addr" "$val" -i f.csv2 --in-place             # 可以 round-trip
 
 由 T96 斷言。
 
-比對是**區分大小寫**的，且沒有旗標可以改變。`--normalize` 只影響 Unicode 正規化，
+比對是**區分大小寫**的，且沒有旗標可以改變。**要折疊大小寫，做法是 `--json` 加自己掃一遍**，
+不是把各種拼法列舉一遍：窮舉 `mbedtls`／`mbedTLS`／`MbedTLS`／… 是 2ⁿ 次執行，七個字母就是
+128 次，二十個字母是一百萬次。
+
+```sh
+csv2 -r --json -i f.csv2 | python3 -c '
+import json,sys
+for line in sys.stdin:
+    o=json.loads(line)
+    if "fields" not in o: continue
+    for k,v in o["fields"].items():
+        if "mbedtls" in v.lower(): print(o["record"], k, v)'
+```
+
+掃一遍、涵蓋所有拼法，而且回來的紀錄號可以直接拿去定址。
+
+**`--normalize` 也會作用在「搜尋字串」上**，不只是儲存格——因此以 NFC 打出來的搜尋字串，
+找得到以 NFD 儲存的儲存格。儲存本身仍然絕不正規化，被正規化的只有那次比較。
+
+`--normalize` 只影響 Unicode 正規化，
 與大小寫無關。
 
 **`--normalize`管的是儲存格「值」，不是欄位「名稱」。** 欄位名稱一律以正規等價比對：在命令列
@@ -433,6 +463,25 @@ $ csv2 -contains zlib --a1 -i pkgs.csv2      # 兩列標頭
 指名它的大小：設上限等於一份會丟資料的稽核軌跡，而那正是這一條要避免的東西；但一份安靜地
 長了一 MB 的 log，應該當場說出來。只有「舊值」到得了那個大小——新值傳不進來，命令列會先被
 `ARG_MAX` 拒絕。
+
+**`:hmac:` 的指紋標識「金鑰」。`:enc:` 的指紋標識「金鑰**與這個檔案的 salt**」，因此每次
+執行都不同。** 兩者都是「推導後金鑰」SHA-256 的前四個位元組，而分歧就在那裡：`-hash` 以固定的
+salt 推導，因此同一把金鑰檔永遠得到同一個數字；`-encrypt` 每次執行抽一個新的 16 bytes salt
+並存進標記裡，因此推導後的金鑰——以及指紋——是每個檔案一個。
+
+```console
+$ for i in 1 2 3; do csv2 -encrypt secret -keyfile k.bin -i s.csv -o e$i.csv -t; done
+secret:enc:d88cdbf1:…      # 一把金鑰檔，
+secret:enc:e16b394a:…      # 三次執行，
+secret:enc:869e54ce:…      # 三個指紋
+
+$ for i in 1 2 3; do csv2 -hash secret -keyfile k.bin -i s.csv -o h$i.csv -t; done
+secret:hmac:9acc9081       # 每次都是同一個數字；換一把金鑰檔才會變
+```
+
+**因此不要把 `:enc:` 的指紋帶到另一個檔案去比對。** 在「同一個檔案內」比對它完全正確，
+拒絕時做的正是那件事——csv2 會用該檔案存下的 salt 重新推導再檢查。把它抄下來當成
+「我的金鑰指紋」再拿去比對第二個檔案，會對**同一把金鑰**得到不符，讀起來就像金鑰換過了。
 
 一個欄位是否「受保護」，依據的是**檔案自己的標頭這麼說**——標頭寫著 `secret:hmac:d6c8da42`
 或 `secret:enc:…` 就是標記——而不是「本次執行剛好正在加密或雜湊它」。因此，即使這一次執行

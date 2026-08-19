@@ -20,7 +20,7 @@ and the macOS host it is built from.
 |---|---|
 | RFC 4180 parsing, quotes, embedded commas and newlines, CRLF, BOM | shipping in the rootfs (phase 7) |
 | `-r`, `-contains`, `-A`/`-B`/`-C`, `-head`/`-tail`/`-mid`, `-rownum` | |
-| two-row `.csv2` headers, `--json`, `-md`, `--pretty` (UAX #11 widths) | |
+| two-row `.csv2` headers, `--json`, `-md`, `--pretty` (display widths) | |
 | `-insert`/`-append`/`-delete`/`-update`, `-delete -cell`, `-delete -col` | |
 | `-hash`, `-encrypt`, `-decrypt`, `-keyfile`, `-debug`, `-log` | |
 | the `-append` O(1) fast path | |
@@ -151,6 +151,10 @@ values are written `\n`, carriage returns `\r` and backslashes `\\`.
 ```
 SELECTING / 選取
   -r                    read
+  -get r:c              print ONE cell's value, raw -- the read that matches
+                        -update r:c VAL. This is the verb to build scripts on:
+                        what composes is the ADDRESS, and this is how a value
+                        crosses from a report to an edit
   -contains S           report every CELL containing S, as record:field
   --filter              with -contains, emit the matching records instead
   --include-headers     search the header rows too (reported as record 0a / 0b)
@@ -184,8 +188,18 @@ INPUT / OUTPUT
   --in-place            edit -i in place, via temp file + rename
 
 OUTPUT SHAPE / 輸出形狀
-  -md [--pretty]        Markdown table; needs -t. --pretty aligns by DISPLAY
-                        width and therefore gives up streaming
+  -md [--pretty]        Markdown table; needs -t. On a .csv2 the two header
+                        rows are joined with <br> into one Markdown header
+                        cell -- `pkg<br>套件` -- because Markdown has one
+                        header row and the data has two; --en or --zh gives
+                        one clean row instead.
+                        --pretty aligns by DISPLAY width and therefore gives
+                        up streaming. That width is grapheme clusters with
+                        emoji presentation applied, NOT a per-code-point UAX
+                        #11 lookup: the latter gets a ZWJ family, a skin-tone
+                        modifier and a variation-selector emoji wrong.
+                        `-debug` prints the computed column widths, so you can
+                        check the alignment instead of counting it by eye
   --json                JSON Lines; --json-ascii escapes non-ASCII, including
                         characters above U+FFFF, which JSON has no single
                         \uXXXX form for and which become UTF-16 surrogate
@@ -325,7 +339,26 @@ csv2 -update "$addr" "$val" -i f.csv2 --in-place             # round-trips
 
 Asserted by T96.
 
-Matching is **case-sensitive** and there is no flag to change that.
+Matching is **case-sensitive** and there is no flag to change that. **The way
+to fold case is `--json` and one pass of your own**, not a sweep of spellings:
+enumerating `mbedtls`/`mbedTLS`/`MbedTLS`/… is 2^n runs, which is 128 at seven
+letters and a million at twenty.
+
+```sh
+csv2 -r --json -i f.csv2 | python3 -c '
+import json,sys
+for line in sys.stdin:
+    o=json.loads(line)
+    if "fields" not in o: continue
+    for k,v in o["fields"].items():
+        if "mbedtls" in v.lower(): print(o["record"], k, v)'
+```
+
+One scan, every spelling, and the record numbers come back addressable.
+
+**`--normalize` applies to the search string too**, not only to the cells — so
+a needle typed in NFC finds a cell stored in NFD. Storage is still never
+normalised; only the comparison is.
 `--normalize` affects Unicode normalisation only, not case.
 
 **`--normalize` governs cell VALUES, not column names.** A column name is
@@ -495,7 +528,7 @@ will not record:
 |---|---|
 | the invocation | yes, but values are replaced: `-update 1:6 <value>`, `-insert 3 <row>` |
 | key **bytes** | never |
-| the keyfile **path**, and the key fingerprint | yes — they identify which key, not what it is |
+| the keyfile **path**, and the key fingerprint | yes — never the key itself. But see below: the two markers' fingerprints do not mean the same thing |
 | old and new values in an **ordinary** column | in full, never truncated; that is the point of an audit trail |
 | old and new values in a **protected** column | `<redacted>` |
 
@@ -512,6 +545,29 @@ be an audit trail that drops data, which is the thing this line exists to
 avoid, but a log that quietly grows by a megabyte should say so at the time.
 Only the *old* value can reach that size — a new one cannot be passed, because
 `ARG_MAX` refuses the command line first.
+
+**A `:hmac:` fingerprint identifies the key. A `:enc:` one identifies the key
+*and this file's salt*, so it is different on every run.** Both are the first
+four bytes of SHA-256 over the DERIVED key, and that is where they part: `-hash`
+derives with a fixed salt, so the same keyfile always yields the same number;
+`-encrypt` draws a fresh 16-byte salt per run and stores it in the marker, so
+the derived key — and the fingerprint — is per file.
+
+```console
+$ for i in 1 2 3; do csv2 -encrypt secret -keyfile k.bin -i s.csv -o e$i.csv -t; done
+secret:enc:d88cdbf1:…      # one keyfile,
+secret:enc:e16b394a:…      # three runs,
+secret:enc:869e54ce:…      # three fingerprints
+
+$ for i in 1 2 3; do csv2 -hash secret -keyfile k.bin -i s.csv -o h$i.csv -t; done
+secret:hmac:9acc9081       # the same number every time; a different keyfile changes it
+```
+
+**So do not carry a `:enc:` fingerprint between files.** Comparing it *within*
+one file is exactly right, and is what the refusal does — csv2 re-derives with
+that file's stored salt and checks. Writing one down as "my key's fingerprint"
+and comparing it against a second file will mismatch for the *same* key, and
+read as if the key had changed.
 
 A column counts as protected when **the file's own header says so** — a header
 reading `secret:hmac:d6c8da42` or `secret:enc:…` marks it — not merely when the

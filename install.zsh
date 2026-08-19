@@ -226,11 +226,38 @@ if (( on_path )); then
     if [[ -z $FOUND_VERSION ]]; then
         die "installed to $DEST but a fresh shell cannot run csv2 / 已裝到 $DEST，但全新的 shell 無法執行 csv2"
     fi
-    if [[ $FOUND_VERSION != $BUILT_VERSION ]]; then
-        die "a fresh shell runs a DIFFERENT csv2: $RESOLVED reports '$FOUND_VERSION', we installed '$BUILT_VERSION'. Check PATH order. / 全新的 shell 執行到的是另一支 csv2：$RESOLVED 回報 '$FOUND_VERSION'，我們裝的是 '$BUILT_VERSION'。請檢查 PATH 順序。"
+    # Compare the FILE, not the version string.
+    #
+    # This check had the right idea and the wrong instrument. Two builds both
+    # say `csv2 0.1.0`, so a version comparison passes while the shell runs
+    # something else entirely -- which is exactly what happened on Windows on
+    # 2026-08-20: the shell resolved through a scoop shim to a binary a year
+    # old, and the check reported success. The number it compared can never
+    # change, and that is precisely why it cannot tell two files apart. Filed
+    # as NN.
+    #
+    # A shim is followed rather than hashed: its own bytes are not the
+    # program's, so hashing the shim would compare the wrong thing and fail for
+    # the wrong reason.
+    #
+    # 比對「檔案」，不是版本字串。
+    # 這條檢查的想法是對的，工具是錯的。兩個建置都會說自己是 `csv2 0.1.0`，因此版本比對會
+    # 通過，而 shell 執行的完全是另一個東西——2026-08-20 在 Windows 上發生的正是這件事：
+    # shell 透過一個 scoop shim 解析到一個一年前的執行檔，而檢查回報成功。它比對的那個數字
+    # 永遠不會變，而那正是它分不出兩個檔案的原因。記為 NN。
+    # 遇到 shim 是「跟著它走」而不是「對它計算雜湊」：shim 自己的位元組不是那支程式的，
+    # 對它算雜湊會比到錯的東西，並以錯的理由失敗。
+    TARGET=$RESOLVED
+    if [[ -f ${RESOLVED%.exe}.shim ]]; then
+        TARGET=$(sed -n 's/^path *= *"\(.*\)"/\1/p' "${RESOLVED%.exe}.shim" | tr '\\' '/')
+        say "note: $RESOLVED is a shim pointing at $TARGET / 該路徑是一個 shim，指向 $TARGET"
     fi
-    say "verified: a fresh shell runs $RESOLVED -> $FOUND_VERSION"
-    say "已驗證：全新的 shell 執行到 $RESOLVED -> $FOUND_VERSION"
+    sum_of() { shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1 || sha256sum "$1" 2>/dev/null | cut -d' ' -f1 }
+    if [[ "$(sum_of "$TARGET")" != "$(sum_of "$DEST")" ]]; then
+        die "a fresh shell runs a DIFFERENT csv2: $TARGET is not the file just installed at $DEST. Both may report the same version -- that is why this compares the file. Check PATH order. / 全新的 shell 執行到的是另一支 csv2：$TARGET 不是剛裝到 $DEST 的那個檔案。兩者可能回報相同的版本——那正是這裡比對檔案的原因。請檢查 PATH 順序。"
+    fi
+    say "verified: a fresh shell runs $TARGET, and it is the file just installed"
+    say "已驗證：全新的 shell 執行到 $TARGET，而它就是剛裝上的那個檔案"
 else
     # Cannot verify by name when the directory is not on PATH; verify the copy
     # runs at all, and say plainly that this is the weaker check.
