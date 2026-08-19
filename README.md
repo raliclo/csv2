@@ -199,11 +199,11 @@ PROTECTION / 保護
   -hash COLS            mask columns, one way. Deterministic, so equal values
                         stay equal — and see the warning below
   -encrypt COLS         encrypt columns (ChaCha20-Poly1305, fresh nonce)
-                        The header is ALWAYS written, with or without -t: the
-                        key fingerprint and salt live in it, the salt is new on
-                        every run, and ciphertext without them can never be
-                        decrypted by anyone. The header is written with or
-                        without -t, including under a selection.
+                        The header is ALWAYS written, with or without -t and
+                        including under a selection: the key fingerprint and
+                        salt live in it, the salt is new on every run, and
+                        ciphertext without them can never be decrypted by
+                        anyone.
   -decrypt COLS         decrypt; COLS may be `all` to take every marked column.
                         A column that is not marked encrypted is REFUSED by
                         name -- plaintext is never fed to the cipher, so you

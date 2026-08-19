@@ -841,7 +841,7 @@ from a fresh session.
 | EE | 平行路徑不印 `metrics:` 行，而 README 說 `-debug` 包含它 | **程式＋文件** |
 | FF | README 教的 `-contains` → `-update` 組合會靜默雙重跳脫 | **文件（後果是資料損壞）** |
 | GG | 名為 `.csv2` 但只有一列標頭的檔案，rc=0 讀出時吞掉一筆；`--json` 的 meta 只是覆述副檔名 | **文件＋缺少能力** |
-| HH | 中文 README 有兩段被截斷的句子；英文 `-encrypt` 區塊有一句重複 | 文件 |
+| HH | 中文 README 有兩段被截斷的句子；英文 `-encrypt` 區塊有一句重複 | 文件  — **已修** |
 | II | `-update` 把命令列上的非 UTF-8 位元組靜默換成 U+FFFD | **程式（違反核心承諾）** |
 | JJ | log 的值沒有跳脫，含換行的值可以偽造出一整筆 log 紀錄 | **程式（稽核相關）**  — **已修 T92d–T92h** |
 

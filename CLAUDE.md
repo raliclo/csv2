@@ -77,6 +77,18 @@ in the message; they are the part that cannot be recovered from the code.
   一個只存在於 session 逐字稿裡的缺陷，留給下一個讀者的是一棵乾淨的樹和一份全過的測試；
   而那個檔案有一半的價值在那些重現步驟，它們是日後判斷「修正有沒有退化」的唯一依據。
   2026-08-19 有兩個程式缺陷被直接修進 `plan/plan.md`，後來只能靠記憶補記。
+- Do not run a blind-testing round from a session that has already been
+  running. A subagent inherits its parent session's context, not the disk, and
+  every `CLAUDE.md` was read into that context at start-up — so on 2026-08-19
+  two rounds quoted a defect table that had already been deleted and
+  committed. Removing something only helps sessions started afterwards. A
+  round must be launched from a FRESH session, and the agent must be asked to
+  disclose anything its context told it before it ran a command.
+  不要從一個「已經在執行中」的 session 派出盲測回合。subagent 繼承的是母 session 的
+  context 而不是磁碟，而每一份 `CLAUDE.md` 都在啟動時被讀進了那個 context——因此
+  2026-08-19 有兩個回合引用了一張「已經被刪除並提交」的缺陷表。移除任何東西，都只對
+  「之後開啟的 session」有效。一個回合必須從**全新的 session** 派出，而且要求該 agent
+  揭露「在執行任何指令之前，它的 context 告訴了它什麼」。
 - Do not put a defect list anywhere else — not in a `CLAUDE.md`, not in a
   README. One was kept in the global `CLAUDE.md` and by 2026-08-19 all five of
   its entries were false, every one having been fixed while the list went on
