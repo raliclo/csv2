@@ -3978,7 +3978,18 @@ assert_contains "$meta" '"fields":3' \
 look=$("$CSV2" -head 1 -t -i "$TMP/t97_lying.csv2" 2>/dev/null | sed -n 2p)
 assert_eq "$look" "zlib,1.3.2,first" \
     "T97e -head 1 -t shows the second header row, where the data is visible / -head 1 -t 會顯示第二列標頭，那裡看得見資料"
-real=$("$CSV2" -head 1 -t -i "$ROOT/compare/vs-sqlite.csv2" 2>/dev/null | sed -n 2p)
+# Built here rather than read from compare/. The first version pointed at
+# compare/vs-sqlite.csv2 and was the ONLY case in the suite to reach outside
+# test/ -- it passed on the host and failed in the guest, where the payload
+# does not carry that directory. A fixture the suite builds is a fixture the
+# suite can rely on anywhere it runs, and this suite has to run on a machine
+# with nothing but the source and the binary.
+# 在此自行建立，而不是去讀 compare/。第一版指向 compare/vs-sqlite.csv2，而它是整份套件裡
+# **唯一**一個伸出 test/ 之外的案例——它在 host 上通過、在 guest 內失敗，因為那裡的 payload
+# 不帶那個目錄。由套件自己建的 fixture，才是套件在任何地方都能依靠的 fixture，而這份套件
+# 必須能在一台「只有原始碼與執行檔」的機器上執行。
+printf 'dimension,note\n比較項目,說明\nstorage,text at scale\n' > "$TMP/t97_real.csv2"
+real=$("$CSV2" -head 1 -t -i "$TMP/t97_real.csv2" 2>/dev/null | sed -n 2p)
 assert_contains "$real" "比較項目" \
     "T97f while a real .csv2 shows titles there / 而真正的 .csv2 那裡顯示的是標題"
 
