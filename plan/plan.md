@@ -2491,6 +2491,47 @@ csv2 -get 2:2 -i f.csv2   →  那一格
 順手把當時的 B 也一起釘住了，而 B 從來沒有人決定過。** 分辨的方法只有一個——去讀那條斷言的
 註解，看它說的是「我們決定這樣」還是「當時就是這樣」。
 
+## 四個節點：它裝在哪裡，以及「同一個版本」不等於「同一個檔案」（2026-08-20）
+
+multissh 的節點升級（`helper/upgrade_nodes_csv2.zsh`）會在每個節點上 clone、建置、執行
+`install.zsh`，再確認 csv2 可達。第一次對 Windows 跑，它回報 `reachable: csv2 0.1.0`
+——**而那是另一個執行檔**。
+
+### 四個節點，以及各自的正確位置
+
+| 節點 | 連線 | 原始碼 | `install.zsh` 裝到 |
+|---|---|---|---|
+| mac | 本機 | `/Volumes/LinuxCS/sos/csv2`（正本，submodule） | `$(brew --prefix)/bin` |
+| wsl | `wslnode`（harvest 設定） | `~/proj/csv2`（git checkout） | `~/.local/bin` |
+| windows | `winnode`（harvest 設定） | `~/proj/csv2`（git checkout） | `%LOCALAPPDATA%\csv2\csv2.exe` |
+| linux VM | `mac-linux-vm`（127.0.0.1:16889） | `/workspace/csv2`（**每次由 runner 重建**） | 不適用 |
+
+**第四個節點不是「還沒升級」，它是依設計就不常駐。** `run_csv2_test.zsh` 每次對
+`workspace.ext4` 的複本注入原始碼並在 guest 內重建，因此那裡沒有 git、也沒有可以「pull」的
+東西。它的升級機制就是跑一次 runner。把它列進「待升級的節點」會是把一個設計當成一個缺口。
+
+### Windows 的位置是「shim 指著的那個」，不是我們挑的
+
+那台機器上的慣例是 scoop 的：執行檔在 `%LOCALAPPDATA%\csv2`，`~/scoop/shims` 裡的 shim
+指向它，而 `scoop/shims` 在 PATH 上。**裝到 shim 本來就指著的位置**，shell 就會解析到新的
+建置，而 `install.zsh` 完全不必往 scoop 自己的目錄裡寫東西——**建立 shim 是 scoop 的事，
+不是我們的**。這也是為什麼 `install.zsh` 只加了一個目標位置，沒有去碰 `.shim` 檔。
+
+### 真正的教訓：版本字串證明不了身分
+
+`install.zsh` 早就想到「shell 跑到的可能是別的 csv2」，而且有一條專門的檢查——但它比對的是
+**版本字串**。兩個都是 `csv2 0.1.0`，於是那條檢查通過了，而跑的是另一個檔案。
+
+**這是 T69 那些過期數字的鏡像。** 那裡的問題是「數字會過期」；這裡的問題是「數字**永遠不變**」
+——而那正是它分不出東西的原因。同一個形狀的兩種失敗：**一個回答不了它被拿來回答的問題的東西，
+看起來與一個能回答的東西一模一樣。**
+
+驗證改用雜湊之後才說得清楚：三個節點上「PATH 解析到的檔案」與「剛建好的執行檔」sha256 相同。
+記為 NN，尚未修——修法是讓那條檢查比對身分而不是版本。
+
+`install.zsh` 本身沒有說謊：它印了警告，並說「已安裝，但**未以名稱驗證**」。說得過頭的是
+外圍那支升級腳本，而它屬於 multissh。
+
 ## 分階段
 
 進度以核取方塊標示：`[x]` 為已完成並有對應的通過測試，`[ ]` 為未做。**一個項目只有在
@@ -2614,7 +2655,11 @@ csv2 -get 2:2 -i f.csv2   →  那一格
   驗證。它從來就沒有被「repo 尚未公開」擋住，那個阻礙只屬於下面兩項
 - [ ] Homebrew tap 與 formula —— 被「`raliclo/csv2` 尚未公開」擋住：formula 需要一個
   「執行 `brew install` 的那台機器抓得到」的來源 URL
-- [ ] Windows 的 scoop shim —— 被「沒有 Windows build」擋住
+- [ ] Windows 的 scoop shim —— **那個阻礙已經沒了**（2026-08-19 起有 Windows build 且測試
+  通過），但剩下的部分不是我們的：**建立 shim 是 scoop 的事**。`install.zsh` 現在裝到
+  `%LOCALAPPDATA%\csv2\csv2.exe`——也就是既有 shim 已經指著的位置——因此 shell 解析得到
+  新的建置，而這支腳本不必往 scoop 自己的目錄裡寫東西。真正的 scoop **manifest**（讓別人
+  `scoop install csv2`）仍然被「repo 尚未公開」擋住，與 Homebrew formula 是同一個阻礙
 
 ### 為什麼是這個順序
 

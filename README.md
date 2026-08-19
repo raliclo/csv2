@@ -29,6 +29,14 @@ and the macOS host it is built from.
 | builds and runs on aarch64 Linux, byte-identical to macOS | |
 | builds and passes on x86_64 Linux (WSL2) and on Windows (MSVC) | |
 
+`install.zsh` puts the binary where each platform's shell actually looks:
+`$(brew --prefix)/bin` where Homebrew is present, `~/.local/bin` as the
+user-level fallback, and on Windows `%LOCALAPPDATA%\csv2\csv2.exe` — the path
+scoop's shim already names, so the shell resolves to the new build without this
+script writing into scoop's own directory. **Check which csv2 you got by
+comparing the file, not the version**: two builds both say `csv2 0.1.0`, so
+`csv2 --version` cannot tell them apart.
+
 Progress is tracked as checkboxes at the end of [plan/plan.md](./plan/plan.md),
 and a box is only ticked once the matching case in
 [test/test_csv2.zsh](./test/test_csv2.zsh) passes. Cases the tool cannot yet

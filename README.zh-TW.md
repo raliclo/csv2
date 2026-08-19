@@ -27,6 +27,13 @@ English: [README.md](./README.md)
 | `.csv.index` / `.csv2.index` sidecar、`--verify-index` | |
 | 平行搜尋，且與單執行緒逐位元相同 | |
 | 可在 aarch64 Linux 上建置執行，且與 macOS 逐位元相同 | |
+| 可在 x86_64 Linux（WSL2）與 Windows（MSVC）上建置並通過測試 | |
+
+`install.zsh` 會把執行檔放到「該平台的 shell 真的會去找」的地方：有 Homebrew 時是
+`$(brew --prefix)/bin`，使用者層級的後援是 `~/.local/bin`，而 Windows 上是
+`%LOCALAPPDATA%\csv2\csv2.exe`——也就是 scoop 的 shim 本來就指著的位置，因此 shell 會解析到
+新的建置，而這支腳本不必往 scoop 自己的目錄裡寫東西。**要確認你拿到的是哪一個 csv2，
+請比對檔案而不是版本**：兩個建置都說自己是 `csv2 0.1.0`，`csv2 --version` 分不出來。
 
 進度以核取方塊記在 [plan/plan.md](./plan/plan.md) 文末，且**只有在
 [test/test_csv2.zsh](./test/test_csv2.zsh) 中對應的案例通過時才打勾**。
