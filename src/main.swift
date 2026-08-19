@@ -107,6 +107,38 @@ func parseArgs(_ argv: [String]) throws -> Options {
     var o = Options()
     var i = 0
 
+    /// For an argument that carries DATA -- a value, a row literal, a search
+    /// string. Those are the ones where Swift's lossy decode of argv changes
+    /// what csv2 stores or compares, silently and at rc=0: `-update 1:2 $'A\xffB'`
+    /// wrote `A U+FFFD B`, which is the exact substitution T8 exists to prevent,
+    /// arriving through the write path instead of the read path.
+    ///
+    /// Only these. A PATH may legitimately hold arbitrary bytes on Linux, and
+    /// refusing those would break a use that works today for a fault csv2 does
+    /// not commit -- it hands paths to the filesystem, it does not store them
+    /// as data. Round 38, defect II.
+    ///
+    /// 給「帶資料」的參數用——一個值、一列 row literal、一個搜尋字串。那些正是
+    /// 「Swift 對 argv 的有損解碼」會改變 csv2 所儲存或比對的東西的地方，而且是靜默的、
+    /// rc=0：`-update 1:2 $'A\xffB'` 存進去的是 `A U+FFFD B`，那正是 T8 存在所要防止的
+    /// 那個替代，只是它從「寫入」路徑而不是「讀取」路徑進來。
+    /// 只有這些。**路徑**在 Linux 上本來就可以是任意位元組，為一個 csv2 並未犯下的錯誤去
+    /// 拒絕它們，會弄壞一個今天可以正常運作的用法——csv2 把路徑交給檔案系統，並不把它當成
+    /// 資料儲存。第 38 回合，缺陷 II。
+    func needData(_ flag: String) throws -> String {
+        let v = try need(flag)
+        // argv[0] is the program, and `argv` here is CommandLine.arguments
+        // dropping it -- so the raw index is one higher.
+        // argv[0] 是程式本身，而此處的 `argv` 是去掉它之後的 CommandLine.arguments
+        // ——因此原始索引要多一。
+        guard Platform.rawArgumentIsValidUTF8(at: i + 1) else {
+            throw usageError(
+                "\(flag): the value is not valid UTF-8. csv2 will not store a replacement character in place of a byte it cannot decode -- that is the silent substitution this tool exists to refuse. Put the value in a file and edit it there, where bytes are preserved exactly.",
+                "\(flag)：這個值不是合法的 UTF-8。csv2 不會用替代字元去頂替一個它解不開的位元組——那正是這支工具存在所要拒絕的那種靜默替代。請把該值放進檔案、在檔案裡編輯，那裡的位元組會被原樣保留。")
+        }
+        return v
+    }
+
     func need(_ flag: String) throws -> String {
         i += 1
         guard i < argv.count else {
@@ -174,7 +206,7 @@ func parseArgs(_ argv: [String]) throws -> Options {
         }
         switch normalizeFlag(arg) {
         case "r": o.read = true
-        case "contains": o.contains = try need(arg)
+        case "contains": o.contains = try needData(arg)
         case "filter": o.filter = true
         case "include-headers": o.includeHeaders = true
         case "normalize": o.normalize = true
@@ -219,7 +251,7 @@ func parseArgs(_ argv: [String]) throws -> Options {
         // 而 -col 接受任何欄位標記，因此沒有東西攔得住。
         case "insert":
             let at = try intVal(arg, try need(arg))
-            let row = try need(arg)
+            let row = try needData(arg)
             if o.cellModifier {
                 throw usageError(
                     "-insert -cell does not exist: inserting a cell mid-record pushes every later field one column along, so status_notes ends up under license. To add a column, every record and both header rows have to change together.",
@@ -228,7 +260,7 @@ func parseArgs(_ argv: [String]) throws -> Options {
             o.edits.append(.insert(at: at, row: row))
             o.cellModifier = false; o.colModifier = false
         case "append":
-            o.edits.append(.append(row: try need(arg)))
+            o.edits.append(.append(row: try needData(arg)))
             o.cellModifier = false; o.colModifier = false
         case "delete":
             let spec = try need(arg)
@@ -253,7 +285,7 @@ func parseArgs(_ argv: [String]) throws -> Options {
             o.cellModifier = false; o.colModifier = false
         case "update":
             let addr = try need(arg)
-            let val = try need(arg)
+            let val = try needData(arg)
             let (r, c) = try parseCellAddress(addr, flag: arg)
             o.edits.append(.update(record: r, column: c, value: val))
             o.cellModifier = false; o.colModifier = false

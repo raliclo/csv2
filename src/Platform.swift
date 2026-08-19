@@ -73,6 +73,46 @@ enum Platform {
     }
 
     // -----------------------------------------------------------------
+    // MARK: - Raw argv / 原始 argv
+    // -----------------------------------------------------------------
+
+    /// The bytes of one argument as the kernel delivered them, before Swift
+    /// decoded it. `CommandLine.arguments` is `[String]`, and Swift builds
+    /// those by decoding argv as UTF-8 **with replacement** -- so an invalid
+    /// byte has already become U+FFFD before any csv2 code runs, and the value
+    /// stored by `-update` is not the value that was typed.
+    ///
+    /// This exists to DETECT that, not to carry the bytes through: csv2 refuses
+    /// such an argument rather than altering it. Threading raw bytes through
+    /// every value path would be the other answer and a much larger change;
+    /// refusing is the one this project's own rule already prescribes -- do not
+    /// silently repair malformed input, report it and exit non-zero.
+    ///
+    /// Here rather than at the call site because reaching argv is a per-platform
+    /// question, which is this file's whole reason for existing.
+    ///
+    /// 一個參數在「Swift 解碼之前」、由核心交過來的原始位元組。`CommandLine.arguments`
+    /// 是 `[String]`，而 Swift 是以「UTF-8 解碼、無效處以替代字元補上」的方式建出它們的
+    /// ——因此在任何 csv2 的程式碼執行之前，無效位元組就已經變成 U+FFFD，而 `-update`
+    /// 存進去的值並不是使用者打的那個值。
+    /// 它的用途是「偵測」，不是把位元組一路帶過去：csv2 會拒絕這樣的參數，而不是改動它。
+    /// 把原始位元組穿過每一條值的路徑是另一個答案，而且是大得多的改動；拒絕才是本專案自己
+    /// 的規則早已規定的那一個——不要靜默修復格式錯誤的輸入，指出它並以非零結束。
+    /// 放在這裡而不是呼叫點旁邊，因為「怎麼拿到 argv」是一個依平台而異的問題，
+    /// 而那正是這個檔案存在的全部理由。
+    static func rawArgumentIsValidUTF8(at index: Int) -> Bool {
+        guard index >= 0, index < Int(CommandLine.argc),
+              let argv = CommandLine.unsafeArgv[index] else { return true }
+        var bytes: [UInt8] = []
+        var p = argv
+        while p.pointee != 0 {
+            bytes.append(UInt8(bitPattern: p.pointee))
+            p += 1
+        }
+        return String(bytes: bytes, encoding: .utf8) != nil
+    }
+
+    // -----------------------------------------------------------------
     // MARK: - Atomic replace / 原子性取代
     // -----------------------------------------------------------------
 

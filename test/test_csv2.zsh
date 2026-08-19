@@ -3987,6 +3987,84 @@ assert_contains "$real" "比較項目" \
 assert_fails "T97g writing a one-header file to a .csv2 name is still refused / 把只有一列標頭的檔案寫到 .csv2 名字仍然被拒絕" -- \
     "$CSV2" -r -t -i "$TMP/t97_honest.csv" -o "$TMP/t97_out.csv2"
 
+# ---------------------------------------------------------------------
+# T98 -- a value the command line cannot carry is refused, not altered.
+#
+# Found on 2026-08-19 while working out what removing the log truncation would
+# cost, not by the blind round. `csv2 -update 1:2 $'A\xffB'` stored
+# `A U+FFFD B`: the exact substitution T8 exists to prevent, arriving through
+# the WRITE path while T8 was watching the read path.
+#
+# The cause is outside csv2. `CommandLine.arguments` is [String], and Swift
+# builds those by decoding argv as UTF-8 WITH REPLACEMENT, so the bytes are
+# gone before any csv2 code runs. Two answers were possible: carry raw bytes
+# through every value path, or refuse. Refusing is what this project's own
+# rule already says -- do not silently repair malformed input, report it and
+# exit non-zero -- and it is the smaller change by a wide margin.
+#
+# Only DATA arguments are checked. A path may legitimately hold arbitrary
+# bytes on Linux, and refusing those would break something that works today
+# for a fault csv2 does not commit: it hands paths to the filesystem, it does
+# not store them as data.
+#
+# T98 —— 命令列載不動的值會被拒絕，而不是被改動。
+# 2026-08-19 在推敲「移除 log 截斷要付出什麼代價」時發現，不是盲測那一輪找到的。
+# `csv2 -update 1:2 $'A\xffB'` 存進去的是 `A U+FFFD B`：正是 T8 存在所要防止的那個替代，
+# 只是它從**寫入**路徑進來，而 T8 看的是讀取路徑。
+# 原因在 csv2 之外。`CommandLine.arguments` 是 [String]，而 Swift 是以「UTF-8 解碼、
+# 無效處以替代字元補上」的方式建出它們的，因此那些位元組在任何 csv2 程式碼執行之前就沒了。
+# 有兩種答案：把原始位元組穿過每一條值的路徑，或者拒絕。拒絕是本專案自己的規則早已規定的
+# 那一個——不要靜默修復格式錯誤的輸入，指出它並以非零結束——而且改動小得多。
+# 只檢查**資料**參數。路徑在 Linux 上本來就可以是任意位元組，為一個 csv2 並未犯下的錯誤去
+# 拒絕它們，會弄壞一個今天能用的用法：csv2 把路徑交給檔案系統，並不把它當成資料儲存。
+# ---------------------------------------------------------------------
+echo
+echo "--- T98: a non-UTF-8 argument is refused, never silently replaced / 非 UTF-8 的參數會被拒絕，絕不被靜默替換 ---"
+
+bad_val=$'A\xffB'
+printf 'id,note\n1,ok\n' > "$TMP/t98.csv"
+cp "$TMP/t98.csv" "$TMP/t98.bak"
+
+assert_fails "T98a -update refuses a value that is not valid UTF-8 / -update 拒絕不是合法 UTF-8 的值" -- \
+    "$CSV2" -update 1:note "$bad_val" -i "$TMP/t98.csv" --in-place
+assert_same "$TMP/t98.csv" "$TMP/t98.bak" \
+    "T98b and the file is untouched, so nothing was stored in place of it / 而檔案原封不動，沒有任何東西被拿來頂替它"
+assert_fails "T98c -append refuses such a row / -append 拒絕這樣的一列" -- \
+    "$CSV2" -append "2,$bad_val" -i "$TMP/t98.csv" --in-place
+assert_fails "T98d -insert refuses it too / -insert 同樣拒絕" -- \
+    "$CSV2" -insert 1 "2,$bad_val" -i "$TMP/t98.csv" -o "$TMP/t98_o.csv"
+assert_fails "T98e and -contains refuses it as a needle, where it would have failed to match instead / 而 -contains 也拒絕把它當成搜尋字串——否則它會變成「找不到」" -- \
+    "$CSV2" -contains "$bad_val" -i "$TMP/t98.csv"
+
+# The message has to name the way out, because there IS one: a file preserves
+# the bytes exactly, which is what T8 asserts.
+# 訊息必須指出出路，因為出路確實存在：檔案會原樣保留那些位元組，而那正是 T8 所斷言的。
+msg=$("$CSV2" -update 1:note "$bad_val" -i "$TMP/t98.csv" --in-place 2>&1 | head -1)
+assert_contains "$msg" "not valid UTF-8" \
+    "T98f the message says what is wrong with the argument / 訊息說出那個參數哪裡不對"
+assert_contains "$msg" "in a file" \
+    "T98g and names the route that does preserve the bytes / 並指出那條「確實會保留位元組」的路"
+
+# Not over-refusing: ordinary values, including non-ASCII ones, are untouched
+# by this. Without it the fix could be "reject anything interesting".
+# 沒有拒絕過頭：一般的值——包含非 ASCII 的——完全不受影響。少了這一條，這個修正大可以是
+# 「凡是有點特別的都拒絕」。
+assert_succeeds "T98h an ordinary CJK value is still accepted / 一般的中文值仍然被接受" -- \
+    "$CSV2" -update 1:note "正常的中文值" -i "$TMP/t98.csv" --in-place
+assert_eq "$("$CSV2" -get 1:note -i "$TMP/t98.csv" 2>/dev/null)" "正常的中文值" \
+    "T98i and stored exactly / 而且原樣存入"
+assert_succeeds "T98j an emoji value too, which is where a byte-level check would go wrong / emoji 也是——那正是「以位元組層級亂檢查」會出錯的地方" -- \
+    "$CSV2" -update 1:note "👨‍👩‍👧 flag 🇹🇼" -i "$TMP/t98.csv" --in-place
+
+# The read path still round-trips bytes csv2 could never accept on argv. The
+# two rules are not in conflict: the file is the medium that carries them.
+# 讀取路徑仍然能 round-trip 那些「csv2 在 argv 上絕不會接受」的位元組。兩條規則並不衝突：
+# 檔案才是承載它們的媒介。
+printf 'id,note\n1,A\xffB\n' > "$TMP/t98_raw.csv"
+"$CSV2" -r -t -i "$TMP/t98_raw.csv" -o "$TMP/t98_raw_out.csv" 2>/dev/null
+assert_same "$TMP/t98_raw.csv" "$TMP/t98_raw_out.csv" \
+    "T98k while the same bytes still round-trip through a FILE, as T8 requires / 而同樣的位元組經由「檔案」仍然可以 round-trip，一如 T8 的要求"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
