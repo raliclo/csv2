@@ -87,8 +87,27 @@ final class Logger {
             "csv2: warning: cannot write log file \(logPath ?? "?"); continuing / 警告：無法寫入 log 檔，操作照常繼續\n".utf8))
     }
 
-    func log(_ level: LogLevel, _ message: String) {
-        let line = "\(Logger.timestamp()) \(level.label) \(message)\n"
+    /// `message` is an @autoclosure, and the level test happens BEFORE anything
+    /// is built. It used to compose the timestamp and the whole line first and
+    /// decide afterwards, while the caller had already paid for its own
+    /// interpolation -- so a TRACE line on a run with the default WARN
+    /// threshold cost two string constructions per record and produced no
+    /// output at all. On a 2,000,000-record stream that was measurable as peak
+    /// RSS: 123 MB, against 15.9 MB for the same bytes in 100,000 records.
+    /// Discovered on 2026-08-19 while chasing the streaming memory claim; the
+    /// per-RECORD shape is what identified it, since the same byte volume in
+    /// fewer records did not grow.
+    /// `message` 是 @autoclosure，而層級判斷發生在「建構任何東西之前」。原本的寫法是
+    /// 先組出時間戳與整行、之後才判斷，而呼叫端在此之前早已付過自己那次字串插值——因此
+    /// 在預設 WARN 門檻下，一行 TRACE 每筆要付兩次字串建構，而且完全不產生輸出。
+    /// 在 2,000,000 筆的串流上這是量得到的：peak RSS 123 MB，而同樣的位元組量分成
+    /// 100,000 筆時是 15.9 MB。2026-08-19 追查串流記憶體宣稱時發現；認出它的是那個
+    /// 「隨紀錄數而非隨位元組數」的形狀。
+    func log(_ level: LogLevel, _ message: @autoclosure () -> String) {
+        let belongsInFile = level >= .info || threshold <= .debug
+        let wantsFile = belongsInFile && (logHandle != nil || logPath != nil)
+        if !wantsFile && level < threshold { return }
+        let line = "\(Logger.timestamp()) \(level.label) \(message())\n"
         // The log FILE is an operation record: what was done, to what, with
         // what result. DEBUG and TRACE are for someone chasing a problem right
         // now -- high volume, thrown away when done -- and letting them into
@@ -99,7 +118,6 @@ final class Logger {
         // 「現在正在查一個問題」的人看的——量大、用完即棄——讓它們進入檔案會把歷史
         // 淹沒在除錯輸出裡，而那正是 -debug 與 -log 是兩個旗標而不是一個的理由。
         // 只有在 -debug 明確要求時，它們才會進入檔案。
-        let belongsInFile = level >= .info || threshold <= .debug
         if let h = logHandle, belongsInFile {
             h.write(Data(line.utf8))
         } else if logPath != nil && belongsInFile {
@@ -124,9 +142,9 @@ final class Logger {
         h.write(Data("\(Logger.timestamp()) \(level.label) \(message)\n".utf8))
     }
 
-    func debug(_ m: String) { log(.debug, m) }
-    func info(_ m: String) { log(.info, m) }
-    func warn(_ m: String) { log(.warn, m) }
+    func debug(_ m: @autoclosure () -> String) { log(.debug, m()) }
+    func info(_ m: @autoclosure () -> String) { log(.info, m()) }
+    func warn(_ m: @autoclosure () -> String) { log(.warn, m()) }
 
     /// A value that belongs to an encrypted or hashed column never appears in
     /// the log. Otherwise `-update` on a protected column writes the plaintext

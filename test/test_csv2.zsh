@@ -280,9 +280,58 @@ r_small=$(rss_of "$TMP/m9a.txt"); r_big=$(rss_of "$TMP/m9b.txt")
 size_small=$(wc -c < "$TMP/m_small.csv2" | tr -d ' ')
 size_big=$(wc -c < "$TMP/m_big.csv2" | tr -d ' ')
 if [[ -n "$r_small" && -n "$r_big" && $((size_big / size_small)) -ge 10 && $r_big -lt $((r_small * 2)) ]]; then
-    ok "T9 -si/-so RSS does not grow with the input (${size_small}B→${r_small}B, ${size_big}B→${r_big}B) / 串流 RSS 不隨輸入變大"
+    ok "T9a -si/-so RSS does not grow with the input (${size_small}B→${r_small}B, ${size_big}B→${r_big}B) / 串流 RSS 不隨輸入變大"
 else
-    bad "T9 streaming RSS (small ${size_small}B→${r_small}B, big ${size_big}B→${r_big}B)"
+    bad "T9a streaming RSS (small ${size_small}B→${r_small}B, big ${size_big}B→${r_big}B)"
+fi
+
+# T9a above was the whole test, and it was reporting on nothing. Its big
+# fixture is 3.3 MB against a ~9 MB floor of process and Foundation, so an
+# implementation that retained EVERY byte still fit inside "less than twice
+# the small run". It passed by 6%. On 2026-08-19 a reader measured peak RSS at
+# 1.02x of a 660 MB stream and was right; this suite had been asserting the
+# opposite for months.
+#
+# Two additions, because the defect had two shapes and only one of them is
+# visible in a size comparison.
+#
+# T9a 原本就是這個測試的全部，而它什麼都沒在回報。它的大 fixture 是 3.3 MB，而行程與
+# Foundation 的地板約 9 MB——因此一個「保留每一個位元組」的實作，仍然塞得進「不到小的那次
+# 的兩倍」。它通過的餘裕是 6%。2026-08-19 一位讀者量到 660 MB 串流的 peak RSS 是 1.02 倍，
+# 而他是對的；這份測試套件已經斷言相反的事好幾個月。
+# 加兩條，因為那個缺陷有兩種形狀，而只有一種在「比大小」時看得見。
+{ head -2 "$TMP/m_small.csv2"
+  for i in {1..200}; do tail -n +3 "$TMP/m_small.csv2"; done } > "$TMP/m9_many.csv2"
+pad9=$(printf 'x%.0s' {1..880})
+{ print -r -- 'k,v,note'; print -r -- '鍵,值,註記'
+  for i in {1..17000}; do print -r -- "row$i,value$i,\"$pad9\""; done } > "$TMP/m9_few.csv2"
+
+cat "$TMP/m9_many.csv2" | "$CSV2" -si --headers 2 -so -r -debug > /dev/null 2>"$TMP/m9c.txt"
+cat "$TMP/m9_few.csv2"  | "$CSV2" -si --headers 2 -so -r -debug > /dev/null 2>"$TMP/m9d.txt"
+r_many=$(rss_of "$TMP/m9c.txt"); r_few=$(rss_of "$TMP/m9d.txt")
+size_many=$(wc -c < "$TMP/m9_many.csv2" | tr -d ' ')
+size_few=$(wc -c < "$TMP/m9_few.csv2" | tr -d ' ')
+
+# The promise is "without buffering the whole file". Below the input size is
+# the weakest form of that which is still an assertion, and it is one the
+# floor cannot satisfy on its own once the input is well past it.
+# 承諾是「不整檔緩衝」。「低於輸入大小」是這個承諾最弱、但仍然算是斷言的形式，而一旦輸入
+# 遠大於那個地板，光靠地板是滿足不了它的。
+if [[ -n "$r_many" && $r_many -lt $size_many ]]; then
+    ok "T9b peak RSS is below the input size on a ${size_many}B stream (${r_many}B) / 在 ${size_many}B 的串流上，peak RSS 低於輸入大小"
+else
+    bad "T9b streaming RSS not below input size (${size_many}B in, ${r_many}B RSS)"
+fi
+
+# The same bytes in a twentieth of the records. This is the assertion that
+# names the actual defect: what was retained was per-RECORD, not per-byte, so
+# a size-only comparison could never have separated it from the floor.
+# 同樣的位元組，紀錄數是二十分之一。這一條指名了真正的缺陷：被留住的東西是「每一筆」一份
+# 而不是每個位元組，因此只比大小的比較，永遠無法把它與那個地板分開。
+if [[ -n "$r_many" && -n "$r_few" && $r_many -lt $((r_few * 3 / 2)) ]]; then
+    ok "T9c RSS does not track the RECORD COUNT (${size_many}B/400k rec →${r_many}B vs ${size_few}B/17k rec →${r_few}B) / RSS 不隨紀錄數成長"
+else
+    bad "T9c RSS tracks record count (${size_many}B/400k rec →${r_many}B vs ${size_few}B/17k rec →${r_few}B)"
 fi
 
 echo

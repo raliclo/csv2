@@ -706,10 +706,12 @@ final class ByteSource {
     }
 
     func next() -> [UInt8]? {
-        let d = handle.readData(ofLength: chunkSize)
-        if d.isEmpty { return nil }
-        bytesRead += d.count
-        return [UInt8](d)
+        return autoreleasepool {
+            let d = handle.readData(ofLength: chunkSize)
+            if d.isEmpty { return nil }
+            bytesRead += d.count
+            return [UInt8](d)
+        }
     }
 
     func close() {
@@ -802,7 +804,9 @@ final class ByteSink {
 
     func flush() {
         if buf.isEmpty { return }
-        handle.write(Data(buf))
+        autoreleasepool {
+            handle.write(Data(buf))
+        }
         bytesWritten += buf.count
         buf.removeAll(keepingCapacity: true)
     }
