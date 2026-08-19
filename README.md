@@ -18,7 +18,7 @@ and the macOS host it is built from.
 
 | Works | Does not yet |
 |---|---|
-| RFC 4180 parsing, quotes, embedded commas and newlines, CRLF, BOM | shipping in the rootfs, `install.zsh` (phase 7) |
+| RFC 4180 parsing, quotes, embedded commas and newlines, CRLF, BOM | shipping in the rootfs (phase 7) |
 | `-r`, `-contains`, `-A`/`-B`/`-C`, `-head`/`-tail`/`-mid`, `-rownum` | |
 | two-row `.csv2` headers, `--json`, `-md`, `--pretty` (UAX #11 widths) | |
 | `-insert`/`-append`/`-delete`/`-update`, `-delete -cell`, `-delete -col` | |
@@ -164,7 +164,9 @@ SELECTING / 選取
                         and always writes the headers, with or without -t
   -rownum               prepend a record-number column. It does NOT renumber
                         anything: see "Two numberings" below
-  --physical            also print the physical line the record starts on.
+  --physical            also print the physical line the record starts on, as
+                        `record:field@Lline`; with --a1 the two combine into
+                        `13:6@L14 [F14]`.
                         Adds to the LOCATING REPORT, so it needs -contains
                         without --filter/-md/--json
   --a1                  also print spreadsheet A1 notation. Same restriction
@@ -191,7 +193,12 @@ OUTPUT SHAPE / 輸出形狀
   --en  --zh            which header row names the columns
 
 EDITING / 編輯
-  -insert N ROW         insert as record N; ROW is ONE line of CSV text
+  -insert N ROW         insert as record N; ROW is ONE line of CSV text.
+                        REPEATABLE, and every N refers to the INPUT: three
+                        -insert flags in one run all count against the file as
+                        it arrived, not as it grows. See below -- the same three
+                        numbers give a different file if you run them one at a
+                        time
   -append ROW           append at the end (O(1) when writing in place)
   -delete a[,b]         delete record a, or records a through b
   -delete -cell r:c     clear one cell (the field count never changes)
@@ -287,7 +294,10 @@ $ csv2 -contains busybox -i TARGET_PACKAGES.csv
 ```
 
 Five lines, because five **cells** match — the long values are cut short here
-with `…` for the page, not by csv2.
+with `…[+N more chars]`, and **csv2 is what cuts them**: the report is one line
+per hit, so a 400-byte cell would otherwise carry the format away with it. The
+cut is marked, never silent. It means the third column is a PREVIEW — `-get`
+returns the whole value, and `--json` carries it in full.
 
 Three fields separated by a **TAB**: the address, the column name, the value.
 One line per matching **cell**, so two matching columns in one record print two
@@ -451,7 +461,8 @@ For many values at once, use `--json` and read the fields by name, or take the
 third column of the locating report:
 
 ```console
-$ csv2 -contains busybox -i pkgs.csv | cut -f3
+$ csv2 -contains busybox -i pkgs.csv | cut -f1      # addresses, whole
+$ csv2 -contains busybox -i pkgs.csv | cut -f3      # values, PREVIEWS -- see above
 ```
 
 ### `--a1` counts the header rows
@@ -717,12 +728,19 @@ write a script that expects to find `record N, field M` in every message:
 Only a fault located at one cell names both. The rest name the record, or
 nothing, because there is nothing else true to name. Asserted by T60.
 
-**The record number in an error is an address you can use.** Feed it straight
-back to `-get` or `-update`: a message reading `record 1 (line 3), field 2`
-means `csv2 -get 1:2`. It counts data records, so it agrees with everything
-else in this tool; the line is there because that is what a text editor wants.
-A fault inside a header row says `header row 0a` or `0b` instead, because a
-header row has no record number to give. Asserted by T93.
+**The record number in an error is a real address.** `record 1 (line 3), field
+2` names the same cell `csv2 -get 1:2` names: it counts data records, so it
+agrees with everything else here, and the line is there because that is what a
+text editor wants. A fault inside a header row says `header row 0a` or `0b`
+instead, because a header row has no record number to give. Asserted by T93.
+
+**Whether you can act on it depends on what the error was.** The example above
+is a PARSE error, and a file csv2 cannot parse is one no verb will touch —
+`-get 1:2` on it returns that same error, not the cell. That is correct: the
+alternative is acting on a file whose shape is unknown. Fix the cell the address
+names, then address it. For errors that are not parse failures — an out-of-range
+`-update`, a refused flag combination — the file is readable and the address is
+immediately usable.
 
 An error in the **arguments** is thrown before `-log` has been read, so it
 reaches stderr but not the log file: the path to log to came from the same
@@ -760,6 +778,42 @@ Each of these exits non-zero with a message saying why:
 | `-append` with `--truncate-partial` | appending adds bytes and cannot remove the incomplete record, so the file would keep it *and* gain a complete record after it. Write a clean copy first: `csv2 -r -t --truncate-partial -i f.csv -o clean.csv` |
 | a value, row or search string that is not valid UTF-8 | Swift decodes `argv` with replacement, so the bytes are already gone; storing what arrives would put U+FFFD where a byte was, silently. Put the value in a file — bytes survive there, which is what the round-trip guarantee is about. **Paths are not checked**: on Linux they may legitimately hold any bytes, and csv2 hands a path to the filesystem rather than storing it as data. **POSIX only**: a Windows command line arrives as UTF-16, so whatever happened to an invalid byte happened before the process started and there is nothing left for csv2 to inspect |
 | unknown flag | never swallowed as something else |
+
+### Every edit index refers to the input, and that is visible with `-insert`
+
+`-insert`, `-delete`, `-update` and `-delete -cell` can each be given more than
+once in a run, and **every index counts against the file as it arrived**. The
+edits are collected and applied in one pass, so an earlier insert never shifts
+a later one's target.
+
+That is the only semantics that makes a batch predictable, and it is also why
+the same three numbers mean two different things depending on how you group
+them:
+
+```console
+$ csv2 -insert 2 A -insert 4 B -insert 5 C -i f.csv --in-place   # one run
+r1  A  r2  r3  B  r4  C  r5
+
+$ csv2 -insert 2 A -i f.csv --in-place                            # three runs
+$ csv2 -insert 4 B -i f.csv --in-place
+$ csv2 -insert 5 C -i f.csv --in-place
+r1  A  r2  B  C  r3  r4  r5
+```
+
+Both exit 0. Neither is wrong — each run's indices are correct against the file
+that run was given — but only the first is a batch. **Decide which you mean; do
+not discover it.** If you want rows to land at FINAL positions 2, 4 and 6, the
+input-relative numbers are 2, 3 and 4.
+
+Two consequences worth stating because they are easy to trip over:
+
+- **Range is checked against the input too.** `-insert 6` on a five-record file
+  is refused in a batch, and legal as the third of three separate runs, because
+  by then the file really does have six places to put it.
+- **Two inserts at the same N keep the order you wrote them**, and `-insert`
+  composes with `-append` in one run.
+
+Asserted by T27.
 
 ### `-t` gates selections, never edits
 

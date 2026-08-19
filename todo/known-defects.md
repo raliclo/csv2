@@ -1221,3 +1221,111 @@ if [[ $FOUND_VERSION != $BUILT_VERSION ]]; then
 
 這一條在三個平台上都成立，只是 Windows 的 PATH 順序讓它現形。
 
+---
+
+# 第 39 回合（2026-08-20）—— 半份報告，以及一個關於盲測本身的量測
+# Round 39 -- a partial report, and a measurement about blind testing itself
+
+該回合的 agent 在第 4 項任務中途因 API 連線中斷而終止，接續後誠實地回報「完成 1–3、
+第 4 項只跑了一個 setup 指令、5 與 6 未開始」，並且**沒有補完任何它沒有實際觀察到的東西**。
+一份誠實的半份報告仍然找到四條。
+
+## 最重要的結果不是缺陷，是那個污染量測
+
+我在 prompt 最前面要求它先回答：在跑任何指令之前，它的 context 裡有沒有那張缺陷表。
+
+**它逐字引用了那張表，兩個檔案都引到**——而那張表**已經從磁碟移除並提交**：
+
+```
+磁碟現況：global CLAUDE.md    0 筆匹配
+          project CLAUDE.md   0 筆匹配
+agent 收到：兩份的完整五列表，逐字
+```
+
+**因此「回合必須從全新 session 派出」不再是推論，是量出來的。** subagent 收到的是**母 session
+啟動時**的 CLAUDE.md 快照，而不是磁碟上的內容。從一個已經在跑的 session 派出的盲測，會被
+餵進該 session 啟動當下的所有指令檔——**包括那些之後才被刪掉的東西**。
+
+該 agent 自己指出了這件事最要命的地方：**第 4 項任務（金鑰指紋不符）正是那張表最會污染的
+一項**，因為表上有一列就是關於 `-encrypt` 丟失 `:enc` marker。它拒絕在那個狀態下給出結論。
+
+| # | 缺陷 | 類別 |
+|---|---|---|
+| OO | README 否認 `-contains` 會截斷，而它會 | **文件（且它建議的 `\| cut -f3` 因此交出被截斷的值）**  — **已修** |
+| PP | 狀態表把 `install.zsh` 列在「Does not yet」，而下方整段在描述它的行為 | 文件  — **已修** |
+| QQ | 「錯誤裡的紀錄號是可以拿來用的位址」——對它所舉的那個**解析錯誤**範例不成立 | 文件（**我今天寫的**）  — **已修** |
+| RR | `-insert` 可重複、且索引指向輸入，README 從未提及；批次與逐次靜默分歧 | 文件  — **已修** |
+| SS | `--physical` 的輸出樣貌從未展示；沒有「A1 → record:field」的反向查找 | 文件  — **已修** |
+
+## OO. README 說那個 `…` 是排版加的，而它是 csv2 加的
+
+README:290 —— 「the long values are cut short here with `…` for the page, **not by csv2**」
+
+```sh
+csv2 -contains "busybox ash cannot parse it" -i TARGET_PACKAGES.csv
+# …relying on the #!/usr/bin/env zsh she…[+63 more chars]
+```
+
+**是 csv2 截的。** 而它截得很誠實——有 `[+63 more chars]` 標記，不是靜默——所以這是文件缺陷
+不是程式缺陷。但那句話存在的唯一目的，就是要讀者不要擔心截斷，而它是假的。
+
+**後果不只是一句話錯**：README 在「For many values at once」推薦
+`csv2 -contains busybox -i pkgs.csv | cut -f3`，而那條管線對夠長的值會交出「被截斷、尾巴還
+黏著 `[+N more chars]`」的東西——**而長的引號散文正是這支工具存在的理由**。
+
+## PP. 「Does not yet」欄裡列著一個已經能用的東西
+
+狀態表：`| RFC 4180 parsing… | shipping in the rootfs, install.zsh (phase 7) |`
+
+而同一份 README 在下面幾行有一整段描述 `install.zsh` 在三個平台上各裝到哪裡。**兩者只能留
+一個。** 那一段是 2026-08-20 加的，加的時候沒有回頭改狀態表——**新增文字沒有讓舊文字失效，
+是這一天第二次發生**（第一次是 plan.md 第 7 階段那個「被沒有 Windows build 擋住」）。
+
+## QQ. 那句話是我今天寫的，而它用錯了範例
+
+CC 修好之後我在 README 加上：
+
+> **The record number in an error is an address you can use.** Feed it straight back to `-get`
+> or `-update`: a message reading `record 1 (line 3), field 2` means `csv2 -get 1:2`.
+
+而我舉的那個訊息是**解析錯誤**：
+
+```sh
+csv2 -r -i bad.csv2      # csv2: record 1 (line 3), field 2: undefined escape sequence \q
+csv2 -get 1:2 -i bad.csv2 # 同一個解析錯誤 —— 讀不了的檔案，任何動詞都動不了
+```
+
+**位址本身是對的**（它確實指到那一格），錯的是「可以直接餵回去」這個承諾用一個
+「檔案根本讀不了」的情況當示範。照字面做的讀者會得出「工具壞了」的結論——而工具沒壞。
+
+## RR. `-insert` 可以重複，而兩種寫法給出不同的檔案
+
+```sh
+# 批次：一次跑
+csv2 -insert 2 A -insert 4 B -insert 5 C -i f.csv --in-place
+# 1,r1 2,A 3,r2 4,r3 5,B 6,r4 7,C 8,r5
+
+# 逐次：三次跑
+csv2 -insert 2 A -i f.csv --in-place; csv2 -insert 4 B …; csv2 -insert 5 C …
+# 1,r1 2,A 3,r2 4,B 5,C 6,r3 7,r4 8,r5
+```
+
+**相同參數、都是 rc=0、檔案不同。**
+
+**程式是對的**：T27 早已定案「所有索引指向輸入，全部收集完一次套用」，批次那個語意就是那個
+決定。**錯的是 README 只寫了單數的 `-insert N ROW`**——讀者無從知道它可以重複，也就無從知道
+自己選了哪一種語意。該回合的 agent 因此把整個任務 3 當成試誤在做，還額外發現「同一個 N 的
+多次插入保持命令列順序」與「`-insert` 與 `-append` 可以同時出現」，兩者同樣沒有記載。
+
+順帶：`-insert 6` 在 5 筆的檔案上（批次）被拒絕，而逐次做到第三步時它是合法的——因為那時
+檔案已經有 7 筆。同一組數字，分組方式不同就一個失敗一個成功。
+
+## SS. `--physical` 印出來長什麼樣，從來沒有人寫過
+
+`--a1` 有範例（`1:1 [A2]`），`--physical` 只有一句說明。兩者併用的實際輸出是
+`13:6@L14 [F14]`，而那個 `@L` 記號要執行過才知道。
+
+另外：bug 回報給的是 `F14`，而**沒有任何動詞能把 `F14` 變回 `13:6`**。`--a1` 只能為
+「你已經靠內容找到的儲存格」加註座標——對「我只有座標」這個情境是循環的。換算規則從
+`--a1` 那一段推導得出來，但 README 從未把它寫成規則。
+

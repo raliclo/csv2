@@ -4137,6 +4137,91 @@ printf 'id,note\n1,A\xffB\n' > "$TMP/t98_raw.csv"
 assert_same "$TMP/t98_raw.csv" "$TMP/t98_raw_out.csv" \
     "T98k while the same bytes still round-trip through a FILE, as T8 requires / 而同樣的位元組經由「檔案」仍然可以 round-trip，一如 T8 的要求"
 
+# ---------------------------------------------------------------------
+# T99 -- repeated edits are input-relative, and the divergence is a decision.
+#
+# Round 39. The README documented a singular `-insert N ROW` and nothing else,
+# so a reader had no way to learn that the flag repeats, and no way to know
+# which of two semantics they had chosen. The two are not subtly different:
+#
+#   one run:    -insert 2 A -insert 4 B -insert 5 C  ->  r1 A r2 r3 B r4 C r5
+#   three runs: the same three, separately           ->  r1 A r2 B C r3 r4 r5
+#
+# Both exit 0. Neither is wrong -- each run's indices are correct against the
+# file that run was handed -- but only the first is a batch.
+#
+# The tool is right: T27 settled that every index refers to the INPUT and all
+# edits apply in one pass, which is the only semantics that makes a batch
+# predictable. What was missing was any way for a reader to find that out.
+#
+# This case exists so the divergence stays a DECISION. Someone reading the two
+# outputs side by side could reasonably decide to "fix" the batch form into
+# cumulative behaviour; that would make `-delete 3 -delete 4` delete input
+# record 3 and then whatever slid into position 4, which is the exact failure
+# T27 was written to prevent.
+#
+# T99 —— 重複的編輯以輸入為基準，而那個分歧是一個決定。
+# 第 39 回合。README 只寫了單數的 `-insert N ROW`，因此讀者無從知道這個旗標可以重複，
+# 也就無從知道自己選了兩種語意中的哪一種。而那兩種的差別並不細微（見上）。
+# 兩者都是 rc=0。兩者都不算錯——每一次執行的索引，對它拿到的那個檔案都是正確的——
+# 但只有第一種是「一批」。
+# 程式是對的：T27 早已定案「每個索引都指向輸入、所有編輯一次套用」，那是唯一能讓一批
+# 可預測的語意。缺的是「讀者要怎麼知道這件事」。
+# 這個案例的存在，是為了讓那個分歧維持是一個**決定**。有人把兩種輸出並排看過之後，很可能
+# 合理地認為該把批次那一種「修」成累加式——而那會讓 `-delete 3 -delete 4` 刪掉輸入的第 3 筆，
+# 再刪掉遞補到第 4 位的那一筆，也就是 T27 當初要防止的那個失敗。
+# ---------------------------------------------------------------------
+echo
+echo "--- T99: repeated edits count against the input / 重複的編輯以輸入為基準 ---"
+
+printf 'pkg,ver\nr1,1\nr2,2\nr3,3\nr4,4\nr5,5\n' > "$TMP/t99.csv"
+cp "$TMP/t99.csv" "$TMP/t99_batch.csv"
+cp "$TMP/t99.csv" "$TMP/t99_seq.csv"
+
+"$CSV2" -insert 2 'A,10' -insert 4 'B,20' -insert 5 'C,30' \
+    -i "$TMP/t99_batch.csv" --in-place 2>/dev/null
+assert_eq "$("$CSV2" -r -i "$TMP/t99_batch.csv" 2>/dev/null | cut -d, -f1 | tr '\n' ' ')" \
+          "r1 A r2 r3 B r4 C r5 " \
+    "T99a three -insert flags in one run all count against the input / 一次執行裡的三個 -insert，數的都是輸入"
+
+for spec in '2:A,10' '4:B,20' '5:C,30'; do
+    "$CSV2" -insert ${spec%%:*} "${spec#*:}" -i "$TMP/t99_seq.csv" --in-place 2>/dev/null
+done
+assert_eq "$("$CSV2" -r -i "$TMP/t99_seq.csv" 2>/dev/null | cut -d, -f1 | tr '\n' ' ')" \
+          "r1 A r2 B C r3 r4 r5 " \
+    "T99b while three separate runs each count against the file that run was given / 而三次獨立執行，各自對它拿到的那個檔案計數"
+
+# The point of the case: the two differ, both succeed, and that is intended.
+# 這個案例的重點：兩者不同、兩者都成功，而那是刻意的。
+if cmp -s "$TMP/t99_batch.csv" "$TMP/t99_seq.csv"; then
+    bad "T99c batch and sequential now agree -- one of the two semantics was changed / 批次與逐次現在一致了——兩種語意之一被改掉了"
+else
+    ok "T99c so the two forms give different files, and the README says which is which / 因此兩種寫法給出不同的檔案，而 README 說明了哪個是哪個"
+fi
+
+# Range is checked against the input as well -- the same asymmetry, and the
+# half a reader is most likely to meet as a surprise.
+# 範圍同樣是對輸入檢查的——同一個不對稱，而且是讀者最可能以「意外」形式撞見的那一半。
+cp "$TMP/t99.csv" "$TMP/t99_r.csv"
+assert_fails "T99d -insert 6 on a five-record file is refused in a batch / 在五筆的檔案上，批次裡的 -insert 6 被拒絕" -- \
+    "$CSV2" -insert 2 'A,1' -insert 4 'B,2' -insert 6 'C,3' -i "$TMP/t99_r.csv" --in-place
+assert_same "$TMP/t99_r.csv" "$TMP/t99.csv" \
+    "T99e and the refusal left the file byte-identical / 而那次拒絕讓檔案逐位元不變"
+
+# Two at the same address keep argument order; -insert composes with -append.
+# 同一個位址上的兩筆保持參數順序；-insert 與 -append 可併用。
+cp "$TMP/t99.csv" "$TMP/t99_same.csv"
+"$CSV2" -insert 3 'X,1' -insert 3 'Y,2' -i "$TMP/t99_same.csv" --in-place 2>/dev/null
+assert_eq "$("$CSV2" -r -i "$TMP/t99_same.csv" 2>/dev/null | cut -d, -f1 | tr '\n' ' ')" \
+          "r1 r2 X Y r3 r4 r5 " \
+    "T99f two inserts at the same N keep the order they were written / 同一個 N 的兩次插入，保持寫下的順序"
+
+cp "$TMP/t99.csv" "$TMP/t99_mix.csv"
+"$CSV2" -insert 2 'X,1' -append 'Z,9' -i "$TMP/t99_mix.csv" --in-place 2>/dev/null
+assert_eq "$("$CSV2" -r -i "$TMP/t99_mix.csv" 2>/dev/null | cut -d, -f1 | tr '\n' ' ')" \
+          "r1 X r2 r3 r4 r5 Z " \
+    "T99g and -insert composes with -append in one run / 而 -insert 與 -append 可在同一次執行裡併用"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
