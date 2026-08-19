@@ -205,7 +205,7 @@ enum CSV2Escape {
     /// same value, which destroys losslessness.
     /// 未定義的跳脫序列（`\q`）是錯誤，不是「原樣保留」。原樣保留會讓兩個
     /// 不同的位元組序列讀回同一個值，破壞無損性。
-    static func unescape(_ v: [UInt8], record: String, field: Int) throws -> [UInt8] {
+    static func unescape(_ v: [UInt8], at: String, atZh: String, field: Int) throws -> [UInt8] {
         var hasBackslash = false
         for b in v where b == BYTE_BACKSLASH { hasBackslash = true; break }
         if !hasBackslash { return v }
@@ -218,8 +218,8 @@ enum CSV2Escape {
             if b != BYTE_BACKSLASH { out.append(b); i += 1; continue }
             guard i + 1 < v.count else {
                 throw fault(
-                    "record \(record), field \(field): trailing lone backslash; write it as \\\\",
-                    "第 \(record) 筆第 \(field) 欄：結尾有孤立的反斜線，應寫成 \\\\")
+                    "\(at), field \(field): trailing lone backslash; write it as \\\\",
+                    "\(atZh)第 \(field) 欄：結尾有孤立的反斜線，應寫成 \\\\")
             }
             let n = v[i + 1]
             switch n {
@@ -229,8 +229,8 @@ enum CSV2Escape {
             default:
                 let seq = String(bytes: [BYTE_BACKSLASH, n], encoding: .utf8) ?? "\\?"
                 throw fault(
-                    "record \(record), field \(field): undefined escape sequence \(seq); .csv2 defines only \\n, \\r and \\\\",
-                    "第 \(record) 筆第 \(field) 欄：未定義的跳脫序列 \(seq)；.csv2 只定義 \\n、\\r 與 \\\\")
+                    "\(at), field \(field): undefined escape sequence \(seq); .csv2 defines only \\n, \\r and \\\\",
+                    "\(atZh)第 \(field) 欄：未定義的跳脫序列 \(seq)；.csv2 只定義 \\n、\\r 與 \\\\")
             }
             i += 2
         }
@@ -375,6 +375,40 @@ final class RecordParser {
         if firstOffset > 0 { self.bomDone = true }
     }
 
+    /// The address a cell-level error prints, in the same shape record-level
+    /// errors have always used: the DATA record number AND the physical line.
+    ///
+    /// It printed `recordsEmitted + 1`, which counts the header rows too. On a
+    /// `.csv2` the offset was therefore exactly two, so a fault in data record
+    /// 2 was reported as `record 4` -- and `-get 4:2` answered "no such
+    /// record; the file has 2 records". The number in an error message is an
+    /// address somebody types back into `-get` or `-update`; one that does not
+    /// resolve is worse than none, because it sends them to a different cell
+    /// or to a refusal that looks like the file is wrong. Round 38, defect CC.
+    ///
+    /// Header rows get `0a` / `0b`, the names the locating report already uses
+    /// for them, rather than a record number they do not have.
+    ///
+    /// 儲存格層級錯誤所印的位址，形狀與紀錄層級錯誤一直以來的寫法相同：資料紀錄號**與**
+    /// 物理行號。
+    /// 原本印的是 `recordsEmitted + 1`，那個計數含標頭列。因此在 `.csv2` 上偏移恰好是二，
+    /// 資料第 2 筆的錯誤會被回報成 `record 4`——而 `-get 4:2` 回答「沒有這一筆；本檔案有
+    /// 2 筆」。錯誤訊息裡的號碼是**會被人打回 `-get` 或 `-update` 的位址**；一個解不出來的
+    /// 位址比沒有更糟，因為它會把人送到另一格，或送到一個「看起來像檔案有問題」的拒絕。
+    /// 第 38 回合，缺陷 CC。
+    /// 標頭列給的是 `0a` / `0b`——定位報告本來就這樣稱呼它們——而不是一個它們並不擁有的紀錄號。
+    private var faultAt: String {
+        let n = recordsEmitted + 1
+        if n <= format.headerRows { return "header row 0\(n == 1 ? "a" : "b") (line \(recLine))" }
+        return "record \(n - format.headerRows) (line \(recLine))"
+    }
+
+    private var faultAtZh: String {
+        let n = recordsEmitted + 1
+        if n <= format.headerRows { return "標頭第 0\(n == 1 ? "a" : "b") 列（第 \(recLine) 行）" }
+        return "第 \(n - format.headerRows) 筆（第 \(recLine) 行）"
+    }
+
     func feed(_ chunk: [UInt8]) throws {
         var bytes = chunk
         if !bomDone {
@@ -499,8 +533,8 @@ final class RecordParser {
             // RFC 4180 不允許，我們也不允許。把多餘的位元組接上去，會靜默
             // 產生一個沒有人寫過的值。
             throw fault(
-                "record \(recordsEmitted + 1), field \(fields.count + 1): unexpected byte after a closing quote (0x\(String(format: "%02x", b))); a quoted field must be followed by a comma or a line ending",
-                "第 \(recordsEmitted + 1) 筆第 \(fields.count + 1) 欄：關閉引號之後出現非預期的位元組（0x\(String(format: "%02x", b))）；引號欄位之後只能接逗號或行尾")
+                "\(faultAt), field \(fields.count + 1): unexpected byte after a closing quote (0x\(String(format: "%02x", b))); a quoted field must be followed by a comma or a line ending",
+                "\(faultAtZh)第 \(fields.count + 1) 欄：關閉引號之後出現非預期的位元組（0x\(String(format: "%02x", b))）；引號欄位之後只能接逗號或行尾")
         }
     }
 
@@ -513,15 +547,13 @@ final class RecordParser {
     private func endField() throws {
         if format == .csv2 && quotedNewlineInField {
             throw fault(
-                "record \(recordsEmitted + 1), field \(fields.count + 1): a raw newline inside a cell; .csv2 keeps one record per line, so newlines must be written as \\n",
-                "第 \(recordsEmitted + 1) 筆第 \(fields.count + 1) 欄：儲存格內有原始換行；.csv2 保證一筆一行，換行必須寫成 \\n")
+                "\(faultAt), field \(fields.count + 1): a raw newline inside a cell; .csv2 keeps one record per line, so newlines must be written as \\n",
+                "\(faultAtZh)第 \(fields.count + 1) 欄：儲存格內有原始換行；.csv2 保證一筆一行，換行必須寫成 \\n")
         }
         var value = valBuf
         if format == .csv2 {
             value = try CSV2Escape.unescape(
-                value,
-                record: recordsEmitted < format.headerRows ? "header" : "\(recordsEmitted + 1)",
-                field: fields.count + 1)
+                value, at: faultAt, atZh: faultAtZh, field: fields.count + 1)
         }
         fields.append(Field(value: value, raw: rawBuf))
         rawBuf = []

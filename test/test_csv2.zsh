@@ -1690,9 +1690,23 @@ printf 'a,b,c\n1,2\n' > "$TMP/t60_rec.csv"
 printf 'a,b\n1,2\n' > "$TMP/t60_ok.csv"
 
 # At one cell: record AND field, because both are true.
+#
+# CORRECTED on 2026-08-19. This asserted `record 3, field 2` for a fault in
+# data record 1 of a .csv2 -- 3 being the physical line. The assertion was
+# right that a cell fault names both; it was wrong about what the number
+# means, and by pinning the printed string it froze the defect as the
+# specification. Round 38 (CC) found that the address could not be typed back
+# into -get. T93 now covers the addressing; this case keeps its own point,
+# which is that a cell fault names BOTH parts rather than one.
+#
+# 2026-08-19 更正。它原本對「.csv2 資料第 1 筆的錯誤」斷言 `record 3, field 2`，
+# 而 3 是物理行號。這條斷言在「儲存格錯誤要同時指出兩者」上是對的，錯的是那個號碼的意思；
+# 而它以「釘住印出來的字串」的方式，把缺陷凍結成了規格。第 38 回合（CC）發現那個位址
+# 打不回 -get。定址現在由 T93 涵蓋；這個案例保留它自己的重點：儲存格錯誤要指出「兩個」
+# 部分，而不是其中一個。
 # 錯在某一格：紀錄與欄位都指出，因為兩者都為真。
 "$CSV2" -r -i "$TMP/t60_cell.csv2" 2> "$TMP/t60_a.txt" >/dev/null
-assert_contains "$(head -1 "$TMP/t60_a.txt")" "record 3, field 2" \
+assert_contains "$(head -1 "$TMP/t60_a.txt")" "record 1 (line 3), field 2" \
     "T60a a fault at one cell names the record and the field / 錯在某一格時，紀錄與欄位都會指出"
 
 # At one record, but no single field owns it: record only. Naming a field here
@@ -3641,6 +3655,85 @@ print -r -- "id,note" > "$TMP/t92g.csv"
 print -r -- "1,NEEDLE$(printf 'B%.0s' {1..400})" >> "$TMP/t92g.csv"
 assert_contains "$("$CSV2" -contains NEEDLE -i "$TMP/t92g.csv" 2>/dev/null)" "more chars" \
     "T92n the locating report still truncates at its own limit / 定位報告仍然依它自己的上限截斷"
+
+# ---------------------------------------------------------------------
+# T93 -- the address in an error message resolves.
+#
+# Round 38, defect CC. Cell-level errors printed `recordsEmitted + 1`, which
+# counts the header rows, so the number was the PHYSICAL LINE wearing a record
+# label. On a .csv2 the offset is exactly two:
+#
+#   csv2: record 4, field 2: undefined escape sequence \q      <- data record 2
+#   csv2 -get 4:2 -i f.csv2   ->  no such record; the file has 2 records
+#
+# Meanwhile record-level errors in the same tool were already correct --
+# `record 1 (line 3)` -- so the error channel carried two numbering schemes,
+# and the README's own example demonstrated the broken one while stating that
+# `N` counts records, not lines, throughout.
+#
+# The number in an error message is an ADDRESS. Someone types it back into
+# -get or -update; that composition is what this tool has instead of a query
+# language. An address that does not resolve is worse than none: it sends the
+# reader to a different cell, or to a refusal that reads as "the file is
+# wrong" when the file is fine.
+#
+# T93 —— 錯誤訊息裡的位址解得出來。
+# 第 38 回合，缺陷 CC。儲存格層級的錯誤印的是 `recordsEmitted + 1`，那個計數含標頭列，
+# 因此那個號碼是「披著紀錄外衣的物理行號」。在 .csv2 上偏移恰好是二：資料第 2 筆的錯誤
+# 印成 `record 4`，而 `-get 4:2` 回答「沒有這一筆；本檔案有 2 筆」。
+# 同一支工具的紀錄層級錯誤本來就是對的（`record 1 (line 3)`），於是錯誤通道裡並存兩套編號，
+# 而 README 自己的範例示範的正是壞掉的那一套——儘管它同時寫著「N 自始至終數的是紀錄，不是行」。
+# 錯誤訊息裡的號碼是一個「位址」。人會把它打回 -get 或 -update，而那個組合正是這支工具用來
+# 取代查詢語言的東西。一個解不出來的位址比沒有更糟：它會把讀者送到另一格，或送到一個
+# 「讀起來像是檔案有問題」的拒絕，而檔案其實沒問題。
+# ---------------------------------------------------------------------
+echo
+echo "--- T93: the address in an error resolves / 錯誤裡的位址解得出來 ---"
+
+printf 'id,val\n編號,值\n1,ok\n2,bad\\qvalue\n' > "$TMP/t93.csv2"
+printf 'id,val\n編號,值\n1,ok\n2,THEBAD\n'     > "$TMP/t93_ok.csv2"
+err=$("$CSV2" -r -t -i "$TMP/t93.csv2" 2>&1 | head -1)
+
+assert_contains "$err" "record 2 " \
+    "T93a a fault in data record 2 is reported as record 2, not as its line / 資料第 2 筆的錯誤回報為 record 2，不是它的行號"
+assert_contains "$err" "(line 4)" \
+    "T93b and the physical line comes with it, the same pair record-level errors print / 而物理行號一併給出，與紀錄層級錯誤的格式相同"
+
+# The point of the whole case: take the address out of the message and use it.
+# 整個案例的重點：把位址從訊息裡取出來，然後用它。
+addr=$(print -r -- "$err" | sed -n 's/.*record \([0-9][0-9]*\) .*field \([0-9][0-9]*\).*/\1:\2/p')
+assert_eq "$addr" "2:2" \
+    "T93c the address parses out of the message as record:field / 位址能從訊息中解析成 record:field"
+assert_eq "$("$CSV2" -get "$addr" -i "$TMP/t93_ok.csv2" 2>/dev/null)" "THEBAD" \
+    "T93d and -get on it returns the cell the message was about / 而以它下 -get，取回的正是訊息所指的那一格"
+
+# A .csv has one header row, so the old bug shifted by one there instead of
+# two -- same defect, different offset, which is why it needs its own case.
+# .csv 只有一列標頭，因此舊缺陷在那裡是偏移一格而不是兩格——同一個缺陷、不同的偏移量，
+# 所以它需要自己的案例。
+printf 'a,b\n1,"x"y\n' > "$TMP/t93.csv"
+errc=$("$CSV2" -r -t -i "$TMP/t93.csv" 2>&1 | head -1)
+assert_contains "$errc" "record 1 (line 2)" \
+    "T93e in a .csv the first data record is record 1, not record 2 / 在 .csv 中第一筆資料是 record 1，不是 record 2"
+
+# A header row has no record number, and inventing one would be an address
+# that resolves to the wrong thing. It gets the name the locating report
+# already uses.
+# 標頭列沒有紀錄號，而發明一個會產生「解得出來、但解到錯的東西」的位址。它拿到的是定位報告
+# 本來就在用的那個名字。
+printf 'id,val\\q\n編號,值\n1,ok\n' > "$TMP/t93_h.csv2"
+errh=$("$CSV2" -r -t -i "$TMP/t93_h.csv2" 2>&1 | head -1)
+assert_contains "$errh" "header row 0a (line 1)" \
+    "T93f a fault in the first header row says so, rather than claiming a record number / 第一列標頭裡的錯誤會這樣說，而不是宣稱一個紀錄號"
+printf 'id,val\n編號,值\\q\n1,ok\n' > "$TMP/t93_h2.csv2"
+assert_contains "$("$CSV2" -r -t -i "$TMP/t93_h2.csv2" 2>&1 | head -1)" "header row 0b (line 2)" \
+    "T93g and the second header row is 0b, which is how the report names it too / 第二列標頭是 0b，定位報告也是這樣稱呼它"
+
+# Both languages carry the same address. A reader of either one must be able
+# to type it back.
+# 兩種語言帶的是同一個位址。讀哪一種語言的人都必須能把它打回去。
+assert_contains "$("$CSV2" -r -t -i "$TMP/t93.csv2" 2>&1 | sed -n 2p)" "第 2 筆（第 4 行）" \
+    "T93h the Chinese line carries the same record and line / 中文那一行帶著相同的紀錄號與行號"
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"

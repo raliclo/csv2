@@ -649,13 +649,20 @@ write a script that expects to find `record N, field M` in every message:
 
 | The fault is | The message names | Example |
 |---|---|---|
-| at one cell | `record N, field M` | `record 3, field 2: undefined escape sequence \q; .csv2 defines only \n, \r and \\` |
+| at one cell | `record N (line L), field M` | `record 1 (line 3), field 2: undefined escape sequence \q; .csv2 defines only \n, \r and \\` |
 | at one record, but no single field | `record N` | `record 1 (line 2) has 2 fields but the header has 3` |
 | in the arguments | neither — it is thrown before any record is read | `unknown flag --nope` |
 | in the file as a whole | neither — there is no record to name | `cannot open input file: /nope.csv` |
 
 Only a fault located at one cell names both. The rest name the record, or
 nothing, because there is nothing else true to name. Asserted by T60.
+
+**The record number in an error is an address you can use.** Feed it straight
+back to `-get` or `-update`: a message reading `record 1 (line 3), field 2`
+means `csv2 -get 1:2`. It counts data records, so it agrees with everything
+else in this tool; the line is there because that is what a text editor wants.
+A fault inside a header row says `header row 0a` or `0b` instead, because a
+header row has no record number to give. Asserted by T93.
 
 An error in the **arguments** is thrown before `-log` has been read, so it
 reaches stderr but not the log file: the path to log to came from the same

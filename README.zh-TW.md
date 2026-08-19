@@ -553,13 +553,18 @@ busybox,1.37.0,"fork raliclo/busybox, branch develop",GPL-2.0
 
 | 錯誤發生在 | 訊息會指出 | 範例 |
 |---|---|---|
-| 某一格 | `record N, field M` | `record 3, field 2: undefined escape sequence \q` |
+| 某一格 | `record N (line L), field M` | `record 1 (line 3), field 2: undefined escape sequence \q` |
 | 某一筆，但不屬於單一欄位 | `record N` | `record 1 (line 2) has 2 fields but the header has 3` |
 | 參數 | 兩者都不指出——它在讀到任何一筆之前就被丟出 | `unknown flag --nope` |
 | 整個檔案 | 兩者都不指出——沒有紀錄可指 | `cannot open input file: /nope.csv` |
 
 只有「錯在某一格」的情況會兩者都指出。其餘只指出紀錄，或什麼都不指——因為再沒有別的為真的
 東西可指。由 T60 斷言。
+
+**錯誤裡的紀錄號是一個「可以拿來用」的位址。** 直接把它餵回 `-get` 或 `-update`：一則寫著
+`record 1 (line 3), field 2` 的訊息，就是 `csv2 -get 1:2`。它數的是資料紀錄，因此與這支工具
+其他地方一致；行號會一併給出，因為那是文字編輯器要的東西。標頭列裡的錯誤改說
+`header row 0a` 或 `0b`，因為標頭列沒有紀錄號可給。由 T93 斷言。
 
 **參數**本身的錯誤是在 `-log` 被讀到之前就丟出的，因此它會到 stderr 但不會進 log 檔：
 要寫進哪個 log，正來自那批解析失敗的參數。
