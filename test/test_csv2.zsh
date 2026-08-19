@@ -3512,6 +3512,136 @@ assert_succeeds "T91l the copy the message recommends can be appended to / 訊�
 assert_succeeds "T91m and reads back cleanly / 而且讀得回來" -- \
     "$CSV2" -r -t -i "$TMP/t91_clean.csv"
 
+# ---------------------------------------------------------------------
+# T92 -- the log records the value in full, and one entry stays one line.
+#
+# Round 38 found the README promising old and new values "in full; that is the
+# point of an audit trail" while the log cut them at 40 characters. In
+# TARGET_PACKAGES.csv, `status_notes` -- the column whose corruption is the
+# reason this project exists -- reaches 878 bytes, so for exactly that column
+# the log preserved nothing usable.
+#
+# Asking what removing the limit would COST turned up the defect the round did
+# not find, and it is the one that had to be fixed first. Logger.redact()
+# wrote the value with quotes and NO escaping, into a format that is one entry
+# per line. A newline inside a value therefore opened a new line whose entire
+# content the value chose:
+#
+#   …INFO  update 1:note: "harmless" -> "x"
+#   2020-01-01T00:00:00+00:00 INFO  nothi…[+11 more chars]"     <- forged
+#
+# The truncation did not prevent that. It only shortened the forged line. So
+# lifting the limit alone would have upgraded the forgery from truncated to
+# complete and convincing. Escape first, then lift.
+#
+# The size decision (2026-08-19): unbounded, with a WARN above 1 MiB. A cap
+# would be an audit trail that drops data, which is the thing being fixed; the
+# warning exists so the person hears about the megabyte at the time rather
+# than finding it in a disk graph later. Note it can only be reached through
+# the OLD value -- a new value that large cannot be passed, because ARG_MAX
+# rejects the command line first.
+#
+# T92 —— log 完整記錄那個值，而一筆紀錄仍然只佔一行。
+# 第 38 回合發現 README 承諾新舊值「完整記錄；那正是稽核軌跡的意義」，而 log 在第 40 個字元
+# 把它們切斷。`TARGET_PACKAGES.csv` 的 `status_notes`——這個專案存在的理由就是那一欄被改壞
+# ——長達 878 bytes，因此恰恰對那一欄，log 保留不下任何可用的東西。
+# 追問「移除那個上限要付出什麼代價」，翻出了該回合沒有找到、而且必須先修的那個缺陷：
+# Logger.redact() 把值加上引號後直接寫進一個「一行一筆」的格式，完全沒有跳脫。於是值裡的
+# 一個換行就會開啟新的一行，而那一行的全部內容由值決定——一筆時間戳由攻擊者挑選的偽造紀錄。
+# 截斷擋不住那件事，它只是把偽造的那一行剪短。因此「只解除上限」會讓偽造從被剪斷變成完整。
+# 先跳脫，再解除。
+# 大小的決定（2026-08-19）：無界，超過 1 MiB 發 WARN。設上限等於「會丟資料的稽核軌跡」，
+# 而那正是現在要修的東西；警告的存在，是為了讓人當場聽到那一 MB，而不是事後在磁碟用量圖上
+# 發現。注意它只能經由「舊值」達到——那麼大的新值傳不進來，命令列會先被 ARG_MAX 拒絕。
+# ---------------------------------------------------------------------
+echo
+echo "--- T92: the log keeps the whole value, on one line / log 完整保留那個值，且只佔一行 ---"
+
+long_a=$(printf 'A%.0s' {1..300})
+long_z=$(printf 'Z%.0s' {1..300})
+print -r -- "id,note" > "$TMP/t92.csv"
+print -r -- "1,$long_a" >> "$TMP/t92.csv"
+rm -f "$TMP/t92.log"
+"$CSV2" -update 1:note "$long_z" -i "$TMP/t92.csv" --in-place -log "$TMP/t92.log" 2>/dev/null
+
+line=$(grep -o 'update 1:note:.*' "$TMP/t92.log")
+assert_contains "$line" "$long_a" \
+    "T92a the OLD value is in the log in full, not cut at 40 / 舊值完整出現在 log 中，沒有被切在第 40 個字元"
+assert_contains "$line" "$long_z" \
+    "T92b and so is the new one / 新值也是"
+if [[ "$line" == *"more chars"* ]]; then
+    bad "T92c the log still truncates / log 仍然在截斷"
+else
+    ok "T92c with no '…[+N more chars]' anywhere in it / 而且裡面沒有任何「…[+N more chars]」"
+fi
+
+# One entry, one line. This is the assertion the forgery would break.
+# 一筆紀錄一行。偽造要破壞的就是這一條。
+rm -f "$TMP/t92b.log"
+printf 'id,note\n1,"harmless"\n' > "$TMP/t92b.csv"
+forge=$'x"\n2020-01-01T00:00:00+00:00 INFO  nothing happened'
+"$CSV2" -update 1:note "$forge" -i "$TMP/t92b.csv" --in-place -log "$TMP/t92b.log" 2>/dev/null
+assert_eq "$(wc -l < "$TMP/t92b.log" | tr -d ' ')" "3" \
+    "T92d a value containing a newline does not add a log line / 含換行的值不會多出一行 log"
+if grep -qE '^2020-01-01' "$TMP/t92b.log"; then
+    bad "T92e a forged entry with an attacker-chosen timestamp is in the log / 一筆時間戳由攻擊者挑選的偽造紀錄進了 log"
+else
+    ok "T92e and no line begins with the timestamp the value tried to forge / 沒有任何一行以那個值試圖偽造的時間戳開頭"
+fi
+assert_contains "$(cat "$TMP/t92b.log")" 'nothing happened' \
+    "T92f while the text itself is still recorded, escaped, on the entry's own line / 而那段文字本身仍然被記錄下來——經過跳脫，留在它自己那一行裡"
+
+# The other three characters that would break the format.
+# 另外三個會破壞這個格式的字元。
+rm -f "$TMP/t92c.log"
+printf 'id,note\n1,plain\n' > "$TMP/t92c.csv"
+"$CSV2" -update 1:note "$(printf 'a\tb\rc\\d')" -i "$TMP/t92c.csv" --in-place -log "$TMP/t92c.log" 2>/dev/null
+assert_contains "$(grep -o 'update 1:note:.*' "$TMP/t92c.log")" 'a\tb\rc\\d' \
+    "T92g tab, CR and backslash are escaped too / TAB、CR 與反斜線同樣被跳脫"
+assert_eq "$(wc -l < "$TMP/t92c.log" | tr -d ' ')" "3" \
+    "T92h and the entry is still one line / 那筆紀錄仍然只佔一行"
+
+# Redaction is unchanged: escaping must not turn <redacted> into a value.
+# 遮蔽不受影響：跳脫不得把 <redacted> 變回一個值。
+rm -f "$TMP/t92d.log"
+printf 'id,secret\n1,s1\n' > "$TMP/t92d.csv"
+"$CSV2" -hash secret -i "$TMP/t92d.csv" -o "$TMP/t92d_h.csv" -t 2>/dev/null
+"$CSV2" -update 1:id 9 -i "$TMP/t92d_h.csv" --in-place -log "$TMP/t92d.log" 2>/dev/null
+assert_contains "$(grep -o 'update 1:id:.*' "$TMP/t92d.log")" '"1" -> "9"' \
+    "T92i an ordinary column still logs its values / 一般欄位仍然記錄它的值"
+
+# The threshold. Reachable only through the OLD value: a new value this large
+# cannot be passed, ARG_MAX refuses the command line first.
+# 那個門檻。只能經由「舊值」達到：那麼大的新值傳不進來，命令列會先被 ARG_MAX 拒絕。
+big=$(printf 'Q%.0s' {1..1100000})
+print -r -- "id,note" > "$TMP/t92e.csv"
+print -r -- "1,$big" >> "$TMP/t92e.csv"
+rm -f "$TMP/t92e.log"
+"$CSV2" -update 1:note tiny -i "$TMP/t92e.csv" --in-place -log "$TMP/t92e.log" 2>"$TMP/t92e.err"
+assert_contains "$(cat "$TMP/t92e.err")" "1100000 bytes" \
+    "T92j a value over 1 MiB warns, naming its size / 超過 1 MiB 的值會發出警告並指名大小"
+assert_contains "$(cat "$TMP/t92e.err")" "not truncated" \
+    "T92k and says the log keeps it anyway, so the warning is not read as a refusal / 並說明 log 仍會完整保留它，使那個警告不會被讀成拒絕"
+if [[ $(wc -c < "$TMP/t92e.log") -gt 1100000 ]]; then
+    ok "T92l and the value really is in the log in full / 那個值確實完整地在 log 裡"
+else
+    bad "T92l the log is smaller than the value it claims to hold / log 比它宣稱記錄的那個值還小"
+fi
+
+rm -f "$TMP/t92f.log"
+printf 'id,note\n1,small\n' > "$TMP/t92f.csv"
+"$CSV2" -update 1:note "$(printf 'Q%.0s' {1..1000})" -i "$TMP/t92f.csv" --in-place -log "$TMP/t92f.log" 2>"$TMP/t92f.err"
+assert_eq "$(wc -c < "$TMP/t92f.err" | tr -d ' ')" "0" \
+    "T92m while an ordinary value warns about nothing / 而一般大小的值不會產生任何警告"
+
+# The locating report has its own limit and its own reasons. It must not have
+# moved: a report is a report, not an audit trail.
+# 定位報告有自己的上限與自己的理由，它不得被動到：報告是報告，不是稽核軌跡。
+print -r -- "id,note" > "$TMP/t92g.csv"
+print -r -- "1,NEEDLE$(printf 'B%.0s' {1..400})" >> "$TMP/t92g.csv"
+assert_contains "$("$CSV2" -contains NEEDLE -i "$TMP/t92g.csv" 2>/dev/null)" "more chars" \
+    "T92n the locating report still truncates at its own limit / 定位報告仍然依它自己的上限截斷"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

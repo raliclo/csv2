@@ -151,8 +151,32 @@ final class Logger {
     /// into a file nobody is guarding.
     /// 屬於加密或雜湊欄位的值絕不出現在 log 中。否則對受保護欄位的 `-update`
     /// 會把明文寫進一個沒有人在保護的檔案。
+    /// Escaped, and NOT truncated. The escaping is the load-bearing half: the
+    /// log is one entry per line, and this wrote the value with quotes and
+    /// nothing else -- so a newline inside a value opened a new line whose
+    /// entire content the value chose. A forged entry with an attacker-picked
+    /// timestamp landed in the audit trail at rc=0. The 40-character
+    /// truncation did not prevent that, it only shortened the forged line,
+    /// which is why lifting the limit had to wait for the escaping: otherwise
+    /// the forgery would have gone from truncated to complete.
+    /// 有跳脫，且**不截斷**。跳脫是承重的那一半：log 是一行一筆，而原本只是把值加上引號、
+    /// 別的什麼都沒做——因此值裡的一個換行就會開啟新的一行，而那一行的全部內容由值決定。
+    /// 一筆時間戳由攻擊者挑選的偽造紀錄，就這樣以 rc=0 落進稽核軌跡。40 字元的截斷擋不住
+    /// 那件事，它只是把偽造的那一行剪短——這正是「解除上限」必須等「跳脫」先做的原因：
+    /// 否則偽造會從被剪斷變成完整。
     func redact(column: String, value: [UInt8]) -> String {
-        redactedColumns.contains(column) ? "<redacted>" : "\"\(echoValue(value))\""
+        redactedColumns.contains(column)
+            ? "<redacted>"
+            : "\"\(reportEscape(echoValue(value, limit: nil)))\""
+    }
+
+    /// Whether a value about to be logged is large enough that the person
+    /// running this should be told. Returns false for a redacted column,
+    /// because nothing of it reaches the log to be large.
+    /// 一個即將被記錄的值是否大到「執行這件事的人應該被告知」。受保護欄位回傳 false，
+    /// 因為它不會有任何內容進入 log，也就談不上大。
+    func logValueIsLarge(column: String, value: [UInt8]) -> Bool {
+        !redactedColumns.contains(column) && value.count > LOG_VALUE_WARN_BYTES
     }
 
     func close() { try? logHandle?.close() }

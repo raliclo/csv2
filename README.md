@@ -425,8 +425,22 @@ will not record:
 | the invocation | yes, but values are replaced: `-update 1:6 <value>`, `-insert 3 <row>` |
 | key **bytes** | never |
 | the keyfile **path**, and the key fingerprint | yes — they identify which key, not what it is |
-| old and new values in an **ordinary** column | in full; that is the point of an audit trail |
+| old and new values in an **ordinary** column | in full, never truncated; that is the point of an audit trail |
 | old and new values in a **protected** column | `<redacted>` |
+
+**One entry is one line, and values are escaped to keep it that way.** A
+newline, tab, CR or backslash in a value is written as `\n`, `\t`, `\r` or
+`\\`. Without that a value containing a newline started a new line whose
+entire content the value chose — a forged entry, with a timestamp of its
+choosing, in the audit trail, at rc=0. Truncating the value did not prevent
+that; it only shortened the forged line.
+
+**"In full" has no upper bound, and above 1 MiB it says so.** A value larger
+than that is still written whole, with a `WARN` naming its size: a cap would
+be an audit trail that drops data, which is the thing this line exists to
+avoid, but a log that quietly grows by a megabyte should say so at the time.
+Only the *old* value can reach that size — a new one cannot be passed, because
+`ARG_MAX` refuses the command line first.
 
 A column counts as protected when **the file's own header says so** — a header
 reading `secret:hmac:d6c8da42` or `secret:enc:…` marks it — not merely when the

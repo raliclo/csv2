@@ -871,6 +871,19 @@ func runEdit(_ o: Options) throws {
                     let name = baseName(headerName(headers[0].fields[c]))
                     let old = r.fields[c].value
                     r.fields[c].set([UInt8](value.utf8))
+                    // The log records the value in full, so say so when "in
+                    // full" is a megabyte. This is a WARN and not a cap: the
+                    // decision (2026-08-19) was that an audit trail must not
+                    // drop data, and the honest consequence of that is an
+                    // unbounded line -- which the person running the edit
+                    // should hear about rather than discover in a disk graph.
+                    // log 會完整記錄那個值，因此當「完整」等於一 MB 時，要說出來。這是
+                    // WARN 而不是上限：2026-08-19 定案「稽核軌跡不得丟資料」，而那個決定
+                    // 誠實的後果就是無界的行長度——執行這次編輯的人應該當場聽到，而不是
+                    // 事後在磁碟用量圖上發現。
+                    for v in [old, r.fields[c].value] where Logger.shared.logValueIsLarge(column: name, value: v) {
+                        Logger.shared.warn("record \(r.number) column \(name): a value of \(v.count) bytes is being written to the log in full; the log is not truncated")
+                    }
                     Logger.shared.info("update \(r.number):\(name): \(Logger.shared.redact(column: name, value: old)) -> \(Logger.shared.redact(column: name, value: r.fields[c].value))")
                 }
             }

@@ -54,22 +54,41 @@ let BOM: [UInt8] = [0xEF, 0xBB, 0xBF]
 /// 一律在 grapheme cluster 邊界截斷。家庭 emoji 是 25 位元組、7 個碼位、
 /// 一個 cluster；按位元組切會得到半個家庭與不合法的 UTF-8。一個在報告錯誤時
 /// 自己產生亂碼的工具，會讓人去查錯的方向。
-func echoValue(_ bytes: [UInt8], limit: Int = 40) -> String {
+/// `limit: nil` means no truncation at all. The log passes nil, because an
+/// audit trail that silently drops the middle of a value is not one -- the
+/// README promised the old and new values "in full" while this cut them at 40
+/// characters, and `status_notes`, the column whose corruption is the reason
+/// this project exists, runs to 878 bytes in the real fixture. Round 38.
+/// `limit: nil` 表示完全不截斷。log 傳的就是 nil，因為一份會安靜地把值的中段丟掉的稽核
+/// 軌跡不算稽核軌跡——README 承諾新舊值「完整記錄」，而這裡在第 40 個字元把它們切斷，
+/// 而 `status_notes`（這個專案存在的理由就是那一欄被改壞）在真實素材裡長達 878 bytes。
+/// 第 38 回合。
+func echoValue(_ bytes: [UInt8], limit: Int? = 40) -> String {
     guard let s = String(bytes: bytes, encoding: .utf8) else {
         // Not UTF-8. Render as hex so the message stays printable rather
         // than emitting raw bytes into someone's terminal.
         // 非 UTF-8，改以十六進位呈現，避免把原始位元組吐進終端機。
-        let head = Array(bytes.prefix(limit))
+        let head = limit.map { Array(bytes.prefix($0)) } ?? bytes
         let hex = head.map { String(format: "%02x", $0) }.joined(separator: " ")
-        return "<non-UTF-8: \(hex)\(bytes.count > limit ? " …" : "")>"
+        let cut = limit.map { bytes.count > $0 } ?? false
+        return "<non-UTF-8: \(hex)\(cut ? " …" : "")>"
     }
-    if s.count <= limit { return s }
+    guard let limit, s.count > limit else { return s }
     // Swift's Character IS a grapheme cluster, so prefix() cuts on a
     // cluster boundary by construction.
     // Swift 的 Character 就是 grapheme cluster，因此 prefix() 天生切在
     // cluster 邊界上。
     return String(s.prefix(limit)) + "…[+\(s.count - limit) more chars]"
 }
+
+/// Above this, a logged value gets a WARN naming its size -- and is still
+/// written in full. The threshold is not a cap: it is the point at which
+/// someone should know their audit trail just grew by a megabyte, which is a
+/// different thing from deciding for them what to keep.
+/// 超過這個大小，被記錄的值會附帶一行 WARN 說明它的大小——而且**仍然完整寫出**。
+/// 這個門檻不是上限：它是「有人該知道自己的稽核軌跡剛剛長了一 MB」的那個點，
+/// 而那與「替他決定該留下什麼」是兩回事。
+let LOG_VALUE_WARN_BYTES = 1 << 20
 
 // ---------------------------------------------------------------------
 // MARK: - Format / 格式
