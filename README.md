@@ -155,10 +155,11 @@ SELECTING / 選取
 INPUT / OUTPUT
   -i FILE  -o FILE      file paths; -o writes a temp file and renames
   -si  -so              stdin / stdout, without buffering the whole file
-  --headers 1|2         required with -si: stdin has no extension. Also
-                        accepted with -i, where it OVERRIDES the suffix -- the
-                        one place the format is not declared by the name. See
-                        the warning above; never combine it with an edit verb
+  --headers 1|2         required with -si: stdin has no extension. With -i it
+                        is accepted only when it AGREES with the suffix, and
+                        disagreeing is refused -- the suffix declares the
+                        format. See the warning above; never combine it with
+                        an edit verb
   --in-place            edit -i in place, via temp file + rename
 
 OUTPUT SHAPE / 輸出形狀
