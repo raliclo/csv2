@@ -312,15 +312,36 @@ r_many=$(rss_of "$TMP/m9c.txt"); r_few=$(rss_of "$TMP/m9d.txt")
 size_many=$(wc -c < "$TMP/m9_many.csv2" | tr -d ' ')
 size_few=$(wc -c < "$TMP/m9_few.csv2" | tr -d ' ')
 
-# The promise is "without buffering the whole file". Below the input size is
-# the weakest form of that which is still an assertion, and it is one the
-# floor cannot satisfy on its own once the input is well past it.
-# 承諾是「不整檔緩衝」。「低於輸入大小」是這個承諾最弱、但仍然算是斷言的形式，而一旦輸入
-# 遠大於那個地板，光靠地板是滿足不了它的。
-if [[ -n "$r_many" && $r_many -lt $size_many ]]; then
-    ok "T9b peak RSS is below the input size on a ${size_many}B stream (${r_many}B) / 在 ${size_many}B 的串流上，peak RSS 低於輸入大小"
+# Two large streams, one twice the other, compared against EACH OTHER. The
+# first version of this asserted "peak RSS below the input size", which passed
+# on macOS and failed in the guest at 27 MB for a 15.5 MB stream -- and that
+# told me nothing, because it cannot separate "Linux still retains the stream"
+# from "Linux's floor is simply higher". An absolute comparison against the
+# input size silently assumes a floor, and the floor is a property of the
+# platform's Foundation, not of csv2.
+#
+# Doubling the input makes the floor cancel: both runs pay it once. If the
+# stream is retained, the larger run costs a whole extra input; the bound here
+# is a QUARTER of that, so an implementation that keeps even half of what it
+# reads cannot pass, on any platform, without knowing what the floor is.
+#
+# 兩條大串流，其中一條是另一條的兩倍，而且是「互相比較」。這一條的第一版斷言的是
+# 「peak RSS 低於輸入大小」，它在 macOS 上通過、在 guest 上以「15.5 MB 的串流用了 27 MB」
+# 失敗——而那個失敗什麼也沒告訴我，因為它分不出「Linux 仍然留住整條串流」與「Linux 的地板
+# 本來就比較高」。拿輸入大小做絕對比較，等於默默假設了一個地板，而那個地板是該平台
+# Foundation 的性質，不是 csv2 的。
+# 把輸入加倍會讓地板抵銷：兩次執行各付一次。若串流被留住，較大的那次會多付一整份輸入；
+# 而這裡的界線是那一份的「四分之一」，因此一個「連讀進來的一半都留著」的實作，在任何平台上
+# 都過不了，而且不需要知道地板是多少。
+{ head -2 "$TMP/m_small.csv2"
+  for i in {1..400}; do tail -n +3 "$TMP/m_small.csv2"; done } > "$TMP/m9_many2.csv2"
+cat "$TMP/m9_many2.csv2" | "$CSV2" -si --headers 2 -so -r -debug > /dev/null 2>"$TMP/m9e.txt"
+r_many2=$(rss_of "$TMP/m9e.txt")
+size_many2=$(wc -c < "$TMP/m9_many2.csv2" | tr -d ' ')
+if [[ -n "$r_many" && -n "$r_many2" && $r_many2 -lt $((r_many + size_many / 4)) ]]; then
+    ok "T9b doubling the stream does not add memory (${size_many}B→${r_many}B, ${size_many2}B→${r_many2}B) / 串流加倍不增加記憶體"
 else
-    bad "T9b streaming RSS not below input size (${size_many}B in, ${r_many}B RSS)"
+    bad "T9b memory grows with the stream (${size_many}B→${r_many}B, ${size_many2}B→${r_many2}B; bound $((r_many + size_many / 4)))"
 fi
 
 # The same bytes in a twentieth of the records. This is the assertion that

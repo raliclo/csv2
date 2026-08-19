@@ -34,6 +34,45 @@ import WinSDK
 enum Platform {
 
     // -----------------------------------------------------------------
+    // MARK: - Autorelease drain / autorelease 排空
+    // -----------------------------------------------------------------
+
+    /// Runs `body` inside an autorelease pool where the platform has one, and
+    /// plain where it does not. It exists for one call site -- the read loop
+    /// -- and it is here rather than there because `autoreleasepool` DOES NOT
+    /// EXIST on Linux Swift: the first version of the fix put it beside the
+    /// call, passed on macOS, and failed the guest build with
+    /// `cannot find 'autoreleasepool' in scope`. That is precisely the rot
+    /// this file's header describes, caught by the cross-platform run instead
+    /// of by review.
+    ///
+    /// The pool is not decoration. `FileHandle.readData` returns Foundation
+    /// objects that, on Darwin, are released only when a pool drains -- with
+    /// none in the loop they accumulated for the whole run and peak RSS tracked
+    /// bytes read. Linux Foundation has no pools and manages `Data` by ARC, so
+    /// the leak was macOS-only and the plain branch is correct rather than a
+    /// stub waiting to be filled in.
+    ///
+    /// 在有 autorelease pool 的平台上把 `body` 包進一個 pool，沒有的平台就直接執行。
+    /// 它只為一個呼叫點存在——讀取迴圈——而它放在這裡而不是那裡，是因為
+    /// **`autoreleasepool` 在 Linux 的 Swift 上根本不存在**：這個修正的第一版把它寫在
+    /// 呼叫點旁邊，在 macOS 上通過，而 guest 建置以
+    /// `cannot find 'autoreleasepool' in scope` 失敗。那正是本檔案開頭所描述的那種腐化，
+    /// 而抓到它的是跨平台的那次執行，不是審閱。
+    ///
+    /// 這個 pool 不是裝飾。`FileHandle.readData` 回傳的 Foundation 物件在 Darwin 上只有
+    /// 在 pool 排空時才會被釋放——迴圈裡一個都沒有，於是它們累積了整趟執行，peak RSS 正比於
+    /// 讀進來的位元組數。Linux 的 Foundation 沒有 pool、以 ARC 管理 `Data`，因此這個洩漏
+    /// 是 macOS 專屬的，而那個「直接執行」的分支是正確答案，不是一個待填的空殼。
+    static func drainingPool<T>(_ body: () -> T) -> T {
+        #if canImport(Darwin)
+        return autoreleasepool(invoking: body)
+        #else
+        return body()
+        #endif
+    }
+
+    // -----------------------------------------------------------------
     // MARK: - Atomic replace / 原子性取代
     // -----------------------------------------------------------------
 

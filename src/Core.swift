@@ -705,8 +705,15 @@ final class ByteSource {
         self.chunkSize = chunkSize
     }
 
+    /// The pool is the point, not the read. Without it, every `Data` this
+    /// returns survives on Darwin until the process exits, so peak RSS grows
+    /// with the number of bytes read and `-si` buffers the whole stream --
+    /// the opposite of what `-so`/`-si` promise. See Platform.drainingPool.
+    /// 重點是那個 pool，不是那次讀取。沒有它，這裡回傳的每一個 `Data` 在 Darwin 上都會
+    /// 活到行程結束，於是 peak RSS 隨「讀了多少位元組」成長、`-si` 等於整條串流都緩衝
+    /// 了起來——與 `-si`／`-so` 的承諾正好相反。見 Platform.drainingPool。
     func next() -> [UInt8]? {
-        return autoreleasepool {
+        return Platform.drainingPool {
             let d = handle.readData(ofLength: chunkSize)
             if d.isEmpty { return nil }
             bytesRead += d.count
@@ -804,9 +811,7 @@ final class ByteSink {
 
     func flush() {
         if buf.isEmpty { return }
-        autoreleasepool {
-            handle.write(Data(buf))
-        }
+        handle.write(Data(buf))
         bytesWritten += buf.count
         buf.removeAll(keepingCapacity: true)
     }
