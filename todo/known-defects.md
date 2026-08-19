@@ -838,7 +838,7 @@ from a fresh session.
 | BB | `-log` 在 40 字元截斷新舊值，而 README 寫「完整記錄」 | **程式＋文件（稽核相關）**  — **已修 T92a–T92n** |
 | CC | 儲存格層級的錯誤位址是「物理行號」卻標著 `record N`，餵不回 `-get`／`-update` | **程式**  — **已修 T93a–T93h** |
 | DD | `-debug=trace` 只回報「被輸出的」紀錄；被排除的一行都沒有 | **程式＋文件**  — **已修 T94a–T94h** |
-| EE | 平行路徑不印 `metrics:` 行，而 README 說 `-debug` 包含它 | **程式＋文件** |
+| EE | 平行路徑不印 `metrics:` 行，而 README 說 `-debug` 包含它 | **程式＋文件**  — **已修 T95a–T95f** |
 | FF | README 教的 `-contains` → `-update` 組合會靜默雙重跳脫 | **文件（後果是資料損壞）** |
 | GG | 名為 `.csv2` 但只有一列標頭的檔案，rc=0 讀出時吞掉一筆；`--json` 的 meta 只是覆述副檔名 | **文件＋缺少能力** |
 | HH | 中文 README 有兩段被截斷的句子；英文 `-encrypt` 區塊有一句重複 | 文件  — **已修** |

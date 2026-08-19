@@ -398,4 +398,21 @@ func runParallelSearch(_ o: Options) throws {
     try outSink.close()
     aborted = false
     Logger.shared.debug("parallel: \(totalRecords) records, \(matched) matched")
+    // The metrics line belongs to every path, not to the one that happens to
+    // end in runSelect. -debug is documented as "diagnostics to stderr,
+    // including a metrics: line", and this path emitted none -- so
+    // peak_rss_bytes was unavailable on exactly the runs where someone would
+    // want it, since parallelism is what a large file gets. Round 38, EE.
+    //
+    // read_bytes is the file size here rather than a counter: the parallel
+    // pass reads every chunk, so those are the same number, and reporting a
+    // counter that could only ever equal the size would invite the reader to
+    // believe it might not.
+    // metrics 那一行屬於「每一條路徑」，不屬於「剛好在 runSelect 收尾的那一條」。-debug 的
+    // 文件寫的是「診斷輸出到 stderr，包含一行 metrics」，而這條路徑一行都沒有——於是
+    // peak_rss_bytes 恰好在「有人會想看它」的那些執行上取不到，因為大檔案拿到的正是平行。
+    // 第 38 回合，EE。
+    // 此處的 read_bytes 直接用檔案大小而不是計數器：平行那一遍會讀過每一個區塊，因此兩者
+    // 是同一個數字；而回報一個「永遠只會等於檔案大小」的計數器，反而會讓讀者以為它可能不等於。
+    Metrics.report(bytesRead: Int(st.size), fileSize: Int(st.size))
 }

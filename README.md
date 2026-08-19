@@ -233,7 +233,10 @@ INDEX / 索引
                         is deliberately a heuristic, not a proof
 
 DIAGNOSTICS / 診斷
-  -debug                diagnostics to stderr, including a metrics: line
+  -debug                diagnostics to stderr, including a metrics: line on
+                        every path -- the parallel one costs about twice the
+                        RSS of the single-threaded one, and that is measurable
+                        from inside rather than only with /usr/bin/time
   -debug=trace          one level lower: every record's selection decision,
                         including the ones NOT emitted and why, and the point
                         at which the read stops -- so a record with no line is

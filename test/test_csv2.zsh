@@ -3804,6 +3804,55 @@ assert_contains "$(tr_of -contains zlib -B 1 --filter -i "$TMP/t94.csv")" "held 
 assert_eq "$("$CSV2" -contains zlib --filter -i "$TMP/t94.csv" -debug 2>&1 >/dev/null | grep -c 'not emitted')" "0" \
     "T94h plain -debug prints none of this / 單純的 -debug 完全不印這些"
 
+# ---------------------------------------------------------------------
+# T95 -- the metrics line belongs to every path.
+#
+# Round 38, defect EE. `-debug` is documented as "diagnostics to stderr,
+# including a metrics: line". The parallel path returned before the line was
+# printed, so `peak_rss_bytes` was unavailable on exactly the runs where
+# somebody would want it: parallelism is what a large file gets, and a large
+# file is what makes memory a question. The reader had to reach for
+# /usr/bin/time -l, which is the tool admitting it cannot answer.
+#
+# It is worth having for its own sake, not just for the promise: the two paths
+# do not cost the same, and now the difference is visible from inside.
+#
+# T95 —— metrics 那一行屬於每一條路徑。
+# 第 38 回合，缺陷 EE。`-debug` 的文件寫的是「診斷輸出到 stderr，包含一行 metrics」。
+# 平行路徑在那一行被印出來之前就 return 了，因此 `peak_rss_bytes` 恰好在「有人會想看它」的
+# 那些執行上取不到：大檔案拿到的正是平行，而「大檔案」正是讓記憶體成為問題的原因。讀者只能
+# 改用 /usr/bin/time -l——那等於這支工具承認自己答不出來。
+# 這件事本身就值得做，不只是為了兌現那句承諾：兩條路徑的成本並不相同，而現在那個差別
+# 從工具內部就看得見。
+# ---------------------------------------------------------------------
+echo
+echo "--- T95: every path reports its metrics / 每一條路徑都回報自己的量測 ---"
+
+{ print -r -- 'a,b'; print -r -- 'A,B'
+  for i in {1..400}; do print -r -- "$i,value with xyz $i"; done } > "$TMP/t95.csv2"
+
+par=$(CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=512 \
+      "$CSV2" -contains xyz -i "$TMP/t95.csv2" -debug 2>&1 >/dev/null)
+sin=$(CSV2_PARALLEL_MIN_BYTES=999999999 \
+      "$CSV2" -contains xyz -i "$TMP/t95.csv2" -debug 2>&1 >/dev/null)
+
+# Prove the two runs really were different paths before comparing what they
+# printed -- T72's lesson, applied here.
+# 在比較它們印了什麼之前，先證明那真的是兩條不同的路徑——T72 的教訓，用在這裡。
+assert_contains "$par" "parallel:" \
+    "T95a the first run really took the parallel path / 第一次執行確實走了平行路徑"
+assert_contains "$sin" "single-threaded:" \
+    "T95b and the second really did not / 而第二次確實沒有"
+
+assert_contains "$par" "metrics:" \
+    "T95c the parallel path prints a metrics line, as -debug promises / 平行路徑會印出 metrics 行，如 -debug 所承諾"
+assert_contains "$par" "peak_rss_bytes=" \
+    "T95d with the RSS figure, which is the field that was unreachable / 其中含 RSS 數值，那正是原本取不到的那個欄位"
+assert_contains "$par" "read_bytes=" \
+    "T95e and the bytes read / 以及讀取的位元組數"
+assert_contains "$sin" "metrics:" \
+    "T95f while the single-threaded path still prints one / 而單執行緒路徑仍然會印"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
