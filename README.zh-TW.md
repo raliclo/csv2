@@ -32,6 +32,13 @@ English: [README.md](./README.md)
 [test/test_csv2.zsh](./test/test_csv2.zsh) 中對應的案例通過時才打勾**。
 工具尚未能滿足的案例會回報為 SKIP 並附原因，不會安靜地略過。
 
+**已設計但尚未實作：`csv2view`，一個原生 SwiftUI 檢視器。** 底下沒有任何一段在描述它，
+因為它還不存在——設計寫在 [plan/plan.md](./plan/plan.md)，並指名 csv2 必須先補上的三件事：
+一個 `-count` 動詞；`-mid` 的**起點**越過檔尾時要報錯而不是回傳空的；以及在索引裡存行號，
+使含引號換行的檔案仍然能 seek。在 19.5 MB 的檔案上，一次 40 列的視窗查詢實測 5.6 ms，
+那正是檢視器會「呼叫這個執行檔」而不是「內嵌一份它的解析器」的理由。
+**不要照著上面任何一項寫腳本；那是計畫，不是介面。**
+
 目前**不**隨 LinuxCS 的 guest rootfs 出貨——需要它的腳本都在 macOS host 上執行。
 但測試在 **macOS 與 aarch64 Linux 兩個平台**上都做，且要求兩邊輸出逐位元相同：
 Linux 上的 Foundation 是另一份實作，「在 macOS 上會過」對 Linux 不構成證據。那就是

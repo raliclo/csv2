@@ -33,6 +33,16 @@ and a box is only ticked once the matching case in
 [test/test_csv2.zsh](./test/test_csv2.zsh) passes. Cases the tool cannot yet
 satisfy are reported as SKIP with the reason rather than quietly left out.
 
+**Designed but not built: `csv2view`, a native SwiftUI viewer.** Nothing below
+describes it, because none of it exists yet — the design lives in
+[plan/plan.md](./plan/plan.md) and names the three things csv2 has to gain
+first: a `-count` verb, an error instead of empty output when `-mid`'s START
+record is past the end, and line numbers in the index so a file with a quoted
+newline can still be seeked into. A measured 5.6 ms per 40-record window on a
+19.5 MB file is why the viewer will call this binary rather than embed a copy
+of its parser. **Do not write a script against any of that; it is a plan, not
+an interface.**
+
 It is **not** shipped in the LinuxCS guest rootfs for now — the scripts that
 need it run on the macOS host. It is tested on **both** macOS and aarch64
 Linux, with byte-identical output required from each: Foundation on Linux is a
