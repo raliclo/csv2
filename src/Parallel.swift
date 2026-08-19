@@ -121,7 +121,30 @@ func parallelDeclineReason(_ o: Options, format: Format) -> String? {
     // 前提是一筆一行。`.csv2` 保證了這一點；`.csv` 只有在「由掃描建立的索引這麼說」
     // 時才被信任。
     if format == .csv2 { return nil }
-    if let idx = CSVIndex.load(dataPath: path), idx.noEmbeddedNewlines { return nil }
+    // --no-index says "never read or write a sidecar", and this was the one
+    // place that read one anyway. It did not print, return or write anything
+    // from the index -- it only let the index decide which path ran -- which
+    // is exactly why nothing caught it: the flag's effect was invisible except
+    // in the record numbers. It also meant the documented escape hatch did not
+    // escape. Anyone reaching for --no-index because they suspect the sidecar
+    // got the sidecar's answer.
+    // --no-index 的意思是「絕不讀寫 sidecar」，而這裡是唯一仍然去讀的地方。它不曾從索引
+    // 取出任何東西來印、來回傳或來寫入——它只是讓索引決定走哪一條路——而那正是沒有東西
+    // 抓到它的原因：那個旗標的作用除了紀錄號之外看不見。它同時也讓那條寫在文件裡的逃生口
+    // 逃不掉：因為懷疑 sidecar 而伸手去拿 --no-index 的人，拿到的還是 sidecar 的答案。
+    if o.noIndex { return "--no-index, and a .csv needs an index to prove one record per line" }
+    if let idx = CSVIndex.load(dataPath: path) {
+        if idx.noEmbeddedNewlines { return nil }
+        // Distinguished from "no index" because the remedy is not the same.
+        // Telling someone to run --build-index here sends them to rebuild an
+        // index that will reach the identical conclusion: the file really does
+        // have a record spanning lines, and the single-threaded path is not a
+        // fallback but the correct answer.
+        // 與「沒有索引」分開，因為解法不同。在這裡叫人去跑 --build-index，是讓他重建一份
+        // 會得到完全相同結論的索引：這個檔案確實有一筆紀錄跨行，而單執行緒不是退而求其次，
+        // 它就是正確答案。
+        return ".csv whose index records a record spanning lines; a record number is not a line number here"
+    }
     return ".csv with no index proving one record per line; build one with --build-index"
 }
 

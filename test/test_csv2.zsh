@@ -2987,6 +2987,207 @@ assert_contains "$("$CSV2" -head 1 -t --json -i "$TMP/t78_one.csv" 2>/dev/null |
 assert_contains "$("$CSV2" -head 1 -t --json -i "$TMP/t78_two.csv2" 2>/dev/null | head -1)" '"headers":2' \
     "T78f and two for a .csv2, which is how a caller asserts bilinguality / 對 .csv2 則回報兩列，那才是呼叫端斷言雙語的方式"
 
+# ---------------------------------------------------------------------
+# The index asserted a property of the file that nothing ever derived, and
+# the O(n) proof offered for exactly this doubt did not check it.
+#
+# An index carries `no_embedded_newlines`. The parallel path consumes it to
+# decide that a line is a record. Three call sites set it, and two of them
+# passed a constant: one wrote `spansLines: false`, the other wrote
+# `rec.line != r.line || false` where `r` is `rec` with only `number`
+# changed -- a comparison that cannot be true. So EVERY index --build-index
+# ever wrote claimed the property, whether the file had it or not.
+#
+# The consequence needed no tampering and no unusual file. Take a CSV with
+# prose in quotes -- TARGET_PACKAGES.csv's `status_notes` is one, and is the
+# reason this project exists -- put one newline inside one quoted field, and:
+#
+#     --build-index    index built
+#     --verify-index   index OK                                    rc=0
+#     -contains        150001:2   (300001 records)                 rc=0
+#     forced single    150000:2
+#     python3 csv      record 150000, 300000 records
+#
+# The wrong record number, at rc=0, with the documented proof saying the
+# index was fine. That is this project's own failure mode, arriving through
+# the one instrument the README nominates for ruling it out.
+#
+# --verify-index missed it for a reason worth keeping: it checked the grid
+# offsets and the record count, and BOTH SURVIVE this edit intact. Every
+# record still begins exactly where the index says, and there are still
+# exactly as many. The only thing that changed was a claim in the header
+# that nothing re-derived.
+#
+# And the escape hatch did not escape. `--no-index` is documented as "never
+# read or write a .index sidecar"; it did not write one, but the parallel
+# eligibility check loaded one anyway and never looked at o.noIndex. So a
+# user who suspected the sidecar and reached for --no-index still got the
+# sidecar's answer.
+#
+# Four changes: one function answers "does this record span lines" for all
+# three call sites, --verify-index re-derives it, --no-index is honoured
+# where it was not, and INDEX_VERSION goes to 3 so the sidecars already on
+# disk -- which no check inside them can catch -- are ignored rather than
+# trusted.
+#
+# T79 —— 索引宣告了一個「沒有任何東西推導過」的檔案性質，而為了這個疑慮才提供的 O(n)
+# 證明並沒有檢查它。
+# 索引帶著 `no_embedded_newlines`，平行路徑用它來斷定「一行就是一筆」。設定它的呼叫點有
+# 三個，其中兩個傳的是常數：一個寫 `spansLines: false`，另一個寫
+# `rec.line != r.line || false`，而 `r` 是只改了 `number` 的 `rec`——那個比較不可能為真。
+# 於是 --build-index 寫出的每一份索引都宣稱自己有這個性質，不管檔案有沒有。
+# 造成的後果不需要竄改、也不需要特殊檔案：拿一份引號內含散文的 CSV（TARGET_PACKAGES.csv
+# 的 `status_notes` 就是，而那正是本專案存在的理由），在某個引號欄位裡放一個換行，然後
+# --verify-index 說 OK、-contains 回報 150001、強制單執行緒回報 150000、python3 的 csv
+# 模組說是 150000。錯的紀錄號、rc=0，而文件指名的那個證明說索引沒問題。
+# --verify-index 漏掉它的原因值得記下來：它檢查的是格點偏移量與筆數，而這兩者在這個改動
+# 下「都完好無損」——每一筆仍然從索引所說的位元組開始，筆數也一樣。變的只是檔頭裡那個沒有
+# 任何東西重新推導過的宣稱。
+# 而逃生口也逃不掉：`--no-index` 文件寫的是「絕不讀寫 .index sidecar」，它確實沒有寫，但
+# 平行資格檢查仍然載入了一份，而且從來沒看過 o.noIndex。於是因為懷疑 sidecar 而伸手去拿
+# --no-index 的人，拿到的還是 sidecar 的答案。
+# 四項修改：由一個函式為三個呼叫點回答「這一筆有沒有跨行」、--verify-index 重新推導它、
+# 在原本沒有遵守的地方遵守 --no-index，以及把 INDEX_VERSION 推進到 3，讓已經在磁碟上、
+# 且內部沒有任何檢查抓得到的那些 sidecar 被忽略而不是被信任。
+# ---------------------------------------------------------------------
+echo
+echo "--- T79: the index's claim about the file, re-derived / 索引對檔案的宣稱，重新推導 ---"
+
+# Genuine, valid RFC 4180. Record 10 holds a newline inside a quoted field --
+# no tampering, this is just what prose in a CSV looks like.
+#
+# The needle sits at record 150, AFTER the spanning one, and that placement is
+# the test. A record that spans lines still STARTS on a line boundary, so its
+# own number survives the miscount; everything after it is shifted by one. A
+# first draft of this fixture put the needle inside the spanning record and
+# passed against the unfixed build -- it was asserting on the one record the
+# defect cannot reach.
+# 真正合法的 RFC 4180。第 10 筆在引號欄位內含一個換行——沒有竄改，CSV 裡的散文本來就長這樣。
+# needle 放在第 150 筆，也就是跨行那一筆「之後」，而那個位置正是這個測試本身。跨行的紀錄
+# 自己仍然從一個行邊界開始，所以它自己的號碼在誤數中存活下來；被推移一格的是它之後的每一筆。
+# 這個 fixture 的第一版把 needle 放進跨行的那一筆裡，結果在未修正的建置上也通過——它斷言的
+# 正好是這個缺陷碰不到的那一筆。
+{ print -r -- 'a,b'
+  for i in {1..300}; do
+      if [[ $i == 10 ]]; then print -r -- "$i,\"prose spanning"; print -r -- "two lines\""
+      elif [[ $i == 150 ]]; then print -r -- "$i,\"needle here\""
+      else print -r -- "$i,\"xx yy $i\""; fi
+  done } > "$TMP/t79_nl.csv"
+{ print -r -- 'a,b'
+  for i in {1..300}; do
+      if [[ $i == 150 ]]; then print -r -- "$i,\"needle on one line\""
+      else print -r -- "$i,\"xx yy $i\""; fi
+  done } > "$TMP/t79_clean.csv"
+
+CSV2_INDEX_MIN_BYTES=1 "$CSV2" --build-index -i "$TMP/t79_nl.csv" >/dev/null
+CSV2_INDEX_MIN_BYTES=1 "$CSV2" --build-index -i "$TMP/t79_clean.csv" >/dev/null
+
+# The record number is the whole point. Compare against the path that cannot
+# use the index at all, which is the reference answer.
+# 紀錄號才是重點。與「完全無法使用索引」的那條路比對，那是基準答案。
+idx=$(CSV2_INDEX_MIN_BYTES=1 CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=512 \
+      "$CSV2" -contains needle -i "$TMP/t79_nl.csv" 2>/dev/null)
+ref=$(CSV2_PARALLEL_MIN_BYTES=999999999 "$CSV2" -contains needle -i "$TMP/t79_nl.csv" 2>/dev/null)
+assert_eq "$idx" "$ref" \
+    "T79a an index does not change the record number on a file with a quoted newline / 對含引號換行的檔案，有沒有索引不改變紀錄號"
+assert_contains "$idx" "150:" \
+    "T79b and the number is 150, the record, not 151, the line / 而那個號碼是紀錄 150，不是行 151"
+
+p=$(CSV2_INDEX_MIN_BYTES=1 CSV2_PARALLEL_MIN_BYTES=1 path_of -contains needle -i "$TMP/t79_nl.csv")
+assert_contains "$p" "records a record spanning lines" \
+    "T79c the reason names the index's finding, not 'build one' -- rebuilding would reach the same conclusion / 理由指名索引的發現，而不是叫人「建一個」——重建會得到相同結論"
+
+# The fast path must survive the fix, or the fix is a different defect.
+# 快路徑必須在修正後存活，否則這個修正只是換了一個缺陷。
+p=$(CSV2_INDEX_MIN_BYTES=1 CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=512 \
+    path_of -contains needle -i "$TMP/t79_clean.csv")
+assert_contains "$p" "parallel:" \
+    "T79d a .csv with no embedded newline still takes the parallel path / 沒有內嵌換行的 .csv 仍然走平行路徑"
+
+assert_succeeds "T79e --verify-index passes on an honestly built index / 誠實建出來的索引通過 --verify-index" -- \
+    env CSV2_INDEX_MIN_BYTES=1 "$CSV2" --verify-index -i "$TMP/t79_nl.csv"
+
+# --no-index: documented as "never read or write". The write half was already
+# true; the read half was not, and only the chosen path showed it.
+# --no-index：文件寫的是「絕不讀寫」。「寫」那一半本來就成立，「讀」那一半不成立，
+# 而唯一顯示出來的地方是「走了哪一條路」。
+p=$(CSV2_INDEX_MIN_BYTES=1 CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=512 \
+    path_of -contains needle --no-index -i "$TMP/t79_clean.csv")
+assert_contains "$p" "single-threaded: --no-index" \
+    "T79f --no-index declines the parallel path because it will not read the sidecar / --no-index 拒絕平行路徑，因為它不會去讀 sidecar"
+assert_eq "$(CSV2_INDEX_MIN_BYTES=1 "$CSV2" -contains needle --no-index -i "$TMP/t79_clean.csv" 2>/dev/null)" \
+          "$(CSV2_PARALLEL_MIN_BYTES=999999999 "$CSV2" -contains needle -i "$TMP/t79_clean.csv" 2>/dev/null)" \
+    "T79g and its answer is the same one, which is the point of refusing / 而它的答案不變，那正是拒絕的意義"
+
+# -tail builds a sidecar as a side effect. That builder passed the constant
+# `false`, so it produced the same lie without anyone asking for an index.
+# -tail 會順手建一份 sidecar。那個建立點傳的是常數 `false`，因此不需要任何人要求建索引，
+# 它就會產生同樣那個謊。
+rm -f "$TMP/t79_nl.csv.index"
+CSV2_INDEX_MIN_BYTES=1 "$CSV2" -tail 1 -t -i "$TMP/t79_nl.csv" >/dev/null 2>&1
+p=$(CSV2_INDEX_MIN_BYTES=1 CSV2_PARALLEL_MIN_BYTES=1 path_of -contains needle -i "$TMP/t79_nl.csv")
+assert_contains "$p" "records a record spanning lines" \
+    "T79h the sidecar -tail builds as a side effect records the property too / -tail 順手建出來的 sidecar 同樣記錄了這個性質"
+
+# The O(1) stamp cannot see a same-size, same-mtime rewrite -- the README says
+# so, and offers --verify-index as the O(n) proof for exactly that case. The
+# proof has to cover the claim the parallel path consumes, not just the two
+# that happened to be right. `touch -t` sets nanoseconds to zero on both
+# platforms, so the stamp is restored exactly and the index really is loaded;
+# if it were not, --verify-index would say "no usable index" instead.
+# O(1) 戳記看不見「大小相同、mtime 相同」的原地改寫——README 這樣寫，並為這個情況提供
+# --verify-index 作為 O(n) 的證明。那個證明必須涵蓋平行路徑真正取用的那個宣稱，而不只是
+# 那兩個剛好是對的。`touch -t` 在兩個平台上都把奈秒設為 0，因此戳記被精確還原、索引真的
+# 有被載入；否則 --verify-index 會說「沒有可用的索引」而不是回報不符。
+# Fixed-width records, so the byte to patch is arithmetic. The first version
+# found it with `grep -abo`, which passed on macOS and FAILED IN THE GUEST --
+# busybox's grep need not offer -b, and a test that cannot locate the byte
+# patches the wrong one and then asserts on something else entirely. The
+# offset is checked below before it is used, so this can no longer happen
+# quietly on a platform whose tools differ.
+#
+#   header  'a,b' + LF                                    =  4 bytes
+#   record  NNN , " twelve-chars " LF                     = 19 bytes
+#   record N starts at 4 + (N-1)*19 ; its payload at +5
+#
+# 固定寬度的紀錄，因此要修改的位元組是算出來的。第一版用 `grep -abo` 找它，在 macOS 上
+# 通過而「在 guest 內失敗」——busybox 的 grep 不一定提供 -b，而一個找不到那個位元組的測試
+# 會去改錯的那一個，然後斷言在完全不同的東西上。下面在使用之前先檢查那個偏移量，因此這件事
+# 不會再在一台工具不同的機器上安靜地發生。
+{ print -r -- 'a,b'
+  for i in {1..300}; do
+      if [[ $i == 150 ]]; then printf '%03d,"needle here."\n' $i
+      else printf '%03d,"filler here."\n' $i; fi
+  done } > "$TMP/t79_doc.csv"
+touch -t 202601010000.00 "$TMP/t79_doc.csv"
+CSV2_INDEX_MIN_BYTES=1 "$CSV2" --build-index -i "$TMP/t79_doc.csv" >/dev/null
+before=$(wc -c < "$TMP/t79_doc.csv")
+sp=$(( 4 + 149 * 19 + 5 + 6 ))
+assert_eq "$(dd if="$TMP/t79_doc.csv" bs=1 skip=$sp count=1 2>/dev/null)" " " \
+    "T79i the computed offset really is the space inside the quoted field / 算出來的偏移量確實是引號欄位內的那個空白"
+printf '\n' | dd of="$TMP/t79_doc.csv" bs=1 seek=$sp count=1 conv=notrunc 2>/dev/null
+touch -t 202601010000.00 "$TMP/t79_doc.csv"
+assert_eq "$(wc -c < "$TMP/t79_doc.csv")" "$before" \
+    "T79j the doctored file is the same size, so the O(1) stamp cannot see it / 竄改後的檔案大小不變，因此 O(1) 戳記看不見它"
+
+# The stamp has to have been restored exactly, or the index is discarded as
+# stale and --verify-index answers a different question ("no usable index")
+# while still exiting non-zero -- which would let T79l pass for the wrong
+# reason. Asserted separately so the two failures cannot be confused.
+# 戳記必須被精確還原，否則索引會被當成過期而丟棄，--verify-index 回答的就是另一個問題
+# （「沒有可用的索引」）卻仍然以非零結束——那會讓 T79l 因為錯的理由而通過。分開斷言，
+# 使這兩種失敗不會被混為一談。
+out=$(CSV2_INDEX_MIN_BYTES=1 "$CSV2" --verify-index -i "$TMP/t79_doc.csv" 2>&1)
+if [[ "$out" == *"no usable index"* ]]; then
+    bad "T79k the stamp was restored exactly, so the index is still loaded / 戳記被精確還原，因此索引仍然被載入 (index was discarded as stale / 索引被當成過期丟棄)"
+else
+    ok "T79k the stamp was restored exactly, so the index is still loaded / 戳記被精確還原，因此索引仍然被載入"
+fi
+assert_contains "$out" "no_embedded_newlines" \
+    "T79l --verify-index re-derives the flag and reports the mismatch / --verify-index 重新推導那個旗標並回報不符"
+assert_fails "T79m and exits non-zero, because an index that lies is worse than none / 並以非零結束，因為說謊的索引比沒有更糟" -- \
+    env CSV2_INDEX_MIN_BYTES=1 "$CSV2" --verify-index -i "$TMP/t79_doc.csv"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

@@ -62,7 +62,19 @@ let INDEX_MAGIC: [UInt8] = Array("CSV2IDX\0".utf8)
 /// 自 2026-08-18 起為 2：檔頭新增了一個「涵蓋索引自身位元組」的檢查碼。版本 1 的索引在
 /// 該欄位處是零，會被直接丟棄，而那是正確的結果——它是由一個「無法偵測自身損毀」的版本
 /// 寫出來的。
-let INDEX_VERSION: UInt32 = 2
+// Bumped to 3 on 2026-08-19. Version 2 sidecars were written by a build whose
+// no_embedded_newlines flag was computed by two call sites that always said
+// "none" -- so a v2 index on a file with a quoted newline asserts a property
+// the file does not have, and the parallel path acted on it. Those files are
+// still on disk and no check inside them can catch it; only the version can.
+// A mismatch is already handled the right way: ignored at INFO, and the scan
+// that replaces it is correct.
+// 2026-08-19 推進為 3。版本 2 的 sidecar 由一個「no_embedded_newlines 旗標出自兩個
+// 恆答『沒有』的呼叫點」的建置寫出——因此含引號換行的檔案旁那份 v2 索引，宣告了一個
+// 該檔案並不具備的性質，而平行路徑照著它做了。那些檔案還在磁碟上，且索引內部沒有任何
+// 檢查抓得到；只有版本抓得到。版本不符本來就處理得對：以 INFO 忽略，取而代之的掃描
+// 是正確的。
+let INDEX_VERSION: UInt32 = 3
 let INDEX_HEADER_SIZE = 88
 let INDEX_DEFAULT_STRIDE = 256
 
@@ -408,6 +420,39 @@ final class CSVIndex {
 /// anyway.
 /// 寫入端本來就知道每一筆從哪個 byte 開始——它剛剛才寫下去，順手記下來不需要
 /// 額外掃描。接手別人產生的 CSV 時才需要付一次完整掃描，而那次掃描本來就要做。
+/// Whether a record occupies more than one physical line, which is the ONLY
+/// thing `no_embedded_newlines` is allowed to mean. One function, because
+/// three call sites each answered it their own way and two of them answered
+/// `false` unconditionally -- so every index ever built claimed the property
+/// whether the file had it or not.
+///
+/// A decoded value can only hold a newline if the source quoted it, so for a
+/// `.csv` this is exactly the question. A `.csv2` escapes newlines and is one
+/// record per line by construction, so a real LF in a value there says nothing
+/// about the file's layout and must not be read as if it did.
+///
+/// CR counts as well as LF. A lone CR inside quotes does not split an
+/// LF-terminated file into lines, so calling it "spanning" is pessimistic --
+/// and pessimistic costs a fast path, while optimistic costs a wrong answer.
+///
+/// 一筆紀錄是否佔用超過一個物理行，而那是 `no_embedded_newlines` 唯一被允許表示的
+/// 意思。寫成一個函式，因為原本三個呼叫點各自回答了這個問題，其中兩個無條件回答
+/// `false`——於是每一份建出來的索引都宣稱自己有這個性質，不管檔案有沒有。
+///
+/// 解碼後的值裡會有換行，只可能是因為來源把它放進引號，所以對 `.csv` 而言這正好就是
+/// 那個問題。`.csv2` 會跳脫換行、且依建構方式就是一筆一行，因此那裡的值中出現真正的
+/// LF 完全不代表檔案的排版，不得被當成代表。
+///
+/// CR 與 LF 一樣算。引號內單獨的 CR 不會把一個以 LF 斷行的檔案切成兩行，所以把它算成
+/// 「跨行」是悲觀的——而悲觀付出的是一條快路徑，樂觀付出的是一個錯的答案。
+func recordSpansLines(_ r: Record, format: Format) -> Bool {
+    if format == .csv2 { return false }
+    for f in r.fields {
+        if f.value.contains(BYTE_LF) || f.value.contains(BYTE_CR) { return true }
+    }
+    return false
+}
+
 final class IndexBuilder {
     private let stride: Int
     private let isCSV2: Bool

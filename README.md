@@ -212,8 +212,10 @@ INDEX / 索引
                         SIDE EFFECT: a write builds one, and -tail builds one
                         because it must read the whole file anyway -- so -mid
                         alone would never produce one
-  --verify-index        O(n) full check; the O(1) check on the normal path is
-                        deliberately a heuristic, not a proof
+  --verify-index        O(n) full check of all three of the index's claims --
+                        the grid offsets, the record count, and whether any
+                        record spans lines. The O(1) check on the normal path
+                        is deliberately a heuristic, not a proof
 
 DIAGNOSTICS / 診斷
   -debug                diagnostics to stderr, including a metrics: line
@@ -821,7 +823,14 @@ Each of these is argued in full in [plan/plan.md](./plan/plan.md).
   rewrite the offsets can rewrite eight more bytes. It also cannot help when the
   *data* file changes without changing size, mtime or its first and last bytes;
   that is what the O(1) check has always been, a heuristic. For a proof, run
-  `--verify-index`, which is O(n) because it has to be. The sidecar for
+  `--verify-index`, which is O(n) because it has to be. **What it proves** is
+  all three of the index's claims: the grid offsets, the record count, and
+  whether any record spans lines. The third was added on 2026-08-19, and it is
+  the one that mattered — it is the claim the parallel path consumes when it
+  treats a line as a record, it was the only claim nothing re-derived, and the
+  edit that breaks it leaves the other two intact, so checking those two alone
+  returned `index OK` on an index that then produced the wrong record number.
+  Asserted by T79. The sidecar for
   `packages.csv` is `packages.csv.index` — the whole filename plus `.index`, so
   `foo.csv` and `foo.csv2` never collide. That is the line to put in
   `.gitignore`: it is derived from the data file and is never the source of

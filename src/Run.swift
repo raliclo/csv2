@@ -186,10 +186,22 @@ func runBuildIndex(_ o: Options) throws {
             // longer a line number, and the index stores bytes rather than
             // lines -- so the seek path must refuse to use this index. Recorded
             // here so the flag in the header is right.
+            //
+            // This read `rec.line != r.line || false`, and `r` is `rec` with
+            // only `number` changed: the comparison could never be true. Every
+            // index --build-index ever wrote claimed no embedded newlines, and
+            // on an ordinary CSV with prose in quotes the parallel path then
+            // counted lines as records and reported the record after the one
+            // it found, at rc=0, with --verify-index saying OK.
             // 自身跨行的紀錄會讓紀錄號不再等於行號，而索引存的是位元組而非行號
             // ——因此 seek 路徑必須拒絕使用這份索引。在此記錄，讓檔頭的旗標正確。
+            //
+            // 原本寫的是 `rec.line != r.line || false`，而 `r` 是只改了 `number` 的
+            // `rec`：那個比較永遠不可能為真。--build-index 寫出的每一份索引都宣稱
+            // 沒有內嵌換行，於是對一份引號內含散文的普通 CSV，平行路徑把行當成紀錄來數，
+            // 回報了它所找到那一筆的「下一筆」，rc=0，而 --verify-index 說 OK。
             builder.add(record: r.number, at: UInt64(r.offset),
-                        spansLines: rec.line != r.line || false)
+                        spansLines: recordSpansLines(r, format: plan.format))
             return true
         } catch {
             pendingError = error
@@ -235,6 +247,7 @@ func runVerifyIndex(_ o: Options) throws {
     var headers: [Record] = []
     var n = 0
     var mismatches: [String] = []
+    var spanningRecord: Int? = nil
     let parser = RecordParser(format: plan.format, truncatePartial: o.truncatePartial) { rec in
         if headers.count < plan.headerRows { headers.append(rec); return true }
         n = rec.number - plan.headerRows
@@ -244,12 +257,37 @@ func runVerifyIndex(_ o: Options) throws {
                 mismatches.append("record \(n): index says byte \(idx.offsets[g]), actual \(rec.offset)")
             }
         }
+        if spanningRecord == nil, recordSpansLines(rec, format: plan.format) { spanningRecord = n }
         return true
     }
     while let c = plan.source.next() { try parser.feed(c) }
     try parser.finish()
     if Int(idx.records) != n {
         mismatches.append("record count: index says \(idx.records), actual \(n)")
+    }
+    // The offsets and the count were the whole check, and both survive the
+    // failure that matters: put a newline inside a quoted field and every
+    // record still starts exactly where the index says, and there are still
+    // exactly as many. What changed is a claim in the header that nothing
+    // re-derived -- and it is the claim the parallel path consumes to decide
+    // that a line is a record. So "proof" proved the two things that were
+    // already right and skipped the one that was wrong.
+    //
+    // Only the dangerous direction is a mismatch. An index that says a file
+    // spans lines when it does not is merely pessimistic: it gives up a fast
+    // path and returns the same answer. Failing on that would send people to
+    // rebuild a sidecar that was never going to hurt them.
+    //
+    // 偏移量與筆數本來就是全部的檢查，而它們在「真正要命的那個失敗」下都活得好好的：
+    // 在引號欄位裡放一個換行，每一筆仍然從索引所說的那個位元組開始，筆數也仍然一樣。
+    // 變的是檔頭裡一個沒有任何東西重新推導過的宣稱——而那正是平行路徑用來斷定「一行
+    // 就是一筆」的那個宣稱。於是「證明」證明了本來就對的兩件事，跳過了錯的那一件。
+    //
+    // 只有危險的那個方向算不符。索引說檔案跨行而其實沒有，只是悲觀：它放棄一條快路徑，
+    // 答案不變。為那種情況失敗，等於叫人去重建一份本來就不會害到他的 sidecar。
+    if idx.noEmbeddedNewlines, let bad = spanningRecord {
+        mismatches.append("no_embedded_newlines: index says the file has none, "
+                        + "but record \(bad) spans lines")
     }
     let sink = ByteSink(stdout: 1 << 13)
     if mismatches.isEmpty {
@@ -466,7 +504,13 @@ func runSelect(_ o: Options) throws {
             seen = r.number
             try checkFieldCount(r, expected: expectedFields,
                                 what: "record \(r.number) (line \(r.line))")
-            builder?.add(record: r.number, at: UInt64(r.offset), spansLines: false)
+            // Not `false`. This is the index -tail builds as a side effect, and
+            // a sidecar that lies about this property is worse than none --
+            // the next -contains on the file acts on it.
+            // 不是 `false`。這是 -tail 順手建出來的那份索引，而一份在這個性質上說謊的
+            // sidecar 比沒有更糟——檔案上的下一次 -contains 會照著它做。
+            builder?.add(record: r.number, at: UInt64(r.offset),
+                         spansLines: recordSpansLines(r, format: plan.format))
             try applyTransform(transform, to: &r, header: headers[0])
 
             if r.number < lower {
@@ -652,8 +696,13 @@ func runEdit(_ o: Options) throws {
         // header is right.
         // 自身含換行的紀錄會讓紀錄號不再等於行號，屆時索引就不能用來 seek
         // （它存的是位元組而非行號）。在此記錄，讓索引檔頭的旗標是正確的。
-        let spans = bytes.dropLast().contains(BYTE_LF)
-        builder?.add(record: outRecords, at: UInt64(outOffset), spansLines: spans)
+        // Answered by the same function as the other two call sites. It was
+        // right here and wrong there; one function is what stops that from
+        // being possible again.
+        // 與另外兩個呼叫點由同一個函式回答。這裡本來是對的、那裡是錯的；
+        // 「只有一個函式」才是讓那件事不可能再發生的東西。
+        builder?.add(record: outRecords, at: UInt64(outOffset),
+                     spansLines: recordSpansLines(r, format: plan.format))
         sink.write(bytes)
         outOffset += bytes.count
     }
