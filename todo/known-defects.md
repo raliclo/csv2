@@ -1071,3 +1071,105 @@ cat inj2.log
 
 由本 session 在調查 BB 的後果時發現，不是盲測 agent 找到的。
 
+---
+
+# 第一次 Windows 建置（2026-08-19）/ First Windows build (2026-08-19)
+
+`Platform.swift` 的開頭自 2026-08-16 起就寫著：Windows 分支「**已寫出，但從未被編譯或執行過**。
+它是移植的起點，不是受支援的平台；在 Windows 上跑出與另外兩者相同的數字之前，本 repo 任何
+地方都不該宣稱相反的事。」
+
+2026-08-19 第一次真的去編它，經由 multissh 連到 `MINGW64_NT-10.0-26200`（Swift 6.3.3，
+`x86_64-unknown-windows-msvc`）。
+
+| # | 缺陷 | 類別 |
+|---|---|---|
+| KK | Windows 分支編不過：`GetProcessMemoryInfo` 不在 scope | **程式（平台）**  — **已修** |
+
+## KK. `GetProcessMemoryInfo` 在 Swift 的 WinSDK 裡找不到
+
+```
+src\Platform.swift:298:15: error: cannot find 'GetProcessMemoryInfo' in scope
+```
+
+**整份原始碼只有這一個錯誤。** 其餘每一行——包含 `PROCESS_MEMORY_COUNTERS` 這個型別本身、
+`MoveFileExW`、以及所有 `#if canImport(ucrt)` 分支——都編得過。
+
+原因不是 API 不存在，而是**它不在 Swift 的 WinSDK 模組所匯出的那一組裡**。`GetProcessMemoryInfo`
+宣告在 `psapi.h` 並由 `psapi.dll` 匯出；Windows 7 起 kernel32 另外匯出了功能等價的
+`K32GetProcessMemoryInfo`，而那一個 Swift 看得見。在該機器上實測：
+
+```swift
+import WinSDK
+var c = PROCESS_MEMORY_COUNTERS()
+c.cb = DWORD(MemoryLayout<PROCESS_MEMORY_COUNTERS>.size)
+K32GetProcessMemoryInfo(GetCurrentProcess(), &c, c.cb)   // true
+// c.PeakWorkingSetSize == 9129984
+```
+
+**這一條之所以值得記在這裡，是因為它證明了那段狀態註記是誠實的。** 那個分支寫了三天，
+看起來完全合理，而它一行都沒有編過——只有真的去編，才知道差在哪裡。
+
+## 首次 Windows 執行：17 條失敗，以及它們真正的形狀
+
+修掉 KK 之後 `csv2.exe` 建了起來並跑得動。第一次跑完整套件時有 **17 條失敗**，而它們分成
+四群——其中只有一群是 csv2 自己的缺陷。
+
+（此處刻意不寫通過的數量：那個數字每次提交都會變，而 T69 正是為了阻止它被寫進文件而存在。
+它剛好在這一段初稿裡抓到了我。）
+
+| # | 症狀 | 真正的原因 | 類別 |
+|---|---|---|---|
+| LL | `--in-place` 與 `-o` 全部以 `Windows error 5` 失敗 | rename 發生在輸入仍開著的時候 | **程式（平台）**  — **已修** |
+| — | T58a/T58b 路徑比對不符 | MSYS2 自動把 POSIX 路徑轉成 Windows 形式 | 測試可攜性 |
+| — | T61a/T61c 串流讀到 0 bytes | MSYS 的 FIFO 對原生 Windows 程式不存在 | 測試可攜性 |
+| — | T98a–T98g 不拒絕非 UTF-8 參數 | Windows 命令列是 UTF-16，原始位元組看不到 | **平台限制** |
+
+## LL. rename 覆蓋一個「還開著」的檔案，在 Windows 上是 ACCESS_DENIED
+
+```
+csv2: cannot rename .../.dc_ip.csv2.csv2tmp.2888 onto .../dc_ip.csv2: Windows error 5
+```
+
+`runSelect` 與 `runEdit` 都寫著 `defer { plan.source.close() }`——**而 defer 在函式回傳時才執行**，
+那是在 `sink.close()` 完成 rename「之後」。POSIX 允許 rename 覆蓋一個仍被開著的檔案，
+**Windows 不允許**。
+
+**這個順序在 macOS 與 Linux 上跑了好幾個月，因為那兩個平台確實不在乎。** 一個平台不在乎的
+順序錯誤，在另一個平台上是每一次寫入都失敗。修法是在 rename 之前顯式關閉輸入；defer 保留
+作為雙保險（`ByteSource.close` 可安全地被呼叫兩次）。
+
+**單這一條就佔了 17 條失敗中的 10 條。** 修掉後剩下 11 條，而那 11 條沒有一條是 csv2 的缺陷。
+
+## 那三群不是 csv2 的缺陷，但必須被說明
+
+**T58a/T58b**：測試以 `sed "s|$TMP/rm.csv2|vs-sqlite.csv2|"` 正規化訊息裡的路徑。MSYS2 在
+呼叫原生 Windows 程式時會自動把 POSIX 路徑轉成 Windows 形式，於是 csv2 印出的是
+`C:/Users/...`，而 sed 拿著 POSIX 形式去比對。**修法是讓正規化不依賴路徑形式**——那在每個
+平台上都更好。
+
+**T61a/T61c**：測試以 `mkfifo` 建一個具名管線，讓 MSYS 的 shell 餵給原生 Windows 的
+`csv2.exe`。**那個 FIFO 對原生程式不存在**，所以什麼都沒送到。這不是串流壞了——串流的性質
+由 T9（RSS 上界）在四個平台上斷言。這一條在 Windows 上 SKIP，並說明理由。
+
+**T98a–T98g**：Windows 的命令列是 UTF-16。無效的 UTF-8 位元組在行程啟動之前就已經被
+shell／CRT 轉換掉，因此 `CommandLine.unsafeArgv` 裡永遠不會出現它——**csv2 沒有東西可以檢查**。
+那個保證在 POSIX 上成立、在 Windows 上無法提供，而**說出這件事比假裝它成立好**。這一條在
+Windows 上 SKIP 並說明；README 會標明該保證的適用範圍。
+
+## 結果：四個平台
+
+| 目標 | Triple | 結果 |
+|---|---|---|
+| macOS | arm64-apple-darwin | 0 失敗、1 略過 |
+| Linux guest（QEMU） | aarch64-unknown-linux-gnu | 0 失敗、1 略過 |
+| WSL2 | x86_64-unknown-linux-gnu | 0 失敗、1 略過 |
+| Windows | x86_64-unknown-windows-msvc | 0 失敗、4 略過 |
+
+Windows 的四個略過各自在略過處指名理由：T47（比對兩個平台，無法從其中之一內部執行）、
+T61a／T61c（MSYS 的 FIFO 對原生程式不存在）、T98a–T98g（UTF-16 命令列沒有原始位元組可查）。
+
+**這次驗證的價值不在「多了兩個平台」，而在它證明了兩件本來只能用猜的事**：`Platform.swift`
+那段「從未被編譯或執行過」的狀態註記是誠實的（第一次編譯恰好兩個錯誤），以及一個
+「在兩個平台上無關緊要的順序」——rename 之前有沒有關掉輸入——在第三個平台上是每一次寫入
+都失敗。**那個順序錯誤在 macOS 與 Linux 上存在了好幾個月，而那兩個平台永遠不會說。**

@@ -26,6 +26,20 @@ set -uo pipefail
 
 HERE="${0:A:h}"
 ROOT="${HERE:h}"
+
+# Which platform this is running on. Three cases need it, and all three are the
+# ENVIRONMENT's limits rather than csv2's -- a POSIX FIFO that a native Windows
+# binary cannot see, and a command line that arrives as UTF-16 with no raw
+# bytes left to inspect. Naming the platform in the skip reason is the point:
+# "SKIP" with no reason is indistinguishable from a case nobody wrote.
+# 這份測試跑在哪個平台上。有三個案例需要知道，而那三個都是「環境」的限制而不是 csv2 的
+# ——一個原生 Windows 程式看不見的 POSIX FIFO，以及一條以 UTF-16 抵達、已經沒有原始位元組
+# 可供檢查的命令列。在略過的理由裡指名平台正是重點：沒有理由的 SKIP，與「根本沒有人寫過
+# 這個案例」無法區分。
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1 ;;
+    *)                    IS_WINDOWS=0 ;;
+esac
 : ${CSV2:="$ROOT/release/csv2"}
 
 if [[ ! -x "$CSV2" ]]; then
@@ -1589,12 +1603,21 @@ else
     bad "T58z $ROOT/README.md is missing; T58 cannot compare against a file that is not there / README 不存在，T58 無法對照一個不在的檔案"
 fi
 readme_en=$(grep -F 'declares 2 header row(s) by its suffix' "$ROOT/README.md" | head -1)
-actual_en=$(head -1 "$TMP/rm_err.txt" | sed "s|$TMP/rm.csv2|vs-sqlite.csv2|")
+# Replace whatever path precedes `rm.csv2`, rather than the exact $TMP string.
+# MSYS2 rewrites a POSIX path into a Windows one on the way to a native binary,
+# so the message came back saying C:/Users/... while $TMP held /c/Users/... and
+# the substitution silently matched nothing. Anchoring on the FILENAME works on
+# every platform and does not care who rewrote the directory part.
+# 取代「`rm.csv2` 之前的任何路徑」，而不是那個精確的 $TMP 字串。MSYS2 在把參數交給原生程式
+# 的途中會把 POSIX 路徑改寫成 Windows 形式，因此訊息回來時寫的是 C:/Users/...，而 $TMP 裡是
+# /c/Users/...，於是那個替換靜默地什麼都沒有匹配到。以「檔名」為錨點在每個平台上都有效，
+# 而且不在乎是誰改寫了目錄的部分。
+actual_en=$(head -1 "$TMP/rm_err.txt" | sed -E 's|[^[:space:]：]*/rm\.csv2|vs-sqlite.csv2|')
 assert_eq "$actual_en" "$readme_en" \
     "T58a the README quotes the English error line in full, not truncated at the first full stop / README 完整引用了英文錯誤行，而非在第一個句號處截斷"
 
 readme_zh=$(grep -F '的副檔名宣告了 2 列標頭' "$ROOT/README.md" | head -1)
-actual_zh=$(sed -n 2p "$TMP/rm_err.txt" | sed "s|$TMP/rm.csv2|vs-sqlite.csv2|")
+actual_zh=$(sed -n 2p "$TMP/rm_err.txt" | sed -E 's|[^[:space:]：]*/rm\.csv2|vs-sqlite.csv2|')
 assert_eq "$actual_zh" "$readme_zh" \
     "T58b and the Chinese line too, so the example matches the two-line rule the README states / 中文行也在，使該範例符合 README 自己陳述的兩行規則"
 
@@ -1795,6 +1818,19 @@ repeat 13; do
 done
 big_bytes=$(wc -c < "$TMP/t61_big" | tr -d ' ')
 
+# A POSIX FIFO created by an MSYS shell does not exist for a native Windows
+# binary, so csv2.exe reads nothing from it and this measures the shim rather
+# than the tool. The property itself -- that output starts before input ends,
+# and that memory does not track the stream -- is asserted on every platform by
+# T9; only this particular INSTRUMENT is unavailable here.
+# MSYS 的 shell 所建立的 POSIX FIFO，對原生的 Windows 程式而言並不存在，因此 csv2.exe
+# 從它那裡什麼也讀不到，而這個案例量到的會是那層 shim 而不是這支工具。它要測的性質本身
+# ——輸出在輸入結束前就開始、記憶體不隨串流成長——由 T9 在每個平台上斷言；此處不可用的
+# 只是「這一個量測工具」。
+if (( IS_WINDOWS )); then
+    skipt "T61a output arrives while the input is still open / 輸入還開著時輸出就已到達 (a POSIX FIFO is not visible to a native Windows binary; the property is covered by T9 / MSYS 的 FIFO 對原生 Windows 程式不存在；該性質由 T9 涵蓋)"
+    skipt "T61c the streamed output is complete / 串流輸出是完整的 (same reason / 同上)"
+else
 rm -f "$TMP/t61.fifo"; mkfifo "$TMP/t61.fifo"
 { print -r -- 'a,b'; cat "$TMP/t61_big"; sleep 2; print -r -- '9,end' } > "$TMP/t61.fifo" &
 "$CSV2" -si --headers 1 -r -so < "$TMP/t61.fifo" > "$TMP/t61.out" 2>/dev/null &
@@ -1829,6 +1865,7 @@ assert_eq "$small_during" "0" \
 # 實際使用的那條管線。
 assert_eq "$(cat "$TMP/t61b.out" | wc -l | tr -d ' ')" "2001" \
     "T61c and the streamed output is complete: 2000 records plus the stalled one / 串流輸出是完整的：2000 筆加上停頓後那一筆"
+fi
 
 # The worked pipeline example the README now shows has to actually work.
 # README 現在展示的那條管線範例，必須真的能跑。
@@ -4036,6 +4073,29 @@ bad_val=$'A\xffB'
 printf 'id,note\n1,ok\n' > "$TMP/t98.csv"
 cp "$TMP/t98.csv" "$TMP/t98.bak"
 
+# The refusals cannot be asserted on Windows, and saying why is better than a
+# platform-blind expectation. A Windows process receives its command line as
+# UTF-16: whatever the shell did with an invalid byte, it did BEFORE the
+# process started, and `CommandLine.unsafeArgv` is synthesised from that UTF-16
+# afterwards. There are no raw bytes left for csv2 to inspect, so there is
+# nothing it could refuse. The guarantee is real on POSIX and unavailable here,
+# and the README says so rather than implying it holds everywhere.
+#
+# What is NOT skipped is the other half -- ordinary values must still be
+# accepted and stored exactly, and bytes must still round-trip through a file.
+# Those are the assertions that would catch this fix over-reaching, and they
+# run on all four platforms.
+#
+# 這幾條拒絕在 Windows 上無法斷言，而說出理由比放一個「無視平台」的期待要好。Windows 行程
+# 收到的命令列是 UTF-16：shell 對一個無效位元組做了什麼，都發生在行程啟動「之前」，而
+# `CommandLine.unsafeArgv` 是事後由那份 UTF-16 合成出來的。已經沒有原始位元組留給 csv2 檢查，
+# 也就沒有東西可以拒絕。那個保證在 POSIX 上是真的、在這裡無法提供，而 README 會這樣寫，
+# 不會讓人以為它到處都成立。
+# 沒有被略過的是另一半——一般的值仍然必須被接受並原樣存入，位元組仍然必須能經由檔案
+# round-trip。那些正是「這個修正如果做過頭」會被抓到的斷言，而它們在四個平台上都跑。
+if (( IS_WINDOWS )); then
+    skipt "T98a-T98g the non-UTF-8 argument refusals / 非 UTF-8 參數的那幾條拒絕 (a Windows command line is UTF-16; no raw argument bytes survive for csv2 to check / Windows 的命令列是 UTF-16，沒有原始參數位元組留給 csv2 檢查)"
+else
 assert_fails "T98a -update refuses a value that is not valid UTF-8 / -update 拒絕不是合法 UTF-8 的值" -- \
     "$CSV2" -update 1:note "$bad_val" -i "$TMP/t98.csv" --in-place
 assert_same "$TMP/t98.csv" "$TMP/t98.bak" \
@@ -4055,6 +4115,7 @@ assert_contains "$msg" "not valid UTF-8" \
     "T98f the message says what is wrong with the argument / 訊息說出那個參數哪裡不對"
 assert_contains "$msg" "in a file" \
     "T98g and names the route that does preserve the bytes / 並指出那條「確實會保留位元組」的路"
+fi
 
 # Not over-refusing: ordinary values, including non-ASCII ones, are untouched
 # by this. Without it the fix could be "reject anything interesting".
@@ -4094,10 +4155,31 @@ skipt "T47 macOS and aarch64 Linux produce byte-identical output / mac 與 Linux
 # T69b 放在最後，因為它數的是「測試自己產生的東西」：文件現在說的是「恰好一個 SKIP」而不是
 # 引用 PASS 總數，而一個取代了數字的宣稱，必須在那個數字定案的位置檢查。放在更早的地方，
 # 測到的是一個還沒數完的計數器。
-if [[ "$skip" == "1" ]]; then
-    ok "T69b there really is exactly one SKIP, as the docs now say / 確實恰好只有一個 SKIP，與文件現在的說法相符"
+# The expected count is per-platform, and each skip has to be one somebody
+# decided rather than one that merely happened. On POSIX there is exactly one:
+# T47, which compares two platforms and so cannot run inside either. Windows
+# adds three, all of them the ENVIRONMENT's limits and all of them documented
+# in todo/known-defects.md: a POSIX FIFO a native binary cannot see (T61a,
+# T61c) and a UTF-16 command line that leaves no raw argument bytes to check
+# (T98a-T98g, one skip line).
+#
+# Checking the number rather than listing the names is deliberate: a name list
+# would pass while a case quietly stopped running, which is the same failure as
+# a stale count. The number moves the moment anything is skipped that nobody
+# accounted for.
+#
+# 預期的數量依平台而定，而每一個 SKIP 都必須是「有人決定的」，不是「碰巧變成這樣的」。
+# POSIX 上恰好一個：T47——它比對的是兩個平台，因此無法在其中任何一個內部執行。Windows
+# 多三個，全部是「環境」的限制、也全部記在 todo/known-defects.md 裡：一個原生程式看不見的
+# POSIX FIFO（T61a、T61c），以及一條「沒有原始參數位元組可查」的 UTF-16 命令列
+# （T98a–T98g，合為一行 skip）。
+# 檢查「數量」而不是列出名字是刻意的：名字清單會在「某個案例安靜地不再執行」時照樣通過，
+# 而那與一個過期的數字是同一種失敗。只要有任何一個沒被計入的東西被略過，數量就會變。
+if (( IS_WINDOWS )); then want_skip=4; else want_skip=1; fi
+if [[ "$skip" == "$want_skip" ]]; then
+    ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
 else
-    bad "T69b docs say one SKIP, the suite produced $skip / 文件說一個 SKIP，測試產生了 $skip 個"
+    bad "T69b expected $want_skip SKIP(s) on this platform, the suite produced $skip / 本平台預期 $want_skip 個 SKIP，測試產生了 $skip 個"
 fi
 
 echo

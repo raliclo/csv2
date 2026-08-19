@@ -10,15 +10,24 @@
 //  #if canImport(...)——正是移植腐化的方式：新增第三個平台就得找出每一處，
 //  而漏掉一處只會在那個平台上、幾個月後才變成建置錯誤。
 //
-//  STATUS: the Darwin and Glibc branches are exercised by the test suite on
-//  macOS and on the aarch64 Linux guest. The Windows branch is written but
-//  HAS NEVER BEEN COMPILED OR RUN. It is a starting point for a port, not a
-//  supported platform, and nothing in this repository should claim otherwise
-//  until a Windows run reports the same counts as the other two.
-//  狀態：Darwin 與 Glibc 兩個分支由測試在 macOS 與 aarch64 Linux guest 上實際
-//  執行過。Windows 分支已寫出，但**從未被編譯或執行過**。它是移植的起點，不是
-//  受支援的平台；在 Windows 上跑出與另外兩者相同的數字之前，本 repo 任何地方都
-//  不該宣稱相反的事。
+//  STATUS (2026-08-19): all three branches are exercised. Darwin on macOS,
+//  Glibc on both the aarch64 Linux guest and x86_64 WSL2, and ucrt on Windows
+//  (MINGW64_NT-10.0-26200, Swift 6.3.3, x86_64-unknown-windows-msvc). The
+//  Windows suite passes with four skips, each one an environment limit that is
+//  named where it is skipped and recorded in todo/known-defects.md.
+//
+//  It had never been compiled until that day, and the first attempt producedd
+//  exactly two errors -- one name that Swift's WinSDK does not surface, and
+//  one property that does not exist there. Everything else in this file had
+//  been right for three days without anyone being able to say so.
+//
+//  狀態（2026-08-19）：三個分支都已被實際執行。Darwin 在 macOS 上，Glibc 在 aarch64
+//  Linux guest 與 x86_64 WSL2 上，ucrt 在 Windows 上（MINGW64_NT-10.0-26200、
+//  Swift 6.3.3、x86_64-unknown-windows-msvc）。Windows 的測試套件通過，有四個略過，
+//  每一個都是環境的限制，在略過處指名，並記在 todo/known-defects.md。
+//  在那一天之前它從未被編譯過，而第一次嘗試恰好produced 兩個錯誤——一個 Swift 的 WinSDK
+//  沒有呈現的名稱，以及一個在那裡並不存在的屬性。這個檔案裡其餘每一行，在那之前三天
+//  都是對的，只是沒有人能這樣說。
 // =====================================================================
 
 import Foundation
@@ -185,12 +194,32 @@ enum Platform {
     /// 寫入快取中；真正沖掉該快取的是 F_FULLFSYNC。用比較弱的那個、然後宣稱「已持久」，
     /// 正是本專案要避免的那種半真陳述。
     @discardableResult
-    static func flushToDisk(_ fd: Int32) -> Bool {
+    /// Takes the FileHandle, not a descriptor, because `FileHandle
+    /// .fileDescriptor` IS UNAVAILABLE ON WINDOWS -- "Cannot perform
+    /// non-owning handle to fd conversion". The old signature took an Int32,
+    /// which forced the one call site to reach for that property and put a
+    /// platform difference in Core.swift, where this file's header says it
+    /// must not live. It compiled on two platforms for months because neither
+    /// of them minded; the third would not build at all. Found on the first
+    /// Windows compile, 2026-08-19, as the second of the two errors.
+    ///
+    /// Windows uses Foundation's `synchronize()`, which calls FlushFileBuffers
+    /// itself -- the same call the previous `_get_osfhandle` branch made, minus
+    /// a descriptor round trip that cannot be taken there.
+    ///
+    /// 收的是 FileHandle 而不是 descriptor，因為 **`FileHandle.fileDescriptor` 在 Windows
+    /// 上不可用**——「Cannot perform non-owning handle to fd conversion」。舊的簽章收 Int32，
+    /// 於是唯一的呼叫點必須去碰那個屬性，把一個平台差異放進了 Core.swift——而本檔案開頭
+    /// 說明了那種東西不該住在那裡。它在兩個平台上編了好幾個月，因為那兩個都不介意；
+    /// 第三個則根本建不起來。發現於 2026-08-19 第一次 Windows 編譯，是兩個錯誤中的第二個。
+    /// Windows 改用 Foundation 的 `synchronize()`，它內部呼叫的就是 FlushFileBuffers
+    /// ——與先前 `_get_osfhandle` 分支所做的是同一件事，只是少了一次「在那裡根本走不通」的
+    /// descriptor 往返。
+    static func flushToDisk(_ handle: FileHandle) -> Bool {
         #if canImport(ucrt)
-        let handle = HANDLE(bitPattern: _get_osfhandle(fd))
-        guard let h = handle, h != INVALID_HANDLE_VALUE else { return false }
-        return FlushFileBuffers(h)
+        do { try handle.synchronize(); return true } catch { return false }
         #elseif canImport(Darwin)
+        let fd = handle.fileDescriptor
         if fcntl(fd, F_FULLFSYNC) == 0 { return true }
         // Some filesystems do not implement F_FULLFSYNC and return ENOTSUP.
         // fsync is then the strongest thing available, and saying so beats
@@ -199,7 +228,7 @@ enum Platform {
         // 最強手段，退回它並說明，好過為此讓寫入失敗。
         return fsync(fd) == 0
         #else
-        return fsync(fd) == 0
+        return fsync(handle.fileDescriptor) == 0
         #endif
     }
 
@@ -295,7 +324,21 @@ enum Platform {
         #if canImport(ucrt)
         var counters = PROCESS_MEMORY_COUNTERS()
         counters.cb = DWORD(MemoryLayout<PROCESS_MEMORY_COUNTERS>.size)
-        guard GetProcessMemoryInfo(GetCurrentProcess(), &counters, counters.cb) else { return 0 }
+        // K32GetProcessMemoryInfo, not GetProcessMemoryInfo. The two are the
+        // same call; the difference is which DLL exports it. The psapi.h name
+        // lives in psapi.dll and is NOT in the set Swift's WinSDK module
+        // surfaces, so it does not resolve -- `cannot find
+        // 'GetProcessMemoryInfo' in scope`, which was the ONE error in the
+        // whole source on the first Windows compile, 2026-08-19. The K32
+        // prefixed form has been exported from kernel32 since Windows 7 and
+        // does resolve. Measured on that machine: 9129984 bytes.
+        // 用 K32GetProcessMemoryInfo，不是 GetProcessMemoryInfo。兩者是同一個呼叫，
+        // 差別在於由哪個 DLL 匯出。psapi.h 的那個名字住在 psapi.dll，而它**不在** Swift 的
+        // WinSDK 模組所呈現的那一組裡，因此解析不到——`cannot find 'GetProcessMemoryInfo'
+        // in scope`，那是 2026-08-19 第一次 Windows 編譯時，整份原始碼裡唯一的錯誤。
+        // 帶 K32 前綴的那個自 Windows 7 起由 kernel32 匯出，解析得到。在該機器上實測：
+        // 9129984 bytes。
+        guard K32GetProcessMemoryInfo(GetCurrentProcess(), &counters, counters.cb) else { return 0 }
         return Int(counters.PeakWorkingSetSize)
         #else
         var usage = rusage()

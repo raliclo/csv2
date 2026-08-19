@@ -879,7 +879,7 @@ final class ByteSink {
             // 先讓資料落地，再 rename；否則 rename 可能已經生效而內容還沒有——
             // 於是舊檔的位置上留下一個名字正確、內容是空的檔案。單靠 rename 保護的
             // 是並行讀者，不是當機。
-            if !Platform.flushToDisk(handle.fileDescriptor) {
+            if !Platform.flushToDisk(handle) {
                 // A failed flush is not a reason to lose the write: report it
                 // and continue, because the alternative is discarding data the
                 // caller successfully produced.

@@ -622,6 +622,27 @@ func runSelect(_ o: Options) throws {
         for r in tailRing { try emitRecord(r, matches: matchesIn(r)) }
         try emitter.end(c, records: seen, matched: matchedCount)
     }
+    // Close the INPUT before the rename, not at function exit.
+    //
+    // POSIX lets you rename over a file somebody still has open; Windows does
+    // not -- MoveFileExW returns error 5, ACCESS_DENIED. `defer { plan.source
+    // .close() }` runs when the function returns, which is AFTER sink.close()
+    // has renamed, so every `--in-place` edit and every `-o` write failed
+    // there. It cost ten of the seventeen failures in the first Windows run of
+    // the suite, 2026-08-19, and not one of them was visible on macOS or Linux,
+    // where the ordering genuinely does not matter.
+    //
+    // The defer stays: this is belt and braces, and ByteSource.close is safe to
+    // call twice.
+    //
+    // 在 rename「之前」關閉輸入，而不是等到函式結束。
+    // POSIX 允許你 rename 覆蓋一個「還有人開著」的檔案，Windows 不允許——MoveFileExW 回傳
+    // error 5（ACCESS_DENIED）。`defer { plan.source.close() }` 在函式回傳時才執行，而那是在
+    // sink.close() 完成 rename「之後」，因此那裡的每一次 `--in-place` 編輯與每一次 `-o` 寫入
+    // 都失敗。它造成了 2026-08-19 首次 Windows 執行中十七條失敗裡的十條，而其中沒有任何一條
+    // 在 macOS 或 Linux 上看得見——在那兩個平台上，這個順序確實無關緊要。
+    // defer 保留：這是雙保險，而 ByteSource.close 可以安全地被呼叫兩次。
+    plan.source.close()
     try sink.close()
     aborted = false
 
@@ -999,6 +1020,27 @@ func runEdit(_ o: Options) throws {
             "\(bad.joined(separator: "、")) 超出範圍；本檔案有 \(total) 筆紀錄，csv2 不會補出空紀錄來填補")
     }
 
+    // Close the INPUT before the rename, not at function exit.
+    //
+    // POSIX lets you rename over a file somebody still has open; Windows does
+    // not -- MoveFileExW returns error 5, ACCESS_DENIED. `defer { plan.source
+    // .close() }` runs when the function returns, which is AFTER sink.close()
+    // has renamed, so every `--in-place` edit and every `-o` write failed
+    // there. It cost ten of the seventeen failures in the first Windows run of
+    // the suite, 2026-08-19, and not one of them was visible on macOS or Linux,
+    // where the ordering genuinely does not matter.
+    //
+    // The defer stays: this is belt and braces, and ByteSource.close is safe to
+    // call twice.
+    //
+    // 在 rename「之前」關閉輸入，而不是等到函式結束。
+    // POSIX 允許你 rename 覆蓋一個「還有人開著」的檔案，Windows 不允許——MoveFileExW 回傳
+    // error 5（ACCESS_DENIED）。`defer { plan.source.close() }` 在函式回傳時才執行，而那是在
+    // sink.close() 完成 rename「之後」，因此那裡的每一次 `--in-place` 編輯與每一次 `-o` 寫入
+    // 都失敗。它造成了 2026-08-19 首次 Windows 執行中十七條失敗裡的十條，而其中沒有任何一條
+    // 在 macOS 或 Linux 上看得見——在那兩個平台上，這個順序確實無關緊要。
+    // defer 保留：這是雙保險，而 ByteSource.close 可以安全地被呼叫兩次。
+    plan.source.close()
     try sink.close()
     aborted = false
 
