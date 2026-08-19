@@ -36,23 +36,28 @@ guest 比對吞掉 csv2 的結束狀態（已修——csv2 單獨執行、檢查
 
 ## 1. Install into the package manager's bin directory / 安裝到套件管理員的 bin 目錄
 
-**Status: to do. The drop-in half is now unblocked; the tap and the shim are
-not. / 狀態：待辦。drop-in 那一半已經沒有東西擋著，tap 與 shim 仍被擋住。**
+**Status (corrected 2026-08-19): the drop-in half is DONE. Only the tap and the
+shim remain, and both are blocked outside this repository. / 狀態（2026-08-19
+更正）：drop-in 那一半**已完成**。只剩 tap 與 shim，兩者都被本 repo 之外的東西擋著。**
 
-There is a binary to install now (`./compile_csv2.zsh` → `release/csv2`), so
-the `$(brew --prefix)/bin` drop-in, the `~/.local/bin` fallback, `--uninstall`
-and the verify-by-running step can all be written today. What remains blocked
-is blocked on things outside this repository:
+This section said "to do" long after `install.zsh` was written, which is the
+same decay the stale PASS counts had: a status line is a claim about the world
+and nothing re-checks it. `plan/plan.md`'s phase 7 had it ticked; this file did
+not. When two places disagree about whether something is done, the one with a
+test behind it wins -- and here that is the plan, because `install.zsh` ends by
+running `csv2 --version` in a fresh shell and comparing.
 
-現在已經有可安裝的執行檔（`./compile_csv2.zsh` → `release/csv2`），因此
-`$(brew --prefix)/bin` 的 drop-in、退回 `~/.local/bin`、`--uninstall`，以及「以執行
-來驗證」那一步，今天就可以寫。仍被擋住的部分，擋住它們的都是本 repo 之外的東西：
+這一節在 `install.zsh` 寫好之後很久仍寫著「待辦」，而那與那些過期的 PASS 數量是同一種衰減：
+一行狀態是一個關於世界的宣稱，而沒有任何東西會重新檢查它。`plan/plan.md` 的第 7 階段已經
+打勾，這個檔案沒有。**當兩個地方對「這件事做完了沒有」意見不同時，以「背後有測試的那一個」
+為準**——而此處那是計畫，因為 `install.zsh` 的結尾是「在全新 shell 中執行 `csv2 --version`
+並比對版本」。
 
-| Part | Blocked on |
+| Part | State |
 |---|---|
-| drop-in `install.zsh` | nothing — can be written now / 沒有，現在就能寫 |
-| Homebrew tap + formula | `raliclo/csv2` is private / repo 尚未公開 |
-| Windows scoop shim | no Windows build exists / 沒有 Windows build |
+| drop-in `install.zsh` | **done** — `$(brew --prefix)/bin`, `/usr/local/bin` where the guest's PATH already has it, `~/.local/bin` fallback, `--uninstall`, `--dry-run`, verified by running / **已完成** |
+| Homebrew tap + formula | blocked: `raliclo/csv2` is private / 被擋住：repo 尚未公開 |
+| Windows scoop shim | blocked: no Windows build exists / 被擋住：沒有 Windows build |
 
 `install.zsh` puts the built `csv2` binary where the platform's package manager
 already has a directory on `PATH`, so that using the tool does not require
