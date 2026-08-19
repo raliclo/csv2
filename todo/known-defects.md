@@ -1,5 +1,24 @@
 # csv2 已驗證缺陷 / verified defects
 
+## 這個檔案的規則：**每一個被回報的缺陷都先寫進這裡，然後才修**
+
+**每一回合回報的每一條，一經親手重現，就在那一回合寫進這個檔案——在動手修之前。**
+修好之後更新那一條的狀態並附上斷言編號，不要把它刪掉。
+
+理由不是流程潔癖，是這一天付過的代價：第 36 與第 37 回合各有一個**程式**缺陷（索引宣稱了
+一個沒有東西推導過的性質；`-si`/`-so` 留住整條串流），當時被直接修掉並只寫進 `plan/plan.md`，
+沒有進這個檔案。它們是 Z 與 AA，**補記於 2026-08-19，而那次補記是靠人記得**。
+
+一個只存在於 session 逐字稿裡的已驗證缺陷是最糟的狀態：下一個來看的人會看到一棵乾淨的樹和
+一份全過的測試。而「修好了所以不必記」也不成立——**這個檔案存在的價值有一半是那些重現步驟**，
+它們是日後判斷「這個修正有沒有退化」的唯一依據。
+
+Every defect reported in a round is written here the moment it is reproduced by
+hand, BEFORE it is fixed. When it is fixed, update its status and name the
+assertions; do not delete it. Two program defects from rounds 36 and 37 were
+fixed straight into plan.md without landing here first -- they are Z and AA,
+backfilled on 2026-08-19, which only happened because someone remembered.
+
 日期：2026-08-16。來源：一次 `read_easy` 檢視（全新 agent，只讀 `README.md` 與
 `README.zh-TW.md`，禁讀原始碼、測試、設計文件與 `--help`），共 164 次嘗試 / 82 個目標。
 **下列每一條都由母專案 session 親手重現過**；agent 提出但無法重現的一條已被撤回，不列於此。
@@ -564,15 +583,104 @@ Two things found while fixing, recorded in plan.md: the first fix covered only
 two of the four verbs, and honouring `--truncate-partial` on the append path
 created a fresh instance of the same defect class.
 
-日期：2026-08-19。來源：一次 README-only 盲測（第 37 回合）。**下列每一條都由本 session
-親手重現過**，指令與輸出照抄在下面。同一輪還報了「串流不是有界的」，那一條已修（見
-`plan/plan.md`「串流的記憶體宣稱是假的」與 T9a–T9c），不列在此。
-
-Verified 2026-08-19 by hand, from a README-only blind pass. The streaming
-memory claim from the same round is already fixed and is not listed here.
+日期：2026-08-19。來源：README-only 盲測第 36 與第 37 回合。**下列每一條都由本 session
+親手重現過**，指令與輸出照抄在下面。
 
 **共同特徵與 2026-08-16 那六條相同：全部在 `rc=0` 下靜默發生。** 而 W 更進一步——它的
 稽核紀錄會主動說出一件與事實不符的事。
+
+| # | 回合 | 缺陷 | 類別 | 斷言 |
+|---|---|---|---|---|
+| Z | 36 | 索引宣稱了一個沒有任何東西推導過的性質；`--verify-index` 為它背書 | **程式** | T79a–T79m |
+| AA | 37 | `-si`/`-so` 留住整條串流；而斷言它的 T9 量的是地板 | **程式＋測試** | T9a–T9c |
+| W | 37 | `-update` 寫進 `:enc:` 欄 → 整欄永久無法解密，且 log 說 `<redacted>` | **程式（安全相關）** | T90a–T90m |
+| X | 37 | `-append --in-place` 不驗證既有檔案，`-append -o` 會驗證 | **程式** | T91a–T91m |
+| Y | 37 | EOF 前未閉合的引號：`-append --in-place` 把新紀錄吞進那個欄位 | **程式** | T91c–T91d |
+
+**Z 與 AA 是補記的**（見本檔開頭的規則）。它們當時被直接修掉並只寫進 `plan/plan.md`，
+而依這個檔案的規則，它們本來應該在第 36、37 回合當下就落在這裡。
+
+---
+
+## Z. 索引宣稱了一個沒有任何東西推導過的性質（第 36 回合，2026-08-19 修正）
+
+**嚴重度：錯的紀錄號，rc=0，而文件指名用來排除這件事的工具說「index OK」。**
+**補記**：當時直接修掉並只寫進 `plan/plan.md`。
+
+索引檔頭帶著 `no_embedded_newlines`，平行搜尋路徑用它斷定「一行就是一筆」。設定它的呼叫點
+有三個，其中兩個傳的是常數——一個寫 `spansLines: false`，另一個寫
+`rec.line != r.line || false`，而 `r` 是只改了 `number` 的 `rec`，那個比較永遠不可能為真。
+**於是 `--build-index` 寫出的每一份索引都宣稱自己有這個性質。**
+
+重現不需要竄改，也不需要特殊檔案——一份引號內含散文的合法 CSV 就夠了：
+
+```sh
+python3 -c "
+with open('honest.csv','w') as f:
+    f.write('id,pkg,note\n')
+    for i in range(1,300001):
+        v='needle' if i==150000 else 'p%06d'%i
+        if i==1000: f.write('%d,%s,\"a note that genuinely\nspans two lines\"\n'%(i,v))
+        else:       f.write('%d,%s,\"prose, with a comma %d\"\n'%(i,v,i))
+"
+csv2 --build-index -i honest.csv       # index built
+csv2 --verify-index -i honest.csv      # index OK               rc=0
+csv2 -contains needle -i honest.csv    # 150001:2  （宣稱 300001 筆）  rc=0
+CSV2_PARALLEL_MIN_BYTES=99999999 csv2 -contains needle -i honest.csv   # 150000:2
+python3 -c "import csv;r=csv.reader(open('honest.csv',newline=''));next(r);print(sum(1 for _ in r))"
+# 300000                                ← 基準真相
+```
+
+**`--verify-index` 漏掉它的原因值得留著**：它檢查格點偏移量與紀錄筆數，而這兩者在這個失敗下
+**都完好無損**——在引號欄位裡放一個換行，不會移動任何一筆的起始位元組，也不會改變筆數。變的
+只是檔頭裡那個沒有任何東西重新推導過的宣稱，而它恰好就是快路徑真正取用的那一個。
+
+`--no-index` 也不是逃生口：它確實不「寫」sidecar，但平行資格檢查仍然載入了一份，而且從來
+沒看過 `o.noIndex`。
+
+**修法**：三個呼叫點由同一個函式回答；`--verify-index` 重新推導那個旗標（只對危險的方向
+失敗）；`--no-index` 在該處被遵守；`INDEX_VERSION` 推進到 3，因為磁碟上的 v2 sidecar 帶著
+錯誤旗標，而它們的檢查碼、戳記、偏移量全是對的——**只有版本抓得到**。
+另外把「索引已記錄跨行」與「沒有索引」兩種拒絕理由分開，因為對前者叫人去 `--build-index`
+是無效的建議。詳見 `plan/plan.md`。
+
+---
+
+## AA. `-si`/`-so` 留住整條串流，而斷言它的測試量的是地板（第 37 回合，2026-08-19 修正）
+
+**嚴重度：README 承諾「不整檔緩衝」，而大於記憶體的輸入會讓行程被 OOM 殺掉。**
+**補記**：當時直接修掉並只寫進 `plan/plan.md`。
+
+```sh
+# 修正前，輸出為零位元組的搜尋
+404 MB 進 stdin  →  peak RSS 415 MB   （比值 1.028）
+```
+
+兩個獨立的原因，而只有一個在「比大小」時看得見：
+
+1. **輸入端**：`ByteSource.next()` 以 64 KiB 呼叫 `FileHandle.readData`，而讀取迴圈裡沒有
+   任何 autoreleasepool。那些 Foundation 物件累積到行程結束，RSS 正比於讀進來的位元組數。
+   （**macOS 專屬**——Linux 的 Foundation 沒有 pool、以 ARC 管理 `Data`。）
+2. **輸出端**：`emitRecord` 每一筆都**無條件建構**一行 TRACE 訊息，而 `Logger.log` 自己也是
+   先組出時間戳與整行、之後才判斷層級。預設門檻是 WARN，因此每筆付兩次字串建構、一個字都
+   不會被印出來。
+
+**認出第二項的量測**——同樣的位元組量、二十分之一的紀錄數：
+
+| 輸入 | 紀錄數 | peak RSS |
+|---|---|---|
+| 79.6 MB | 2,000,002 | 123 MB |
+| 90.3 MB | 100,002 | 15.9 MB |
+
+**這一條同時是一個測試缺陷。** T9 全程通過：它的斷言是 `r_big < r_small * 2`，fixture 是
+77 KB 與 3.3 MB，而行程與 Foundation 的地板就有 9 MB——一個保留每個位元組的實作在大 fixture
+上是 17.7 MB，**仍然小於 9.4 MB 的兩倍，餘裕 6%**。那不是門檻太鬆，是量測被地板淹沒。
+
+**修法**：`Platform.drainingPool`（Darwin 用 pool、其他平台直接執行——寫在 `Platform.swift`，
+因為 `autoreleasepool` 在 Linux 的 Swift 上不存在，第一版寫在呼叫點旁邊導致 guest 建置失敗）；
+`Logger.log` 的 `message` 改為 `@autoclosure` 且層級判斷排在最前。T9 補上 T9b（兩條大小相差
+一倍的串流互相比較，地板抵銷）與 T9c（等位元組、二十分之一紀錄數）。修正後 79／90／181 MB、
+10 萬到 400 萬筆，peak RSS 全部是 9.5 MB。
 
 ---
 

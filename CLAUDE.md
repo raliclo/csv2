@@ -64,3 +64,26 @@ in the message; they are the part that cannot be recovered from the code.
   non-zero. 不要靜默修復格式錯誤的輸入；請指出紀錄與欄位並以非零結束。
 - Do not let the tool print anything on the normal path. It has to work in a
   pipeline. 正常路徑上不得輸出任何訊息，本工具必須能放進管線。
+- Do not fix a reported defect before it is written down. Every finding from a
+  blind-testing round goes into [`todo/known-defects.md`](./todo/known-defects.md)
+  the moment it is reproduced by hand — with the commands and the output — and
+  the fix comes after. A defect that exists only in a session transcript leaves
+  the next reader a clean tree and a passing suite; and half the value of that
+  file is the reproductions, which are the only way to tell later whether a fix
+  has regressed. Two program defects were fixed straight into `plan/plan.md` on
+  2026-08-19 and had to be backfilled from memory.
+  不要在一個被回報的缺陷「被寫下來」之前就去修它。盲測每一回合的每一項發現，一經親手重現
+  就寫進 [`todo/known-defects.md`](./todo/known-defects.md)——連同指令與輸出——修正在那之後。
+  一個只存在於 session 逐字稿裡的缺陷，留給下一個讀者的是一棵乾淨的樹和一份全過的測試；
+  而那個檔案有一半的價值在那些重現步驟，它們是日後判斷「修正有沒有退化」的唯一依據。
+  2026-08-19 有兩個程式缺陷被直接修進 `plan/plan.md`，後來只能靠記憶補記。
+- Do not put a defect list anywhere else — not in a `CLAUDE.md`, not in a
+  README. One was kept in the global `CLAUDE.md` and by 2026-08-19 all five of
+  its entries were false, every one having been fixed while the list went on
+  steering people away from an operation that was already safe. Instruction
+  files are also pre-injected into every agent's context, which is what stopped
+  two README-only blind tests from being blind.
+  缺陷清單不要放在別的地方——不放在任何 `CLAUDE.md`，也不放在 README。全域 `CLAUDE.md`
+  曾經有一份，到 2026-08-19 時**五條全部不成立**，每一條都早已修掉，而那張表還在叫人避開
+  一個已經安全的操作。指令檔還會被預先注入每一個 agent 的 context，那正是兩次「只讀 README
+  的盲測」不再是盲測的原因。
