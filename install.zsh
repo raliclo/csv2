@@ -82,6 +82,33 @@ target_dir() {
     # ——在 build_multissh_in_linux_vm.zsh 中查證過，它 export 的是
     # /workspace/opt/swift/usr/bin:/usr/local/sbin:/usr/local/bin:...——即使
     # buildroot 並未建立該目錄。因此只要我們寫得進去，那就是對的位置。
+    # Windows. The first Windows install put the binary in
+    # $HOME/.local/bin, which is not on PATH there, and said so -- honestly,
+    # but the node upgrade around it then found an OLDER csv2 through a scoop
+    # shim and reported success. 2026-08-20, defect MM.
+    #
+    # The convention on that machine is scoop's: the executable lives under
+    # %LOCALAPPDATA%\csv2 and a shim in ~/scoop/shims points at it, with
+    # scoop/shims on PATH. Installing to the place the shim ALREADY names means
+    # the shell resolves to the new build without this script writing anything
+    # into scoop's own directory -- creating shims is scoop's business, not
+    # ours.
+    #
+    # Windows。第一次在 Windows 上安裝時，執行檔被放進 $HOME/.local/bin，而那裡不在 PATH 上；
+    # 它誠實地說了，但外圍的節點升級腳本接著透過一個 scoop shim 找到了「更舊的」csv2，
+    # 並回報成功。2026-08-20，缺陷 MM。
+    # 那台機器上的慣例是 scoop 的：執行檔放在 %LOCALAPPDATA%\csv2 底下，由 ~/scoop/shims
+    # 裡的一個 shim 指向它，而 scoop/shims 在 PATH 上。**裝到 shim 本來就指著的那個位置**，
+    # 會讓 shell 解析到新的建置，而這支腳本完全不必往 scoop 自己的目錄裡寫東西——建立 shim
+    # 是 scoop 的事，不是我們的。
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*)
+            local appdata=${LOCALAPPDATA:-$HOME/AppData/Local}
+            print -r -- "${appdata//\\//}/csv2"
+            return
+            ;;
+    esac
+
     if [[ $(uname -s) == Linux ]]; then
         case ":$PATH:" in
             *":/usr/local/bin:"*)
@@ -101,7 +128,14 @@ target_dir() {
 }
 
 DEST_DIR=$(target_dir)
-DEST=$DEST_DIR/csv2
+# `.exe` on Windows, because the shell will not run it otherwise and the scoop
+# shim names it that way. Everywhere else the extension would be noise.
+# Windows 上要 `.exe`，否則 shell 不會執行它，而 scoop 的 shim 指的也是那個名字。
+# 在其他平台上，那個副檔名只是雜訊。
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) DEST=$DEST_DIR/csv2.exe ;;
+    *)                    DEST=$DEST_DIR/csv2 ;;
+esac
 
 # ---------------------------------------------------------------------
 # Uninstall / 移除

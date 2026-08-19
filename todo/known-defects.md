@@ -1173,3 +1173,51 @@ T61a／T61c（MSYS 的 FIFO 對原生程式不存在）、T98a–T98g（UTF-16 �
 那段「從未被編譯或執行過」的狀態註記是誠實的（第一次編譯恰好兩個錯誤），以及一個
 「在兩個平台上無關緊要的順序」——rename 之前有沒有關掉輸入——在第三個平台上是每一次寫入
 都失敗。**那個順序錯誤在 macOS 與 Linux 上存在了好幾個月，而那兩個平台永遠不會說。**
+
+---
+
+# 節點升級暴露的兩條（2026-08-20）/ Two found by the node upgrade (2026-08-20)
+
+`multissh` 的 `helper/upgrade_nodes_csv2.zsh` 會在每個節點上 clone、建置、執行 `install.zsh`，
+再以 `command -v csv2` 確認可達。它在 Windows 上回報 `reachable: csv2 0.1.0`——**而那是另一個
+執行檔**。
+
+| # | 缺陷 | 類別 |
+|---|---|---|
+| MM | `install.zsh` 不認得 Windows 的安裝慣例，裝到一個不在 PATH 上的目錄 | **程式（安裝）** |
+| NN | 安裝後的驗證以「版本字串」判定身分，而版本字串分不出同版號的兩個建置 | **程式（驗證）** |
+
+## MM. Windows 上 `install.zsh` 裝到了 shell 找不到的地方
+
+`target_dir()` 依序試 `$PREFIX`、`brew --prefix`、Linux 上的 `/usr/local/bin`，最後落到
+`$HOME/.local/bin`。**Windows 沒有任何一條適用的分支**，於是它落到
+`C:/Users/lowei/.local/bin`——而那不在 PATH 上。
+
+該機器上既有的慣例是：執行檔放 `%LOCALAPPDATA%\csv2\csv2.exe`，由 scoop 的 shim
+（`~/scoop/shims/csv2.shim`）指向它，而 `scoop/shims` 在 PATH 上。
+
+```
+scoop shim 指向  : C:\Users\lowei\AppData\Local\csv2\csv2.exe
+install.zsh 寫到 : C:/Users/lowei/.local/bin/csv2      （與新建置 sha256 相同）
+PATH 解析到      : shim → AppData 那一份，8/16 的舊檔
+```
+
+**`install.zsh` 本身沒有說謊。** 它印出警告說該目錄不在 PATH 上，並明說「已安裝，但**未以
+名稱驗證**」。誤導的是升級腳本自己那行 `command -v csv2 && csv2 --version`——它找到舊的 shim
+並回報成功。那一支屬於 multissh，不在此處修，但這裡記下它為什麼會被騙。
+
+## NN. 「同一個版本號」不足以證明「同一個執行檔」
+
+`install.zsh` 已經想到了這個風險，並且有一條專門的檢查：
+
+```
+if [[ $FOUND_VERSION != $BUILT_VERSION ]]; then
+    die "a fresh shell runs a DIFFERENT csv2: ..."
+```
+
+**但它比對的是版本字串。** 兩個都是 `csv2 0.1.0`，於是「跑到的是不是同一個檔案」這個問題，
+被一個「答不出這件事」的東西回答了。這與 T69 那些過期數字是同一族的問題，只是方向相反：
+那裡的數字會過期，這裡的數字**永遠不會變**——而那正是它分不出東西的原因。
+
+這一條在三個平台上都成立，只是 Windows 的 PATH 順序讓它現形。
+
