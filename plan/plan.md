@@ -2504,11 +2504,46 @@ multissh 的節點升級（`helper/upgrade_nodes_csv2.zsh`）會在每個節點�
 | mac | 本機 | `/Volumes/LinuxCS/sos/csv2`（正本，submodule） | `$(brew --prefix)/bin` |
 | wsl | `wslnode`（harvest 設定） | `~/proj/csv2`（git checkout） | `~/.local/bin` |
 | windows | `winnode`（harvest 設定） | `~/proj/csv2`（git checkout） | `%LOCALAPPDATA%\csv2\csv2.exe` |
-| linux VM | `mac-linux-vm`（127.0.0.1:16889） | `/workspace/csv2`（**每次由 runner 重建**） | 不適用 |
+| linux VM | `mac-linux-vm`（127.0.0.1:16889） | `/workspace/csv2`（**git checkout**） | 不需要（`release/` 已在 PATH） |
 
-**第四個節點不是「還沒升級」，它是依設計就不常駐。** `run_csv2_test.zsh` 每次對
-`workspace.ext4` 的複本注入原始碼並在 guest 內重建，因此那裡沒有 git、也沒有可以「pull」的
-東西。它的升級機制就是跑一次 runner。把它列進「待升級的節點」會是把一個設計當成一個缺口。
+### 這一段原本寫錯了，而錯的方式值得留著
+
+初稿寫的是「第四個節點依設計就不常駐、那裡沒有 git、升級機制就是跑一次 runner」。
+**三句話全錯**，而三句都是推論、不是量測：
+
+| 我寫的 | 實際 |
+|---|---|
+| 那裡沒有 git | `/usr/bin/git` 2.55.GIT，而且 `/workspace/csv2` 就是 checkout |
+| 依設計每次重建 | **我把兩台 guest 搞混了**——`run_csv2_test.zsh` 開的是 `workspace.ext4` 的 per-run 複本，與這個常駐節點是不同的機器 |
+| `GIT_SSH_COMMAND` 用不上 | 用得上。git 接受 multissh 當傳輸，一路走到選金鑰才停 |
+
+**推論之所以危險，不是因為它會錯，是因為它讀起來與量測一模一樣。** 上面那張表寫成事實的
+語氣，而它的來源只是「我想它應該是這樣」。這與本專案一路在修的那些缺陷是同一個形狀——
+一個回答不了問題的東西，看起來與能回答的東西沒有分別。
+
+### 那個節點為什麼不 pull，而是收 bundle
+
+實測到底之後，擋住 `git pull` 的東西是可以一層層說清楚的：
+
+```
+git 接受 multissh 當 SSH 傳輸        ✅  GIT_SSH_COMMAND 有效
+multissh 金鑰                        ✅  /workspace/multissh/multissh_keys/generated/
+埠號                                 ⚠️  multissh 預設 16888，GitHub 要 22
+KEX 協商                             ❌  no common key exchange algorithm
+```
+
+最後那一條是設計使然：multissh 預設用後量子的 `mlkem768x25519-sha256`，GitHub 不支援；
+而它**只有在「PQ identity 不可用、且 `~/.ssh/id_ed25519` 存在」時**才切換到 stock OpenSSH
+profile。也就是說，要讓 guest 從 GitHub pull，就得在裡面放一把 GitHub 認得的私鑰。
+
+**而那正是 `linux_kernal_vm_interactive/README.md` 記載的設計所要避免的**：「prebuilt 的
+存在意義就是建置可以離線完成；在此走網路等於悄悄把 token 與可用連線變成建置的前提」。
+
+**定案：以 git bundle 經 multissh 更新。** 從 Mac 的工作樹產生 bundle、經「此刻已經在用的
+那條連線」送進 guest、`git fetch` 該 bundle 再 fast-forward。
+
+**它一樣走網路**——那條連線就是網路。差別不在「有沒有網路」，而在**依賴的形狀**：它不新增
+對外相依、不需要憑證、也不在映像裡留下秘密。（初稿把它寫成「不走網路」，那是第四個錯誤。）
 
 ### Windows 的位置是「shim 指著的那個」，不是我們挑的
 
