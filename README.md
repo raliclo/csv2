@@ -291,6 +291,21 @@ backslash `\\`. Without that a cell containing a tab or a newline would break
 the format the report promises — and quoted prose containing both is exactly
 the data this tool was written for.
 
+**So the third column is for reading, not for feeding back.** It is a display
+form: escaped so the report stays one line per hit. `-update` takes a *logical*
+value and escapes it for you, so handing it the escaped text writes the
+backslashes themselves — `X⏎Y\Z` becomes the seven characters `X\nY\\Z`, at
+rc=0, and nothing says so. **What composes is the ADDRESS.** To carry a value
+across, read it with `-get`, which returns the stored bytes:
+
+```sh
+addr=$(csv2 -contains "old" -i f.csv2 | head -1 | cut -f1)   # 12:6
+val=$(csv2 -get "$addr" -i f.csv2)                           # the value itself
+csv2 -update "$addr" "$val" -i f.csv2 --in-place             # round-trips
+```
+
+Asserted by T96.
+
 Matching is **case-sensitive** and there is no flag to change that.
 `--normalize` affects Unicode normalisation only, not case.
 

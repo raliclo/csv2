@@ -3853,6 +3853,75 @@ assert_contains "$par" "read_bytes=" \
 assert_contains "$sin" "metrics:" \
     "T95f while the single-threaded path still prints one / 而單執行緒路徑仍然會印"
 
+# ---------------------------------------------------------------------
+# T96 -- the address composes; the reported value does not.
+#
+# Round 38, defect FF. The README presents `record:field` addressing as what
+# lets finding and editing compose, and separately says report values are
+# escaped. A reader who joins those two takes the report's third column and
+# feeds it to -update. For any value containing a newline, tab, CR or
+# backslash -- the data this tool exists for -- that writes the escape
+# sequences themselves, at rc=0, with nothing said:
+#
+#   stored   X <LF> Y \ Z
+#   report   X\nY\\Z            (escaped, correctly: one line per hit, T53)
+#   -update with that  ->  X \ n Y \ \ Z
+#
+# Neither half is wrong on its own. The report must escape or it cannot stay
+# one line per hit; -update must take a logical value or the caller would have
+# to escape by hand. What was missing is the sentence saying they do not meet
+# -- and the middle step that makes them, which already existed: -get returns
+# the stored bytes.
+#
+# T96 —— 能組合的是位址；報告裡的那個值不能。
+# 第 38 回合，缺陷 FF。README 把 `record:field` 定址呈現為「讓尋找與編輯得以組合」的東西，
+# 又在另一處說報告的值有跳脫。把這兩件事接起來的讀者，會拿報告的第三欄去餵 -update。
+# 對任何含換行、TAB、CR 或反斜線的值——也就是這支工具存在的理由——那會把跳脫序列本身寫進去，
+# rc=0，而且什麼都不說。
+# 兩邊單獨看都沒有錯：報告不跳脫就無法維持一行一個命中；-update 不收邏輯值，呼叫端就得自己
+# 手動跳脫。缺的是那句「它們接不起來」，以及那個能讓它們接起來的中間步驟——而它本來就存在：
+# -get 回傳的是儲存的位元組。
+# ---------------------------------------------------------------------
+echo
+echo "--- T96: the address composes, the reported value does not / 能組合的是位址，不是報告裡的值 ---"
+
+print -r -- 'id,val'  > "$TMP/t96.csv2"
+print -r -- '編號,值' >> "$TMP/t96.csv2"
+print -r -- '1,X\nY\\Z' >> "$TMP/t96.csv2"
+
+orig=$("$CSV2" -get 1:2 -i "$TMP/t96.csv2" 2>/dev/null)
+
+# The report escapes. That is correct and must stay correct.
+# 報告會跳脫。那是對的，而且必須維持是對的。
+assert_contains "$("$CSV2" -contains X -i "$TMP/t96.csv2" 2>/dev/null)" 'X\nY\\Z' \
+    "T96a the report escapes the value, so a hit stays one line / 報告會跳脫那個值，因此一個命中仍佔一行"
+
+# The documented round trip: address from the report, value from -get.
+# 文件所寫的那條往返路徑：位址取自報告，值取自 -get。
+cp "$TMP/t96.csv2" "$TMP/t96_rt.csv2"
+addr=$("$CSV2" -contains X -i "$TMP/t96_rt.csv2" 2>/dev/null | head -1 | cut -f1)
+assert_eq "$addr" "1:2" \
+    "T96b the address parses out of the report / 位址能從報告中解析出來"
+val=$("$CSV2" -get "$addr" -i "$TMP/t96_rt.csv2" 2>/dev/null)
+"$CSV2" -update "$addr" "$val" -i "$TMP/t96_rt.csv2" --in-place 2>/dev/null
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t96_rt.csv2" 2>/dev/null)" "$orig" \
+    "T96c and a value carried across with -get comes back byte-identical / 而以 -get 帶過去的值，回來時逐位元相同"
+assert_same "$TMP/t96.csv2" "$TMP/t96_rt.csv2" \
+    "T96d so the whole file is unchanged by writing the value back to itself / 因此把值寫回它自己，整個檔案不變"
+
+# And the trap, pinned so nobody 'fixes' -update into accepting escapes: the
+# reported form is NOT the value, and feeding it back is a different value.
+# 而那個陷阱要釘住，免得有人把 -update「修」成接受跳脫序列：報告的形式**不是**那個值，
+# 把它餵回去得到的是另一個值。
+cp "$TMP/t96.csv2" "$TMP/t96_bad.csv2"
+rep=$("$CSV2" -contains X -i "$TMP/t96_bad.csv2" 2>/dev/null | head -1 | cut -f3)
+"$CSV2" -update 1:2 "$rep" -i "$TMP/t96_bad.csv2" --in-place 2>/dev/null
+if [[ "$("$CSV2" -get 1:2 -i "$TMP/t96_bad.csv2" 2>/dev/null)" == "$orig" ]]; then
+    bad "T96e -update now interprets escapes, which would make the report ambiguous with a real backslash / -update 開始解讀跳脫序列了，那會讓報告與「真正的反斜線」無法區分"
+else
+    ok "T96e feeding the REPORTED text back yields a different value, which is why the docs send you through -get / 把「報告的文字」餵回去會得到另一個值——那正是文件要人改走 -get 的原因"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
