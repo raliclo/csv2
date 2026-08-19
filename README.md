@@ -234,7 +234,10 @@ INDEX / 索引
 
 DIAGNOSTICS / 診斷
   -debug                diagnostics to stderr, including a metrics: line
-  -debug=trace          one level lower: every record's selection decision
+  -debug=trace          one level lower: every record's selection decision,
+                        including the ones NOT emitted and why, and the point
+                        at which the read stops -- so a record with no line is
+                        a record that was never reached, and says so
   -log FILE             append a timestamped operation record
   --version  --help
 ```

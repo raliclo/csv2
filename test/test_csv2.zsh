@@ -1385,7 +1385,16 @@ assert_fails "T56l --physical without a locating report is refused / 沒有定�
 # unreachable, so it is asserted here as reachable AND as not firing without it.
 # T50 —— 計畫定義 -debug 有五個層級，CLI 只實作了一個，TRACE 無法達到。此處斷言它
 # 可被達到，也斷言未指定時不會出現。
-t_on=$("$CSV2" -head 2 -i "$PKG" -debug=trace 2>&1 >/dev/null | grep -c 'TRACE')
+# Counting ALL trace lines made this brittle, and it broke the moment trace
+# started reporting the records it does NOT emit (round 38, DD) plus the line
+# saying where the read stops. The property T50 is about is unchanged --
+# reachable with the flag, silent without -- so it now counts the per-record
+# lines specifically instead of everything the level ever prints.
+# 計算「全部的 trace 行」讓這條測試很脆弱，而在 trace 開始回報「沒有被輸出的紀錄」
+# （第 38 回合，DD）以及那行「讀取到此為止」的當下，它就壞了。T50 要測的性質沒有變
+# ——給了旗標就到得了、沒給就沉默——因此它現在只數「逐筆的那種行」，而不是那個層級
+# 曾經印出的每一行。
+t_on=$("$CSV2" -head 2 -i "$PKG" -debug=trace 2>&1 >/dev/null | grep -c 'select: record [0-9]* line')
 t_off=$("$CSV2" -head 2 -i "$PKG" -debug 2>&1 >/dev/null | grep -c 'TRACE')
 if [[ "$t_on" -eq 2 && "$t_off" -eq 0 ]]; then
     ok "T50 -debug=trace emits one line per record; plain -debug emits none / -debug=trace 每筆一行，單純的 -debug 不輸出"
@@ -3734,6 +3743,66 @@ assert_contains "$("$CSV2" -r -t -i "$TMP/t93_h2.csv2" 2>&1 | head -1)" "header 
 # 兩種語言帶的是同一個位址。讀哪一種語言的人都必須能把它打回去。
 assert_contains "$("$CSV2" -r -t -i "$TMP/t93.csv2" 2>&1 | sed -n 2p)" "第 2 筆（第 4 行）" \
     "T93h the Chinese line carries the same record and line / 中文那一行帶著相同的紀錄號與行號"
+
+# ---------------------------------------------------------------------
+# T94 -- trace answers "why is record N not in my result".
+#
+# Round 38, defect DD. The README offers `-debug=trace` as "every record's
+# selection decision". It logged only the records it EMITTED -- which is the
+# half you already had, from the output. For the record actually being asked
+# about there was no line, no reason, nothing.
+#
+# And silence meant two different things that could not be told apart: "read
+# and rejected" and "never reached, because -mid stopped the read first". This
+# project condemns exactly that two sections earlier in its own README, about
+# the parallel path: "reporting only the interesting case would make silence
+# ambiguous".
+#
+# T94 —— trace 回答「為什麼第 N 筆不在我的結果裡」。
+# 第 38 回合，缺陷 DD。README 把 `-debug=trace` 說成「每一筆紀錄的選取決定」，而它只記錄
+# 「被輸出的」那些——那一半你從輸出本身就已經有了。真正被詢問的那一筆，沒有行、沒有理由、
+# 什麼都沒有。
+# 而那份沉默同時代表兩件無法分辨的事：「讀過但被排除」與「根本沒讀到，因為 -mid 先停了
+# 讀取」。本專案在自己 README 中隔兩節就譴責過這件事（平行路徑那一段）：「只回報有趣的
+# 那個情況，會讓沉默變得有歧義」。
+# ---------------------------------------------------------------------
+echo
+echo "--- T94: trace explains the records that are missing / trace 解釋那些不見的紀錄 ---"
+
+printf 'pkg,ver\nzlib,1\nzstd,2\nbusybox,3\n' > "$TMP/t94.csv"
+tr_of() { "$CSV2" "$@" -debug=trace 2>&1 >/dev/null | grep -o 'select:.*' }
+
+out=$(tr_of -contains zlib --filter -i "$TMP/t94.csv")
+assert_contains "$out" "record 2 line 3 not emitted: no field matched" \
+    "T94a a record that was read and rejected says so, with the reason / 讀過但被排除的紀錄會說出來，並附上理由"
+assert_eq "$(print -r -- "$out" | grep -c 'record [0-9]* line')" "3" \
+    "T94b and every record in the file has a line, not just the ones that came out / 檔案裡每一筆都有一行，不只是有輸出的那些"
+
+# The other half of the ambiguity: a record with no line because the read
+# stopped. Without this the two cases are indistinguishable.
+# 歧義的另一半：某一筆沒有行，是因為讀取停了。少了這一條，兩種情況無法分辨。
+out=$(tr_of -mid 1,2 -i "$TMP/t94.csv")
+assert_contains "$out" "stopping after record 2" \
+    "T94c and when the read stops early, trace says where / 而當讀取提前停止時，trace 會說出停在哪裡"
+if print -r -- "$out" | grep -q 'record 3 line'; then
+    bad "T94d record 3 has a line although it was never read / 第 3 筆從未被讀到，卻有一行"
+else
+    ok "T94d so a record past the stop has no line, and now that is stated rather than silent / 因此停止點之後的紀錄沒有行——而那件事現在是被說出來的，不是沉默"
+fi
+
+# The remaining non-emitting branches each name themselves.
+# 其餘「不輸出」的分支各自指名自己。
+assert_contains "$(tr_of -mid 2,3 -i "$TMP/t94.csv")" "record 1 line 2 not emitted: before the requested range" \
+    "T94e a record before the range says which side of it it fell / 在範圍之前的紀錄會說出它落在哪一邊"
+assert_contains "$(tr_of -tail 1 -i "$TMP/t94.csv")" "held in the -tail buffer" \
+    "T94f -tail says a record is buffered, because whether it survives is not known until EOF / -tail 會說明紀錄被緩衝著，因為它能否存活要到 EOF 才知道"
+assert_contains "$(tr_of -contains zlib -B 1 --filter -i "$TMP/t94.csv")" "held as -B context" \
+    "T94g and -B says a non-matching record is being kept as context / 而 -B 會說明未命中的紀錄正被當成上下文保留"
+
+# Unchanged: the level must still be silent without the flag.
+# 不變：沒有那個旗標時，這個層級仍然必須沉默。
+assert_eq "$("$CSV2" -contains zlib --filter -i "$TMP/t94.csv" -debug 2>&1 >/dev/null | grep -c 'not emitted')" "0" \
+    "T94h plain -debug prints none of this / 單純的 -debug 完全不印這些"
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"

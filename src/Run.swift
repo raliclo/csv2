@@ -418,6 +418,28 @@ func runSelect(_ o: Options) throws {
         return hits
     }
 
+    /// TRACE for a record that is NOT emitted. Without it, `-debug=trace`
+    /// logged only the records that came out -- which is the half you already
+    /// had, from the output. The question it is supposed to answer is "why is
+    /// record N not in my result", and for that the interesting record is
+    /// precisely the one with no line.
+    ///
+    /// It also removed an ambiguity this project condemns two sections earlier
+    /// in its own README, about the parallel path: "reporting only the
+    /// interesting case would make silence ambiguous". Silence here meant
+    /// either "read and rejected" or "never reached, because the read stopped
+    /// first", and the evidence was identical. Round 38, defect DD.
+    ///
+    /// 給「沒有被輸出」的紀錄用的 TRACE。少了它，`-debug=trace` 只會記錄有輸出的那些
+    /// ——而那一半你從輸出本身就已經有了。它該回答的問題是「為什麼第 N 筆不在我的結果裡」，
+    /// 而對那個問題來說，有意思的紀錄恰恰是「沒有那一行」的那一筆。
+    /// 它同時消除了一個歧義，而本專案在自己 README 中隔兩節就譴責過它（平行路徑那一段）：
+    /// 「只回報有趣的那個情況，會讓沉默變得有歧義」。這裡的沉默可能是「讀過但被排除」，
+    /// 也可能是「根本沒讀到，因為讀取先停了」，而兩者的證據完全相同。第 38 回合，缺陷 DD。
+    func traceSkip(_ r: Record, _ why: String) {
+        Logger.shared.log(.trace, "select: record \(r.number) line \(r.line) not emitted: \(why)")
+    }
+
     func emitRecord(_ r: Record, matches: [Int]) throws {
         guard let c = ctx else { return }
         // TRACE is per-record: the question it answers is "why was record N not
@@ -517,10 +539,14 @@ func runSelect(_ o: Options) throws {
                 if o.before > 0 {
                     ring.append(r)
                     if ring.count > o.before { ring.removeFirst() }
+                    traceSkip(r, "before the requested range; held as -B context")
+                } else {
+                    traceSkip(r, "before the requested range")
                 }
                 return true
             }
             if r.number > upper {
+                traceSkip(r, "past the requested range")
                 // A builder means the whole file is being scanned to produce
                 // the index, so stopping early would leave it incomplete.
                 // 有 builder 表示正在為了產生索引而掃描全檔，提前停止會讓它不完整。
@@ -531,6 +557,7 @@ func runSelect(_ o: Options) throws {
             if let n = tailN {
                 tailRing.append(r)
                 if tailRing.count > n { tailRing.removeFirst() }
+                traceSkip(r, "held in the -tail buffer; whether it is emitted is not known until EOF")
                 return true
             }
 
@@ -552,6 +579,9 @@ func runSelect(_ o: Options) throws {
                 } else if o.before > 0 {
                     ring.append(r)
                     if ring.count > o.before { ring.removeFirst() }
+                    traceSkip(r, "no field matched; held as -B context")
+                } else {
+                    traceSkip(r, "no field matched")
                 }
             } else {
                 try emitRecord(r, matches: [])
@@ -561,7 +591,16 @@ func runSelect(_ o: Options) throws {
             // operation on a huge file.
             // 在此回傳 false 即停止讀取。`-mid a,b` 因此不會碰到 b 之後的任何
             // 一個位元組，那正是它在巨大檔案上最便宜的原因。
-            if r.number >= upper && afterRemaining == 0 && tailN == nil && builder == nil { return false }
+            if r.number >= upper && afterRemaining == 0 && tailN == nil && builder == nil {
+                // Say that the read stops here. Otherwise every record after
+                // this one is missing from the trace for a reason the trace
+                // cannot express -- indistinguishable from having been read
+                // and rejected.
+                // 說出「讀取到此為止」。否則之後每一筆都會因為一個「trace 表達不出來的理由」
+                // 而缺席，與「讀過但被排除」無法區分。
+                Logger.shared.log(.trace, "select: stopping after record \(r.number); nothing past it is read")
+                return false
+            }
             return true
         } catch {
             pendingError = error
