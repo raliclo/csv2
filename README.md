@@ -189,7 +189,11 @@ EDITING / 編輯
   -delete -col N|NAME   remove that column from every record AND from both
                         header rows -- the one deletion that keeps alignment
   -update r:c VAL       update one cell
-  --truncate-partial    drop a trailing incomplete record instead of failing
+  --truncate-partial    when READING, drop a record left unfinished at EOF by
+                        an unclosed quote, instead of failing. A trailing
+                        record with too few fields is a hard error either way:
+                        it is complete as written and simply wrong. Refused
+                        with -append, which can only add bytes
 
 PROTECTION / 保護
   -hash COLS            mask columns, one way. Deterministic, so equal values
@@ -669,6 +673,10 @@ Each of these exits non-zero with a message saying why:
 | `-encrypt` with no `-keyfile` and no tty | a prompt that cannot be shown is never a yes |
 | an edit with no `-o`, `-so` or `--in-place` | `-insert`/`-append`/`-delete`/`-update` need an explicit destination; there is no implied in-place |
 | `-o /dev/stdout` | output is written to a temp file beside the target and renamed, which needs a regular file. Use `-so` |
+| `-update`/`-delete -cell` on a column the file marks `:enc:`, `:hmac:` or `:hash` | a raw value written there cannot be read back, and for an encrypted column `-decrypt` stops at that cell — so records the edit never touched are lost with it |
+| `-insert`/`-append` into a file that has such a column | every field of the literal row is raw, including that one, and no value you could supply would be right: the transform needs the key, and the header carries only its fingerprint |
+| `-append` onto a file whose last record is incomplete | a short final record, or one left open by an unclosed quote. Checked for `-o` and for `--in-place` alike — the fast path used to skip it and produce a file csv2 then refused to read |
+| `-append` with `--truncate-partial` | appending adds bytes and cannot remove the incomplete record, so the file would keep it *and* gain a complete record after it. Write a clean copy first: `csv2 -r -t --truncate-partial -i f.csv -o clean.csv` |
 | unknown flag | never swallowed as something else |
 
 ### `-t` gates selections, never edits

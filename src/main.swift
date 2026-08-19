@@ -854,6 +854,71 @@ func checkTornAppend(path: String, format: Format, truncatePartial: Bool) throws
     }
 }
 
+/// Reads the existing file and applies the SAME check the rewrite path applies.
+/// It runs only when the file does not end in a newline, which is the only
+/// state in which the tail can be a partial record -- so a file that ends
+/// properly, which is nearly all of them, still costs the fast path nothing.
+///
+/// It exists because `-append --in-place` validated nothing for a `.csv` and
+/// said rc=0 twice over. A file ending `zlib,1.3` where the header has three
+/// columns took the append and produced a file csv2 itself then refused to
+/// read, while THE SAME INPUT through `-o` was correctly refused -- one verb,
+/// one input, opposite outcomes, and the difference documented only as a
+/// big-O note. A file ending inside an unclosed quote absorbed the appended
+/// record into that field, so a write that reported success had not happened.
+/// Round 37 of the README-only blind testing, defects X and Y.
+///
+/// Cheaper checks were considered and are not sound. Reading back a bounded
+/// window and parsing the tail after the last newline cannot tell a partial
+/// record from a complete one that contains an embedded newline: both look
+/// like a fragment, and the answer depends on the quote state at the start of
+/// the record, which is only knowable by parsing from the front. Paying O(n)
+/// on the one case that can be wrong beats being wrong quietly.
+///
+/// 讀取既有檔案，並套用「重寫路徑所套用的同一份檢查」。它只在檔案未以換行結尾時執行，
+/// 而那是唯一「結尾可能是半筆」的狀態——因此一個正常結尾的檔案（幾乎全部都是）不必為
+/// 快路徑多付任何成本。
+/// 它之所以存在，是因為 `-append --in-place` 對 `.csv` 完全不驗證，而且以 rc=0 錯了兩次。
+/// 一個以 `zlib,1.3` 結尾、而標頭有三欄的檔案，會照樣接受追加並產生一個 csv2 自己拒讀的
+/// 檔案，而**同一份輸入**走 `-o` 會被正確拒絕——同一個動詞、同一份輸入、相反的結果，而兩者的
+/// 差別只被寫成一個 O(1) 的括號註記。一個結束在未閉合引號裡的檔案，會把追加的那一筆吸進那個
+/// 欄位，於是一次回報成功的寫入其實沒有發生。README-only 盲測第 37 回合，編號 X 與 Y。
+/// 更便宜的檢查考慮過，而且不成立：讀回一段有界的視窗、解析最後一個換行之後的部分，分不出
+/// 「半筆」與「一筆含內嵌換行的完整紀錄」——兩者看起來都是碎片，而答案取決於該紀錄開頭處的
+/// 引號狀態，那只有從檔案前面解析才知道。在唯一可能出錯的那個情況上付 O(n)，好過安靜地弄錯。
+func validateBeforeAppend(path: String, format: Format, headerRows: Int,
+                          truncatePartial: Bool) throws {
+    let source = try ByteSource(path: path)
+    defer { source.close() }
+    var headers: [Record] = []
+    var expected = 0
+    var pending: Error?
+    let parser = RecordParser(format: format, truncatePartial: truncatePartial) { rec in
+        if headers.count < headerRows {
+            headers.append(rec)
+            if headers.count == headerRows { expected = headers[0].count }
+            return true
+        }
+        var r = rec
+        r.number = rec.number - headerRows
+        do {
+            try checkFieldCount(r, expected: expected,
+                                what: "record \(r.number) (line \(r.line))")
+        } catch {
+            pending = error
+            return false
+        }
+        return true
+    }
+    while !parser.stopped, let c = source.next() { try parser.feed(c) }
+    // finish() is what reports a file ending inside a quoted field, so it must
+    // run even though nothing else here needs it.
+    // finish() 才是回報「檔案結束在引號欄位內」的地方，因此即使此處沒有別的東西需要它，
+    // 它也必須被執行。
+    if !parser.stopped { try parser.finish() }
+    if let e = pending { throw e }
+}
+
 // ---------------------------------------------------------------------
 // MARK: - Field count check / 欄數檢查
 // ---------------------------------------------------------------------

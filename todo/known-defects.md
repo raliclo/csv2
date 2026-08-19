@@ -543,8 +543,26 @@ V 是「一個值被靜默地**毀掉**」——而且從解析後的物件裡�
 
 ---
 
-# 第 37 回合驗證的三條，尚未修（2026-08-19）
-# Three verified by round 37, not yet fixed (2026-08-19)
+# 第 37 回合驗證的三條 —— 全部已修（2026-08-19）
+# Three verified by round 37 -- all fixed (2026-08-19)
+
+**狀態：W、X、Y 三條均已修正，並由 T90a–T90m 與 T91a–T91m 共 26 項斷言涵蓋，macOS 與
+aarch64 Linux 兩邊皆通過。本節保留為紀錄：下面的重現步驟仍然有效，只是現在每一條都會以
+非零結束、且不動到檔案。**
+
+Status: all three fixed, covered by 26 assertions (T90a-T90m, T91a-T91m),
+passing on macOS and in the aarch64 Linux guest. Kept as the record -- the
+reproductions below still run, they now exit non-zero and leave the file alone.
+
+修正時發現的兩件事，記在 `plan/plan.md`「每一條寫入捷徑都跳過了慢路徑的驗證」：
+**W 的第一版修正是不完整的**——它只涵蓋 `-update` 與 `-delete -cell`，而 `-append` 直接
+走過去造成一模一樣的破壞；`-append --in-place` 還需要第二處守衛，因為它不經過 `runEdit`。
+以及**修正過程中我自己造出了同一類缺陷的新案例**：讓 `--truncate-partial` 在追加路徑上被
+接受，會把不完整的紀錄從解析中丟掉、卻留在檔案裡。
+
+Two things found while fixing, recorded in plan.md: the first fix covered only
+two of the four verbs, and honouring `--truncate-partial` on the append path
+created a fresh instance of the same defect class.
 
 日期：2026-08-19。來源：一次 README-only 盲測（第 37 回合）。**下列每一條都由本 session
 親手重現過**，指令與輸出照抄在下面。同一輪還報了「串流不是有界的」，那一條已修（見
@@ -603,9 +621,12 @@ INFO  update 1:secret: <redacted> -> <redacted>
 `:hmac:` / `:hash` 欄位同樣接受 `-update`，rc=0，明文就留在那裡，而雜湊欄位**連一個會失敗的
 驗證都沒有**，因此永遠不會有任何東西發現它。
 
-**修法方向（尚未實作）**：`-update` 與 `-delete -cell` 對帶有 `:enc:`／`:hmac:`／`:hash`
-標記的欄位必須拒絕，並在訊息裡說出唯一正確的做法（先解密、再改、再重新加密）。這與
-`-decrypt` 「在標記層拒絕、絕不拖到密碼演算法」是同一條原則的另一半。
+**修法（已實作）**：四個會寫入原始值的動詞——`-update`、`-delete -cell`、`-insert`、
+`-append`——對「檔案宣告為已轉換」的欄位一律拒絕。單格與整列是兩個不同的拒絕，訊息不同；
+加密與雜湊的後果不同，訊息與出路也不同（對雜湊欄位說「先解開再改」是做不到的事）。
+`-append --in-place` 在 `runAppendFast` 內另有一處守衛，因為它不經過 `runEdit`。
+「同一次執行裡轉換並編輯」仍然允許——被加密的就是那個新值。這與 `-decrypt`
+「在標記層拒絕、絕不拖到密碼演算法」是同一條原則的另一半。
 
 ---
 
@@ -638,8 +659,11 @@ csv2 -append 'zstd,1.5.7,compression' -i c6.csv -o c6out.csv
 **這正是 README「Why this exists」描述的那個事故**——「成功執行、印出改了什麼的清單」——
 在這支為了防止它而寫的工具內部重現。
 
-**修法方向（尚未實作）**：快路徑在寫入之前，從檔尾讀回一段有界的位元組並驗證最後一筆是
-完整的、欄數正確的。那仍然是 O(1)（讀取量與檔案大小無關），因此不必放棄快路徑的承諾。
+**修法（已實作，且與當初的方向不同）**：原本設想的是「從檔尾讀回一段有界的位元組」。
+**那不成立**——讀回一段視窗、解析最後一個換行之後的部分，分不出「半筆」與「一筆含內嵌換行的
+完整紀錄」，兩者看起來都是碎片，而答案取決於該紀錄開頭處的引號狀態，那只有從檔案前面解析
+才知道。實際做法是：檔案**未以換行結尾時**才完整解析一次。那是唯一「結尾可能只寫了一半」的
+狀態，因此正常結尾的檔案仍然是 O(1)，由 T91h 以「那行 O(n) 的 debug 訊息不出現」來斷言。
 
 ---
 
@@ -674,8 +698,11 @@ csv2 -r -t -i e6.csv
 | 未閉合的引號 | **有效**，丟棄該筆，rc=0 |
 | 欄數不足的紀錄 | **完全無作用**，訊息與 rc 皆與不給時相同 |
 
-「欄數不足且無結尾換行」正是教科書上的「不完整的結尾紀錄」。這一條與 X 的修法應該一起做：
-快路徑要能分辨那種結尾，`--truncate-partial` 才有東西可以丟棄。
+**已定案（2026-08-19）：不擴充這個旗標，改為把文件寫準。** 欄數不足的結尾紀錄「照它所寫的
+內容是完整的，只是錯的」——把它歸類為「不完整」，等於讓一個明確的旗標去猜使用者的意圖。
+README 現在寫明它丟棄的是「因未閉合引號而在 EOF 處未完成的那一筆」，而欄數不足兩種情況下
+都是硬錯誤。另外，`--truncate-partial` 搭配 `-append` 現在會被**拒絕**：追加只會加上位元組，
+它移除不了那筆不完整的紀錄，接受它只會讓檔案同時保留半筆、並在其後多出一筆完整的。
 
 （順帶更正一項舊的記載：全域 `CLAUDE.md` 的已知缺陷表說 `--truncate-partial` 完全無作用，
 以及 `--include-headers` 的 `0a`／`0b` 未實作。兩者現在都不對——前者對未閉合引號有效，

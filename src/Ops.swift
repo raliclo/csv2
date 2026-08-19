@@ -677,13 +677,90 @@ func applyTransform(_ t: CellTransform, to record: inout Record, header: Record)
 /// NEW 明文寫進 log。放進那個值的那次執行受保護，改動它的那次執行不受保護。
 /// 標頭是檔案自己對「哪些欄位存放秘密」的陳述。它比任何單次呼叫都活得久，而且它是唯一
 /// 可能對「一個不是呼叫者建立的檔案」說得準的東西。
-func redactColumnsDeclaredByHeader(_ header: Record) {
-    for f in header.fields {
+/// One predicate for "the file's own header says this column holds a
+/// transformed value". Two things depend on it and they must not drift: what
+/// the log redacts, and what an edit is refused on. They were separate before
+/// 2026-08-19, and the gap between them was a defect -- redaction covered the
+/// column while editing did not, so a value the log declined to print was
+/// written into a column it destroyed.
+/// 「檔案自己的標頭說這一欄存放的是轉換過的值」——只有一個謂詞。有兩件事依賴它，而它們
+/// 不能各走各的：log 要遮蔽什麼，以及編輯要在什麼上面被拒絕。2026-08-19 之前這兩者是
+/// 分開的，而它們之間的落差就是一個缺陷——遮蔽涵蓋了那一欄而編輯沒有，於是一個 log 拒絕
+/// 印出來的值，被寫進了一個它會摧毀的欄位。
+func headerDeclaresProtected(_ name: String) -> Bool {
+    EncMarker.parse(name) != nil
+        || name.hasSuffix(":hash")
+        || name.range(of: ":hmac:", options: .backwards) != nil
+}
+
+/// The columns this file declares transformed, as (index, visible name), plus
+/// whether any of them is encrypted rather than hashed. The two consequences
+/// are different and the messages below have to say the one that applies.
+/// 本檔案宣告為已轉換的欄位，以 (索引, 可見欄名) 表示，另附「其中是否有加密而非雜湊的」。
+/// 兩者的後果不同，而下面的訊息必須說出適用的那一個。
+func protectedColumns(_ header: Record) -> (columns: [(Int, String)], anyEncrypted: Bool) {
+    var cols: [(Int, String)] = []
+    var enc = false
+    for (i, f) in header.fields.enumerated() {
         let n = headerName(f)
-        let isProtected = EncMarker.parse(n) != nil
-            || n.hasSuffix(":hash")
-            || n.range(of: ":hmac:", options: .backwards) != nil
-        if isProtected { Logger.shared.redactedColumns.insert(baseName(n)) }
+        guard headerDeclaresProtected(n) else { continue }
+        if EncMarker.parse(n) != nil { enc = true }
+        cols.append((i, baseName(n)))
+    }
+    return (cols, enc)
+}
+
+/// Writing a raw value into a cell of a column the file declares transformed.
+/// Shared so `-update` and `-delete -cell` cannot say different things about
+/// the same situation.
+/// 把原始值寫進「檔案宣告為已轉換」的欄位中的一格。共用，好讓 `-update` 與
+/// `-delete -cell` 不會對同一個情況說出不同的話。
+func rawCellWriteRefusal(targets: [String], anyEncrypted: Bool) -> CSV2Error {
+    let why = anyEncrypted
+        ? "a raw value written there cannot be decrypted, and it takes the whole column with it: -decrypt stops at that cell, so records this edit never touched can no longer be read either"
+        : "a raw value written there would sit in a hashed column looking like a hash, and nothing can detect it -- a hash cannot be checked against the value it replaced"
+    let whyZh = anyEncrypted
+        ? "寫進去的原始值解不開，而且會連整欄一起帶走：-decrypt 會停在那一格，於是這次編輯從未碰過的紀錄也一起讀不回來"
+        : "寫進去的原始值會待在一個雜湊欄位裡、看起來就像一個雜湊，而沒有任何東西能發現它——雜湊無法拿來與它所取代的值比對"
+    let fix = anyEncrypted
+        ? "Decrypt to a file first, edit that, then encrypt it again."
+        : "Hashing is one way, so this file cannot be edited back: change the source the hash was made from and hash it again."
+    let fixZh = anyEncrypted
+        ? "請先解密成一個檔案、改那一份，再重新加密。"
+        : "雜湊是單向的，因此這個檔案改不回去：請修改當初拿來雜湊的來源，再雜湊一次。"
+    return fault(
+        "\(targets.sorted().joined(separator: ", ")) targets a column this file declares transformed; \(why). \(fix)",
+        "\(targets.sorted().joined(separator: "、")) 指向一個「本檔案宣告為已轉換」的欄位；\(whyZh)。\(fixZh)")
+}
+
+/// Writing a whole raw ROW into such a file. Separate from the cell case
+/// because the caller did not aim at the protected column -- the row simply
+/// has a field for it, and there is no value they could have supplied that
+/// would be right, since the transform needs the key the header only
+/// fingerprints. Found by extending defect W: the first fix covered -update
+/// and -delete -cell, and -append walked straight past it into the same
+/// destruction at rc=0.
+/// 把一整列原始資料寫進這樣的檔案。與「單格」分開，因為呼叫者並不是瞄準那個受保護欄位——
+/// 那一列只是剛好有它的一欄，而且**沒有任何他們給得出的值會是對的**，因為那個轉換需要金鑰，
+/// 而標頭裡只有金鑰的指紋。這是延伸缺陷 W 時發現的：第一版的修正只涵蓋 -update 與
+/// -delete -cell，而 -append 直接繞過它、以 rc=0 造成同樣的破壞。
+func rawRowWriteRefusal(verbs: [String], columns: [String], anyEncrypted: Bool) -> CSV2Error {
+    let what = anyEncrypted ? "encrypted" : "hashed"
+    let whatZh = anyEncrypted ? "加密" : "雜湊"
+    let tail = anyEncrypted
+        ? "and the whole column stops being decryptable, not just the new record"
+        : "and it would sit there looking like a hash, with nothing able to detect it"
+    let tailZh = anyEncrypted
+        ? "而且失去解密能力的是整欄，不只是新加的那一筆"
+        : "而且它會待在那裡、看起來就像一個雜湊，沒有任何東西能發現"
+    return fault(
+        "\(verbs.sorted().joined(separator: ", ")) writes a whole record into a file whose column \(columns.joined(separator: ", ")) is \(what); the new record's value for it would be stored raw, \(tail). Build the record in an untransformed copy and transform that.",
+        "\(verbs.sorted().joined(separator: "、")) 要把一整筆寫進一個「\(columns.joined(separator: "、")) 欄已\(whatZh)」的檔案；新紀錄在該欄的值會以原始形式存入，\(tailZh)。請在未轉換的複本上建立該筆，再對那一份做轉換。")
+}
+
+func redactColumnsDeclaredByHeader(_ header: Record) {
+    for f in header.fields where headerDeclaresProtected(headerName(f)) {
+        Logger.shared.redactedColumns.insert(baseName(headerName(f)))
     }
 }
 

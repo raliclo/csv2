@@ -164,7 +164,10 @@ $ csv2 -r --json -i example.csv2 | head -1
   -delete -cell r:c     清空一個儲存格（欄數不變）
   -delete -col N|名稱   從每一筆與兩列標頭中移除該欄——唯一能保持對齊的刪除
   -update r:c VAL       更新一個儲存格
-  --truncate-partial    丟棄結尾不完整的紀錄，而非以錯誤結束
+  --truncate-partial    「讀取」時，丟棄因未閉合引號而在 EOF 處未完成的那一筆，
+                        而非以錯誤結束。欄數不足的結尾紀錄兩種情況下都是硬錯誤：
+                        它照所寫的內容是完整的，只是錯的。與 -append 併用會被
+                        拒絕——追加只能加上位元組
 
 保護
   -hash COLS            單向遮蔽欄位。確定性的，因此相等的值仍然相等
@@ -579,6 +582,10 @@ busybox,1.37.0,"fork raliclo/busybox, branch develop",GPL-2.0
 | `-encrypt` 未給 `-keyfile` 且沒有 tty | 無法顯示的提示絕不視為「是」 |
 | 編輯時沒有給 `-o`、`-so` 或 `--in-place` | `-insert`/`-append`/`-delete`/`-update` 需要明確的目的地；沒有「隱含就地編輯」這回事 |
 | `-o /dev/stdout` | 輸出會先寫到目標旁的暫存檔再 rename，那需要一個一般檔案。請改用 `-so` |
+| 對「檔案標記為 `:enc:`、`:hmac:` 或 `:hash`」的欄位下 `-update`／`-delete -cell` | 寫進去的原始值讀不回來，而對加密欄位而言 `-decrypt` 會停在那一格——於是該次編輯從未碰過的紀錄也一起失去 |
+| `-insert`／`-append` 到含有這種欄位的檔案 | 那一列的每一欄都是原始值，包括那一欄，而**你給得出的值沒有一個會是對的**：轉換需要金鑰，而標頭裡只有它的指紋 |
+| 對「最後一筆不完整」的檔案 `-append` | 結尾紀錄欄數不足，或因未閉合引號而未收尾。`-o` 與 `--in-place` 一視同仁——快路徑過去會跳過這項檢查，產生一個 csv2 接著就拒讀的檔案 |
+| `-append` 搭配 `--truncate-partial` | 追加只會加上位元組、移除不了那筆不完整的紀錄，因此檔案會同時保留它、並在其後多出一筆完整的。請先寫出一份乾淨的複本：`csv2 -r -t --truncate-partial -i f.csv -o clean.csv` |
 | 未知旗標 | 絕不被當成別的東西吞掉 |
 
 ### `-t` 管的是選取，從不管編輯

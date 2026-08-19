@@ -2305,13 +2305,32 @@ unset CSV2_INDEX_MIN_BYTES
 echo
 echo "--- T69: no document quotes a test count / 任何文件都不引用測試數量 ---"
 
+# The list did not include plan/ or todo/, and on 2026-08-19 plan.md's own
+# header was found carrying TWO stale counts -- macOS 112, guest 72, against a
+# suite already far past both. This case existed precisely to stop that, and it
+# was not looking at the file. A check with a hand-written file list decays the
+# same way the numbers do; the difference is that nothing reports it.
+#
+# The pattern now excludes a digit preceded by `T`, so a test IDENTIFIER
+# ("測試 T1-T8 通過", "T16 通過") is not mistaken for a count. That distinction
+# is why the list could not simply be widened: plan.md is full of the former.
+#
+# 這份清單原本不含 plan/ 與 todo/，而 2026-08-19 發現 plan.md 自己的開頭帶著「兩個」過期
+# 數字——macOS 寫 112、guest 寫 72，而測試套件早已遠超過兩者。這個案例存在的目的正是阻止
+# 那件事，而它根本沒有在看那個檔案。一份「手寫檔案清單」的檢查，與那些數字以同樣的方式衰減；
+# 差別只在於沒有任何東西會回報它。
+# 樣式現在排除「前面緊接著 T 的數字」，好讓測試「編號」（「測試 T1–T8 通過」、「T16 通過」）
+# 不被誤認為數量。那個區別正是這份清單不能直接放寬的原因：plan.md 裡到處都是前者。
 typeset -a counted
-for f in README.md README.zh-TW.md AGENTS.md CLAUDE.md test/README.md test/README.zh-TW.md; do
+for f in README.md README.zh-TW.md AGENTS.md CLAUDE.md test/README.md test/README.zh-TW.md \
+         plan/plan.md todo/todo.md todo/known-defects.md \
+         verifications/README.md verifications/README.zh-TW.md; do
     [[ -f "$ROOT/$f" ]] || continue
-    # A digit immediately before PASS, in either language's phrasing. `0 FAIL`
-    # is fine and deliberate -- it does not grow.
-    # 兩種語言中「數字緊接在 PASS 之前」的寫法。`0 FAIL` 沒問題且是刻意的——它不會增長。
-    if grep -qE '[0-9]+ (PASS|通過)|PASS [0-9]+' "$ROOT/$f"; then
+    # A digit immediately before PASS, in either language's phrasing, and not
+    # part of a test id. `0 FAIL` is fine and deliberate -- it does not grow.
+    # 兩種語言中「數字緊接在 PASS 之前」的寫法，且不是測試編號的一部分。
+    # `0 FAIL` 沒問題且是刻意的——它不會增長。
+    if grep -qE '(^|[^T0-9])[0-9]+ (PASS|通過)|PASS [0-9]+' "$ROOT/$f"; then
         counted+=("$f")
     fi
 done
@@ -2658,35 +2677,73 @@ echo "--- T73: redaction follows the file, not the run / 遮蔽依據檔案，�
 printf 'pkg,secret,license\na,s1,MIT\nb,s2,GPL\n' > "$TMP/t73.csv"
 head -c 32 /dev/urandom > "$TMP/t73.key"
 "$CSV2" -hash secret -keyfile "$TMP/t73.key" -i "$TMP/t73.csv" -o "$TMP/t73_h.csv" -t 2>/dev/null
+cp "$TMP/t73_h.csv" "$TMP/t73_h.bak"
 
-# The run that changes a protected cell performs no transform of its own.
-# 改動一個受保護儲存格的那次執行，自身完全沒有做任何轉換。
+# REVERSED on 2026-08-19, and the reversal is the finding.
+#
+# Round 25 asked whether -log reintroduces the exposure the absent -key flag
+# exists to avoid, and the answer -- redaction follows the FILE's declaration,
+# not the run's activity -- is still right and is still asserted below.
+#
+# But this test also pinned that the edit itself SUCCEEDS: "redaction is about
+# the log, not about refusing the edit". That was never a decision anyone made.
+# It was a guard against T73a passing vacuously, by the write having failed.
+#
+# Round 37 showed what the write actually does. A raw value written into a
+# column the file marks `:enc:` cannot be read back, and -decrypt stops at that
+# cell -- so every later record, ciphertext intact and never touched, is lost
+# with it. The log said `<redacted> -> <redacted>`, exactly as this test
+# required, and that line was the only record of what had happened.
+#
+# So round 25's protection was working perfectly on a value that should never
+# have been written at all, and the protection is what hid the damage. The edit
+# is now refused, and the vacuity guard moves to the ordinary column, where a
+# write must still happen and still be recorded.
+#
+# 2026-08-19 反轉，而這個反轉本身就是那個發現。
+# 第 25 回合問的是「-log 是否重新引入了『刻意不提供 -key』所要避免的暴露」，而它的答案——
+# 遮蔽依據的是「檔案的宣告」而非「本次執行在做什麼」——仍然正確，下面仍然斷言它。
+# 但這個測試同時釘住了「該次編輯會成功」：「遮蔽針對的是 log，不是拒絕該次編輯」。
+# **那從來不是任何人做過的決定**，它只是一道防線，防止 T73a 因為「寫入失敗」而空洞地通過。
+# 第 37 回合顯示了那次寫入實際上做了什麼：寫進 `:enc:` 欄位的原始值讀不回來，而 -decrypt
+# 會停在那一格——於是之後每一筆（密文完好、從未被碰過）也一起消失。而 log 寫的是
+# `<redacted> -> <redacted>`，與這個測試的要求完全一致，而那一行是「發生了什麼」唯一的紀錄。
+# 也就是說，第 25 回合的保護在一個「根本就不該被寫下去的值」上運作得完美無缺，
+# 而那道保護正是掩蓋損害的東西。該次編輯現在被拒絕，而那道防止空洞通過的防線，
+# 移到一般欄位上——在那裡寫入仍然必須發生、也仍然必須被記錄。
 rm -f "$TMP/t73.log"
 "$CSV2" -update 1:secret 'SUPER SECRET 12345' -i "$TMP/t73_h.csv" -o "$TMP/t73_o.csv" \
     -log "$TMP/t73.log" 2>/dev/null
+assert_fails "T73a an edit aimed at a column the file marks protected is refused / 針對「檔案標記為受保護」欄位的編輯會被拒絕" -- \
+    "$CSV2" -update 1:secret 'SUPER SECRET 12345' -i "$TMP/t73_h.csv" -o "$TMP/t73_o.csv"
+assert_same "$TMP/t73_h.csv" "$TMP/t73_h.bak" \
+    "T73b and the input is untouched, which for an encrypted column is the whole column / 而輸入原封不動——對加密欄位而言，那就是整欄"
+
+# Redaction still has to hold: the refusal must not be the only thing standing
+# between a secret and the log. A run that never reaches the refusal -- because
+# it edits an ordinary column of the same file -- must still not print the
+# protected one, and the command echo must not carry the attempted value.
+# 遮蔽仍然必須成立：拒絕不能是「秘密與 log 之間」唯一的一道防線。一次不會走到那個拒絕的
+# 執行——因為它改的是同一個檔案的一般欄位——仍然不得印出那個受保護的欄位，而指令回顯也不得
+# 帶著那個被嘗試寫入的值。
 if grep -q 'SUPER SECRET 12345' "$TMP/t73.log"; then
-    bad "T73a the log leaked a value written into a column the file marks protected / log 洩漏了一個寫入「檔案標記為受保護」欄位的值"
+    bad "T73c the log leaked a value aimed at a column the file marks protected / log 洩漏了一個瞄準「檔案標記為受保護」欄位的值"
 else
-    ok "T73a a value written into a protected column stays out of the log / 寫入受保護欄位的值不會進入 log"
+    ok "T73c a value aimed at a protected column stays out of the log / 瞄準受保護欄位的值不會進入 log"
 fi
-assert_contains "$(grep -o 'update 1:secret.*' "$TMP/t73.log")" "<redacted>" \
-    "T73b and the line says so rather than omitting the record / 而那一行會明說，不是把紀錄整個略去"
 
 # The log must stay USEFUL. Redacting everything would be safe and worthless:
-# an audit trail that cannot say what changed is not one.
+# an audit trail that cannot say what changed is not one. This is also the
+# vacuity guard now: if edits stopped working altogether, this fails.
 # log 必須維持「有用」。全部遮蔽既安全又毫無價值：一份說不出改了什麼的稽核軌跡，不是稽核軌跡。
+# 這一條現在同時是那道「防止空洞通過」的防線：如果編輯整個壞掉了，它會失敗。
 rm -f "$TMP/t73b.log"
 "$CSV2" -update 1:license 'GPL-3.0' -i "$TMP/t73.csv" -o "$TMP/t73_o2.csv" \
     -log "$TMP/t73b.log" 2>/dev/null
 assert_contains "$(grep -o 'update 1:license.*' "$TMP/t73b.log")" 'GPL-3.0' \
-    "T73c while an ordinary column still records what changed / 而一般欄位仍然記錄了改了什麼"
-
-# The value must really be in the OUTPUT -- redaction is about the log, not
-# about refusing the edit. Without this, T73a could pass by the write failing.
-# 那個值必須真的在「輸出」裡——遮蔽針對的是 log，不是拒絕該次編輯。少了這一條，T73a 可能
-# 因為「寫入失敗」而通過。
-assert_eq "$("$CSV2" -get 1:secret -i "$TMP/t73_o.csv" 2>/dev/null)" 'SUPER SECRET 12345' \
-    "T73d and the value really was written to the file / 而那個值確實已寫入檔案"
+    "T73d while an ordinary column still records what changed / 而一般欄位仍然記錄了改了什麼"
+assert_eq "$("$CSV2" -get 1:license -i "$TMP/t73_o2.csv" 2>/dev/null)" 'GPL-3.0' \
+    "T73e and the edit really happened, so the assertions above are not passing on a tool that refuses everything / 而那次編輯確實發生了，因此上面那些斷言不是靠「一支什麼都拒絕的工具」通過的"
 
 # Key bytes never appear, whatever else does.
 # 不論別的如何，金鑰位元組永不出現。
@@ -2694,12 +2751,12 @@ rm -f "$TMP/t73c.log"
 "$CSV2" -hash secret -keyfile "$TMP/t73.key" -i "$TMP/t73.csv" -o "$TMP/t73_h2.csv" -t \
     -log "$TMP/t73c.log" 2>/dev/null
 if grep -qa "$(head -c 8 "$TMP/t73.key" | od -An -tx1 | tr -d ' \n')" "$TMP/t73c.log"; then
-    bad "T73e key bytes appear in the log / 金鑰位元組出現在 log 中"
+    bad "T73f key bytes appear in the log / 金鑰位元組出現在 log 中"
 else
-    ok "T73e key bytes never appear in the log / 金鑰位元組不會出現在 log 中"
+    ok "T73f key bytes never appear in the log / 金鑰位元組不會出現在 log 中"
 fi
 assert_contains "$(cat "$TMP/t73c.log")" "fingerprint" \
-    "T73f but the fingerprint does, which identifies the key without being it / 但指紋會出現——它標識金鑰而不是金鑰本身"
+    "T73g but the fingerprint does, which identifies the key without being it / 但指紋會出現——它標識金鑰而不是金鑰本身"
 
 # ---------------------------------------------------------------------
 # T74 -- "-md is one-way" has to be true, not merely intended.
@@ -3257,6 +3314,203 @@ assert_contains "$out" "no_embedded_newlines" \
     "T79l --verify-index re-derives the flag and reports the mismatch / --verify-index 重新推導那個旗標並回報不符"
 assert_fails "T79m and exits non-zero, because an index that lies is worse than none / 並以非零結束，因為說謊的索引比沒有更糟" -- \
     env CSV2_INDEX_MIN_BYTES=1 "$CSV2" --verify-index -i "$TMP/t79_doc.csv"
+
+# ---------------------------------------------------------------------
+# T90 -- a raw value must not be written into a column the FILE declares
+# transformed, by any verb.
+#
+# Round 37, defect W. `-update 1:secret NEW` on a file whose header reads
+# `secret:enc:<fp>:<salt>` was accepted at rc=0. The plaintext went in, and
+# `-decrypt` then stopped at that cell -- so records 2 and 3, whose ciphertext
+# was intact and which the edit never touched, could not be read back either.
+# The audit log recorded it as `update 1:secret: <redacted> -> <redacted>`,
+# because redaction follows the file's declaration: the protection worked
+# perfectly on a value that should never have been written, and in doing so it
+# was the only record of the damage and it concealed it.
+#
+# Four verbs write raw values and all four had to be closed. The first fix
+# covered -update and -delete -cell only, and -append walked past it into the
+# identical destruction -- which is why -append --in-place is asserted here
+# separately: it never reaches runEdit, so a guard placed there does nothing
+# for the O(1) path, the one most likely to be used on a large protected file.
+#
+# What stays allowed is as important as what is refused. Transforming and
+# editing in the SAME run is coherent -- the new value is what gets encrypted
+# -- because the input's header carries no marker yet; and an ordinary column
+# of a protected file is nobody's business but the caller's.
+#
+# T90 —— 任何動詞都不得把原始值寫進一個「檔案自己宣告為已轉換」的欄位。
+# 第 37 回合，編號 W。對標頭為 `secret:enc:<指紋>:<salt>` 的檔案下
+# `-update 1:secret NEW`，會以 rc=0 被接受。明文寫了進去，而 `-decrypt` 接著停在那一格
+# ——於是第 2、3 筆（密文完好、且該次編輯從未碰過）也一起讀不回來。稽核紀錄寫的是
+# `update 1:secret: <redacted> -> <redacted>`，因為遮蔽依據的是檔案的宣告：那道保護在一個
+# 「根本不該被寫下去的值」上運作得完美無缺，而它同時是損害唯一的紀錄，並且掩蓋了它。
+# 有四個動詞會寫入原始值，四個都必須關上。第一版的修正只涵蓋 -update 與 -delete -cell，
+# 而 -append 直接走過去造成一模一樣的破壞——這也是為什麼 -append --in-place 在此單獨斷言：
+# 它不會走到 runEdit，因此放在那裡的守衛對 O(1) 路徑毫無作用，而那正是最可能被用在一個
+# 大型受保護檔案上的路徑。
+# 「什麼仍然被允許」與「什麼被拒絕」一樣重要。在「同一次執行」裡轉換並編輯是說得通的——
+# 被加密的就是那個新值——因為輸入的標頭還沒有標記；而一個受保護檔案裡的一般欄位，
+# 是呼叫者自己的事。
+# ---------------------------------------------------------------------
+echo
+echo "--- T90: no verb writes a raw value into a declared column / 任何動詞都不得把原始值寫進已宣告的欄位 ---"
+
+head -c 32 /dev/urandom > "$TMP/t90.key"
+printf 'pkg,ver,secret\nbusybox,1.37.0,s1\nzlib,1.3.2,s2\nzstd,1.5.7,s3\n' > "$TMP/t90.csv"
+"$CSV2" -encrypt secret -keyfile "$TMP/t90.key" -i "$TMP/t90.csv" -o "$TMP/t90_enc.csv" -t 2>/dev/null
+"$CSV2" -hash secret -i "$TMP/t90.csv" -o "$TMP/t90_hash.csv" -t 2>/dev/null
+cp "$TMP/t90_enc.csv" "$TMP/t90_enc.bak"
+
+assert_fails "T90a -update into an encrypted column is refused / -update 寫入加密欄位被拒絕" -- \
+    "$CSV2" -update 1:secret NEW -i "$TMP/t90_enc.csv" -o "$TMP/t90_out.csv" -t
+assert_fails "T90b -delete -cell into an encrypted column is refused / -delete -cell 寫入加密欄位被拒絕" -- \
+    "$CSV2" -delete -cell 1:secret -i "$TMP/t90_enc.csv" -o "$TMP/t90_out.csv" -t
+assert_fails "T90c -insert into a file with an encrypted column is refused / -insert 到含加密欄位的檔案被拒絕" -- \
+    "$CSV2" -insert 1 'x,1,RAW' -i "$TMP/t90_enc.csv" -o "$TMP/t90_out.csv" -t
+assert_fails "T90d -append -o into such a file is refused / -append 走 -o 同樣被拒絕" -- \
+    "$CSV2" -append 'x,1,RAW' -i "$TMP/t90_enc.csv" -o "$TMP/t90_out.csv" -t
+
+# The O(1) path does not go through runEdit, so it needs its own guard and its
+# own assertion. This is the case the first fix missed.
+# O(1) 路徑不經過 runEdit，因此它需要自己的守衛與自己的斷言。這正是第一版修正漏掉的那個。
+assert_fails "T90e -append --in-place, the O(1) path that skips runEdit, is refused too / -append --in-place（跳過 runEdit 的 O(1) 路徑）同樣被拒絕" -- \
+    "$CSV2" -append 'x,1,RAW' -i "$TMP/t90_enc.csv" --in-place
+assert_same "$TMP/t90_enc.csv" "$TMP/t90_enc.bak" \
+    "T90f and after all five refusals the file is byte-identical / 五次拒絕之後，檔案逐位元不變"
+
+# The property that actually matters. Every earlier assertion is a proxy for
+# this one: the column can still be read back.
+# 真正要緊的性質。前面每一條斷言都只是它的代理：那一欄仍然讀得回來。
+"$CSV2" -decrypt all -keyfile "$TMP/t90.key" -i "$TMP/t90_enc.csv" -o "$TMP/t90_back.csv" -t 2>/dev/null
+assert_same "$TMP/t90.csv" "$TMP/t90_back.csv" \
+    "T90g and the whole column still decrypts to the original, byte for byte / 而整欄仍能逐位元解回原值"
+
+# A hashed column is a different consequence and must get a different message.
+# Telling someone to decrypt a hash sends them looking for a flag that cannot
+# exist.
+# 雜湊欄位的後果不同，訊息也必須不同。叫人去把雜湊解開，會讓他去找一個不可能存在的旗標。
+enc_msg=$("$CSV2" -update 1:secret NEW -i "$TMP/t90_enc.csv" -o "$TMP/t90_out.csv" -t 2>&1)
+hash_msg=$("$CSV2" -update 1:secret NEW -i "$TMP/t90_hash.csv" -o "$TMP/t90_out.csv" -t 2>&1)
+assert_fails "T90h a hashed column refuses too / 雜湊欄位同樣拒絕" -- \
+    "$CSV2" -update 1:secret NEW -i "$TMP/t90_hash.csv" -o "$TMP/t90_out.csv" -t
+assert_contains "$enc_msg" "decrypt" \
+    "T90i the encrypted message says the column stops decrypting / 加密的訊息說出「整欄不再能解密」"
+assert_contains "$hash_msg" "one way" \
+    "T90j while the hashed message says hashing is one way, not that it can be undone / 而雜湊的訊息說「雜湊是單向的」，不是叫人去還原它"
+
+# What must NOT be refused.
+# 不得被拒絕的部分。
+assert_succeeds "T90k transforming and editing in one run is still allowed / 同一次執行裡轉換並編輯仍然允許" -- \
+    "$CSV2" -encrypt secret -keyfile "$TMP/t90.key" -update 1:secret NEW -i "$TMP/t90.csv" -o "$TMP/t90_both.csv" -t
+"$CSV2" -decrypt all -keyfile "$TMP/t90.key" -i "$TMP/t90_both.csv" -o "$TMP/t90_both_p.csv" -t 2>/dev/null
+assert_eq "$("$CSV2" -get 1:secret -i "$TMP/t90_both_p.csv" 2>/dev/null)" "NEW" \
+    "T90l and it is the NEW value that was encrypted, not the old one / 而被加密的是新值，不是舊值"
+assert_succeeds "T90m an ordinary column of a protected file is still editable / 受保護檔案裡的一般欄位仍可編輯" -- \
+    "$CSV2" -update 1:ver 9.9 -i "$TMP/t90_enc.csv" -o "$TMP/t90_ver.csv" -t
+
+# ---------------------------------------------------------------------
+# T91 -- the append fast path validates what the rewrite path validates.
+#
+# Round 37, defects X and Y. `-append --in-place` read only the header, so for
+# a `.csv` it validated nothing about the records already there. A file ending
+# `zlib,1.3` where the header has three columns took the append at rc=0 and
+# produced a file csv2 itself then refused to read; the SAME input through `-o`
+# was correctly refused. A file ending inside an unclosed quote absorbed the
+# appended record into that field, so a write that reported success had not
+# happened.
+#
+# The check runs only when the file does not end in a newline, which is the
+# only state in which the tail can be half-written -- so the O(1) promise is
+# kept for every file that ends properly, and T91f asserts that rather than
+# trusting it.
+#
+# --truncate-partial is refused here rather than honoured, and that is a
+# decision made while fixing this: honouring it dropped the incomplete record
+# from the PARSE and left it in the FILE, then appended a complete record after
+# it -- rc=0, unreadable next time. Appending adds bytes; it cannot remove any.
+#
+# T91 —— 追加快路徑要驗證「重寫路徑會驗證的東西」。
+# 第 37 回合，編號 X 與 Y。`-append --in-place` 只讀標頭，因此對 `.csv` 而言，它對已經在那裡
+# 的紀錄不做任何驗證。一個以 `zlib,1.3` 結尾、而標頭有三欄的檔案，會以 rc=0 接受追加並產生
+# 一個 csv2 自己拒讀的檔案；**同一份輸入**走 `-o` 則被正確拒絕。一個結束在未閉合引號裡的檔案，
+# 會把追加的那一筆吸進那個欄位，於是一次回報成功的寫入其實沒有發生。
+# 這個檢查只在檔案未以換行結尾時執行，而那是唯一「結尾可能只寫了一半」的狀態——因此對每一個
+# 正常結尾的檔案，O(1) 的承諾仍然成立，而 T91f 斷言它，不是相信它。
+# --truncate-partial 在此是被拒絕而非被接受，那是修這件事時做的決定：接受它會把不完整的紀錄
+# 從「解析」中丟掉、卻留在「檔案」裡，然後在其後追加一筆完整的——rc=0，下一次就讀不了。
+# 追加只會加上位元組，它移除不了任何東西。
+# ---------------------------------------------------------------------
+echo
+echo "--- T91: the append fast path validates the file it appends to / 追加快路徑會驗證它所追加的檔案 ---"
+
+printf 'pkg,ver,note\nbusybox,1.37.0,core\nzlib,1.3' > "$TMP/t91_short.csv"
+printf 'pkg,ver,note\nbusybox,1.37.0,core\nzlib,1.3.2,"unterminated' > "$TMP/t91_quote.csv"
+printf 'pkg,ver,note\nbusybox,1.37.0,core\nzlib,1.3.2,ok' > "$TMP/t91_ok.csv"
+cp "$TMP/t91_short.csv" "$TMP/t91_short.bak"
+cp "$TMP/t91_quote.csv" "$TMP/t91_quote.bak"
+
+assert_fails "T91a -append --in-place onto a short trailing record is refused / 對「結尾紀錄欄數不足」的檔案追加會被拒絕" -- \
+    "$CSV2" -append 'zstd,1.5.7,compression' -i "$TMP/t91_short.csv" --in-place
+assert_same "$TMP/t91_short.csv" "$TMP/t91_short.bak" \
+    "T91b and the file is untouched / 而檔案原封不動"
+assert_fails "T91c -append --in-place onto an unclosed quote is refused / 對「結尾為未閉合引號」的檔案追加會被拒絕" -- \
+    "$CSV2" -append 'zstd,1.5.7,compression' -i "$TMP/t91_quote.csv" --in-place
+assert_same "$TMP/t91_quote.csv" "$TMP/t91_quote.bak" \
+    "T91d and that file is untouched too / 那個檔案同樣原封不動"
+
+# The point of X: the two paths must now agree. Before the fix they disagreed
+# on the same bytes, which is what made it impossible to notice.
+# X 的重點：兩條路徑現在必須一致。修正之前它們對「同一份位元組」給出相反的結果，
+# 而那正是它難以被發現的原因。
+"$CSV2" -append 'zstd,1.5.7,compression' -i "$TMP/t91_short.csv" -o "$TMP/t91_o.csv" >/dev/null 2>&1
+rc_o=$?
+"$CSV2" -append 'zstd,1.5.7,compression' -i "$TMP/t91_short.csv" --in-place >/dev/null 2>&1
+rc_ip=$?
+assert_eq "$rc_o" "$rc_ip" \
+    "T91e -o and --in-place now reach the same verdict on the same file / -o 與 --in-place 現在對同一個檔案得到相同的判斷"
+
+# A complete record that merely lacks its final newline is NOT damaged, and
+# appending to it must still work -- csv2 supplies the newline. Without this,
+# the fix above could have been "refuse everything without a trailing LF".
+# 一筆「只是少了結尾換行」的完整紀錄並沒有損壞，對它追加必須仍然可行——csv2 會補上那個換行。
+# 少了這一條，上面的修正大可以是「凡是沒有結尾 LF 一律拒絕」。
+assert_succeeds "T91f a complete record with no final newline still accepts an append / 「完整但少了結尾換行」的檔案仍可被追加" -- \
+    "$CSV2" -append 'zstd,1.5.7,compression' -i "$TMP/t91_ok.csv" --in-place
+assert_eq "$("$CSV2" -r -i "$TMP/t91_ok.csv" 2>/dev/null | wc -l | tr -d ' ')" "3" \
+    "T91g and the result is three records, not two glued together / 而結果是三筆，不是被黏成兩筆"
+
+# The O(1) promise: a file that ends properly must not be read through. The
+# debug line names the O(n) path, so its ABSENCE is the assertion.
+# O(1) 的承諾：正常結尾的檔案不得被整份讀過。那個 debug 行會指名 O(n) 路徑，
+# 因此「它不出現」就是斷言本身。
+mk_rows "$TMP/t91_big.csv2" 20000
+"$CSV2" -append 'a,b,c' -i "$TMP/t91_big.csv2" --in-place -debug 2>"$TMP/t91_dbg.txt" >/dev/null
+if grep -q "does not end with a newline" "$TMP/t91_dbg.txt"; then
+    bad "T91h a properly terminated file was read through anyway / 正常結尾的檔案仍然被整份讀過"
+else
+    ok "T91h a properly terminated file still takes the O(1) path / 正常結尾的檔案仍然走 O(1) 路徑"
+fi
+
+# --truncate-partial cannot be honoured by a verb that only adds bytes, and
+# saying so is better than doing half of it.
+# 一個「只會加上位元組」的動詞無法履行 --truncate-partial，而說出來比做一半好。
+cp "$TMP/t91_quote.bak" "$TMP/t91_quote.csv"
+tp_msg=$("$CSV2" -append 'zstd,1.5.7,compression' --truncate-partial -i "$TMP/t91_quote.csv" --in-place 2>&1)
+assert_fails "T91i --truncate-partial with -append is refused, not half-honoured / --truncate-partial 搭配 -append 是被拒絕，而不是做一半" -- \
+    "$CSV2" -append 'zstd,1.5.7,compression' --truncate-partial -i "$TMP/t91_quote.csv" --in-place
+assert_same "$TMP/t91_quote.csv" "$TMP/t91_quote.bak" \
+    "T91j and it left the file alone rather than appending after the incomplete record / 而它沒有動那個檔案，不是在不完整的紀錄後面追加"
+assert_contains "$tp_msg" "cannot be honoured" \
+    "T91k the message says why, and names the way through / 訊息說出理由，並指出走得通的那條路"
+
+# The way through has to actually work, or the message is worse than silence.
+# 那條走得通的路必須真的走得通，否則那個訊息比沉默更糟。
+"$CSV2" -r -t --truncate-partial -i "$TMP/t91_quote.csv" -o "$TMP/t91_clean.csv" 2>/dev/null
+assert_succeeds "T91l the copy the message recommends can be appended to / 訊息所建議的那份複本，追加得上去" -- \
+    "$CSV2" -append 'zstd,1.5.7,compression' -i "$TMP/t91_clean.csv" --in-place
+assert_succeeds "T91m and reads back cleanly / 而且讀得回來" -- \
+    "$CSV2" -r -t -i "$TMP/t91_clean.csv"
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"

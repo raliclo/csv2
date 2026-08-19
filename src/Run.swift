@@ -721,6 +721,66 @@ func runEdit(_ o: Options) throws {
                     // 放在 buildTransform 之前，好讓「檔案已標記的欄位」即使在本次完全沒有
                     // 轉換時也會被遮蔽。
                     redactColumnsDeclaredByHeader(headers[0])
+                    // Refuse before a byte is written, and against the INPUT
+                    // header rather than the marked one -- `-encrypt secret`
+                    // together with `-update 1:secret NEW` is coherent (the new
+                    // value is what gets encrypted) and stays allowed, because
+                    // the input's header carries no marker yet.
+                    //
+                    // What is refused is writing a raw value into a column the
+                    // FILE already declares transformed. For `:enc:` that is
+                    // not merely wrong, it is unrecoverable and it is not
+                    // confined to the record edited: -decrypt stops at the
+                    // damaged cell, so every later record -- ciphertext intact,
+                    // never touched -- can no longer be read either. And the
+                    // log said `<redacted> -> <redacted>`, because redaction
+                    // follows the file's declaration, so the one record of what
+                    // happened concealed it. Round 37 of the README-only blind
+                    // testing, defect W.
+                    //
+                    // 在寫出任何一個位元組之前拒絕，而且是對「輸入的」標頭而非加上標記後的
+                    // 標頭——`-encrypt secret` 與 `-update 1:secret NEW` 併用是說得通的
+                    // （被加密的就是那個新值），因此仍然允許，因為輸入的標頭還沒有標記。
+                    // 被拒絕的是「把原始值寫進一個檔案已經宣告為轉換過的欄位」。對 `:enc:`
+                    // 而言那不只是錯，而是不可回復、且不限於被編輯的那一筆：-decrypt 會停在
+                    // 損壞的那一格，於是之後每一筆——密文完好、從未被碰過——也一起讀不回來。
+                    // 而 log 寫的是 `<redacted> -> <redacted>`，因為遮蔽依據的是檔案的宣告，
+                    // 於是唯一那份「發生了什麼」的紀錄把它掩蓋掉了。README-only 盲測第 37
+                    // 回合，編號 W。
+                    let prot = protectedColumns(headers[0])
+                    if !prot.columns.isEmpty {
+                        var cellTargets: [String] = []
+                        let protIdx = Set(prot.columns.map { $0.0 })
+                        for (rn, ups) in updates {
+                            for (c, _) in ups where protIdx.contains(try resolveColumn(c, header: headers[0])) {
+                                cellTargets.append("-update \(rn):\(c)")
+                            }
+                        }
+                        for (rn, cols) in blanks {
+                            for c in cols where protIdx.contains(try resolveColumn(c, header: headers[0])) {
+                                cellTargets.append("-delete -cell \(rn):\(c)")
+                            }
+                        }
+                        if !cellTargets.isEmpty {
+                            throw rawCellWriteRefusal(targets: cellTargets, anyEncrypted: prot.anyEncrypted)
+                        }
+                        // A whole row cannot be written into such a file at all:
+                        // every field of it is raw, including the one belonging
+                        // to the transformed column, and no value the caller
+                        // could supply would be right -- the transform needs the
+                        // key, and the header carries only its fingerprint.
+                        // 一整列根本無法寫進這樣的檔案：它的每一欄都是原始值，包括屬於那個
+                        // 已轉換欄位的那一欄，而呼叫者給得出的值沒有一個會是對的——那個轉換
+                        // 需要金鑰，而標頭裡只有它的指紋。
+                        var rowVerbs: [String] = []
+                        for rn in inserts.keys.sorted() { rowVerbs.append("-insert \(rn)") }
+                        if !appends.isEmpty { rowVerbs.append("-append") }
+                        if !rowVerbs.isEmpty {
+                            throw rawRowWriteRefusal(verbs: rowVerbs,
+                                                     columns: prot.columns.map { $0.1 },
+                                                     anyEncrypted: prot.anyEncrypted)
+                        }
+                    }
                     transform = try buildTransform(o, headers: headers)
                     markHeaders(&headers, transform: transform)
                     if !dropTokens.isEmpty {
@@ -957,6 +1017,23 @@ func runAppendFast(_ o: Options) throws {
     try validateHeaders(headers, want: headerRows, path: path)
     let expected = headers[0].count
 
+    // The fast path never reaches runEdit, so the refusal has to be repeated
+    // here rather than relied on. It is the same function, which is the point:
+    // the first version of this fix lived only in runEdit and `-append
+    // --in-place` -- the path most likely to be used on a big protected file --
+    // walked straight past it and wrote plaintext into an encrypted column at
+    // rc=0. Cheap here: the header is already read.
+    // 快路徑不會走到 runEdit，因此這條拒絕必須在此重複一次，而不是指望它。用的是同一個
+    // 函式，那正是重點：這個修正的第一版只住在 runEdit 裡，而 `-append --in-place`——
+    // 最可能被用在一個大型受保護檔案上的那條路徑——直接繞過它，以 rc=0 把明文寫進了加密欄。
+    // 在這裡做很便宜：標頭本來就已經讀進來了。
+    let protFast = protectedColumns(headers[0])
+    if !protFast.columns.isEmpty {
+        throw rawRowWriteRefusal(verbs: ["-append"],
+                                 columns: protFast.columns.map { $0.1 },
+                                 anyEncrypted: protFast.anyEncrypted)
+    }
+
     // Load the index BEFORE writing. Validation compares against the file as
     // it is now, so an index loaded after the append would always look stale
     // and could never be updated -- the sidecar would silently die on the
@@ -986,6 +1063,35 @@ func runAppendFast(_ o: Options) throws {
                 // 證據，而不只是檔案不整齊。除非給了 --truncate-partial，
                 // checkTornAppend 已經報過錯了。
                 try checkTornAppend(path: path, format: fmt, truncatePartial: o.truncatePartial)
+            }
+            // Reached for every format, because the reason is not the format:
+            // a file that does not end in a newline is the only file whose
+            // last record can be half-written, and the fast path had no way to
+            // know. Reported so the O(n) is visible rather than a mystery in
+            // the timings.
+            // 每一種格式都會走到，因為理由與格式無關：未以換行結尾的檔案，是唯一
+            // 「最後一筆可能只寫了一半」的檔案，而快路徑原本無從得知。回報出來，讓那次
+            // O(n) 是看得見的，而不是計時數字裡的一個謎。
+            Logger.shared.debug("append: \(path) does not end with a newline, so the existing records are validated before writing")
+            do {
+                // Validated STRICTLY, never with --truncate-partial honoured.
+                // Honouring it here produced a new instance of the defect this
+                // check was added to fix: the parser dropped the incomplete
+                // record, validation passed, and the append went on -- leaving
+                // the incomplete record in the FILE with a complete one after
+                // it, at rc=0, unreadable on the next pass. Appending adds
+                // bytes; it has no way to remove any.
+                // 一律「嚴格」驗證，絕不在此接受 --truncate-partial。在這裡接受它會產生
+                // 一個「與這個檢查所要修的缺陷同類」的新案例：解析器丟掉了那筆不完整的紀錄、
+                // 驗證通過、追加照常進行——而那筆不完整的紀錄仍留在「檔案裡」，後面接著一筆
+                // 完整的，rc=0，下一次讀取就壞掉。追加只會加上位元組，它沒有辦法移除任何東西。
+                try validateBeforeAppend(path: path, format: fmt, headerRows: headerRows,
+                                         truncatePartial: false)
+            } catch let e as CSV2Error {
+                guard o.truncatePartial else { throw e }
+                throw fault(
+                    "\(e.message) --truncate-partial cannot be honoured by -append: appending adds bytes and cannot remove the incomplete record, so the file would keep it and gain a complete record after it. Write a clean copy first (csv2 -r -t --truncate-partial -i \(path) -o CLEAN), then append to that.",
+                    "\(e.messageZh) -append 無法接受 --truncate-partial：追加只會加上位元組、無法移除那筆不完整的紀錄，因此檔案會同時保留它、並在其後多出一筆完整的。請先寫出一份乾淨的複本（csv2 -r -t --truncate-partial -i \(path) -o CLEAN），再對那一份追加。")
             }
             // .csv makes no such promise -- plenty of tools emit a file with
             // no trailing newline. Add one, or the new record gets glued onto
