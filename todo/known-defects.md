@@ -842,6 +842,8 @@ from a fresh session.
 | FF | README 教的 `-contains` → `-update` 組合會靜默雙重跳脫 | **文件（後果是資料損壞）** |
 | GG | 名為 `.csv2` 但只有一列標頭的檔案，rc=0 讀出時吞掉一筆；`--json` 的 meta 只是覆述副檔名 | **文件＋缺少能力** |
 | HH | 中文 README 有兩段被截斷的句子；英文 `-encrypt` 區塊有一句重複 | 文件 |
+| II | `-update` 把命令列上的非 UTF-8 位元組靜默換成 U+FFFD | **程式（違反核心承諾）** |
+| JJ | log 的值沒有跳脫，含換行的值可以偽造出一整筆 log 紀錄 | **程式（稽核相關）** |
 
 **HH 在第 36 回合就被回報過，我當時沒有修。** 那正是「先寫進這個檔案再修」這條規則要防止的
 ——一個沒有被寫下來的發現，會在下一輪被重新發現，而中間那段時間它一直是錯的。
@@ -1006,3 +1008,54 @@ README 對 `-md` 明確警告過這條 shell 重導路線，對 CSV 沒有。
 英文 `-encrypt` 區塊（README:202–206）自身也有問題：**同一段裡把「不論給不給 `-t`，標頭一律
 寫出」講了兩次**。在一段與安全有關的說明裡重複，會讓讀者懷疑自己讀錯，而不是更確定——第 37
 回合的讀者就明說他因此改為「防禦性地加上 `-t`」。
+
+---
+
+## II. `-update` 把命令列上的非 UTF-8 位元組靜默換成 U+FFFD（2026-08-19，調查 BB 時發現）
+
+**嚴重度：靜默替代，rc=0——而「不做這個替代」是本專案的核心承諾之一。**
+
+```sh
+printf 'id,note\n1,ok\n' > nu2.csv
+csv2 -update 1:note "$(python3 -c 'import sys; sys.stdout.buffer.write(b"A\xffB")')" \
+     -i nu2.csv --in-place
+csv2 -get 1:note -i nu2.csv | od -c
+# A  ef bf bd  B          ← 存進去的是 U+FFFD，不是 0xFF
+```
+
+T8 斷言「非 UTF-8 位元組 round-trip 不被換成 U+FFFD」，而它測的是**讀取**路徑（檔案進、檔案出）。
+**寫入路徑上、值來自命令列時，那個保證不成立**：Swift 的 `CommandLine.arguments` 以 UTF-8
+解碼 argv 並用替代字元補洞，因此那些位元組在抵達 csv2 自己的程式碼之前就已經沒了。
+
+不是不可修——`CommandLine.unsafeArgv` 拿得到原始位元組——但那是一個決定，不是一行修正：
+要嘛保留原始位元組，要嘛在偵測到無效 UTF-8 時拒絕。**目前是第三種：安靜地改掉它。**
+
+由本 session 在調查 BB 的後果時發現，不是盲測 agent 找到的。
+
+---
+
+## JJ. log 的值沒有跳脫：含換行的值可以偽造一整筆紀錄（2026-08-19，調查 BB 時發現）
+
+**嚴重度：稽核紀錄可被它所記錄的資料偽造，rc=0。**
+
+`Logger.redact()` 把值加上引號後直接寫進 log，**沒有經過任何跳脫**。log 是一行一筆的格式，
+因此值裡的一個換行就會產生新的一行——而新的那一行的內容完全由值決定：
+
+```sh
+printf 'id,note\n1,"harmless"\n' > inj2.csv
+csv2 -update 1:note "$(printf 'x"\n2020-01-01T00:00:00+00:00 INFO  nothing happened')" \
+     -i inj2.csv --in-place -log inj2.log
+cat inj2.log
+# …INFO  update 1:note: "harmless" -> "x"
+# 2020-01-01T00:00:00+00:00 INFO  nothi…[+11 more chars]"      ← 偽造的紀錄，時間戳由攻擊者選
+# …INFO  wrote 1 records, 2 fields, atomic rename OK
+```
+
+**40 字元的截斷（BB）沒有擋住這件事，只是把偽造的那一行剪短。** 兩者的關係很重要：
+**若只把 BB 的上限移除而不先修 JJ，偽造會從「被剪斷的」變成「完整且可信的」。**
+
+因此修的順序是固定的：**先跳脫，再移除上限。** `reportEscape()` 已經存在，而且正好處理
+`\`、TAB、`\n`、`\r` 四個字元——那正是「一筆紀錄一行」所需要的全部。
+
+由本 session 在調查 BB 的後果時發現，不是盲測 agent 找到的。
+
