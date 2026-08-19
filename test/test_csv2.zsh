@@ -3922,6 +3922,71 @@ else
     ok "T96e feeding the REPORTED text back yields a different value, which is why the docs send you through -get / 把「報告的文字」餵回去會得到另一個值——那正是文件要人改走 -get 的原因"
 fi
 
+# ---------------------------------------------------------------------
+# T97 -- what the meta line observes, and what it merely restates.
+#
+# Round 38, defect GG. Rename a one-header `.csv` to `.csv2` and csv2 reads
+# its first data record as header row 0b: rc=0, one record short, nothing
+# said. The README offered the --json meta line as the way "a caller can
+# assert what it is reading" -- but `headers` there is the DECLARATION. It
+# reports 2 for any `.csv2`, including that one, so asserting on it is
+# asserting the filename against itself.
+#
+# This is not fixed by detection, and that is the decision rather than a
+# limitation admitted late. A row of titles and a row of data are not
+# distinguishable by shape; a detector would be a guess, and "declared by the
+# suffix, never detected" exists precisely to keep guesses out. So the
+# asymmetry stays: WRITING such a file is refused, reading one is not, and the
+# documentation now says which parts of the meta line are counted from the
+# file and which are the name talking.
+#
+# T97 —— meta 行裡哪些是「觀察到的」，哪些只是「覆述」。
+# 第 38 回合，缺陷 GG。把一份只有一列標頭的 `.csv` 改名成 `.csv2`，csv2 會把它的第一筆資料
+# 讀成標頭列 0b：rc=0、少一筆、什麼都不說。README 把 --json 的 meta 行當成「呼叫端能斷言
+# 自己讀到什麼」的方法——但那裡的 `headers` 是**宣告**。任何 `.csv2` 它都回報 2，包括那一份，
+# 因此拿它來斷言，等於拿檔名去斷言檔名。
+# 這件事不以「偵測」來修，而那是一個決定，不是事後才承認的限制。「一列標題」與「一列資料」
+# 在形狀上並無分別；偵測器就是猜測，而「由副檔名宣告、絕不偵測」的存在正是為了把猜測擋在外面。
+# 因此那個不對稱維持不變：**寫出**這樣的檔案會被拒絕，**讀取**則不會，而文件現在說明了 meta
+# 行裡哪些欄位是從檔案數出來的、哪些是檔名在說話。
+# ---------------------------------------------------------------------
+echo
+echo "--- T97: the meta line, observed against declared / meta 行：觀察值與宣告值 ---"
+
+printf 'pkg,ver,note\nzlib,1.3.2,first\nzstd,1.5.7,second\n' > "$TMP/t97_lying.csv2"
+printf 'pkg,ver,note\nzlib,1.3.2,first\nzstd,1.5.7,second\n' > "$TMP/t97_honest.csv"
+
+meta=$("$CSV2" -r --json -i "$TMP/t97_lying.csv2" 2>/dev/null | head -1)
+assert_contains "$meta" '"headers":2' \
+    "T97a a .csv2 always reports headers:2, because that is the declaration / .csv2 一律回報 headers:2，因為那是宣告"
+assert_eq "$("$CSV2" -r --json -i "$TMP/t97_lying.csv2" 2>/dev/null | tail -1)" \
+          '{"meta":{"records":1,"matched":0}}' \
+    "T97b so the mislabelled file loses a record, and the meta cannot warn about it / 因此戴錯名字的檔案會少一筆，而 meta 無法對此示警"
+assert_eq "$("$CSV2" -r --json -i "$TMP/t97_honest.csv" 2>/dev/null | tail -1)" \
+          '{"meta":{"records":2,"matched":0}}' \
+    "T97c while the same bytes under the honest name keep both / 而同樣的位元組在誠實的名字底下保留了兩筆"
+
+# `records` and `fields` ARE observations, which is the half of the meta line
+# that can be asserted on.
+# `records` 與 `fields` 確實是觀察值，那是 meta 行裡「可以拿來斷言」的那一半。
+assert_contains "$meta" '"fields":3' \
+    "T97d fields is counted from the file, not declared / fields 是從檔案數出來的，不是宣告的"
+
+# The documented way to check a file you did not produce: look at the header
+# rows and see whether the second one holds titles or data.
+# 文件所寫的、用來檢查「不是你產生的檔案」的方法：去看那兩列標頭，判斷第二列裡是標題還是資料。
+look=$("$CSV2" -head 1 -t -i "$TMP/t97_lying.csv2" 2>/dev/null | sed -n 2p)
+assert_eq "$look" "zlib,1.3.2,first" \
+    "T97e -head 1 -t shows the second header row, where the data is visible / -head 1 -t 會顯示第二列標頭，那裡看得見資料"
+real=$("$CSV2" -head 1 -t -i "$ROOT/compare/vs-sqlite.csv2" 2>/dev/null | sed -n 2p)
+assert_contains "$real" "比較項目" \
+    "T97f while a real .csv2 shows titles there / 而真正的 .csv2 那裡顯示的是標題"
+
+# The asymmetry is deliberate and must stay: writing one is refused.
+# 那個不對稱是刻意的，而且必須維持：寫出這樣的檔案會被拒絕。
+assert_fails "T97g writing a one-header file to a .csv2 name is still refused / 把只有一列標頭的檔案寫到 .csv2 名字仍然被拒絕" -- \
+    "$CSV2" -r -t -i "$TMP/t97_honest.csv" -o "$TMP/t97_out.csv2"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

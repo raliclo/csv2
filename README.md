@@ -348,6 +348,36 @@ $ csv2 -head 1 -t --json -i pkgs.csv2 | head -1
 That first line exists precisely so a caller can assert what it is reading
 instead of accepting a wrong guess. Asserted by T78.
 
+**But be exact about which parts of it are observed.** `fields` and `records`
+are counted from the file. `format` and `headers` are the *declaration* — they
+restate what the name said, because that is what "declared by the suffix,
+never detected" means. So `headers:2` on a `.csv2` is not evidence that a
+second header row exists; it is evidence that csv2 treated the second line as
+one.
+
+**That matters for a file you did not produce.** Rename a one-header `.csv` to
+`.csv2` and csv2 reads its first data record as header row `0b` — at rc=0, one
+record short, and no check can catch it, because a row of titles and a row of
+data are not distinguishable by shape. Nothing in the format can rescue this;
+only looking can:
+
+```console
+$ csv2 -head 1 -t -i handed-to-me.csv2       # both header rows, then record 1
+pkg,ver,note
+zlib,1.3.2,first                             <- data, not titles: a .csv wearing the wrong name
+zstd,1.5.7,second
+
+$ csv2 -head 1 -t -i vs-sqlite.csv2          # what a real one looks like
+dimension,csv2,sqlite,advantage,basis,note
+比較項目,csv2,SQLite,優勢方,依據,說明
+"storage, text at scale",…
+```
+
+Writing such a file is refused (csv2 will not convert between the two
+formats); reading one cannot be, and that asymmetry is deliberate — csv2
+believes the name because inventing a detector would mean guessing, which is
+the thing the suffix rule exists to prevent. Asserted by T97.
+
 ### A BOM is stripped, and never reaches a column name
 
 A file that opens with a UTF-8 BOM — anything exported by Excel, typically —
