@@ -815,3 +815,194 @@ README 現在寫明它丟棄的是「因未閉合引號而在 EOF 處未完成�
 （順帶更正一項舊的記載：全域 `CLAUDE.md` 的已知缺陷表說 `--truncate-partial` 完全無作用，
 以及 `--include-headers` 的 `0a`／`0b` 未實作。兩者現在都不對——前者對未閉合引號有效，
 後者實測輸出 `0a:4` 與 `0b:4`。）
+
+---
+
+# 第 38 回合（2026-08-19）—— 七條，全部親手重現，尚未修
+# Round 38 (2026-08-19) -- seven, all reproduced by hand, not yet fixed
+
+**這一回合的盲測仍然不是盲的，而原因值得記下來。** 缺陷表已經從兩個 `CLAUDE.md` 移除並提交，
+但受測 agent 仍然逐字引用了它——因為**派出它的那個 session 在啟動時就把那些檔案讀進 context
+了**，subagent 繼承的是 context，不是磁碟。全域 `CLAUDE.md` 自己就寫著這件事：「已經在執行中的
+session 不會看到這一頁」。
+
+**因此：移除缺陷表只對「新開的 session」有效。要跑一次真正的盲測，必須從一個新 session 派出。**
+該回合的 agent 自行重測並推翻了那五條全部，所以下列發現仍然有效；但這個限制本身要記住。
+
+Removing the tables only helps sessions started afterwards: a subagent inherits
+its parent's context, not the disk. A genuinely blind round has to be launched
+from a fresh session.
+
+| # | 缺陷 | 類別 |
+|---|---|---|
+| BB | `-log` 在 40 字元截斷新舊值，而 README 寫「完整記錄」 | **程式＋文件（稽核相關）** |
+| CC | 儲存格層級的錯誤位址是「物理行號」卻標著 `record N`，餵不回 `-get`／`-update` | **程式** |
+| DD | `-debug=trace` 只回報「被輸出的」紀錄；被排除的一行都沒有 | **程式＋文件** |
+| EE | 平行路徑不印 `metrics:` 行，而 README 說 `-debug` 包含它 | **程式＋文件** |
+| FF | README 教的 `-contains` → `-update` 組合會靜默雙重跳脫 | **文件（後果是資料損壞）** |
+| GG | 名為 `.csv2` 但只有一列標頭的檔案，rc=0 讀出時吞掉一筆；`--json` 的 meta 只是覆述副檔名 | **文件＋缺少能力** |
+| HH | 中文 README 有兩段被截斷的句子；英文 `-encrypt` 區塊有一句重複 | 文件 |
+
+**HH 在第 36 回合就被回報過，我當時沒有修。** 那正是「先寫進這個檔案再修」這條規則要防止的
+——一個沒有被寫下來的發現，會在下一輪被重新發現，而中間那段時間它一直是錯的。
+
+---
+
+## BB. `-log` 在 40 字元截斷，而 README 說「完整記錄」
+
+**嚴重度：稽核軌跡不完整，而 rc=0、log 有寫、看起來一切正常。**
+
+README 第 428 行：
+
+> | old and new values in an **ordinary** column | in full; that is the point of an audit trail |
+
+實測：
+
+```sh
+python3 -c "print('id,note'); print('1,\"%s\"'%('A'*300))" > lt.csv
+csv2 -update 1:note "$(python3 -c 'print("Z"*300)')" -i lt.csv --in-place -log lt.log
+grep -o 'update 1:note.*' lt.log
+# update 1:note: "AAAA…（40 個）…[+260 more chars]" -> "ZZZZ…（40 個）…[+260 more chars]"
+```
+
+兩側都在**第 40 個字元**截斷。`TARGET_PACKAGES.csv` 的 `status_notes`——**這個專案存在的理由
+就是那一欄被改壞**——典型長度遠超過 40，因此對那一欄而言，log 保留不下任何可用的舊值。
+
+**待決**：截斷本身可能是刻意的（避免單行 log 爆炸）。若是，README 那句「完整記錄」必須改，
+並說明上限；若不是，上限要拿掉或大幅提高。**兩者擇一，不能維持現狀**——目前是「文件承諾一件
+程式不做的事」，而那正是本專案定義的最糟狀態。
+
+---
+
+## CC. 儲存格層級的錯誤位址是物理行號，卻標著 `record N`
+
+**嚴重度：錯誤訊息裡的位址餵不回這支工具，而「位址可以組合」正是它的賣點。**
+
+README 第 249 行：「`N` counts **records, not lines** throughout」。
+
+```sh
+printf 'id,val\n編號,值\n1,ok\n2,bad\\qvalue\n' > esc.csv2   # 壞掉的是「資料第 2 筆」
+csv2 -r -t -i esc.csv2
+# csv2: record 4, field 2: undefined escape sequence \q          ← 4 是物理行號
+```
+
+把那個位址拿回來用：
+
+```sh
+csv2 -get 4:2 -i fixed.csv2     # csv2: -get: no such record; the file has 2 records   rc=1
+csv2 -get 2:2 -i fixed.csv2     # THEBAD                                               rc=0
+```
+
+**偏移量恰好等於標頭列數**，因此那是行號。同一支工具的**紀錄層級**錯誤則是對的
+（`record 1 (line 3)`，兩個數字都給）。也就是說錯誤通道裡並存兩套編號，而 README 的範例
+（`record 3, field 2: undefined escape sequence \q`）示範的正是壞掉的那一套。
+
+---
+
+## DD. `-debug=trace` 只回報「被輸出的」紀錄
+
+**嚴重度：無法回答「為什麼第 N 筆不在我的輸出裡」，而那正是 README 說它要回答的問題。**
+
+README 第 237 行：`-debug=trace  one level lower: every record's selection decision`。
+
+```sh
+printf 'pkg,ver\nzlib,1\nzstd,2\nbusybox,3\n' > t.csv
+csv2 -contains zlib --filter -i t.csv -debug=trace 2>&1 >/dev/null | grep TRACE
+# TRACE select: record 1 line 2 emitted, matched fields [1]
+# （第 2、3 筆一行都沒有）
+```
+
+**這與本專案自己的原則相矛盾**，而那條原則就寫在 README 的平行路徑那一段：「只回報有趣的
+那個情況，會讓沉默變得有歧義」。這裡「讀過但被排除」與「根本沒讀到」（例如 `-mid` 提前停止）
+產生**完全相同的證據**：沒有任何一行。
+
+---
+
+## EE. 平行路徑不印 `metrics:` 行
+
+**嚴重度：`peak_rss_bytes` 恰好在「你會想量它」的那種執行上取不到。**
+
+README 第 236 行：`-debug  diagnostics to stderr, including a metrics: line`。
+
+```sh
+CSV2_PARALLEL_MIN_BYTES=1000 csv2 -contains pkg299999 -i big.csv2 -debug 2>&1 >/dev/null
+# DEBUG parallel: 2 chunks, 10 workers, chunk 4194304 bytes
+# DEBUG parallel: 300000 records, 1 matched
+# （沒有 metrics: 行）
+
+CSV2_PARALLEL_MIN_BYTES=999999999 csv2 -contains … -debug 2>&1 >/dev/null
+# DEBUG single-threaded: …
+# DEBUG metrics: read_bytes=… file_bytes=… peak_rss_bytes=…      ← 單執行緒有
+```
+
+---
+
+## FF. README 教的 `-contains` → `-update` 組合會靜默雙重跳脫
+
+**嚴重度：對「含換行／TAB／CR／反斜線」的值——也就是這支工具存在的理由——資料被靜默改壞，rc=0。**
+
+```sh
+printf 'id,val\n編號,值\n1,X\\nY\\\\Z\n' > u.csv2
+csv2 -get 1:2 -i u.csv2 | od -c
+# X  \n   Y   \   Z                     ← 儲存的原始位元組
+
+csv2 -contains X -i u.csv2 | cut -f3
+# X\nY\\Z                               ← 報告為了「一行一筆」而跳脫（T53 的決定，正確）
+
+V=$(csv2 -contains X -i u.csv2 | cut -f3)
+csv2 -update 1:2 "$V" -i u3.csv2 --in-place    # rc=0
+csv2 -get 1:2 -i u3.csv2 | od -c
+# X   \   n   Y   \   \   Z             ← 跳脫被當成字面，值被改壞
+```
+
+**能組合的是「位址」，不是報告裡的那個「值」。** 正確的寫法已經存在——`-contains` 找到位址、
+`-get r:c` 取回原始值、`-update` 寫回——但 README 沒有說，而它把 `-contains` → `-update`
+當作「尋找與編輯如何組合」的核心示範。
+
+---
+
+## GG. 檔名可以對格式說謊，而讀取信任檔名
+
+**嚴重度：靜默少一筆，rc=0。**
+
+```sh
+printf 'pkg,ver,note\nzlib,1.3.2,first\nzstd,1.5.7,second\n' > missing2nd.csv2   # 2 筆資料
+csv2 -r --json -i missing2nd.csv2
+# {"meta":{"format":"csv2","headers":2,"fields":3}}
+# {"record":1,"line":3,"fields":{"pkg":"zstd",…}}
+# {"meta":{"records":1,"matched":0}}                ← 只有 1 筆；zlib 被當成第二列標頭吃掉
+```
+
+**副檔名宣告格式是設計，不是缺陷**——README 對此有完整的論證。有問題的是它接著說的那句：
+
+> That first line exists precisely so a caller can assert what it is reading（README:327）
+
+**meta 行做不到那件事。** 它印的 `"headers":2` 是「副檔名說了什麼」的覆述，不是對檔案的觀察，
+因此任何 `.csv2` 檔案都會得到 `headers:2`，包括這一份。呼叫端拿它斷言，等於拿檔名斷言檔名。
+
+同源的另一半：`-si --headers 1 -so > out.csv2` 會繞過那條轉檔拒絕，以 rc=0 產生一個名為
+`.csv2` 的 CSV。值裡有換行時讀回來會**大聲失敗**（正確）；沒有換行時就退化成上面那種靜默少一筆。
+README 對 `-md` 明確警告過這條 shell 重導路線，對 CSV 沒有。
+
+**待決**：可行的方向是讓 `--include-headers` 或 meta 提供「觀察到的」資訊，讓呼叫端有東西可以
+斷言；或者至少把 README:327 那句改成它做得到的事。
+
+---
+
+## HH. 中文 README 的兩段壞句，與英文的一句重複（第 36 回合已回報，未修）
+
+`README.zh-TW.md` `-encrypt` 條目：
+
+> `-encrypt` 與選取旗標併用原本會在 rc=0 下 標頭一律寫出，給不給 -t 都一樣，搭配選取時亦然。
+
+這是一段缺陷註記被接進功能說明裡的殘骸，中文讀者從這句話得不到任何資訊。
+
+`README.zh-TW.md` `--in-place` 段落：
+
+> 它本來可以從「`--in-place`……以暫存檔加 rename」由 T28c 斷言。
+
+一個中段被刪掉的句子。英文對應處是乾淨的：「Asserted by T28c.」
+
+英文 `-encrypt` 區塊（README:202–206）自身也有問題：**同一段裡把「不論給不給 `-t`，標頭一律
+寫出」講了兩次**。在一段與安全有關的說明裡重複，會讓讀者懷疑自己讀錯，而不是更確定——第 37
+回合的讀者就明說他因此改為「防禦性地加上 `-t`」。
