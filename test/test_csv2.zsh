@@ -6713,6 +6713,43 @@ else
 fi
 
 # ---------------------------------------------------------------------
+# T138 -- reporting an error must not be a way to fail.
+#
+# DV routed every SINK through Platform.writeAll. The direct stderr writes are
+# not sinks -- the top-level error printer, the Logger echo, -debug -- and they
+# still called FileHandle.standardError.write, which answers a failed write
+# with an exception nobody catches. So `csv2 -get 9:9 -i f.csv 2>&-`, an
+# ordinary thing for a script to do, exited 134 WHILE PRINTING THE REFUSAL:
+# a status of 1 turned into one the documentation does not contain.
+#
+# T138 —— 「回報一個錯誤」這件事本身，不該成為一種失敗的方式。
+# DV 把每一個 sink 都導向了 Platform.writeAll，而直接寫 stderr 的那幾處不是 sink——最上層
+# 的錯誤印出、Logger 的回顯、-debug——它們仍然呼叫 FileHandle.standardError.write，
+# 而它對「寫入失敗」的回答是一個沒有人接的例外。於是 `csv2 -get 9:9 -i f.csv 2>&-`
+# 這種腳本裡很平常的寫法，會在「印出那則拒絕」的當下以 134 結束。
+# ---------------------------------------------------------------------
+echo
+echo "--- T138: stderr that cannot be written / T138：寫不出去的 stderr ---"
+
+print -r -- 'a,b'  > "$TMP/t138.csv"
+print -r -- '1,x' >> "$TMP/t138.csv"
+
+"$CSV2" -get 9:9 -i "$TMP/t138.csv" 2>&-
+assert_eq "$?" "1" \
+    "T138a a refusal with stderr closed still exits 1 / stderr 已關閉時，一次拒絕仍然以 1 結束"
+
+"$CSV2" -r -t -i "$TMP/t138.csv" -debug 2>&- >/dev/null
+assert_eq "$?" "0" \
+    "T138b and -debug with stderr closed still exits 0 / 而 stderr 已關閉時的 -debug 仍然以 0 結束"
+
+# The message still has to arrive when there IS somewhere to put it: a fix that
+# quietly stopped reporting would pass the two cases above.
+# 有地方可放時，那則訊息仍然必須送到：一個「安靜地不再回報」的修法，上面兩個案例照樣會通過。
+"$CSV2" -get 9:9 -i "$TMP/t138.csv" 2>"$TMP/t138.err"
+assert_eq "$(wc -l < "$TMP/t138.err" | tr -d ' ')" "2" \
+    "T138c while an open stderr still gets the two lines / 而開著的 stderr 仍然收到那兩行"
+
+# ---------------------------------------------------------------------
 # T136 -- claims the README makes that nothing had checked.
 #
 # Round 53 found each of these by reading the README and then measuring:

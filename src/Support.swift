@@ -185,8 +185,8 @@ final class Logger {
         //
         // 它不能直接走 `Logger.warn`：那會同時寫進 log 檔，而剛剛失敗的正是那個 log 檔。
         // 因此這一行以相同的形狀組出來，只送到 stderr。
-        FileHandle.standardError.write(Data(
-            "csv2: \(Logger.timestamp()) WARN  cannot write log file \(logPath ?? "?"); continuing without one\n".utf8))
+        Platform.writeStderr(
+            "csv2: \(Logger.timestamp()) WARN  cannot write log file \(logPath ?? "?"); continuing without one\n")
     }
 
     /// `message` is an @autoclosure, and the level test happens BEFORE anything
@@ -244,7 +244,7 @@ final class Logger {
             // IS the CSV, and a timestamp in the middle of it is corruption.
             // 診斷訊息走 stderr，絕不走 stdout：使用 `-so` 時輸出就是 CSV，
             // 在其中插入時間戳就是損毀。
-            FileHandle.standardError.write(Data("csv2: \(line)".utf8))
+            Platform.writeStderr("csv2: \(line)")
         }
     }
 
@@ -455,12 +455,12 @@ enum KeySource {
                         "未指定 -keyfile 且沒有可詢問的 tty；請明確給 -keyfile，或以 --yes 表示已知悉將使用預設的 multissh 金鑰 \(p)")
                 }
                 let fp = fingerprint(derive(material: bytes, salt: [UInt8](domainLabel.utf8)))
-                FileHandle.standardError.write(Data("""
+                Platform.writeStderr("""
                 warning: no -keyfile given; the multissh private key will be used / 警告：未指定 -keyfile，將使用 multissh 的私鑰
                   \(p)  (fingerprint \(fp))
                 if that key is regenerated or lost, this file can never be decrypted / 若此金鑰被重新產生或遺失，本檔案將永久無法解密
                 continue? [y/N] / 繼續？[y/N]
-                """.utf8))
+                """)
                 let answer = readLine(strippingNewline: true)?.lowercased() ?? ""
                 guard answer == "y" || answer == "yes" else {
                     throw fault("aborted at the key prompt", "已於金鑰確認處中止")

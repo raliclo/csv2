@@ -1538,8 +1538,8 @@ func main() -> Int32 {
         // 與 log 那一行同理，而且它自己還有一個承諾：stderr 上的錯誤在文件裡是「恰好兩行」，
         // 英文在前中文在後。一則插入了含換行欄名的訊息會產生四行，而依「兩行」去讀的腳本
         // 會把被注入的那一行當成錯誤訊息的一部分。
-        FileHandle.standardError.write(Data(
-            "csv2: \(lineEscape(e.message))\ncsv2：\(lineEscape(e.messageZh))\n".utf8))
+        Platform.writeStderr(
+            "csv2: \(lineEscape(e.message))\ncsv2：\(lineEscape(e.messageZh))\n")
         // Recorded in the -log FILE, not echoed to stderr again. ERROR is above
         // the default WARN threshold, so routing it through Logger printed the
         // same failure a third time, with a timestamp, even when no -log was
@@ -1551,7 +1551,7 @@ func main() -> Int32 {
         Logger.shared.close()
         return 1
     } catch {
-        FileHandle.standardError.write(Data("csv2: \(lineEscape("\(error)"))\n".utf8))
+        Platform.writeStderr("csv2: \(lineEscape("\(error)"))\n")
         Logger.shared.close()
         return 1
     }

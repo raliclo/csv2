@@ -572,6 +572,32 @@ enum Platform {
         #endif
     }
 
+    /// Everything csv2 says to stderr goes through here.
+    ///
+    /// Not `FileHandle.standardError.write`: that answers a failed write with
+    /// an exception nobody catches, so `csv2 -get 9:9 -i f.csv 2>&-` -- an
+    /// ordinary thing for a script to do -- exited 134 while PRINTING THE
+    /// REFUSAL, turning an exit status of 1 into one the documentation does
+    /// not contain. Reporting an error is the last place that should be able
+    /// to fail this way.
+    ///
+    /// A departed reader still ends the process with SIGPIPE, inside
+    /// writeAll: `csv2 -debug 2>&1 | head -1` is a pipeline, not a fault. Any
+    /// other failure means stderr cannot be written, and there is nothing
+    /// further to say about it -- the caller's exit status is what carries the
+    /// news.
+    /// csv2 對 stderr 說的每一句話都走這裡。
+    /// 不用 `FileHandle.standardError.write`：它對「寫入失敗」的回答是一個沒有人接的例外，
+    /// 因此 `csv2 -get 9:9 -i f.csv 2>&-`——腳本裡很平常的寫法——會在「印出那則拒絕」的
+    /// 當下以 134 結束，把一個本該是 1 的結束狀態，換成一個文件裡根本沒有的數字。
+    /// 「回報一個錯誤」是最不該以這種方式失敗的地方。
+    /// 讀端離開仍然會在 writeAll 裡以 SIGPIPE 結束行程：`csv2 -debug 2>&1 | head -1`
+    /// 是一條管線，不是故障。其餘的失敗只表示 stderr 寫不出去，而那件事沒有別的話好說
+    /// ——把消息帶出去的是呼叫端拿到的結束狀態。
+    static func writeStderr(_ text: String) {
+        _ = writeAll(fd: 2, [UInt8](text.utf8))
+    }
+
     /// The system's text for an errno, as a message can print it.
     /// 一個 errno 對應的系統文字，可直接印在訊息裡。
     static func errorText(_ code: Int32) -> String {
