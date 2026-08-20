@@ -947,20 +947,20 @@ final class ByteSource {
 final class ByteSink {
     private var buf: [UInt8] = []
     private let limit: Int
-    private let handle: FileHandle
-    /// Set only for the stdout sink. A file sink writes through `handle` --
-    /// it cannot meet a broken pipe, and on Windows a FileHandle for a file
-    /// cannot yield a descriptor at all.
-    /// 只有 stdout 那個 sink 會設定它。檔案 sink 走 `handle` 寫出——它不可能遇到管線斷掉，
-    /// 而在 Windows 上，指向檔案的 FileHandle 根本取不到描述子。
+    /// Set for the stdout and stderr sinks: the two that can meet a reader
+    /// who left. A file sink has no such fd and no such failure.
+    /// 只有 stdout 與 stderr 這兩個 sink 會設定它——它們是會遇到「讀端離開」的那兩個。
+    /// 檔案 sink 沒有這個描述子，也沒有那種失敗。
     private let pipeSafeFD: Int32?
-    /// The descriptor every sink writes through. Kept beside the FileHandle
-    /// because Windows will not hand one out from a FileHandle, and because a
-    /// write has to be able to report WHY it failed -- which is what
-    /// FileHandle.write cannot do without throwing an exception nobody catches.
-    /// 每個 sink 實際寫出所用的描述子。與 FileHandle 並存，因為 Windows 不會從 FileHandle
-    /// 交出描述子，也因為一次寫入必須說得出「為什麼失敗」——那正是 FileHandle.write 做不到
-    /// 的事，它只會擲出一個沒有人接的例外。
+    /// The descriptor every sink writes through -- the only thing it writes
+    /// through. There was a FileHandle here as well until DV and EE removed
+    /// every use of it: Windows will not hand out a descriptor from one, and
+    /// FileHandle.write answers a failed write with an exception nobody
+    /// catches. A field nothing reads is a claim that something does.
+    /// 每個 sink 實際寫出所用的描述子——也是它唯一用來寫出的東西。這裡原本還有一個
+    /// FileHandle，直到 DV 與 EE 把它的每一處使用都拿掉：Windows 不會從它交出描述子，
+    /// 而 FileHandle.write 對「寫入失敗」的回答是一個沒有人接的例外。一個沒有人讀的欄位，
+    /// 本身就是一句「有人在讀它」的宣稱。
     private let writeFD: Int32?
     private let tmpPath: String?
     private let finalPath: String?
@@ -969,7 +969,6 @@ final class ByteSink {
 
     /// stdout / 標準輸出
     init(stdout limit: Int = 1 << 16) {
-        handle = FileHandle.standardOutput
         pipeSafeFD = 1
         writeFD = 1
         self.limit = limit
@@ -984,7 +983,6 @@ final class ByteSink {
     /// 記憶體內，供平行工作者組出自己的片段。它不會 flush，因此片段的大小由那一個
     /// 區塊的產出決定——這正是只有定位報告走平行的原因。
     init(memory: Void) {
-        handle = FileHandle.nullDevice
         pipeSafeFD = nil
         writeFD = nil
         self.limit = Int.max
@@ -1000,7 +998,6 @@ final class ByteSink {
 
     /// stderr / 標準錯誤
     init(stderr limit: Int = 1 << 13) {
-        handle = FileHandle.standardError
         // stderr is fd 2, and a diagnostic stream can meet a broken pipe just
         // as stdout can -- `csv2 -debug … 2>&1 | head` is an ordinary thing to
         // type.
@@ -1030,11 +1027,6 @@ final class ByteSink {
             throw fault("cannot create temporary file beside \(path): \(e)",
                         "無法在 \(path) 旁建立暫存檔：\(e)")
         }
-        // nullDevice, because this sink does not use a FileHandle at all --
-        // see Platform.openForWrite for what happened when it did.
-        // 用 nullDevice，因為這個 sink 根本不使用 FileHandle——它曾經使用過，後果見
-        // Platform.openForWrite 的說明。
-        handle = FileHandle.nullDevice
         pipeSafeFD = nil
         writeFD = fd
         Platform.rememberTemp(tmp)
