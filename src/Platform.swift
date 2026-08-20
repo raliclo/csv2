@@ -616,12 +616,20 @@ enum Platform {
     static func fileKind(path: String) -> FileKind? {
         var st = stat()
         guard stat(path, &st) == 0 else { return nil }
-        let mode = UInt32(st.st_mode)
-        let fmt = mode & UInt32(S_IFMT)
-        if fmt == UInt32(S_IFREG) { return .regular }
-        if fmt == UInt32(S_IFDIR) { return .directory }
+        // The numbers rather than the names: on Windows `S_IFMT` is ambiguous
+        // -- the CRT exposes both it and `_S_IFMT` -- and Swift refuses to
+        // choose. The values are the same everywhere csv2 builds (0o170000,
+        // 0o100000, 0o040000, 0o010000) and have been since V7 Unix, so
+        // writing them costs nothing and removes a per-platform spelling.
+        // 用數字而不是名字：在 Windows 上 `S_IFMT` 是有歧義的——CRT 同時提供它與 `_S_IFMT`
+        // ——而 Swift 拒絕替我們選。這些值在 csv2 建置的每一個平台上都相同（0o170000、
+        // 0o100000、0o040000、0o010000），而且從 V7 Unix 以來就是這樣，因此直接寫出來
+        // 沒有任何代價，還少掉一組「每個平台各自拼寫」的名字。
+        let fmt = UInt32(st.st_mode) & 0o170000
+        if fmt == 0o100000 { return .regular }
+        if fmt == 0o040000 { return .directory }
         #if !canImport(ucrt)
-        if fmt == UInt32(S_IFIFO) { return .fifo }
+        if fmt == 0o010000 { return .fifo }
         #endif
         return .other
     }
