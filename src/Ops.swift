@@ -1016,9 +1016,18 @@ func buildTransform(_ o: Options, headers: [Record]) throws -> CellTransform {
                                                          forCreating: true)
             let key = KeySource.derive(material: material.bytes, salt: [UInt8]("csv2-hash".utf8))
             let fp = KeySource.fingerprint(key)
-            Logger.shared.info("hashing columns with a key from \(material.path) (fingerprint \(fp))")
+            Logger.shared.info("hashing columns \(cols.map { baseName(headerName(header.fields[$0])) }.joined(separator: ",")) with a key from \(material.path) (fingerprint \(fp))")
             return .hash(columns: cols, key: key, fingerprint: fp)
         }
+        // The unkeyed path said nothing at all. -encrypt names its columns and
+        // so does the keyed hash; the one that is irreversible AND
+        // dictionary-attackable logged neither the columns nor the fact that
+        // no key was used. The audit trail was weakest where the operation is
+        // hardest to undo.
+        // 無金鑰那條路先前什麼也不說。-encrypt 會列出它的欄位，有金鑰的雜湊也會；而那個
+        // 「不可逆、又可用字典攻破」的組合，既沒有記下欄位，也沒有記下「沒有用金鑰」。
+        // 稽核軌跡最弱的地方，正是那個最難還原的操作。
+        Logger.shared.info("hashing columns \(cols.map { baseName(headerName(header.fields[$0])) }.joined(separator: ",")) with NO key (unsalted SHA-256)")
         return .hash(columns: cols, key: nil, fingerprint: nil)
     }
     if let spec = o.encryptCols {

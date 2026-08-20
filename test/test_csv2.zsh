@@ -7301,6 +7301,71 @@ else
 fi
 
 # ---------------------------------------------------------------------
+# T148 -- the audit trail was thinnest where the loss is largest.
+#
+# Round 56: the -log table promises "old and new values in an ordinary column
+# -- in full, never truncated", and `-delete -cell` destroyed exactly such a
+# value while logging only `blank 1:notes`. A deleted RECORD logged its number
+# and nothing of its contents. `-hash` logged no column names at all, and
+# unkeyed it logged nothing whatsoever -- the operation that is both
+# irreversible and dictionary-attackable had the weakest trail of any.
+#
+# T148 —— 稽核軌跡最薄的地方，正是損失最大的地方。
+# ---------------------------------------------------------------------
+echo
+echo "--- T148: what the log records when something is destroyed / T148：有東西被銷毀時，log 記下了什麼 ---"
+
+print -r -- 'a,notes'          > "$TMP/t148.csv"
+print -r -- '1,secret-value'  >> "$TMP/t148.csv"
+print -r -- '2,y'             >> "$TMP/t148.csv"
+
+cp "$TMP/t148.csv" "$TMP/t148_blank.csv"
+rm -f "$TMP/t148_blank.log"
+"$CSV2" -delete -cell 1:2 -i "$TMP/t148_blank.csv" --in-place -log "$TMP/t148_blank.log"
+assert_contains "$(cat "$TMP/t148_blank.log")" 'blank 1:notes: "secret-value"' \
+    "T148a blanking a cell records the value it destroyed / 清空一個儲存格會記下它銷毀的那個值"
+
+cp "$TMP/t148.csv" "$TMP/t148_del.csv"
+rm -f "$TMP/t148_del.log"
+"$CSV2" -delete 1 -i "$TMP/t148_del.csv" --in-place -log "$TMP/t148_del.log"
+assert_contains "$(cat "$TMP/t148_del.log")" 'delete record 1: a="1", notes="secret-value"' \
+    "T148b and deleting a record records its contents, by column / 而刪除一筆紀錄會逐欄記下它的內容"
+
+cp "$TMP/t148.csv" "$TMP/t148_h.csv"
+rm -f "$TMP/t148_h.log"
+"$CSV2" -hash notes -i "$TMP/t148_h.csv" -o "$TMP/t148_h_out.csv" -log "$TMP/t148_h.log"
+_t148_h=$(cat "$TMP/t148_h.log")
+if [[ $_t148_h == *"hashing columns notes"* && $_t148_h == *"NO key"* ]]; then
+    ok "T148c an unkeyed -hash records the columns and that no key was used / 無金鑰的 -hash 會記下欄位，以及「沒有用金鑰」"
+else
+    bad "T148c $(print -r -- $_t148_h | grep -o 'hashing.*' | head -1) / log 內容如上"
+fi
+
+# Redaction still wins over the new detail: a protected column must not arrive
+# in the log in the clear just because its record was deleted.
+# 遮蔽規則仍然優先於這些新增的細節：一個受保護的欄位，不能因為它所在的紀錄被刪掉，就以明文
+# 進到 log 裡。
+rm -f "$TMP/t148_r.log"
+cp "$TMP/t148_h_out.csv" "$TMP/t148_r.csv"
+"$CSV2" -delete 1 -i "$TMP/t148_r.csv" --in-place -log "$TMP/t148_r.log"
+_t148_r=$(cat "$TMP/t148_r.log")
+if [[ $_t148_r == *"notes=<redacted>"* ]]; then
+    ok "T148d while a protected column is still redacted in that record / 而該紀錄裡受保護的欄位仍然被遮蔽"
+else
+    bad "T148d $(print -r -- $_t148_r | grep -o 'delete record.*' | head -1) / log 內容如上"
+fi
+
+# One record is one entry: a value containing a newline must not become two
+# lines in the log, which is the property T127 pinned for arguments.
+# 一筆紀錄就是一則紀錄：含換行的值不得在 log 裡變成兩行，那正是 T127 為引數釘住的性質。
+print -r -- 'a,notes'      > "$TMP/t148_nl.csv"
+printf '1,"x\ny"\n'      >> "$TMP/t148_nl.csv"
+rm -f "$TMP/t148_nl.log"
+"$CSV2" -delete 1 -i "$TMP/t148_nl.csv" --in-place -log "$TMP/t148_nl.log"
+assert_eq "$(grep -c 'delete record' "$TMP/t148_nl.log")" "1" \
+    "T148e and a record holding a newline is still one log entry / 而含換行的紀錄在 log 裡仍然是一則"
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one

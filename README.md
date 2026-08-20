@@ -699,8 +699,11 @@ will not record:
 | the invocation | yes, but values are replaced: `-update 1:6 <value>`, `-insert 3 <row>` |
 | key **bytes** | never |
 | the keyfile **path**, and the key fingerprint | yes — never the key itself. But see below: the two markers' fingerprints do not mean the same thing |
-| old and new values in an **ordinary** column | in full, never truncated; that is the point of an audit trail |
-| old and new values in a **protected** column | `<redacted>` |
+| old and new values in an **ordinary** column | in full, never truncated; that is the point of an audit trail. This covers `-update` and `-delete -cell` alike — blanking a cell records what was in it |
+| old and new values in a **protected** column | `<redacted>`, including inside a deleted record |
+| a deleted **record** | its contents, column by column: `delete record 1: a="1", notes="…"`. The largest thing this tool destroys, so the entry says what was in it |
+| a deleted **column** | the column name, not its values — one entry for the run rather than one per record, because the values are the whole column |
+| `-hash` and `-encrypt` | which columns, and which key. Unkeyed hashing says so in as many words: `hashing columns notes with NO key (unsalted SHA-256)` |
 
 **One entry is one line, and every line is escaped to keep it that way.** A
 newline, tab, CR or backslash is written as `\n`, `\t`, `\r` or `\\`. Without

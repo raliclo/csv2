@@ -1082,7 +1082,19 @@ func runEdit(_ o: Options) throws {
             }
             if deletes.contains(where: { r.number >= $0.0 && r.number <= $0.1 }) {
                 touched.insert(r.number)
-                Logger.shared.info("delete record \(r.number)")
+                // With its contents. A deleted record is the largest thing
+                // this tool destroys, and the audit trail said only that a
+                // number had gone. Redacted per column, so a protected column
+                // does not arrive in the log in the clear, and escaped like
+                // every other line, so one record is one entry.
+                // 連同它的內容。被刪掉的紀錄是這個工具銷毀得最大的東西，而稽核軌跡先前只說了
+                // 「某個編號不見了」。逐欄套用遮蔽規則，好讓受保護的欄位不會以明文進到 log；
+                // 也與其他每一行一樣做跳脫，因此一筆紀錄就是一則紀錄。
+                let contents = r.fields.enumerated().map { (i, f) -> String in
+                    let n = i < headers[0].count ? baseName(headerName(headers[0].fields[i])) : "\(i + 1)"
+                    return "\(n)=\(Logger.shared.redact(column: n, value: f.value))"
+                }.joined(separator: ", ")
+                Logger.shared.info("delete record \(r.number): \(contents)")
                 return true
             }
             try checkFieldCount(r, expected: expectedFields,
@@ -1123,8 +1135,19 @@ func runEdit(_ o: Options) throws {
                     // 只清空，絕不移除。真的把欄位拿掉會讓該列少一欄、後面所有
                     // 欄位往前位移，於是 status_notes 出現在 license 底下——
                     // 而且是靜默的。
+                    // The value goes into the log BEFORE it is discarded.
+                    // `-update` has always recorded old -> new, and the README
+                    // promises "old and new values in an ordinary column -- in
+                    // full, never truncated"; blanking a cell destroys exactly
+                    // such a value and recorded only that it had happened. The
+                    // most destructive of the two logged the least.
+                    // 值在被丟棄「之前」進入 log。`-update` 一向記錄 old -> new，而 README
+                    // 承諾「一般欄位的新舊值——完整、絕不截斷」；清空一個儲存格銷毀的正是
+                    // 那樣一個值，而它先前只記錄了「這件事發生過」。兩者之中破壞性較大的
+                    // 那一個，記錄得最少。
+                    let gone = r.fields[c].value
                     r.fields[c].set([])
-                    Logger.shared.info("blank \(r.number):\(name)")
+                    Logger.shared.info("blank \(r.number):\(name): \(Logger.shared.redact(column: name, value: gone)) -> ")
                 }
             }
             try applyTransform(transform, to: &r, header: headers[0])
