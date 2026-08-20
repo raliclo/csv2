@@ -36,9 +36,19 @@ guest 比對吞掉 csv2 的結束狀態（已修——csv2 單獨執行、檢查
 
 ## 1. Install into the package manager's bin directory / 安裝到套件管理員的 bin 目錄
 
-**Status (corrected 2026-08-19): the drop-in half is DONE. Only the tap and the
-shim remain, and both are blocked outside this repository. / 狀態（2026-08-19
-更正）：drop-in 那一半**已完成**。只剩 tap 與 shim，兩者都被本 repo 之外的東西擋著。**
+**Status (corrected 2026-08-20): the drop-in half and the Windows half are both
+DONE. Only the Homebrew tap remains, and it is blocked outside this repository.
+/ 狀態（2026-08-20 更正）：drop-in 與 Windows 兩半**都已完成**。只剩 Homebrew tap，
+而它被本 repo 之外的東西擋著。**
+
+This line was corrected once already, on 2026-08-19, and it went stale again
+within a day: "no Windows build exists" survived a round in which the Windows
+node built, installed and ran the suite. Correcting a status does not make it
+self-maintaining, which is the whole reason the paragraph below says a status
+is a claim about the world with nothing re-checking it.
+這一行在 2026-08-19 才更正過一次，一天之內又過期了：「沒有 Windows build」熬過了一個
+「Windows 節點完成建置、安裝並跑完測試」的回合。更正一行狀態，不會讓它從此自我維護——
+而那正是下面那一段說「一行狀態是一個關於世界的宣稱，沒有任何東西會重新檢查它」的理由。
 
 This section said "to do" long after `install.zsh` was written, which is the
 same decay the stale PASS counts had: a status line is a claim about the world
@@ -57,7 +67,7 @@ running `csv2 --version` in a fresh shell and comparing.
 |---|---|
 | drop-in `install.zsh` | **done** — `$(brew --prefix)/bin`, `/usr/local/bin` where the guest's PATH already has it, `~/.local/bin` fallback, `--uninstall`, `--dry-run`, verified by running / **已完成** |
 | Homebrew tap + formula | blocked: `raliclo/csv2` is private / 被擋住：repo 尚未公開 |
-| Windows scoop shim | blocked: no Windows build exists / 被擋住：沒有 Windows build |
+| Windows scoop shim | **done, and by not creating one** — `install.zsh` writes to `%LOCALAPPDATA%\csv2\csv2.exe`, the path the machine's existing shim already names; measured 2026-08-20: `command -v csv2` resolves through `~/scoop/shims/csv2.shim` to the build just made, and the suite runs 568 PASS / 0 FAIL / 5 SKIP there / **已完成，而且是靠「不建立 shim」完成的**——`install.zsh` 寫到該機器既有 shim 本來就指著的位置；2026-08-20 實測如上 |
 
 `install.zsh` puts the built `csv2` binary where the platform's package manager
 already has a directory on `PATH`, so that using the tool does not require
