@@ -7519,6 +7519,113 @@ assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t151_dash.csv")" "--in-place" \
 
 
 # ---------------------------------------------------------------------
+# T152 -- the compose recipe, and the shell in the middle of it.
+#
+# Round 57: the recipe is annotated "# round-trips" and does not, for a value
+# ending in a newline. csv2 is not at fault -- `$( )` strips every trailing
+# newline, so the value comes back one byte shorter and is written back that
+# way at rc=0. The READMEs now carry the caveat and the `printf x` form that
+# survives it; both belong to a test, since a recipe that does not work is
+# worse than no recipe.
+#
+# Also here: `-contains` prints in ascending record order. The recipe leans on
+# `head -1` and nothing said so.
+#
+# T152 —— 那份組合配方，以及夾在中間的那個 shell。
+# ---------------------------------------------------------------------
+echo
+echo "--- T152: the recipe as written / T152：照著寫出來的那份配方 ---"
+
+print -r -- 'a,b'      > "$TMP/t152.csv"
+printf '1,"x\n"\n'   >> "$TMP/t152.csv"
+
+# The plain form loses the trailing newline -- that is what the caveat says.
+# 單純的寫法會弄丟結尾的換行——那正是那句但書說的。
+_t152_plain=$("$CSV2" -get 1:2 -i "$TMP/t152.csv")
+if [[ $_t152_plain == "x" ]]; then
+    ok "T152a \$( ) strips the value's trailing newline, as the caveat says / \$( ) 會吃掉值結尾的換行，一如那句但書所說"
+else
+    bad "T152a expected the stripped form, got $(print -r -- $_t152_plain | od -c | head -1) / 預期是被吃掉的那個形式"
+fi
+
+# The documented form keeps it.
+# 文件給的那個寫法保得住它。
+_t152_kept=$("$CSV2" -get 1:2 -i "$TMP/t152.csv"; printf x); _t152_kept=${_t152_kept%x}
+assert_eq "$(print -rn -- "$_t152_kept" | od -A n -c | tr -s ' ')" "$(printf 'x\n\n' | od -A n -c | tr -s ' ')" \
+    "T152b while the printf x form keeps every byte -get produced / 而 printf x 的寫法保住了 -get 產生的每一個位元組"
+
+# And the whole recipe still round-trips a value with no trailing whitespace,
+# which is what T96 covers and what most values are.
+# 而對「結尾沒有空白」的值，整份配方仍然可以 round-trip——那是 T96 涵蓋的、也是大多數值的情況。
+print -r -- 'a,b'          > "$TMP/t152b.csv"
+print -r -- '1,"x,y"'     >> "$TMP/t152b.csv"
+_t152_addr=$("$CSV2" -contains 'x,y' -i "$TMP/t152b.csv" | head -1 | cut -f1)
+_t152_val=$("$CSV2" -get "$_t152_addr" -i "$TMP/t152b.csv")
+"$CSV2" -update "$_t152_addr" "$_t152_val" -i "$TMP/t152b.csv" --in-place
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t152b.csv")" "x,y" \
+    "T152c the recipe round-trips a value with no trailing whitespace / 對結尾沒有空白的值，配方可以 round-trip"
+
+# Ascending record order, which `head -1` in the recipe depends on.
+# 以紀錄號遞增的順序輸出，那是配方裡的 `head -1` 所依賴的。
+print -r -- 'a,b'  > "$TMP/t152c.csv"
+print -r -- '1,z' >> "$TMP/t152c.csv"
+print -r -- '2,z' >> "$TMP/t152c.csv"
+print -r -- '3,z' >> "$TMP/t152c.csv"
+assert_eq "$("$CSV2" -contains z -i "$TMP/t152c.csv" | cut -f1 | tr '\n' ' ')" "1:2 2:2 3:2 " \
+    "T152d -contains prints in ascending record order / -contains 以紀錄號遞增的順序輸出"
+
+# ---------------------------------------------------------------------
+# T153 -- N edits in one run either all land or none do.
+#
+# Round 57 wrote the loop the compose recipe implies -- one csv2 call per
+# address -- and a failure on the fourth left the first three written, at exit
+# 1, with nothing in the file to say which. The atomic form exists and was
+# documented only as a lesson about -insert numbering. Both READMEs name it
+# now, so it needs holding: all-or-nothing, and the log agreeing.
+#
+# T153 —— 一次執行裡的 N 個編輯，要嘛全部落地、要嘛一個都不落地。
+# ---------------------------------------------------------------------
+echo
+echo "--- T153: all or nothing / T153：全部，或一個都不 ---"
+
+{
+    print -r -- 'a,b'
+    for i in {1..5}; do printf '%d,v%d\n' $i $i; done
+} > "$TMP/t153.csv"
+_t153_before=$(cksum < "$TMP/t153.csv")
+
+# One run, one address out of range: nothing may land.
+# 一次執行，其中一個位址越界：一個都不能落地。
+"$CSV2" -update 1:2 A -update 2:2 B -update 99:2 C -i "$TMP/t153.csv" --in-place 2>/dev/null
+assert_eq "$?" "1" \
+    "T153a a run with one bad address fails / 一次執行裡有一個壞位址就會失敗"
+assert_eq "$(cksum < "$TMP/t153.csv")" "$_t153_before" \
+    "T153b and the file is byte-for-byte what it was / 而那個檔案逐位元組維持原樣"
+
+# All good: every one lands.
+# 全部合法：每一個都落地。
+"$CSV2" -update 1:2 A -update 2:2 B -update 3:2 C -i "$TMP/t153.csv" --in-place
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t153.csv")$("$CSV2" -get 2:2 -i "$TMP/t153.csv")$("$CSV2" -get 3:2 -i "$TMP/t153.csv")" "ABC" \
+    "T153c while a run whose addresses are all good lands all of them / 而位址全部合法的執行，會讓它們全部落地"
+
+# The loop the recipe implies, for contrast: this is what the READMEs now warn
+# about, and it has to actually behave that way or the warning is folklore.
+# 對照組：配方所暗示的那個迴圈——那正是兩份 README 現在警告的東西，而它必須真的是那樣，
+# 否則那句警告就只是傳說。
+{
+    print -r -- 'a,b'
+    for i in {1..5}; do printf '%d,v%d\n' $i $i; done
+} > "$TMP/t153b.csv"
+for _addr in 1:2 2:2 99:2; do
+    "$CSV2" -update $_addr Z -i "$TMP/t153b.csv" --in-place 2>/dev/null || break
+done
+if [[ $("$CSV2" -get 1:2 -i "$TMP/t153b.csv") == "Z" && $("$CSV2" -get 5:2 -i "$TMP/t153b.csv") == "v5" ]]; then
+    ok "T153d a call-per-address loop leaves the earlier edits written / 「每個位址跑一次」的迴圈會讓先前的編輯留在檔案裡"
+else
+    bad "T153d the loop did not behave as the warning describes / 那個迴圈的行為與警告所述不符"
+fi
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one

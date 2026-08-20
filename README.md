@@ -192,10 +192,12 @@ SELECTING / 選取
                         past the end; until 2026-08-21 that was the one case
                         it missed. `records` on the trailing --json meta line
                         answers the same question for a caller that would
-                        rather parse than read stderr -- though on an empty
-                        file it reads `0` whether the window missed or the
-                        file was simply empty, which is why the WARN is the
-                        one that distinguishes them. -head and -tail clamp the same way,
+                        rather parse than read stderr -- but only by
+                        comparing it against the START you asked for: a window
+                        that missed and one that hit and was clamped both
+                        report the file's own record count with `matched:0`,
+                        and on an empty file it reads `0` either way. The WARN
+                        is the one that says which happened. -head and -tail clamp the same way,
                         silently, because clamping an END is what was asked
                         for
   -t                    include the header rows (off by default). It applies
@@ -451,7 +453,19 @@ val=$(csv2 -get "$addr" -i f.csv2)                           # the value itself
 csv2 -update "$addr" "$val" -i f.csv2 --in-place             # round-trips
 ```
 
-Asserted by T96.
+Asserted by T96 — **for the tool. The shell in the middle is the part that
+loses data**: `$( )` strips every trailing newline, so a value ending in one
+comes back one byte shorter and is written back that way, at rc=0, with nothing
+to see. csv2 handed over the right bytes and got different ones back. When a
+value may end in whitespace, carry it through a file instead, or pin the end:
+
+```sh
+val=$(csv2 -get "$addr" -i f.csv2; printf x); val=${val%x}   # keeps the tail
+```
+
+**The report's own values are for reading, and this is a third reason:** `-get`
+is the only shape that hands you the stored bytes, and even it is at the mercy
+of what you pour them into.
 
 **An address is only as current as the file it came from, and there is one way
 it can be wrong without anything saying so.** If a `.index` sidecar sits beside
@@ -468,6 +482,13 @@ csv2 -contains "old" --no-index -i f.csv2   # or do not use one at all
 
 `--no-index` is the flag for "refuse to trust a sidecar"; it is listed under
 the index flags and named here because this recipe is where it matters.
+
+**A write repairs the sidecar, which erases the evidence.** If a stale index
+sends an edit to the wrong record, the edit rewrites the file and builds a
+correct sidecar as it goes — so `--verify-index` afterwards says `index OK` at
+exit 0, about the file you have just damaged. Both halves are documented
+separately and the composition is the part that bites: verify BEFORE the edit,
+not after.
 
 **Only `-contains` reads the sidecar.** `-get` and the edit verbs scan, so a
 stale index does not make them miscount — it makes the ADDRESS you carry over
@@ -724,6 +745,7 @@ will not record:
 | a deleted **record** | its contents, column by column: `delete record 1: a="1", notes="…"`. The largest thing this tool destroys, so the entry says what was in it |
 | a deleted **column** | the column name, not its values — one entry for the run rather than one per record, because the values are the whole column |
 | `-hash` and `-encrypt` | which columns, and which key. Unkeyed hashing says so in as many words: `hashing columns notes with NO key (unsalted SHA-256)` |
+| the outcome of the run | `wrote N records, M fields, atomic rename OK` — the line that says the write completed, and the one to look for when asking whether an edit landed |
 
 **One entry is one line, and every line is escaped to keep it that way.** A
 newline, tab, CR or backslash is written as `\n`, `\t`, `\r` or `\\`. Without
@@ -1107,6 +1129,17 @@ is running brings it back** — the `rm` lands on the old inode and the rename
 puts the new one where the name was. This is the one guarantee with no fallback — with `-o` you still have
 the input if the output is wrong, and with `--in-place` the input *is* the
 output. Asserted by T28c.
+
+**Several addresses, one run.** `-update` is repeatable, and every address in
+one run resolves against the file as it arrived, so N edits either all land or
+none do. A loop that runs csv2 once per address is not that: the fourth call
+failing leaves the first three written, at exit 1, with no way to tell from the
+file which had happened. The same is true of `-insert`, and is why its numbers
+are documented as resolving against the input.
+
+```sh
+csv2 -update 3:6 A -update 12:6 B -update 40:6 C -i f.csv --in-place   # atomic
+```
 
 **Before an edit you cannot undo, `-so` is a dry run.** It writes what the edit
 would produce to stdout, touches nothing, and refuses out-of-range addresses
