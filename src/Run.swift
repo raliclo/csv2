@@ -1202,7 +1202,25 @@ func runEdit(_ o: Options) throws {
     if let b = builder, let outPath = o.output, let idx = b.finish(dataPath: outPath) {
         idx.save(dataPath: outPath)
     }
-    Logger.shared.info("wrote \(total) records, \(expectedFields) fields, atomic rename OK")
+    // The counts describe what was WRITTEN, not what was read. This line used
+    // to report `total` and `expectedFields`, both of which are the input's
+    // shape: after `-delete 1,2 -delete -col 7` it said "22 records, 7 fields"
+    // for a file holding 20 and 6. Wrong in both numbers, in the one line of
+    // the audit trail that summarises the result -- and the trail's stated job
+    // is to record what changed.
+    //
+    // `outRecords` is incremented in emitData, so it counts records that
+    // reached the sink; `headers[0]` has already had its dropped columns
+    // removed by the time this runs, so its width is the output's.
+    //
+    // 這兩個數字描述的是「寫出了什麼」，不是「讀進了什麼」。這一行原本回報的是 `total` 與
+    // `expectedFields`，而兩者都是「輸入」的形狀：在 `-delete 1,2 -delete -col 7` 之後，
+    // 它說「22 筆、7 欄」，而檔案裡是 20 筆、6 欄。兩個數字都錯，而且錯在稽核軌跡裡「總結
+    // 結果」的那一行——那份軌跡自己宣稱的工作，正是記錄改了什麼。
+    //
+    // `outRecords` 在 emitData 裡遞增，因此它數的是「真的到達輸出端」的紀錄；而執行到這裡時，
+    // `headers[0]` 已經移除過被刪掉的欄位，所以它的寬度就是輸出的寬度。
+    Logger.shared.info("wrote \(outRecords) records, \(headers.first?.count ?? expectedFields) fields, atomic rename OK")
 }
 
 // ---------------------------------------------------------------------

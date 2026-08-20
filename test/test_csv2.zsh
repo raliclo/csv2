@@ -6030,6 +6030,143 @@ else
     ok "T120b and not the English one / 而不帶英文的那一個"
 fi
 
+# ---------------------------------------------------------------------
+# T121 -- a flag written into your data, and four more argument-parser holes.
+#
+#   csv2 -update 1:1 -t -i f.csv --in-place     rc=0, the cell now holds "-t"
+#   csv2 -append --json -i f.csv --in-place     a record containing "--json"
+#
+# This tool's founding failure -- exit zero, plausible garbage -- arriving
+# through its own argument parser. The README quotes multissh being bitten by
+# an unknown option swallowed as a hostname as the reason unknown flags are
+# always an error; the principle was there and stopped at UNKNOWN flags.
+#
+# Known flags only, not "anything starting with a dash": `-update 1:2 -5`
+# stores a negative number. `--` ends flag parsing for the value that follows,
+# which is how a value that IS a flag name gets stored.
+#
+# The other four, all rc=0 before:
+#   -hash note -hash ver   hashed ver, left note in PLAINTEXT
+#   -o with --in-place     wrote -o, left the in-place target untouched
+#   --verify-index --no-index   read the sidecar --no-index forbids
+#   the log's "wrote N records, M fields"   reported the INPUT's shape
+#
+# T121 —— 一個被寫進資料裡的旗標，以及另外四個引數解析器的洞。
+# 這是這個工具的招牌失敗——以 0 結束、輸出看似合理的垃圾——而它是從自己的引數解析器進來的。
+# README 引用過 multissh 被「未知選項被當成主機名吞掉」咬過的事，作為「未知旗標一律視為錯誤」
+# 的理由；那條原則本來就在，只是停在「未知」旗標上。
+# 只擋已知旗標，而不是所有以減號開頭的東西：`-update 1:2 -5` 存的是一個負數。`--` 結束其後
+# 那個值的旗標解析，那是「本身就是旗標名的值」存得進去的方式。
+# ---------------------------------------------------------------------
+echo
+echo "--- T121: a flag is not data / 旗標不是資料 ---"
+
+print -r -- 'a,b,note'   > "$TMP/t121.csv"
+print -r -- '1,x,hello' >> "$TMP/t121.csv"
+print -r -- '2,y,world' >> "$TMP/t121.csv"
+cp "$TMP/t121.csv" "$TMP/t121.bak"
+# The pristine copy is also READ by T122, and a .bak has no extension, so csv2
+# cannot know its format. A second copy keeps the .csv name.
+# 這份原始複本 T122 也會「讀」它，而 .bak 沒有副檔名，csv2 無從得知格式。再留一份保有
+# .csv 名稱的複本。
+cp "$TMP/t121.csv" "$TMP/t121_pristine.csv"
+
+assert_fails "T121a a known flag in a data position is refused / 出現在資料位置的已知旗標會被拒絕" -- \
+    "$CSV2" -update 1:1 -t -i "$TMP/t121.csv" --in-place
+assert_same "$TMP/t121.csv" "$TMP/t121.bak" \
+    "T121b and nothing was written / 而且什麼都沒有寫入"
+
+assert_fails "T121c the same for a row literal / 對「一列」的字面值同樣如此" -- \
+    "$CSV2" -append --json -i "$TMP/t121.csv" --in-place
+
+# A value that merely LOOKS like a flag must still work: a negative number is
+# ordinary data and refusing it would be a worse defect than the one being
+# fixed.
+# 一個「看起來像旗標」的值必須仍然能用：負數是普通資料，把它擋掉會比正在修的這個缺陷更糟。
+assert_succeeds "T121d while a negative number is still stored / 而負數仍然存得進去" -- \
+    "$CSV2" -update 1:1 -5 -i "$TMP/t121.csv" --in-place
+assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t121.csv")" "-5" \
+    "T121e exactly as given / 一字不差"
+
+# And a value that really is a flag name has a way in.
+# 而一個「真的就是旗標名」的值，有它的路。
+assert_succeeds "T121f and -- ends flag parsing so a flag name can be stored / 而 -- 結束旗標解析，讓旗標名存得進去" -- \
+    "$CSV2" -update 1:1 -- -t -i "$TMP/t121.csv" --in-place
+assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t121.csv")" "-t" \
+    "T121g and it lands as the two characters it is / 而它就以那兩個字元落地"
+
+# The flag list this depends on must match the parser's own cases, or the
+# refusal quietly stops covering a flag someone added.
+# 這件事所依賴的旗標清單，必須與解析器自己的 case 相符，否則這個拒絕會在有人新增旗標時
+# 悄悄地不再涵蓋它。
+t121_cases=$(awk '/^func parseArgs/,/^\}/' "$ROOT/src/main.swift" \
+    | grep -oE '^\s+case "[a-z0-9-]+"(, "[a-z0-9-]+")*:' | grep -oE '"[a-z0-9-]+"' | tr -d '"' | sort -u)
+t121_listed=$(awk '/^let KNOWN_FLAGS/,/^\]/' "$ROOT/src/main.swift" \
+    | grep -oE '"[a-z0-9-]+"' | tr -d '"' | sort -u)
+t121_missing=$(comm -23 <(print -r -- "$t121_cases") <(print -r -- "$t121_listed") | tr '\n' ' ')
+if [[ -z "${t121_missing// /}" ]]; then
+    ok "T121h and KNOWN_FLAGS covers every case the parser has / 而 KNOWN_FLAGS 涵蓋了解析器的每一個 case"
+else
+    bad "T121h KNOWN_FLAGS is missing:${t121_missing} / KNOWN_FLAGS 少了：${t121_missing}"
+fi
+
+# ---------------------------------------------------------------------
+# T122 -- flags given twice, and pairs that cannot both be meant.
+# T122 —— 給了兩次的旗標，以及不可能同時成立的組合。
+# ---------------------------------------------------------------------
+echo
+echo "--- T122: twice, and both at once / 兩次，以及同時 ---"
+
+head -c 32 /dev/urandom > "$TMP/t122.key"
+
+# The one with a security consequence: -hash twice hashed the second column and
+# left the first in plaintext, at rc=0, in a file whose purpose was masking it.
+# 有安全後果的那一個：-hash 給兩次，雜湊了第二欄、把第一欄留成明文，rc=0——而那個檔案存在
+# 的目的就是遮蔽它。
+assert_fails "T122a -hash twice is refused rather than masking only the last / -hash 給兩次會被拒絕，而不是只遮蔽最後一個" -- \
+    "$CSV2" -hash note -hash b -keyfile "$TMP/t122.key" -i "$TMP/t121_pristine.csv" -o "$TMP/t122.csv" -t
+
+assert_succeeds "T122b while one -hash still works / 而一個 -hash 照常運作" -- \
+    "$CSV2" -hash note -keyfile "$TMP/t122.key" -i "$TMP/t121_pristine.csv" -o "$TMP/t122b.csv" -t
+
+assert_fails "T122c -o with --in-place is refused, not silently one of them / -o 與 --in-place 併用會被拒絕，而不是靜默擇一" -- \
+    "$CSV2" -update 1:1 'Z' -i "$TMP/t121_pristine.csv" --in-place -o "$TMP/t122c.csv"
+
+# An index has to EXIST, or --verify-index fails for want of one and the case
+# passes without ever testing --no-index. It did exactly that on the first
+# attempt: green against a build where `--verify-index --no-index` happily read
+# the sidecar and reported `index OK`.
+# 索引必須「存在」，否則 --verify-index 會因為「找不到索引」而失敗，於是這個案例根本沒測到
+# --no-index 就通過了。第一版正是如此：在一個「`--verify-index --no-index` 會愉快地讀那個
+# sidecar 並回報 `index OK`」的建置上，它是綠的。
+"$CSV2" --build-index -i "$TMP/t121_pristine.csv" >/dev/null 2>&1
+assert_succeeds "T122d0 with an index present, --verify-index alone succeeds / 索引存在時，單獨的 --verify-index 會成功" -- \
+    "$CSV2" --verify-index -i "$TMP/t121_pristine.csv"
+assert_fails "T122d --verify-index with --no-index is refused, as --build-index already was / --verify-index 與 --no-index 併用會被拒絕，一如 --build-index 早已如此" -- \
+    "$CSV2" --verify-index --no-index -i "$TMP/t121_pristine.csv"
+
+# ---------------------------------------------------------------------
+# T123 -- the audit trail's summary line described the input.
+# T123 —— 稽核軌跡的總結行描述的是輸入。
+# ---------------------------------------------------------------------
+echo
+echo "--- T123: wrote N records, and N is the output's / wrote N records，而 N 是輸出的 ---"
+
+{ print -r -- 'a,b,c,d,e,f,g'
+  for i in {1..22}; do print -r -- "$i,$i,$i,$i,$i,$i,$i"; done
+} > "$TMP/t123.csv"
+rm -f "$TMP/t123.log"
+"$CSV2" -delete 1,2 -delete -col 7 -i "$TMP/t123.csv" --in-place -log "$TMP/t123.log" >/dev/null 2>&1
+
+t123_line=$(grep wrote "$TMP/t123.log")
+assert_contains "$t123_line" "wrote 20 records, 6 fields" \
+    "T123a the log reports what was written, not what was read / log 回報的是「寫出了什麼」，不是「讀進了什麼」"
+
+# Cross-checked against the file rather than against my expectation of it.
+# 與檔案本身對照，而不是與我對它的預期對照。
+assert_contains "$("$CSV2" -r --json -i "$TMP/t123.csv" 2>/dev/null | tail -1)" '"records":20' \
+    "T123b and the file agrees / 而檔案同意"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

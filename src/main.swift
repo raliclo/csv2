@@ -97,6 +97,83 @@ func usageError(_ en: String, _ zh: String) -> CSV2Error { fault(en, zh) }
 /// `-contains` 與 `--contains` 皆接受。成本為零，且避免使用者按 swift_tar 的
 /// `--long` 習慣打字時撞牆。未知旗標一律報錯：multissh 已經被「未知選項被當成
 /// 主機名稱吞掉」咬過一次。
+/// Every flag this parser recognises, so a DATA argument can refuse to be one.
+///
+/// `csv2 -update 1:1 -t -i f.csv --in-place` wrote the two characters `-t`
+/// into the cell, at rc=0. `-append --json` appended a record containing
+/// `--json`. That is this tool's founding failure -- exit zero, plausible
+/// garbage -- arriving through its own argument parser, and the README quotes
+/// multissh being bitten by an unknown option swallowed as a hostname as the
+/// reason unknown flags are always an error. The principle was there; it just
+/// stopped at UNKNOWN flags.
+///
+/// Known flags only, not "anything starting with a dash": `-update 1:2 -5`
+/// stores a negative number and must keep working. For a value that really is
+/// a flag name, `--` ends flag parsing -- `-update 1:1 -- -t`.
+///
+/// T121b holds this list against the parser's own cases, because a list of
+/// names beside a switch is exactly the kind of thing that drifts.
+///
+/// 這個解析器認得的每一個旗標，好讓「資料」引數能拒絕自己變成其中之一。
+///
+/// `csv2 -update 1:1 -t -i f.csv --in-place` 會把 `-t` 這兩個字元寫進儲存格，rc=0。
+/// 那正是這個工具的招牌失敗——以 0 結束、輸出看似合理的垃圾——而它是從自己的引數解析器
+/// 進來的；README 還引用了 multissh 被「未知選項被當成主機名吞掉」咬過的事，作為「未知旗標
+/// 一律視為錯誤」的理由。那條原則本來就在，只是停在「未知」旗標上。
+///
+/// 只擋「已知旗標」，而不是「所有以減號開頭的東西」：`-update 1:2 -5` 存的是一個負數，
+/// 必須繼續能用。若某個值真的就是一個旗標名，用 `--` 結束旗標解析：`-update 1:1 -- -t`。
+///
+/// 這份清單由 T121b 對照解析器自己的 case 檢查——一份放在 switch 旁邊的名稱清單，正是那種
+/// 會漂移的東西。
+let KNOWN_FLAGS: Set<String> = [
+    "a1",
+    "append",
+    "build-index",
+    "cell",
+    "col",
+    "contains",
+    "debug",
+    "decrypt",
+    "delete",
+    "en",
+    "encrypt",
+    "filter",
+    "get",
+    "h",
+    "hash",
+    "head",
+    "headers",
+    "help",
+    "i",
+    "in-place",
+    "include-headers",
+    "insert",
+    "json",
+    "json-ascii",
+    "key",
+    "keyfile",
+    "log",
+    "md",
+    "mid",
+    "no-index",
+    "normalize",
+    "o",
+    "physical",
+    "pretty",
+    "r",
+    "rownum",
+    "si",
+    "so",
+    "t",
+    "tail",
+    "truncate-partial",
+    "update",
+    "verify-index",
+    "yes",
+    "zh"
+]
+
 func normalizeFlag(_ a: String) -> String {
     if a.hasPrefix("--") { return String(a.dropFirst(2)) }
     if a.hasPrefix("-") { return String(a.dropFirst(1)) }
@@ -106,6 +183,33 @@ func normalizeFlag(_ a: String) -> String {
 func parseArgs(_ argv: [String]) throws -> Options {
     var o = Options()
     var i = 0
+    /// Set by `--` and consumed by the next `needData`, so a value that is a
+    /// flag name can still be stored.
+    /// 由 `--` 設定、由下一次 `needData` 消耗，好讓「本身就是旗標名」的值仍然存得進去。
+    var dataIsLiteral = false
+    /// Flags already seen, for the ones that are not repeatable.
+    ///
+    /// Given twice, they used to take the LAST silently. For most that is a
+    /// surprise; for `-hash` it discloses data: `-hash note -hash ver` hashed
+    /// `ver` and left `note` in plaintext, at rc=0, in a file whose whole
+    /// purpose was that `note` be masked. The README states the edit verbs are
+    /// repeatable and accumulate, which makes the unstated opposite rule for
+    /// everything else actively misleading.
+    ///
+    /// 已經出現過的旗標，供「不可重複」的那些使用。
+    ///
+    /// 重複給出時，它們原本會靜默採用「最後一個」。對多數旗標那只是意外；對 `-hash` 則會
+    /// 洩漏資料：`-hash note -hash ver` 雜湊了 `ver`、把 `note` 留成明文，rc=0，而那個檔案
+    /// 存在的全部目的就是讓 `note` 被遮蔽。README 說「編輯動詞可重複、會累加」，這讓其餘
+    /// 旗標那條沒有被寫出來的相反規則，變得會主動誤導人。
+    var seenFlags: Set<String> = []
+    func once(_ name: String) throws {
+        guard seenFlags.insert(name).inserted else {
+            throw usageError(
+                "\(name) is given more than once; it is not repeatable, and taking the last one silently is how -hash note -hash ver leaves note in plaintext at rc=0. The repeatable verbs are -insert, -append, -delete and -update",
+                "\(name) 被給了不只一次；它不可重複，而「靜默採用最後一個」正是 -hash note -hash ver 會在 rc=0 下把 note 留成明文的原因。可重複的動詞是 -insert、-append、-delete 與 -update")
+        }
+    }
 
     /// For an argument that carries DATA -- a value, a row literal, a search
     /// string. Those are the ones where Swift's lossy decode of argv changes
@@ -127,6 +231,12 @@ func parseArgs(_ argv: [String]) throws -> Options {
     /// 資料儲存。第 38 回合，缺陷 II。
     func needData(_ flag: String) throws -> String {
         let v = try need(flag)
+        if !dataIsLiteral, v.hasPrefix("-"), KNOWN_FLAGS.contains(normalizeFlag(v)) {
+            throw usageError(
+                "\(flag) \(v): \(v) is a flag, and this position takes DATA. csv2 will not write a flag into your file. If the value really is \(v), end flag parsing first: \(flag) -- \(v)",
+                "\(flag) \(v)：\(v) 是一個旗標，而這個位置要的是「資料」。csv2 不會把一個旗標寫進你的檔案。若這個值真的就是 \(v)，請先結束旗標解析：\(flag) -- \(v)")
+        }
+        dataIsLiteral = false
         // argv[0] is the program, and `argv` here is CommandLine.arguments
         // dropping it -- so the raw index is one higher.
         // argv[0] 是程式本身，而此處的 `argv` 是去掉它之後的 CommandLine.arguments
@@ -151,6 +261,19 @@ func parseArgs(_ argv: [String]) throws -> Options {
         // `-cell` 是修飾詞，寫在動詞與位址之間才自然：`-delete -cell 12:6`。
         // 把它當成值會使位址變成「-cell」，接著以一個在講位址的訊息失敗——
         // 而那不是實際發生的事。
+        // `--` ends flag parsing for the value that follows, which is the only
+        // way to store a value that IS a flag name. Conventional, and it gives
+        // the refusal above something true to point at.
+        // `--` 結束「其後那個值」的旗標解析，那是「儲存一個本身就是旗標名的值」唯一的辦法。
+        // 這是慣例，也讓上面那個拒絕有一個真的存在的出路可以指。
+        if argv[i] == "--" {
+            i += 1
+            guard i < argv.count else {
+                throw usageError("\(flag) needs a value after --", "\(flag) 在 -- 之後仍需要一個值")
+            }
+            dataIsLiteral = true
+            return argv[i]
+        }
         while argv[i] == "-cell" || argv[i] == "--cell"
                 || argv[i] == "-col" || argv[i] == "--col" {
             let mod = argv[i]
@@ -206,7 +329,7 @@ func parseArgs(_ argv: [String]) throws -> Options {
         }
         switch normalizeFlag(arg) {
         case "r": o.read = true
-        case "contains": o.contains = try needData(arg)
+        case "contains": try once("-contains"); o.contains = try needData(arg)
         case "filter": o.filter = true
         case "include-headers": o.includeHeaders = true
         case "normalize": o.normalize = true
@@ -215,19 +338,19 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "C":
             let n = try nonNegativeInt(arg, try need(arg))
             o.after = n; o.before = n
-        case "head": o.head = try positiveInt(arg, try need(arg))
-        case "tail": o.tail = try positiveInt(arg, try need(arg))
-        case "mid": o.mid = try parseMid(try need(arg))
+        case "head": try once("-head"); o.head = try positiveInt(arg, try need(arg))
+        case "tail": try once("-tail"); o.tail = try positiveInt(arg, try need(arg))
+        case "mid": try once("-mid"); o.mid = try parseMid(try need(arg))
         case "t": o.withHeader = true
         case "rownum": o.rownum = true
         case "physical": o.physical = true
         case "a1": o.a1 = true
-        case "i": o.input = try need(arg)
-        case "o": o.output = try need(arg)
+        case "i": try once("-i"); o.input = try need(arg)
+        case "o": try once("-o"); o.output = try need(arg)
         case "si": o.useStdin = true
         case "so": o.useStdout = true
         case "in-place": o.inPlace = true
-        case "headers": o.headersOverride = try intVal(arg, try need(arg))
+        case "headers": try once("--headers"); o.headersOverride = try intVal(arg, try need(arg))
         case "md": o.markdown = true
         case "pretty": o.pretty = true
         case "json": o.json = true
@@ -293,6 +416,7 @@ func parseArgs(_ argv: [String]) throws -> Options {
                                            argvTail: argv, index: i))
             o.cellModifier = false; o.colModifier = false
         case "get":
+            try once("-get")
             let addr = try need(arg)
             // 0a / 0b are well-formed ADDRESSES -- the locating report emits
             // them -- they are simply not addresses any verb can act on. Caught
@@ -314,10 +438,10 @@ func parseArgs(_ argv: [String]) throws -> Options {
             let (r, c) = try parseCellAddress(addr, flag: arg)
             o.edits.append(.update(record: r, column: c, value: val))
             o.cellModifier = false; o.colModifier = false
-        case "encrypt": o.encryptCols = try need(arg)
-        case "decrypt": o.decryptCols = try need(arg)
-        case "hash": o.hashCols = try need(arg)
-        case "keyfile": o.keyfile = try need(arg)
+        case "encrypt": try once("-encrypt"); o.encryptCols = try need(arg)
+        case "decrypt": try once("-decrypt"); o.decryptCols = try need(arg)
+        case "hash": try once("-hash"); o.hashCols = try need(arg)
+        case "keyfile": try once("-keyfile"); o.keyfile = try need(arg)
         case "yes": o.assumeYes = true
         case "key":
             // Deliberately NOT implemented, and it says why rather than
@@ -333,7 +457,7 @@ func parseArgs(_ argv: [String]) throws -> Options {
                 "不支援 -key：命令列上的秘密在 `ps` 中對本機每個行程都可見，也會留在 shell 歷史中。請改用 -keyfile <path>。")
         case "debug": o.debug = true
         case "debug=trace", "debug=TRACE": o.debug = true; o.trace = true
-        case "log": o.logPath = try need(arg)
+        case "log": try once("-log"); o.logPath = try need(arg)
         case "no-index": o.noIndex = true
         case "verify-index": o.verifyIndex = true
         case "build-index": o.buildIndex = true
@@ -484,6 +608,34 @@ func validate(_ o: inout Options) throws {
     }
     if o.output != nil && o.useStdout {
         throw usageError("-o and -so are mutually exclusive", "-o 與 -so 互斥")
+    }
+    // `-o` and `--in-place` are as exclusive as `-o` and `-so`, and only the
+    // first pair was checked. Given both, `--in-place` was silently discarded:
+    // the named -o file was written, the in-place target was left
+    // byte-for-byte unchanged, and the log recorded the edit -- so a caller
+    // who asked for an in-place edit got rc=0, an audit entry, and an
+    // untouched file.
+    // `-o` 與 `--in-place` 的互斥程度，和 `-o` 與 `-so` 完全一樣，而只有前一對被檢查了。
+    // 兩者同時給出時，`--in-place` 會被靜默丟棄：-o 指名的檔案被寫出、就地編輯的目標逐位元
+    // 未變，而 log 記下了那次編輯——於是一個要求「就地編輯」的呼叫端，得到的是 rc=0、
+    // 一筆稽核紀錄，以及一個沒有被動過的檔案。
+    if o.output != nil && o.inPlace {
+        throw usageError("-o and --in-place are mutually exclusive: one names a destination and the other says the input IS the destination",
+                         "-o 與 --in-place 互斥：一個指名了目的地，另一個說「輸入就是目的地」")
+    }
+    if o.useStdout && o.inPlace {
+        throw usageError("-so and --in-place are mutually exclusive", "-so 與 --in-place 互斥")
+    }
+    // `--build-index --no-index` was refused as contradictory and
+    // `--verify-index --no-index` was not: it read the sidecar `--no-index`
+    // forbids and reported `index OK`. One of the two had to move, and the
+    // refusal is the one that matches what --no-index says it means.
+    // `--build-index --no-index` 會被當成互相矛盾而拒絕，`--verify-index --no-index` 不會：
+    // 它讀了 `--no-index` 明令不讀的那個 sidecar，並回報 `index OK`。兩者必須有一個改變，
+    // 而「拒絕」才是符合 --no-index 自己所宣稱的意思的那一個。
+    if o.verifyIndex && o.noIndex {
+        throw usageError("--verify-index and --no-index contradict each other: verifying means reading the sidecar",
+                         "--verify-index 與 --no-index 互相矛盾：驗證就是要讀那個 sidecar")
     }
     // Documented as refused in two places -- the flag entry and the refusals
     // table -- and refused in neither. It fired only when validation happened

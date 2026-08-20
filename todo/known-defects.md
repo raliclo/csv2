@@ -3472,3 +3472,87 @@ csv2：索引 … 存在但無法使用：stale: the data file changed。
 
 現在它是一對 `(en, zh)`。而 T120b 斷言的是「英文那句**不在**中文行裡」——只斷言「中文在」
 的話,一行同時含有兩者也會通過。
+---
+
+# 第 50 回合(2026-08-20)—— 把每一個旗標放到它不該在的位置
+
+## DD. 一個旗標被寫進了你的資料
+
+```console
+$ csv2 -update 1:1 -t -i f.csv --in-place
+rc=0
+$ csv2 -get 1:1 -i f.csv
+-t
+```
+
+`-append --json` 會追加一筆內容是 `--json` 的紀錄。
+
+**這是這個工具的招牌失敗——以 0 結束、輸出看似合理的垃圾——而它是從自己的引數解析器進來的。**
+
+而 README 引用過 multissh 被「未知選項被當成主機名吞掉」咬過的事,作為「未知旗標一律視為
+錯誤」的理由。**那條原則本來就在,只是停在「未知」旗標上。**
+
+修法要精確:**只擋已知旗標**,不是「所有以減號開頭的東西」——`-update 1:2 -5` 存的是一個
+負數,必須繼續能用。而「值本身就是旗標名」的情況需要一條真的存在的出路,因此加上 `--`:
+`-update 1:1 -- -t`。
+
+那份 `KNOWN_FLAGS` 清單由 **T121h** 對照解析器自己的 `case` 檢查——一份放在 switch 旁邊的
+名稱清單,正是那種會漂移的東西。
+
+## DE. 一個旗標給兩次,後者靜默取代前者——而其中一個有安全後果
+
+```console
+$ csv2 -hash note -hash b -keyfile k.bin -i f.csv -o h.csv -t
+rc=0
+$ head -1 h.csv
+a,b:hmac:76a06e81,note          ← note 是明文
+```
+
+**那個檔案存在的全部目的,就是讓 `note` 被遮蔽。**
+
+README 明說編輯動詞「可重複、會累加」,而其餘旗標那條相反的規則從來沒有被寫出來——這讓
+「後者取代前者」不只是意外,而是會主動誤導人。
+
+現在 `-i`、`-o`、`-contains`、`-head`、`-tail`、`-mid`、`-get`、`-hash`、`-encrypt`、
+`-decrypt`、`-keyfile`、`-log`、`--headers` 給兩次都會被拒絕,訊息裡指名可重複的是哪四個。
+
+## DF. 兩組不可能同時成立的旗標,只有一組被檢查
+
+```console
+$ csv2 -update 1:1 'Z' -i ip.csv --in-place -o out.csv
+rc=0     ip.csv 逐位元未變     out.csv 被寫出     log 記下了那次編輯
+```
+
+`-o` 與 `-so` 是文件裡明訂互斥的;`-o` 與 `--in-place` 的互斥程度完全一樣,而沒有被檢查。
+一個要求「就地編輯」的呼叫端,拿到的是 rc=0、一筆稽核紀錄,以及一個沒有被動過的檔案。
+
+同一族的另一個:`--build-index --no-index` 會被當成矛盾拒絕,而 `--verify-index --no-index`
+不會——**它讀了 `--no-index` 明令不讀的那個 sidecar,並回報 `index OK`。**
+
+## DG. 稽核軌跡的總結行,描述的是輸入
+
+```console
+$ csv2 -delete 1,2 -delete -col 7 -i x.csv --in-place -log W.log
+$ grep wrote W.log
+wrote 22 records, 7 fields, atomic rename OK
+$ csv2 -r --json -i x.csv | tail -1
+{"meta":{"records":20,…}}          ← 而且是 6 欄
+```
+
+**兩個數字都在描述讀進來的東西**,而那一行是這份軌跡裡「總結結果」的唯一一行——它自己
+宣稱的工作,正是記錄改了什麼。
+
+## 而 T122d 第一版通過的理由是錯的
+
+它斷言 `--verify-index --no-index` 會被拒絕,而它在**未修正的建置上也通過**——因為那個
+fixture 沒有索引,於是 `--verify-index` 是因為「找不到索引」而失敗的,與 `--no-index`
+毫無關係。
+
+現在它先 `--build-index`,並且多了一條 T122d0 斷言「索引存在時,單獨的 `--verify-index`
+會成功」——把那個前提本身也釘住。
+
+Round 50 put every flag where it did not belong. The worst: a known flag in a
+data position was written into the file at rc=0 -- this tool's founding failure
+arriving through its own argument parser, in a document that cites multissh
+being bitten by a swallowed option as the reason unknown flags are always an
+error. The principle was there and stopped at UNKNOWN flags.
