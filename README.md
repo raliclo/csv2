@@ -1212,6 +1212,21 @@ $ head -1 masked.csv | cut -d, -f7
 license:hmac:289b9391              # keyed — fingerprint of the key used
 ```
 
+**`--yes` also selects a key, and therefore also selects the algorithm.** It
+means "use the default key without asking", which for `-hash` is the difference
+between `:hash` and `:hmac:<fingerprint>`:
+
+```console
+$ csv2 -hash license -i pkgs.csv -o m.csv -t          # license:hash
+$ csv2 -hash license --yes -i pkgs.csv -o m.csv -t    # license:hmac:9c65c01a
+```
+
+So adding `--yes` to make a script non-interactive strengthens the output, and
+removing it weakens it, at rc=0 either way. **The file records which happened**
+— that is what the marker is for — but two files hashed differently never
+compare equal, so a join across them silently matches nothing. Decide once, per
+column, and read the marker rather than the command line. Asserted by T142.
+
 Choose the unkeyed form only when the value space is genuinely large — a long
 free-text field, an opaque identifier — or when you do not actually need the
 values hidden from someone holding the file.

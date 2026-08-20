@@ -6885,6 +6885,56 @@ assert_succeeds "T141f -o to a path that does not exist yet still works / -o 指
     "$CSV2" -r -t -i "$TMP/t141_one.csv" -o "$TMP/t141_new.csv"
 
 # ---------------------------------------------------------------------
+# T142 -- --yes decides the algorithm, not just the prompt.
+#
+# Round 54: "-hash license" gives `license:hash`, unkeyed SHA-256, which the
+# README warns at length is dictionary-attackable. "-hash license --yes" gives
+# `license:hmac:<fp>`. --yes is listed as "accept the default key without a
+# prompt", and for -hash that turns out to decide whether the output is
+# dictionary-attackable. Both READMEs say so now, so both need this behind
+# them -- including the consequence, which is that the two never compare equal.
+#
+# T142 —— --yes 決定的是演算法，不只是「跳過詢問」。
+# ---------------------------------------------------------------------
+echo
+echo "--- T142: the flag that chooses the algorithm / T142：選定演算法的那個旗標 ---"
+
+print -r -- 'name,license'  > "$TMP/t142.csv"
+print -r -- 'app,MIT'      >> "$TMP/t142.csv"
+print -r -- 'lib,MIT'     >> "$TMP/t142.csv"
+
+"$CSV2" -hash license -t -i "$TMP/t142.csv" -o "$TMP/t142_plain.csv"
+assert_contains "$(head -1 "$TMP/t142_plain.csv")" "license:hash" \
+    "T142a -hash without a key marks the column :hash / 沒有金鑰的 -hash 把該欄標記為 :hash"
+
+"$CSV2" -hash license --yes -t -i "$TMP/t142.csv" -o "$TMP/t142_yes.csv"
+assert_contains "$(head -1 "$TMP/t142_yes.csv")" "license:hmac:" \
+    "T142b while --yes marks it :hmac:, having selected the default key / 而 --yes 會標記為 :hmac:，因為它選定了預設金鑰"
+
+head -c 32 /dev/urandom > "$TMP/t142.key"
+"$CSV2" -hash license -keyfile "$TMP/t142.key" -t -i "$TMP/t142.csv" -o "$TMP/t142_key.csv"
+assert_contains "$(head -1 "$TMP/t142_key.csv")" "license:hmac:" \
+    "T142c and -keyfile likewise / -keyfile 同樣如此"
+
+# The consequence the README now states: the two do not compare equal, so a
+# join across files masked differently matches nothing.
+# README 現在寫出來的那個後果：兩者不會相等，因此跨「以不同方式遮蔽的檔案」比對，一個都
+# 對不上。
+_t142_a=$("$CSV2" -get 1:license -i "$TMP/t142_plain.csv")
+_t142_b=$("$CSV2" -get 1:license -i "$TMP/t142_yes.csv")
+if [[ -n $_t142_a && $_t142_a != $_t142_b ]]; then
+    ok "T142d a value hashed with and without a key never matches itself / 同一個值在有無金鑰下雜湊出來永遠不相等"
+else
+    bad "T142d [$_t142_a] vs [$_t142_b] / 兩者如上"
+fi
+
+# Determinism within one choice is the property that makes hashing useful at
+# all, and it must survive both forms.
+# 在同一種選擇之內的確定性，是雜湊之所以有用的性質，兩種形式都必須保有它。
+assert_eq "$("$CSV2" -get 1:license -i "$TMP/t142_yes.csv")" "$("$CSV2" -get 2:license -i "$TMP/t142_yes.csv")" \
+    "T142e while equal values still hash equal within one choice / 而在同一種選擇之內，相等的值仍然雜湊出相等的結果"
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one
