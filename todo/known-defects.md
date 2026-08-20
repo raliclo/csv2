@@ -818,8 +818,8 @@ README 現在寫明它丟棄的是「因未閉合引號而在 EOF 處未完成�
 
 ---
 
-# 第 38 回合（2026-08-19）—— 七條，全部親手重現，尚未修
-# Round 38 (2026-08-19) -- seven, all reproduced by hand, not yet fixed
+# 第 38 回合（2026-08-19）—— 七條，全部親手重現（2026-08-20 逐條複測，全部已解決）
+# Round 38 (2026-08-19) -- seven, all reproduced by hand (all resolved, re-measured 2026-08-20)
 
 **這一回合的盲測仍然不是盲的，而原因值得記下來。** 缺陷表已經從兩個 `CLAUDE.md` 移除並提交，
 但受測 agent 仍然逐字引用了它——因為**派出它的那個 session 在啟動時就把那些檔案讀進 context
@@ -879,7 +879,7 @@ grep -o 'update 1:note.*' lt.log
 
 ---
 
-## CC. 儲存格層級的錯誤位址是物理行號，卻標著 `record N`
+## CC. 儲存格層級的錯誤位址是物理行號，卻標著 `record N`（已修，複測 2026-08-20）
 
 **嚴重度：錯誤訊息裡的位址餵不回這支工具，而「位址可以組合」正是它的賣點。**
 
@@ -904,7 +904,7 @@ csv2 -get 2:2 -i fixed.csv2     # THEBAD                                        
 
 ---
 
-## DD. `-debug=trace` 只回報「被輸出的」紀錄
+## DD. `-debug=trace` 只回報「被輸出的」紀錄（已修，複測 2026-08-20）
 
 **嚴重度：無法回答「為什麼第 N 筆不在我的輸出裡」，而那正是 README 說它要回答的問題。**
 
@@ -923,7 +923,7 @@ csv2 -contains zlib --filter -i t.csv -debug=trace 2>&1 >/dev/null | grep TRACE
 
 ---
 
-## EE. 平行路徑不印 `metrics:` 行
+## EE. 平行路徑不印 `metrics:` 行（已修，複測 2026-08-20）
 
 **嚴重度：`peak_rss_bytes` 恰好在「你會想量它」的那種執行上取不到。**
 
@@ -942,7 +942,7 @@ CSV2_PARALLEL_MIN_BYTES=999999999 csv2 -contains … -debug 2>&1 >/dev/null
 
 ---
 
-## FF. README 教的 `-contains` → `-update` 組合會靜默雙重跳脫
+## FF. README 教的 `-contains` → `-update` 組合會靜默雙重跳脫（已由文件解決並由 T96 斷言，複測 2026-08-20）
 
 **嚴重度：對「含換行／TAB／CR／反斜線」的值——也就是這支工具存在的理由——資料被靜默改壞，rc=0。**
 
@@ -966,7 +966,7 @@ csv2 -get 1:2 -i u3.csv2 | od -c
 
 ---
 
-## GG. 檔名可以對格式說謊，而讀取信任檔名
+## GG. 檔名可以對格式說謊，而讀取信任檔名（已定案並由 T97a–T97g 斷言，複測 2026-08-20）
 
 **嚴重度：靜默少一筆，rc=0。**
 
@@ -999,7 +999,7 @@ README 現在說明 meta 行裡哪些欄位是「數出來的」（`fields`、`r
 
 ---
 
-## HH. 中文 README 的兩段壞句，與英文的一句重複（第 36 回合已回報，未修）
+## HH. 中文 README 的兩段壞句，與英文的一句重複（已修，複測 2026-08-20）
 
 `README.zh-TW.md` `-encrypt` 條目：
 
@@ -1019,7 +1019,7 @@ README 現在說明 meta 行裡哪些欄位是「數出來的」（`fields`、`r
 
 ---
 
-## II. `-update` 把命令列上的非 UTF-8 位元組靜默換成 U+FFFD（2026-08-19，調查 BB 時發現）
+## II. `-update` 把命令列上的非 UTF-8 位元組靜默換成 U+FFFD（已修，複測 2026-08-20）
 
 **嚴重度：靜默替代，rc=0——而「不做這個替代」是本專案的核心承諾之一。**
 
@@ -2001,7 +2001,7 @@ DEBUG single-threaded: .csv with no index proving one record per line; build one
 **這是本專案的老毛病又一次:加了一段文字,卻沒有去作廢它所使之為假的東西。**
 與 README 狀態表對 `install.zsh` 那次(AF)是同一個模式。
 
-## AO. 平行路徑沒有上界,而 README 說的是另一回事(2026-08-20 文件修正;程式面待決)
+## AO. 平行路徑沒有上界,而 README 說的是另一回事(2026-08-20 文件修正;成因見 AR,同日修正)
 
 README 說:「`-debug` … 每一條路徑都有一行 metrics——平行那一條的 RSS **約為單執行緒的
 兩倍**。」
@@ -2065,7 +2065,7 @@ README 說 `--verify-index` 證明的三件事之一是「是否有紀錄跨行�
 | AL | `--a1` 的列號改為「紀錄號 + 標頭列數」 | T105 |
 | AM | 記入 log 的值裡,`"` 加倍(RFC 4180 慣例) | T106 |
 | AN | 三種拒絕分開;丟棄的理由依 sidecar 去重,每次執行說一次 | T107 |
-| AO | 文件改寫:平行的 RSS **無上界**,約為檔案的兩倍 | 程式面待決,見 todo |
+| AO | 文件改寫。**其中的模型是錯的**——真正的成因見 AR,當日修正 | T108 |
 | AP | 換成實際會發生的「拒絕」;遮蔽保留為最後防線並註明無可達路徑 | T40／T73 既有 |
 | AQ | 寫明它證明的是「宣稱準確」而非「宣稱的內容」 | — |
 
@@ -2218,3 +2218,47 @@ whole file to number the chunks -- and the user's prescription (throttle the
 in-flight chunks) would have done nothing about it: batch=1 and batch=10
 differed by half a percent. Measuring before implementing is what separated
 those.
+
+---
+
+## 這份檔案自己也漂移了,而發現它的方式只是「有什麼要做的嗎」
+
+2026-08-20,在被問到「還有什麼要做的」時,我沒有靠印象回答,而是去讀這個檔案。第 38 回合
+那一節的標題寫著:
+
+> 第 38 回合(2026-08-19)—— 七條,全部親手重現,**尚未修**
+
+**七條全部已經解決了。** 逐條複測的結果:
+
+| | 狀態 |
+|---|---|
+| CC 錯誤位址標著 `record N` 卻是行號 | 已修——現在印 `record 2 (line 3)` |
+| DD `-debug=trace` 只報「被輸出的」 | 已修——會報跳過 |
+| EE 平行路徑不印 `metrics:` | 已修 |
+| FF `-contains` → `-update` 靜默雙重跳脫 | 已由文件解決:README 明寫「第三欄是給人讀的,不是拿來餵回去的」,並給出 `-get` 的正確寫法,由 T96 斷言 |
+| GG 檔名對格式說謊 | 已定案(不加偵測、改寫準文件),由 T97a–T97g 斷言 |
+| HH 中文 README 兩段壞句 | 已修,英文那處重複也已消除 |
+| II 命令列非 UTF-8 靜默替代 | 已修——現在明確拒絕 |
+
+**而那個「尚未修」的標題,存活了一整天。**
+
+這正是本檔案開頭警告過的那件事,只是這次發生在本檔案自己身上:全域 `CLAUDE.md` 的缺陷表
+曾經有五條、實測時五條全部不成立;那份表被移除的理由是「一份寫在指令檔裡的缺陷清單,會與
+它所描述的程式反向漂移,而且沒有任何東西會回報它」。
+
+**這份檔案的防線是「每一條旁邊都有重現步驟」,而那道防線有效**——七條都能在幾分鐘內複測完。
+但它防的是「條目內容錯」,防不了「條目狀態過期」。**沒有任何東西會在一個缺陷被修好時,回頭
+去改它上面那個標題。**
+
+做法上的結論:**修好一條缺陷時,同時去看它所屬的那一節的標題。** 一節的標題是對整節的宣稱,
+而它比條目更容易被遺忘——因為修東西的人看的是條目。
+
+This file had drifted too, and what found it was the question "anything to be
+done". The round-38 heading still said "not yet fixed" for seven findings, all
+seven of which were resolved. The per-entry reproductions did their job -- all
+seven were re-measured in minutes -- but reproductions guard the CONTENT of an
+entry, not its STATUS. Nothing goes back to amend a heading when the thing
+underneath it is fixed. When fixing a defect, look at the heading of the
+section it lives in: a heading is a claim about the whole section, and it is
+easier to forget than the entry, because whoever does the fixing is looking at
+the entry.
