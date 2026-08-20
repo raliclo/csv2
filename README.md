@@ -1141,7 +1141,14 @@ what was done to which column:
 | `license:enc:<fp>:<salt>` | encrypted; `-decrypt all` finds these |
 
 Addressing still uses the plain name: `-update 3:license` works after masking.
-Re-masking an already-marked column is refused rather than layered.
+Re-masking an already-marked column is refused rather than layered, **in both
+directions**. Until 2026-08-20 each verb looked only for its own marker:
+`-hash` on an `:enc:` column was accepted and it is the worst thing this tool
+can do — it hashes the CIPHERTEXT one way and overwrites the `:enc:` marker
+together with its salt, at rc=0, printing nothing, and the correct key
+afterwards gets `no encrypted columns found`. The rule was general and the
+implementation was two special cases that each recognised only themselves.
+Asserted by T124.
 
 `--json` keys stay clean, so the same marking appears in the metadata line
 instead:

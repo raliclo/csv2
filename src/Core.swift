@@ -754,7 +754,34 @@ final class RecordParser {
                 // done on csv2's own initiative -- only when asked for by name.
                 // 丟棄一筆使用者可能以為已寫入的紀錄，絕不由 csv2 自行決定，
                 // 只有在被指名要求時才做。
-                Logger.shared.info("--truncate-partial: discarded an incomplete trailing record at byte \(recOffset)")
+                // WARN, and with the size, because "a record" is not what
+                // this always drops. When the quote opens early, everything
+                // after it is ONE unterminated record from the parser's view
+                // -- and that one record can hold the whole rest of the file.
+                // Measured: a ten-record file whose quote opens in record 1
+                // came back with zero records, at rc=0, with nothing on
+                // stderr. The flag was asked for by name, so this is not an
+                // error; it is a surprise large enough that the WARN
+                // machinery, which already fires for a -mid window that
+                // selected nothing, should fire here too.
+                //
+                // Bytes rather than records: from inside the parser the
+                // discarded text IS one record, and counting the records a
+                // reader would have seen in it would mean parsing text that
+                // has just been declared unparseable.
+                //
+                // 用 WARN，而且帶著大小——因為它丟掉的不總是「一筆」。當引號很早就打開，
+                // 從解析器的角度，其後的一切都是「一筆」未終止的紀錄——而那一筆可以裝著
+                // 整個檔案的其餘部分。實測：一個 10 筆的檔案，引號在第 1 筆打開，回傳 0 筆、
+                // rc=0、stderr 空無一物。這個旗標是被指名要求的，所以它不是錯誤；但它是一個
+                // 大到應該讓 WARN 機制出聲的意外——而那套機制早已為「什麼都沒選到的 -mid
+                // 視窗」而觸發。
+                //
+                // 用位元組而不是筆數：從解析器內部看，被丟掉的文字「就是一筆」，而去數
+                // 「讀者本來會在裡面看到幾筆」，等於去解析一段剛剛被宣告為解析不了的文字。
+                let dropped = rawBuf.count + valBuf.count
+                Logger.shared.warn(
+                    "--truncate-partial discarded \(dropped) bytes: an unterminated record beginning at byte \(recOffset). If the quote opened early, that is everything after it")
                 fields = []
                 rawBuf = []
                 valBuf = []
@@ -794,9 +821,21 @@ final class RecordParser {
                         "a chunk boundary fell inside a quoted field, so this file does not have one record per line -- which is what the parallel path was told it had",
                         "有一個區塊邊界落在引號欄位中間，因此這個檔案並不是一筆一行——而「一筆一行」正是平行路徑被告知的前提")
                 }
+                // The DATA record number, as faultAt has computed it since
+                // round 38's CC. This message kept using the raw
+                // `recordsEmitted + 1`, which counts the header rows, so on a
+                // `.csv2` it named record 6 of a four-record file -- an
+                // address that resolves to nothing when typed back into -get.
+                // The correction existed a few lines above and this one call
+                // site did not use it.
+                // 資料紀錄號，與 faultAt 自第 38 回合的 CC 起所計算的一致。這則訊息一直沿用
+                // 原始的 `recordsEmitted + 1`，那個計數含標頭列，於是在 `.csv2` 上它會把一個
+                // 4 筆檔案的問題指名為第 6 筆——一個打回 `-get` 會解不出來的位址。那個修正
+                // 就在上面幾行，而這一個呼叫點沒有用它。
+                let n = max(1, recordsEmitted + 1 - format.headerRows)
                 throw fault(
-                    "record \(recordsEmitted + 1): the input ends inside a quoted field -- the closing quote is missing. The record is incomplete; pass --truncate-partial to discard it.",
-                    "第 \(recordsEmitted + 1) 筆：輸入在引號欄位內就結束了——缺少收尾的引號。該紀錄不完整；要丟棄它請給 --truncate-partial。")
+                    "record \(n): the input ends inside a quoted field -- the closing quote is missing. The record is incomplete; pass --truncate-partial to discard it.",
+                    "第 \(n) 筆：輸入在引號欄位內就結束了——缺少收尾的引號。該紀錄不完整；要丟棄它請給 --truncate-partial。")
             }
             // `.csv2` without a trailing newline is reported by checkTornAppend
             // before parsing begins, so reaching here means the caller chose to

@@ -6167,6 +6167,127 @@ assert_contains "$t123_line" "wrote 20 records, 6 fields" \
 assert_contains "$("$CSV2" -r --json -i "$TMP/t123.csv" 2>/dev/null | tail -1)" '"records":20' \
     "T123b and the file agrees / 而檔案同意"
 
+# ---------------------------------------------------------------------
+# T124 -- the worst thing this tool can do, from one well-formed command.
+#
+#   csv2 -encrypt status -keyfile k.bin -i p.csv -o e.csv -t
+#   csv2 -hash    status -keyfile k.bin -i e.csv --in-place     rc=0, silent
+#   csv2 -decrypt all    -keyfile k.bin -i e.csv -o back.csv -t
+#   csv2: no encrypted columns found
+#
+# The ciphertext was hashed one way and the `:enc:` marker overwritten, taking
+# the salt with it. The correct key does not help. Nothing was printed, and the
+# audit trail recorded a hash as though that were the whole story.
+#
+# The two guards were asymmetric: -hash looked only for a hash marker, -encrypt
+# only for an encryption marker, and neither looked at the other's. The README
+# already promised the general rule -- "re-masking an already-marked column is
+# refused rather than layered" -- and the promise was kept in one direction of
+# two.
+#
+# The other direction destroys nothing and produces a file that lies about
+# itself: `:hmac:` becomes `:enc:`, and `-decrypt` then hands back hex digests
+# under a clean column name with nothing marking them as digests.
+#
+# T124 —— 這個工具做得出來最糟的一件事，只需要一個格式完全正確的指令。
+# 密文被單向雜湊掉，`:enc:` 標記連同 salt 一起被覆寫。正確的金鑰救不回來。什麼都沒印，
+# 而稽核軌跡把「雜湊了一個欄位」記成了事情的全部。
+# 兩個守衛原本是不對稱的：-hash 只找雜湊標記、-encrypt 只找加密標記，兩者都不看對方的。
+# README 早就承諾了那條通則——「對一個已經標記過的欄位再次遮蔽會被拒絕，而不是疊加」——
+# 而那個承諾在兩個方向裡守住了一個。
+# 反方向不銷毀任何東西，但會產生一個「對自己說謊」的檔案。
+# ---------------------------------------------------------------------
+echo
+echo "--- T124: re-masking a marked column / 對已標記的欄位再次遮蔽 ---"
+
+head -c 32 /dev/urandom > "$TMP/t124.key"
+print -r -- 'pkg,status'       > "$TMP/t124.csv"
+print -r -- 'zlib,SECRET-ONE' >> "$TMP/t124.csv"
+print -r -- 'zstd,SECRET-TWO' >> "$TMP/t124.csv"
+
+"$CSV2" -encrypt status -keyfile "$TMP/t124.key" -i "$TMP/t124.csv" -o "$TMP/t124_enc.csv" -t >/dev/null 2>&1
+cp "$TMP/t124_enc.csv" "$TMP/t124_enc.bak"
+
+assert_fails "T124a -hash on an encrypted column is refused / 對已加密的欄位下 -hash 會被拒絕" -- \
+    "$CSV2" -hash status -keyfile "$TMP/t124.key" -i "$TMP/t124_enc.csv" --in-place
+assert_same "$TMP/t124_enc.csv" "$TMP/t124_enc.bak" \
+    "T124b and the ciphertext is untouched / 而密文原封不動"
+
+# The refusal has to say why, because the reason is the whole point: this is
+# the one refusal whose absence is unrecoverable.
+# 拒絕必須說出理由，因為理由就是重點所在：這是唯一一個「少了它就救不回來」的拒絕。
+assert_contains "$("$CSV2" -hash status -keyfile "$TMP/t124.key" -i "$TMP/t124_enc.csv" --in-place 2>&1)" \
+    "no key would recover the plaintext" \
+    "T124c and says that no key would recover the plaintext / 並說明「沒有任何金鑰救得回明文」"
+
+# And the file still decrypts, which is what "untouched" has to mean here.
+# 而那個檔案仍然解得開——那才是此處「原封不動」真正的意思。
+assert_succeeds "T124d and the file still decrypts with the right key / 而那個檔案用對的金鑰仍然解得開" -- \
+    "$CSV2" -decrypt all -keyfile "$TMP/t124.key" -i "$TMP/t124_enc.csv" -o "$TMP/t124_back.csv" -t
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t124_back.csv")" "SECRET-ONE" \
+    "T124e returning the plaintext / 交還明文"
+
+# The other direction.
+# 反方向。
+"$CSV2" -hash status -keyfile "$TMP/t124.key" -i "$TMP/t124.csv" -o "$TMP/t124_h.csv" -t >/dev/null 2>&1
+cp "$TMP/t124_h.csv" "$TMP/t124_h.bak"
+assert_fails "T124f -encrypt on a hashed column is refused / 對已雜湊的欄位下 -encrypt 會被拒絕" -- \
+    "$CSV2" -encrypt status -keyfile "$TMP/t124.key" -i "$TMP/t124_h.csv" --in-place
+assert_same "$TMP/t124_h.csv" "$TMP/t124_h.bak" \
+    "T124g leaving that file alone as well / 那個檔案同樣沒有被動過"
+
+# Neither guard may block the ordinary case.
+# 兩個守衛都不能擋掉普通情況。
+assert_succeeds "T124h while a plain column still hashes / 而未標記的欄位照常雜湊得了" -- \
+    "$CSV2" -hash status -keyfile "$TMP/t124.key" -i "$TMP/t124.csv" -o "$TMP/t124_h2.csv" -t
+assert_succeeds "T124i and still encrypts / 也照常加密得了" -- \
+    "$CSV2" -encrypt status -keyfile "$TMP/t124.key" -i "$TMP/t124.csv" -o "$TMP/t124_e2.csv" -t
+
+# ---------------------------------------------------------------------
+# T125 -- --truncate-partial dropping far more than "a record", in silence.
+# T125 —— --truncate-partial 靜默丟掉的，遠不只「一筆」。
+# ---------------------------------------------------------------------
+echo
+echo "--- T125: how much --truncate-partial discards / --truncate-partial 丟掉了多少 ---"
+
+{ print -r -- 'a,b'
+  print -r -- '1,"opens here'
+  for i in {2..10}; do print -r -- "$i,ok$i"; done
+} > "$TMP/t125.csv"
+
+t125_err=$("$CSV2" -r --truncate-partial -i "$TMP/t125.csv" 2>&1 >/dev/null)
+assert_contains "$t125_err" "--truncate-partial discarded" \
+    "T125a a discard that swallows the rest of the file says so / 一次「吞掉檔案其餘部分」的丟棄會說出來"
+assert_contains "$t125_err" "bytes" \
+    "T125b and gives the size, since the count of records is not knowable here / 並給出大小——因為在這裡「筆數」是不可知的"
+
+# It stays a success: the flag was asked for by name.
+# 它仍然是成功：那個旗標是被指名要求的。
+assert_succeeds "T125c while remaining a success, because the flag was asked for / 而它仍然是成功，因為那個旗標是被要求的" -- \
+    "$CSV2" -r --truncate-partial -i "$TMP/t125.csv"
+
+# ---------------------------------------------------------------------
+# T126 -- an error's record number is an address someone types back.
+# T126 —— 錯誤裡的紀錄編號，是一個會被人打回去的位址。
+# ---------------------------------------------------------------------
+echo
+echo "--- T126: the unclosed-quote record number / 未閉合引號的紀錄編號 ---"
+
+{ print -r -- 'a,b'
+  print -r -- 'A,B'
+  print -r -- '1,x'
+  print -r -- '2,"unclosed'
+} > "$TMP/t126.csv2"
+
+t126=$("$CSV2" -r -i "$TMP/t126.csv2" 2>&1 | head -1)
+assert_contains "$t126" "record 2:" \
+    "T126a the number counts DATA records, not header rows / 那個號碼數的是資料紀錄，不是標頭列"
+
+# The address has to resolve, which is the whole reason the number matters.
+# 那個位址必須解得出來——那正是這個號碼要緊的全部原因。
+assert_succeeds "T126b and an address that far into the file resolves / 而那個位址在檔案裡解得出來" -- \
+    "$CSV2" -get 1:1 -i "$TMP/t126.csv2" --truncate-partial
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

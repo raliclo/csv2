@@ -3556,3 +3556,107 @@ data position was written into the file at rc=0 -- this tool's founding failure
 arriving through its own argument parser, in a document that cites multissh
 being bitten by a swallowed option as the reason unknown flags are always an
 error. The principle was there and stopped at UNKNOWN flags.
+---
+
+# 第 51 回合(2026-08-20)—— 拒絕會不會留下痕跡、拿不到金鑰時能拿到什麼、壞檔案能救回多少
+
+**這一輪找到的是目前為止破壞性最大的一條,而它只需要一個格式完全正確的指令。**
+
+## DH. 對已加密的欄位下 `-hash`,永久銷毀資料,rc=0,不印任何東西(2026-08-20 修正,T124a–e)
+
+```console
+$ csv2 -encrypt status -keyfile k.bin -i p.csv -o e.csv -t
+$ head -1 e.csv
+pkg,status:enc:2da3ce42:J37wDKapSLbFPwOg4wb8tQ==
+
+$ csv2 -hash status -keyfile k.bin -i e.csv --in-place
+rc=0                                        ← 什麼都沒印
+$ head -1 e.csv
+pkg,status:hmac:3bb1e58f                    ← :enc: 與它的 salt 一起沒了
+
+$ csv2 -decrypt all -keyfile k.bin -i e.csv -o back.csv -t
+csv2: no encrypted columns found
+```
+
+**密文被單向雜湊掉,`:enc:` 標記連同 salt 被覆寫,而正確的金鑰救不回來。**
+
+README 說:「**對一個已經標記過的欄位再次遮蔽會被拒絕,而不是疊加。**」——那句話是假的。
+`-encrypt` 對已加密欄位確實有守衛(「column X is already encrypted」),而 `-hash` 沒有。
+
+受測者的話:
+
+> 「這是這個工具明言的頭號大罪,由一個格式完全正確的指令執行完成。」
+
+## DI. 而反方向會產生一個「對自己說謊」的檔案(2026-08-20 修正,T124f–i)
+
+```console
+$ csv2 -encrypt status -keyfile k.bin -i h.csv --in-place    # h.csv 的 status 是 :hmac:
+rc=0
+$ head -1 h.csv
+pkg,status:enc:bc4a7672:UusICvta3FyJ8JqIdw+bSA==
+```
+
+`-decrypt` 之後會交還一堆十六進位摘要,**掛在一個乾淨的欄名底下,沒有任何東西標記它們是
+摘要**。資料沒有被銷毀,但那個檔案現在宣稱了一件不成立的事。
+
+## DJ. `--truncate-partial` 丟掉的不是「一筆」,而是引號打開之後的全部(2026-08-20 修正,T125)
+
+```console
+$ cat t.csv                    # 10 筆，引號在第 1 筆就打開
+a,b
+1,"opens here
+2,ok2
+...
+10,ok10
+
+$ csv2 -r --truncate-partial -i t.csv | wc -l
+0                              ← 一筆都不剩
+rc=0                           stderr 空無一物
+```
+
+文件把它描述成丟棄「**一筆**不完整的紀錄」。從解析器的角度那確實是一筆——但那一筆裝著
+其餘九筆的文字。
+
+**而 WARN 機制存在,還為一個小得多的意外而觸發**(起點越界的 `-mid`)。這裡沒有。
+
+## DK. 「輸入在引號欄位內結束」的紀錄編號,差了標頭列數(2026-08-20 修正,T126)
+
+受測者量到:在一個 4 筆的 `.csv2` 上,它指名第 6 筆。那則訊息用的是
+`recordsEmitted + 1`,而 `recordsEmitted` 把標頭列也數了進去。
+
+README 說:「錯誤裡的紀錄編號是一個真的位址……它數的是資料紀錄。」
+
+Round 51 found the most destructive defect so far, and it needs one
+well-formed command: `-hash` on an already-encrypted column hashes the
+ciphertext one way, overwrites the `:enc:` marker together with its salt, exits
+0 and prints nothing. The correct key does not help afterwards. The README says
+re-masking an already-marked column is refused rather than layered; the guard
+exists for `-encrypt` and not for `-hash`.
+
+### DH／DI:兩個守衛各自只看自己那一種標記
+
+```swift
+for c in cols where hashMarkerBase(...) != nil { ... }   // -hash 只找雜湊標記
+for c in cols where EncMarker.parse(...) != nil { ... }  // -encrypt 只找加密標記
+```
+
+**兩者都不看對方的。** 而 README 承諾的是那條通則:「對一個已經標記過的欄位再次遮蔽會被
+拒絕,而不是疊加。」——一條**通則**,被實作成兩個各自只認得自己的特例。
+
+拒絕訊息必須說出理由,因為理由就是重點:**這是唯一一個「少了它就救不回來」的拒絕。**
+
+### DK 的成因:修正就在上面幾行,而這個呼叫點沒有用它
+
+`faultAt` 自第 38 回合的 CC 起就已經扣掉標頭列數了。而「輸入在引號欄位內結束」那一則,
+一直沿用原始的 `recordsEmitted + 1`。
+
+**同一個檔案裡,同一個偏移,修好了一處、漏掉一處。** 那與 T79(三個呼叫點、兩個傳常數)、
+CQ(第四個呼叫點)是同一個形狀,而這次只隔了十幾行。
+
+### DJ 為什麼用「位元組」而不是「筆數」
+
+從解析器內部看,被丟掉的文字**就是一筆**紀錄——未終止的那一筆。去數「讀者本來會在裡面看到
+幾筆」,等於去解析一段剛剛被宣告為解析不了的文字。
+
+位元組是這裡唯一誠實的量度,而訊息把那個推論也說出來:「若引號很早就打開,那就是它之後的
+全部。」

@@ -927,9 +927,42 @@ func buildTransform(_ o: Options, headers: [Record]) throws -> CellTransform {
     }
     if let spec = o.hashCols {
         let cols = try resolveColumnList(spec, header: header)
-        for c in cols where hashMarkerBase(headerName(header.fields[c])) != nil {
-            throw fault("column \(baseName(headerName(header.fields[c]))) is already hashed",
-                        "欄位 \(baseName(headerName(header.fields[c]))) 已經是雜湊過的")
+        // Each of these guards used to look for ITS OWN marker only: -hash
+        // refused an already-hashed column, -encrypt refused an
+        // already-encrypted one, and neither looked at the other's.
+        //
+        // `-hash` on an `:enc:` column was therefore accepted, and it is the
+        // worst thing this tool can do. It hashes the CIPHERTEXT one way and
+        // overwrites the `:enc:` marker -- taking the salt with it -- at rc=0,
+        // printing nothing, with an audit entry saying it hashed a column. The
+        // correct key afterwards gets `no encrypted columns found`. One
+        // well-formed command, and the data is gone.
+        //
+        // The README already promised this was refused: "re-masking an
+        // already-marked column is refused rather than layered". The promise
+        // was kept for one direction out of two.
+        //
+        // 這兩個守衛原本各自「只看自己那一種標記」：-hash 拒絕已雜湊的欄位、-encrypt 拒絕
+        // 已加密的欄位，而兩者都不看對方的。
+        //
+        // 於是對 `:enc:` 欄位下 `-hash` 是被接受的——而那是這個工具做得出來最糟的一件事。
+        // 它把「密文」單向雜湊掉，並覆寫 `:enc:` 標記、連同 salt 一起帶走，rc=0、不印任何
+        // 東西，而稽核紀錄說它雜湊了一個欄位。事後拿正確的金鑰去解，得到的是
+        // `no encrypted columns found`。一個格式完全正確的指令，資料就沒了。
+        //
+        // README 早就承諾過它會被拒絕：「對一個已經標記過的欄位再次遮蔽會被拒絕，而不是
+        // 疊加。」那個承諾，兩個方向裡守住了一個。
+        for c in cols {
+            let name = headerName(header.fields[c])
+            if EncMarker.parse(name) != nil {
+                throw fault(
+                    "column \(baseName(name)) is encrypted; -hash would hash the CIPHERTEXT one way and overwrite the :enc: marker together with its salt, and no key would recover the plaintext afterwards. Decrypt it first if you meant to mask it instead",
+                    "欄位 \(baseName(name)) 已加密；-hash 會把「密文」單向雜湊掉，並連同 salt 一起覆寫 :enc: 標記，之後沒有任何金鑰救得回明文。若你的本意是改為遮蔽，請先解密")
+            }
+            if hashMarkerBase(name) != nil {
+                throw fault("column \(baseName(name)) is already hashed",
+                            "欄位 \(baseName(name)) 已經是雜湊過的")
+            }
         }
         Logger.shared.redactedColumns = Set(cols.map { baseName(headerName(header.fields[$0])) })
         // A key turns SHA-256 into HMAC-SHA256. Both are deterministic, so
@@ -951,13 +984,29 @@ func buildTransform(_ o: Options, headers: [Record]) throws -> CellTransform {
     }
     if let spec = o.encryptCols {
         let cols = try resolveColumnList(spec, header: header)
-        for c in cols where EncMarker.parse(headerName(header.fields[c])) != nil {
+        for c in cols {
+            let name = headerName(header.fields[c])
             // Refused rather than layered. A second layer would need a second
             // decrypt to undo, and nothing in the file would say how many.
             // 直接拒絕而非疊加一層。疊加需要再解一次才能還原，而檔案裡沒有任何
             // 東西會說明疊了幾層。
-            throw fault("column \(baseName(headerName(header.fields[c]))) is already encrypted",
-                        "欄位 \(baseName(headerName(header.fields[c]))) 已經加密過")
+            if EncMarker.parse(name) != nil {
+                throw fault("column \(baseName(name)) is already encrypted",
+                            "欄位 \(baseName(name)) 已經加密過")
+            }
+            // The other direction destroys nothing and produces a file that
+            // lies about itself: the header becomes `:enc:`, so `-decrypt`
+            // hands back hex digests under a clean column name with nothing
+            // marking them as digests. A hash is not a plaintext and a file
+            // must not claim it is.
+            // 反方向不會銷毀任何東西，但會產生一個「對自己說謊」的檔案：標頭變成 `:enc:`，
+            // 於是 `-decrypt` 會交還一堆十六進位摘要，掛在乾淨的欄名底下，而沒有任何東西
+            // 標記它們是摘要。雜湊不是明文，而一個檔案不該宣稱它是。
+            if hashMarkerBase(name) != nil {
+                throw fault(
+                    "column \(baseName(name)) is hashed; encrypting it would mark the file as holding ciphertext there, and -decrypt would then hand back hex digests under a clean column name with nothing saying they are digests",
+                    "欄位 \(baseName(name)) 是雜湊過的；對它加密會讓檔案標記成「那裡放的是密文」，而 -decrypt 之後會交還一堆十六進位摘要、掛在乾淨的欄名底下，沒有任何東西說明它們是摘要")
+            }
         }
         let material = try KeySource.loadKeyMaterial(path: o.keyfile, assumeYes: o.assumeYes,
                                                      forCreating: true)
