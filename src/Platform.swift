@@ -436,9 +436,18 @@ enum Platform {
     /// 也就是結束狀態 141，那是 shell 與管線中其他每一個工具所預期的。Windows 沒有 SIGPIPE，
     /// 因此直接產生 141——在那裡這個數字是一個約定而不是訊號，而沿用同一個數字，可以讓
     /// 「會去檢查它」的腳本保持可攜。
-    static func writeAll(_ h: FileHandle, _ bytes: [UInt8]) {
+    /// Takes a DESCRIPTOR, not a FileHandle, because Swift for Windows marks
+    /// `FileHandle.fileDescriptor` unavailable outright ("Cannot perform
+    /// non-owning handle to fd conversion"). Only the stdout sink needs this
+    /// path -- a file sink cannot meet a broken pipe -- and stdout is fd 1 in
+    /// the C runtime on every platform csv2 builds for, so nothing has to be
+    /// converted.
+    /// 接受的是「描述子」而不是 FileHandle，因為 Swift for Windows 直接把
+    /// `FileHandle.fileDescriptor` 標為不可用。只有 stdout 那個 sink 需要這條路徑——
+    /// 檔案 sink 不可能遇到管線斷掉——而 stdout 在 csv2 建置的每個平台上、於 C runtime 中
+    /// 都是 fd 1，因此沒有任何東西需要轉換。
+    static func writeAll(fd: Int32, _ bytes: [UInt8]) {
         if bytes.isEmpty { return }
-        let fd = h.fileDescriptor
         var off = 0
         bytes.withUnsafeBufferPointer { buf in
             guard let base = buf.baseAddress else { return }

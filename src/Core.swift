@@ -790,6 +790,12 @@ final class ByteSink {
     private var buf: [UInt8] = []
     private let limit: Int
     private let handle: FileHandle
+    /// Set only for the stdout sink. A file sink writes through `handle` --
+    /// it cannot meet a broken pipe, and on Windows a FileHandle for a file
+    /// cannot yield a descriptor at all.
+    /// 只有 stdout 那個 sink 會設定它。檔案 sink 走 `handle` 寫出——它不可能遇到管線斷掉，
+    /// 而在 Windows 上，指向檔案的 FileHandle 根本取不到描述子。
+    private let pipeSafeFD: Int32?
     private let tmpPath: String?
     private let finalPath: String?
     private var closed = false
@@ -798,6 +804,7 @@ final class ByteSink {
     /// stdout / 標準輸出
     init(stdout limit: Int = 1 << 16) {
         handle = FileHandle.standardOutput
+        pipeSafeFD = 1
         self.limit = limit
         tmpPath = nil
         finalPath = nil
@@ -811,6 +818,7 @@ final class ByteSink {
     /// 區塊的產出決定——這正是只有定位報告走平行的原因。
     init(memory: Void) {
         handle = FileHandle.nullDevice
+        pipeSafeFD = nil
         self.limit = Int.max
         tmpPath = nil
         finalPath = nil
@@ -825,6 +833,12 @@ final class ByteSink {
     /// stderr / 標準錯誤
     init(stderr limit: Int = 1 << 13) {
         handle = FileHandle.standardError
+        // stderr is fd 2, and a diagnostic stream can meet a broken pipe just
+        // as stdout can -- `csv2 -debug … 2>&1 | head` is an ordinary thing to
+        // type.
+        // stderr 是 fd 2，而診斷串流與 stdout 一樣會遇到管線斷掉——
+        // `csv2 -debug … 2>&1 | head` 是很平常的寫法。
+        pipeSafeFD = 2
         self.limit = limit
         tmpPath = nil
         finalPath = nil
@@ -847,6 +861,7 @@ final class ByteSink {
             throw fault("cannot create temporary file beside \(path)", "無法在 \(path) 旁建立暫存檔")
         }
         handle = h
+        pipeSafeFD = nil
         self.limit = limit
         tmpPath = tmp
         finalPath = path
@@ -862,11 +877,18 @@ final class ByteSink {
 
     func flush() {
         if buf.isEmpty { return }
-        // Not handle.write: on Linux and Windows that turns a broken pipe into
-        // a fatal error and a Swift backtrace. See Platform.writeAll.
-        // 不用 handle.write：在 Linux 與 Windows 上，它會把「管線斷掉」變成一個致命錯誤
-        // 與一段 Swift backtrace。見 Platform.writeAll。
-        Platform.writeAll(handle, buf)
+        // stdout does NOT go through handle.write: on Linux and Windows that
+        // turns a broken pipe into a fatal error and a Swift backtrace. A file
+        // sink keeps handle.write, which cannot meet one. See
+        // Platform.writeAll.
+        // stdout 不走 handle.write：在 Linux 與 Windows 上，它會把「管線斷掉」變成一個
+        // 致命錯誤與一段 Swift backtrace。檔案 sink 仍走 handle.write，它不可能遇到那件事。
+        // 見 Platform.writeAll。
+        if let fd = pipeSafeFD {
+            Platform.writeAll(fd: fd, buf)
+        } else {
+            handle.write(Data(buf))
+        }
         bytesWritten += buf.count
         buf.removeAll(keepingCapacity: true)
     }
