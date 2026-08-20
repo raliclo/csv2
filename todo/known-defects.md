@@ -1456,3 +1456,185 @@ csv2: … drop --pretty (the unaligned form renders identically) …
 
 Markdown 算出來是同一張表，**終端機裡不是**。而使用者讀到這則訊息的地方，正是終端機。
 
+---
+
+# 第 41 回合(2026-08-20)—— 兩次執行環境失敗,以及它們照樣抓到的東西
+# Round 41 -- two harness failures, and what got caught anyway
+
+前兩次嘗試都沒有跑起來,而**兩次的原因都在我這邊,不在 csv2**:
+
+| 嘗試 | 失敗原因 |
+|---|---|
+| `claude -p`(無旗標) | 幾乎沒有工具權限——`ls`／`pwd`／`which`／`cat` 通過,連 `csv2 --version` 都被擋 |
+| `claude -p --allowedTools Bash Read Write "<prompt>"` | `--allowedTools` 是**變參**,把整個 prompt 當成工具名稱吃掉,於是沒有 prompt 留下 |
+
+正確形式:**prompt 走 stdin、`--allowedTools` 用單一逗號清單**。
+
+**第一次那個受測者的處理值得記住。** 它一個 csv2 指令都沒跑成,而它明說:
+
+> 「第 4 類是空的,**而這個空是毫無證據價值的**。程式從未被執行。不要把這一輪記成
+> 『沒有找到工具缺陷』,要記成『工具從未被執行』。」
+
+那正是本專案一路在要求的那種區分——**「沒找到」與「沒找」不是同一件事**,而它自己標明了
+是哪一種。
+
+## 而它只靠讀那兩份 README,就抓到三條我今天自己造成的疏漏
+
+| # | 缺陷 | 成因 |
+|---|---|---|
+| AE | 中文版指紋表格仍說「標識哪一把金鑰」,而同一頁下方說那對 `:enc:` 不成立 | 我的腳本中途 assert 失敗、整份未寫入,重試時只補了一半  — **已修** |
+| AF | 中文版狀態表仍把 `install.zsh` 列在「尚未」欄,而下方整段描述它的行為 | 我只改了英文版  — **已修** |
+| AG | 中文版的錯誤訊息範例被截斷,少了「合法跳脫序列有哪些」那一半 | 我只改了英文版  — **已修** |
+
+**三條都是同一個模式:我修英文版、把中文版留在後面。** 而 AE 更精確地說是另一種:
+**一個 Python 腳本在中途 assert 失敗,整份編輯都沒有寫入,而我重試時只重現了其中一部分**
+——我沒有回去確認前面那幾處是否還在。
+
+那個模式與這棵樹上的其他缺陷同形:**一次「部分成功」看起來與「完全成功」沒有分別。**
+腳本印出了「zh fixes applied」,而其中一項根本沒有發生。
+
+**做法上的結論**:多步驟的編輯腳本要嘛全做要嘛全不做,而**失敗之後的重試必須從頭再跑一次
+完整的腳本**,不能只補「我記得還沒做的那幾項」。
+
+---
+
+## 第三次嘗試被中止,而它的產物仍然是一次量測
+
+第三次 `claude -p` 跑起來了,做完任務 1、深入到任務 2,然後被中止——交出的報告只有
+15 bytes:`Execution error`。**但它在 scratchpad 裡留下 31 個檔案**,其中包含兩組可以
+直接比對的輸出。那些檔案本身就是量測,不需要它的敘述。
+
+比對的結果是一條真的:
+
+```
+fast.txt == slow.txt == ni.txt     一致
+i3.out   == n3.out                 一致
+i4.out   != n4.out                 *** 不一致 ***
+```
+
+**我沒有採信它,我自己從頭重現了一次。** 以下每一個數字都是我這邊跑出來的。
+
+### 那一個位元組
+
+`b4.csv` 與 `big.csv` **只差一個位元組**:offset 11015957,空白(0o40)改成換行(0o12)。
+而那個位置落在引號內:
+
+```
+…,"Two project⏎fixes were needed. (1) configure hardcoded Apple libtool…
+```
+
+引號內的換行是資料,不是紀錄邊界。所以正確答案是 **41140 筆**,而:
+
+| 路徑 | 紀錄總數 | 對不對 |
+|---|---|---|
+| `--no-index`(循序) | 41140 | ✅ |
+| 有索引(平行) | **41141** | ❌ |
+
+從第 23511 筆之後,**每一個印出來的紀錄編號都差一**,rc=0,沒有任何一句抱怨。
+
+### 錯的不是索引建立器
+
+我先懷疑建立器沒看見那個換行。**不是。** 對改過的檔案重新 `--build-index`:
+
+```
+wrote index t.csv.index: 41140 records, stride 256, 161 entries
+DEBUG single-threaded: .csv whose index records a record spanning lines;
+      a record number is not a line number here
+```
+
+它看見了,而且正確地讓平行路徑退場。**建立器是對的。**
+
+### 錯的是那個戳記,而它已經被記在 Z
+
+解出 `b4.csv.index` 的檔頭,對照檔案本身:
+
+```
+index: version=3 flags=1 (no_embedded_newlines=True) mtimeSec=1787183882 mtimeNsec=391472534
+file :          size=22026798                        mtimeSec=1787183882 mtimeNsec=391472534
+```
+
+**size 相同、mtime 相同到奈秒,而內容不同。** 戳記無從分辨,於是那個
+`no_embedded_newlines=True` 被採信,平行路徑在引號中間切開檔案。
+
+這正是 **Z** 記的那件事(`cp -p`／`rsync -t`／`tar -p` 都保留 mtime)。機制上不是新缺陷。
+**新的是它現在可以隨時重現**——在此之前 Z 只是一段推論,沒有人真的造出那個檔案。上面
+那一個位元組的做法就是。
+
+### 文件指定的補救有效
+
+```
+$ csv2 --verify-index -i b4.csv
+index MISMATCH: no_embedded_newlines: index says the file has none, but record 20575 spans lines
+csv2: index beside b4.csv does not describe the file
+rc=1
+```
+
+**指名了紀錄編號,rc=1。** README 說 `--verify-index` 是那個 O(n) 的證明,而它確實是。
+
+## AH. 索引被採信的那一次,log 一個字都不說(2026-08-20 修正)
+
+上面那次靜默給出錯誤答案的執行,**完整的 `-debug` log 是這四行**:
+
+```
+INFO  csv2 -contains libcurl -i b4.csv -debug
+DEBUG parallel: 6 chunks, 10 workers, chunk 4194304 bytes
+DEBUG parallel: 41141 records, 7480 matched
+DEBUG metrics: read_bytes=22026798 file_bytes=22026798 peak_rss_bytes=55885824
+```
+
+「index」出現 **0 次**。
+
+而每一條**拒絕**平行的路徑都會指名索引並說明理由:
+
+```
+DEBUG single-threaded: .csv with no index proving one record per line; build one with --build-index
+DEBUG single-threaded: .csv whose index records a record spanning lines; …
+DEBUG single-threaded: --no-index, and a .csv needs an index to prove one record per line
+```
+
+**這個不對稱正好反了。** `-debug` 能告訴你索引為什麼**沒被用**,卻永遠不告訴你它
+**被用了**、用的是哪一個 sidecar。而依 Z,採信索引的那條路徑是**唯一可能靜默給出錯誤
+答案**的一條——最需要留下痕跡的那一次,留下的最少。
+
+一個操作者拿到上面那四行,沒有任何辦法看出這次結果依賴了一個他從未檢查過的檔案。
+
+**已修**:平行路徑採信索引時,DEBUG 說出 sidecar 的路徑、它宣告的 `no_embedded_newlines`,
+以及那個足以推翻它的 `--verify-index`。由 **T101** 斷言。
+
+那行 log 放在 `runParallelSearch` 裡唯一的使用點,**不是**放在 `parallelDeclineReason`。
+第一版放在後者,結果印了兩次——它是純查詢,一次執行會被問不只一次,而讀 log 的人會以為
+查了兩個 sidecar。
+
+**T101 的 fixture 換過一次位置,而換的理由值得記下來。** 偏移**不是**從跨行那一筆開始:
+區塊內部的解析器正確處理引號,因此第一個區塊連同跨行那一筆全部編號正確。假的
+`no_embedded_newlines` 弄壞的是「之後每一個區塊」的 `firstRecord`——那是以「到該位移為止
+有幾個換行」推算的。於是編號從**跨行紀錄之後的第一個區塊邊界**才開始出錯(8 KiB 區塊下實測
+為第 158 筆)。第一版把 needle 放在第 150 筆,早了一個區塊,**在缺陷完整存在的情況下照樣
+通過**——與 T79 當年那個 fixture 是同一個陷阱的不同成因。
+
+**負向對照**:把 `src/Parallel.swift` 的修正 stash 掉重建,T101d/e/f 立刻失敗。而 T101b/c
+也失敗——沒有那行 log,測試連自己走在哪一個分支都判斷不了,於是大聲失敗而不是悄悄通過。
+那本身就是這條 log 存在的理由。
+
+**而 T101 的第一版在 guest 裡失敗了,原因值得單獨記。** macOS 上 `touch -r` 把 mtime 還原
+到奈秒,於是那次同大小改寫溜過了戳記,測試走「被採信」那個分支。aarch64 guest 裡的 busybox
+`touch -r` 只保留整秒,同樣的構造在那裡被抓住,測試走了另一個分支——而我在那個分支斷言
+`--verify-index` 會**成功**,理由是「被拒絕的索引會被重建」。
+
+**它不會。** 忽略一份過期索引,就只是讓它留在原地;磁碟上那份 sidecar 依然不描述這個檔案,
+於是 `--verify-index` 依然(正確地)說不符。這條斷言現在不分支了:**不論 O(1) 戳記有沒有
+察覺,O(n) 證明都必須指出不符。**
+
+兩件事因此變得明確:
+
+1. **Z 的可利用性取決於保留 mtime 的那個工具,而不取決於 csv2。** `cp -p` 與 `rsync -t`
+   保留的比 busybox `touch -r` 多。缺口在兩個平台上都是真的,只是這個 fixture 只能在工具
+   配合的地方把它演示出來。
+2. **macOS 從未走到那個分支,所以那個錯誤只可能在 guest 裡浮現。** 這正是「Linux 驗證必須
+   開 VM」那條規則今天的具體回報:一條在本機四平台裡有三個都測不到的斷言錯誤。
+
+The asymmetry runs the wrong way: `-debug` explains why an index was *not*
+used, and says nothing when one *was*. By Z, the index-trusting path is the
+only one that can be silently wrong -- so the run that most needs a trace
+leaves the least. An operator holding those four lines has no way to tell the
+answer rested on a sidecar they never checked.

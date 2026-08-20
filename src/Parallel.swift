@@ -134,6 +134,12 @@ func parallelDeclineReason(_ o: Options, format: Format) -> String? {
     // 逃不掉：因為懷疑 sidecar 而伸手去拿 --no-index 的人，拿到的還是 sidecar 的答案。
     if o.noIndex { return "--no-index, and a .csv needs an index to prove one record per line" }
     if let idx = CSVIndex.load(dataPath: path) {
+        // Kept free of logging on purpose: this is a pure query and it is
+        // asked more than once per run. The trust line belongs at the single
+        // point of use in runParallelSearch, or it prints twice and reads as
+        // two sidecars having been consulted.
+        // 刻意不在此記錄：這是純查詢，一次執行會被問不只一次。那行「採信」屬於
+        // runParallelSearch 裡唯一的使用點，否則會印兩次，讀起來像查了兩個 sidecar。
         if idx.noEmbeddedNewlines { return nil }
         // Distinguished from "no index" because the remedy is not the same.
         // Telling someone to run --build-index here sends them to rebuild an
@@ -232,6 +238,24 @@ func runParallelSearch(_ o: Options) throws {
     let path = o.input!
     guard let st = FileStamp.of(path: path) else {
         throw fault("cannot stat \(path)", "無法取得 \(path) 的狀態")
+    }
+
+    // Every path that DECLINES the index names it and says why; the path that
+    // TRUSTS it said nothing at all. The asymmetry ran the wrong way: by the
+    // size+mtime stamp's own limits a trusted index can be stale, so this is
+    // the only branch that can be silently wrong -- and it was the only one
+    // leaving no trace. An operator reading -debug could see why a sidecar was
+    // rejected but never that one had been believed, nor which file it was.
+    // 每一條「拒絕」索引的路徑都會指名它並說明理由；而「採信」它的那條什麼都不說。
+    // 這個不對稱正好反了：依 size+mtime 戳記自身的限制，被採信的索引可能是過期的，
+    // 因此這是唯一可能靜默給出錯誤答案的分支——卻也是唯一不留痕跡的。讀 -debug 的人
+    // 看得到 sidecar 為何被拒，卻看不到它被信了、信的是哪一個檔案。
+    if plan.format != .csv2, let idx = CSVIndex.load(dataPath: path), idx.noEmbeddedNewlines {
+        Logger.shared.debug(
+            "parallel: trusting index \(CSVIndex.path(for: path)), which declares "
+            + "no_embedded_newlines; if the file changed since that was built while keeping "
+            + "the same size and mtime, record numbers will be wrong -- "
+            + "csv2 --verify-index -i \(path) is the O(n) proof")
     }
 
     let headers = try readHeaderRows(path: path, format: plan.format, want: plan.headerRows)

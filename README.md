@@ -1005,6 +1005,29 @@ ambiguity bites exactly here: comparing a "parallel" run against a
 single-threaded one proves nothing if both quietly took the same path — and
 identical output is precisely what that looks like. Asserted by T72.
 
+**And when a `.csv` takes the parallel path, the sidecar it believed is named**:
+
+```console
+$ csv2 -contains xyz -i pkgs.csv -debug
+DEBUG parallel: trusting index pkgs.csv.index, which declares no_embedded_newlines;
+      if the file changed since that was built while keeping the same size and mtime,
+      record numbers will be wrong -- csv2 --verify-index -i pkgs.csv is the O(n) proof
+DEBUG parallel: 6 chunks, 10 workers, chunk 4194304 bytes
+```
+
+Until 2026-08-20 this line did not exist, and the asymmetry ran the wrong way.
+Every path that *declines* an index named it and said why; the one path that
+*trusts* one said nothing at all. By the O(1) stamp's own limits — described
+below — a trusted index can be stale, so that was the only branch capable of
+being silently wrong, and it was the only one leaving no trace. An operator
+reading `-debug` could see why a sidecar had been rejected, never that one had
+been believed, nor which file it was. Asserted by T101, which also pins the
+line's other property: it is emitted once per run, not once per eligibility
+check. Note where the record numbers go wrong when this does happen — not at
+the record that spans lines, whose own number survives, but from the first
+chunk boundary after it, because what a stale `no_embedded_newlines` corrupts
+is each later chunk's starting record number.
+
 
 ## Design decisions worth knowing before reading the code
 

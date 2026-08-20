@@ -4289,6 +4289,168 @@ fi
 assert_eq "$(head -1 "$TMP/t100_h1.csv")" "$(head -1 "$TMP/t100_h2.csv")" \
     "T100e while two -hash runs with that key give the SAME :hmac: fingerprint / 而同一把金鑰的兩次 -hash 給出相同的 :hmac: 指紋"
 
+# ---------------------------------------------------------------------
+# T101 -- the run that trusts an index left no trace, and it is the only
+# run that can be silently wrong.
+#
+# T79 closed the case where the index's claim was never derived. What it
+# cannot close is the stamp: an index is judged current by size + mtime, and
+# `cp -p`, `rsync -t` and `tar -p` all preserve mtime, so a same-size rewrite
+# is invisible to it. That gap is documented, and --verify-index is the O(n)
+# proof offered for it.
+#
+# What was missing sat next to it. EVERY path that DECLINES an index names it
+# and says why -- no index, index records a spanning record, --no-index. The
+# one path that TRUSTS an index said nothing at all, not even at -debug. So
+# the branch that by design can be silently wrong was also the branch leaving
+# no trace: an operator could see why a sidecar was rejected, never that one
+# had been believed, nor which file it was.
+#
+# The trust line is what makes this case testable at all. Whether a same-size
+# rewrite escapes the stamp depends on how much mtime precision the platform
+# and `touch -r` preserve, and asserting a fixed answer to that would be a
+# platform-dependent test of the kind this suite has been bitten by before.
+# So the log line is read first, and it decides which of two assertions runs.
+# Both are real; neither is a skip.
+#
+# T101 —— 採信索引的那次執行不留任何痕跡，而它是唯一可能靜默出錯的那一次。
+# T79 關掉的是「索引的宣稱從未被推導」那個缺口。它關不掉的是戳記本身：索引是否為最新
+# 以 size + mtime 判定，而 `cp -p`、`rsync -t`、`tar -p` 都保留 mtime，因此「同樣大小的
+# 改寫」對它是隱形的。那個缺口是記錄在案的，`--verify-index` 就是為它提供的 O(n) 證明。
+# 缺的東西就在它旁邊：每一條「拒絕」索引的路徑都會指名它並說明理由——沒有索引、索引記錄了
+# 跨行紀錄、--no-index。而唯一「採信」索引的那條什麼都不說，連 -debug 都沒有。於是設計上
+# 唯一可能靜默出錯的分支，也正是唯一不留痕跡的分支：操作者看得到 sidecar 為何被拒，卻看
+# 不到它被信了、信的是哪一個檔案。
+# 那行 trust line 也正是本案例得以成立的原因。「同大小改寫」躲不躲得過戳記，取決於平台與
+# `touch -r` 保留多少 mtime 精度；把某個固定答案寫死，就會變成本套件吃過虧的那種平台相依
+# 測試。因此先讀那行 log，由它決定要跑兩個斷言中的哪一個。兩者都是真的斷言，都不是 SKIP。
+# ---------------------------------------------------------------------
+echo
+echo "--- T101: an index that was trusted says so / 被採信的索引會說出來 ---"
+
+# Both versions are produced by the same generator, differing only in the ONE
+# byte between "spanning" and "two" -- a space in the first, a newline in the
+# second. Same length by construction, so the size half of the stamp cannot
+# tell them apart; `touch -r` is then asked for the mtime half.
+#
+# The needle sits at record 250, and where it sits is the test. The shift does
+# NOT begin at the spanning record: inside a chunk the parser reads quotes
+# correctly, so chunk 1 numbers everything right, spanning record included.
+# What the false `no_embedded_newlines` corrupts is each LATER chunk's
+# firstRecord, which is derived by counting newlines up to that offset. So the
+# numbers go wrong at the first chunk boundary after the spanning record --
+# measured here at record 158 with 8 KiB chunks -- and not before it. A first
+# draft put the needle at 150, one chunk too early, and passed while the
+# defect was fully present. It was asserting on the half of the file the
+# miscount cannot reach.
+# 兩個版本由同一個產生器產出，只差「spanning」與「two」之間那「一個位元組」——前者是空白，
+# 後者是換行。長度依構造相同，因此戳記的 size 那一半分辨不出來；mtime 那一半則交給
+# `touch -r`。
+# needle 放在第 250 筆，而「放在哪裡」正是這個測試本身。偏移「不是」從跨行那一筆開始：區塊
+# 內部的解析器正確處理引號，因此第 1 個區塊連同跨行那一筆全都編號正確。假的
+# `no_embedded_newlines` 弄壞的是「之後每一個區塊」的 firstRecord——那是用「到該位移為止有
+# 幾個換行」推算出來的。於是編號從「跨行紀錄之後的第一個區塊邊界」才開始出錯（此處以 8 KiB
+# 區塊實測為第 158 筆），在那之前完全正確。本 fixture 的第一版把 needle 放在第 150 筆，早了
+# 一個區塊，於是在缺陷完整存在的情況下照樣通過——它斷言的正好是誤數碰不到的那半個檔案。
+gen_t101() {   # $1 = the one byte that differs / 唯一不同的那個位元組
+    print -r -- 'a,b'
+    local i
+    for i in {1..300}; do
+        if   [[ $i == 10  ]]; then print -r -- "$i,\"prose spanning$1two lines\""
+        elif [[ $i == 250 ]]; then print -r -- "$i,\"needle here\""
+        else print -r -- "$i,\"row $i padding padding padding padding padding\""
+        fi
+    done
+}
+
+gen_t101 ' ' > "$TMP/t101.csv"
+"$CSV2" --build-index -i "$TMP/t101.csv" >/dev/null 2>&1
+cp -p "$TMP/t101.csv" "$TMP/t101.ref"
+gen_t101 $'\n' > "$TMP/t101.csv"
+touch -r "$TMP/t101.ref" "$TMP/t101.csv"
+
+# If these ever differ the construction is broken and every assertion below is
+# measuring the wrong thing, so it is checked rather than assumed.
+# 這兩者若不相等，代表構造壞了、下面每一條斷言量到的都是別的東西，因此檢查而不是假設。
+assert_eq "$(wc -c < "$TMP/t101.csv" | tr -d ' ')" "$(wc -c < "$TMP/t101.ref" | tr -d ' ')" \
+    "T101a the rewrite preserved the file's size, so only mtime can betray it / 改寫保持了檔案大小，因此只剩 mtime 能揭露它"
+
+P=(CSV2_PARALLEL_MIN_BYTES=1000 CSV2_PARALLEL_CHUNK_BYTES=8192)
+env $P "$CSV2" -contains "needle" -i "$TMP/t101.csv" -debug \
+    > "$TMP/t101_idx.out" 2> "$TMP/t101_dbg.txt"
+"$CSV2" -contains "needle" --no-index -i "$TMP/t101.csv" \
+    > "$TMP/t101_noidx.out" 2>/dev/null
+
+trusted=$(grep -c 'trusting index' "$TMP/t101_dbg.txt")
+
+if (( trusted > 0 )); then
+    # The stamp did not notice: this is the documented gap, reproduced.
+    # 戳記沒有察覺：這就是那個記錄在案的缺口，被重現了出來。
+    if cmp -s "$TMP/t101_idx.out" "$TMP/t101_noidx.out"; then
+        bad "T101b the index was trusted yet the two paths agree -- the trust line no longer marks the risky branch / 索引被採信、兩條路徑卻一致——那行 trust line 已不再標記出有風險的分支"
+    else
+        ok "T101b a stale index escapes the size+mtime stamp and shifts the record numbers, exactly as documented / 過期索引躲過 size+mtime 戳記並推移了紀錄編號，一如文件所述"
+    fi
+else
+    # The stamp did notice, and whether it does is not csv2's choice: macOS
+    # `touch -r` restores mtime to the nanosecond, so the rewrite slips past;
+    # busybox `touch -r` in the aarch64 guest keeps only whole seconds, so the
+    # same construction is caught there. The gap is real on both -- `cp -p`
+    # and `rsync -t` preserve more than busybox touch does -- but this fixture
+    # can only demonstrate it where the tools cooperate. Ignoring a stale index
+    # is not rebuilding it, so the sidecar on disk is untouched either way.
+    # 戳記察覺了——而察不察覺不是 csv2 決定的：macOS 的 `touch -r` 會把 mtime 還原到奈秒，
+    # 於是那次改寫溜了過去；aarch64 guest 裡的 busybox `touch -r` 只保留整秒，同樣的構造
+    # 在那裡就被抓住。缺口在兩邊都是真的——`cp -p` 與 `rsync -t` 保留的比 busybox touch 多
+    # ——但這個 fixture 只能在工具配合的地方把它演示出來。「忽略過期索引」不等於「重建它」，
+    # 因此磁碟上那份 sidecar 兩種情況下都原封不動。
+    assert_same "$TMP/t101_idx.out" "$TMP/t101_noidx.out" \
+        "T101b the stamp rejected the rewritten file, so both paths give the same answer / 戳記拒絕了被改寫的檔案，於是兩條路徑給出相同答案"
+fi
+
+# Unconditional, and that is the point: whether or not the O(1) stamp noticed,
+# the sidecar sitting on disk does NOT describe this file, and the O(n) proof
+# has to say so. A first draft asserted the opposite in the stamp-noticed
+# branch -- reasoning that a rejected index would be rebuilt. It is not:
+# ignoring a stale index leaves it exactly where it was. macOS never reached
+# that branch, so the mistake surfaced only in the guest.
+# 不分支，而那正是重點：不論 O(1) 戳記有沒有察覺，磁碟上那份 sidecar 都「不」描述這個檔案，
+# 而那個 O(n) 證明就必須這麼說。本案例的第一版在「戳記察覺了」那個分支斷言了相反的事——
+# 理由是「被拒絕的索引會被重建」。它不會：忽略一份過期索引，就只是讓它留在原地。macOS 從未
+# 走到那個分支，所以這個錯誤只在 guest 裡浮現。
+assert_fails "T101c and --verify-index, the O(n) proof offered for that gap, reports the mismatch either way / 而為那個缺口提供的 O(n) 證明 --verify-index 兩種情況下都指出不符" -- \
+    "$CSV2" --verify-index -i "$TMP/t101.csv"
+
+# The rest holds on every platform: an index that IS trusted must be named,
+# and the remedy must be named with it. Built fresh here so the trusted branch
+# is reached regardless of what the stamp did above.
+# 其餘的在每個平台都成立：被採信的索引必須被指名，補救方式也必須一併指出。此處重新建立，
+# 使「被採信」那條路徑不論上面戳記如何都會被走到。
+gen_t101 ' ' > "$TMP/t101b.csv"
+"$CSV2" --build-index -i "$TMP/t101b.csv" >/dev/null 2>&1
+env $P "$CSV2" -contains "needle" -i "$TMP/t101b.csv" -debug \
+    >/dev/null 2> "$TMP/t101b_dbg.txt"
+line=$(grep 'trusting index' "$TMP/t101b_dbg.txt" | head -1)
+
+assert_eq "$(grep -c 'trusting index' "$TMP/t101b_dbg.txt")" "1" \
+    "T101d a trusted index is reported exactly once, not once per eligibility check / 被採信的索引只回報一次，而非每次資格檢查各一次"
+assert_contains "$line" "t101b.csv.index" \
+    "T101e and the line names the sidecar it believed / 而那行指名了它所相信的 sidecar"
+assert_contains "$line" "--verify-index" \
+    "T101f and points at the proof that can contradict it / 並指出那個足以推翻它的證明"
+
+# Every path that declines must stay silent about trusting, or the line stops
+# meaning anything.
+# 每一條拒絕的路徑都不能出現「採信」，否則那行就失去意義。
+"$CSV2" -contains "needle" --no-index -i "$TMP/t101b.csv" -debug \
+    >/dev/null 2> "$TMP/t101c_dbg.txt"
+assert_eq "$(grep -c 'trusting index' "$TMP/t101c_dbg.txt")" "0" \
+    "T101g --no-index trusts nothing and claims nothing / --no-index 不採信任何東西，也不宣稱任何東西"
+
+env $P "$CSV2" -contains "needle" -i "$TMP/t101.csv" >/dev/null 2> "$TMP/t101d_err.txt"
+assert_eq "$(wc -c < "$TMP/t101d_err.txt" | tr -d ' ')" "0" \
+    "T101h and without -debug the line is absent, as the pipeline requires / 而沒有 -debug 時那行不存在，一如管線的要求"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

@@ -18,7 +18,7 @@ English: [README.md](./README.md)
 
 | 可用 | 尚未做 |
 |---|---|
-| RFC 4180 解析、引號、內嵌逗號與換行、CRLF、BOM | 隨 rootfs 出貨、`install.zsh`（第 7 階段） |
+| RFC 4180 解析、引號、內嵌逗號與換行、CRLF、BOM | 隨 rootfs 出貨（第 7 階段） |
 | `-r`、`-contains`、`-A`/`-B`/`-C`、`-head`/`-tail`/`-mid`、`-rownum` | |
 | `.csv2` 兩列標頭、`--json`、`-md`、`--pretty`（顯示寬度） | |
 | `-insert`/`-append`/`-delete`/`-update`、`-delete -cell`、`-delete -col` | |
@@ -450,7 +450,7 @@ $ csv2 -contains zlib --a1 -i pkgs.csv2      # 兩列標頭
 |---|---|
 | 呼叫的指令列 | 會，但值會被置換：`-update 1:6 <value>`、`-insert 3 <row>` |
 | 金鑰**位元組** | 絕不 |
-| 金鑰檔的**路徑**與金鑰指紋 | 會——它們標識的是「哪一把金鑰」，不是「它是什麼」 |
+| 金鑰檔的**路徑**與金鑰指紋 | 會——絕不記錄金鑰本身。但見下方：兩種標記的指紋意思並不相同 |
 | **一般**欄位的新舊值 | 完整記錄、絕不截斷；那正是稽核軌跡的意義 |
 | **受保護**欄位的新舊值 | `<redacted>` |
 
@@ -658,7 +658,7 @@ busybox,1.37.0,"fork raliclo/busybox, branch develop",GPL-2.0
 
 | 錯誤發生在 | 訊息會指出 | 範例 |
 |---|---|---|
-| 某一格 | `record N (line L), field M` | `record 1 (line 3), field 2: undefined escape sequence \q` |
+| 某一格 | `record N (line L), field M` | `record 1 (line 3), field 2: undefined escape sequence \q; .csv2 defines only \n, \r and \\` |
 | 某一筆，但不屬於單一欄位 | `record N` | `record 1 (line 2) has 2 fields but the header has 3` |
 | 參數 | 兩者都不指出——它在讀到任何一筆之前就被丟出 | `unknown flag --nope` |
 | 整個檔案 | 兩者都不指出——沒有紀錄可指 | `cannot open input file: /nope.csv` |
@@ -862,6 +862,25 @@ DEBUG single-threaded: not a search; parallelism applies to -contains only
 只回報「有趣的那一種」會讓沉默變得有歧義，而那個歧義正好咬在這裡：拿一次「平行」執行去比對
 一次單執行緒執行，若兩者其實悄悄走了同一條路，那什麼也證明不了——而「輸出相同」看起來
 恰恰就是那個樣子。由 T72 斷言。
+
+**而當一個 `.csv` 走上平行路徑時，它所相信的那個 sidecar 會被指名**：
+
+```console
+$ csv2 -contains xyz -i pkgs.csv -debug
+DEBUG parallel: trusting index pkgs.csv.index, which declares no_embedded_newlines;
+      if the file changed since that was built while keeping the same size and mtime,
+      record numbers will be wrong -- csv2 --verify-index -i pkgs.csv is the O(n) proof
+DEBUG parallel: 6 chunks, 10 workers, chunk 4194304 bytes
+```
+
+2026-08-20 之前這一行並不存在，而那個不對稱正好反了。每一條「拒絕」索引的路徑都會指名它並
+說明理由；唯一「採信」索引的那條什麼都不說。依下文所述那個 O(1) 戳記自身的限制，被採信的
+索引可能是過期的——因此那是唯一可能靜默給出錯誤答案的分支，卻也是唯一不留痕跡的分支。讀
+`-debug` 的人看得到 sidecar 為何被拒，卻永遠看不到它被信了、信的是哪一個檔案。由 T101 斷言；
+該案例同時固定了這一行的另一個性質：**每次執行只印一次**，而不是每做一次資格檢查就印一次。
+另外要留意這件事真的發生時，紀錄編號是從哪裡開始出錯的——不是從跨行的那一筆（它自己的號碼
+存活了下來），而是從它之後的第一個區塊邊界開始，因為過期的 `no_embedded_newlines` 弄壞的是
+「之後每一個區塊」的起始紀錄號。
 
 
 ## 讀程式碼前值得先知道的幾項決定
