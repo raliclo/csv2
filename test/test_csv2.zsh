@@ -40,6 +40,39 @@ case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1 ;;
     *)                    IS_WINDOWS=0 ;;
 esac
+
+# This suite hands csv2 absolute paths built from `${0:A:h}`, and on Windows
+# those are POSIX-shaped (`/c/Users/...`). A native Windows binary cannot open
+# such a path; what makes it work is MSYS2 rewriting the argument to `C:/...`
+# on the way to a native process. The suite has depended on that since it first
+# ran there -- T58a/T58b exist because the rewriting shows up in csv2's own
+# error messages -- but nothing said so, and nothing made sure it was on.
+#
+# `MSYS2_ARG_CONV_EXCL=*` turns all of it off. Set it, and every path this
+# suite passes arrives unrewritten: 276 of 454 cases failed, most of them with
+# `cannot open input file`, which reads exactly like a badly broken program.
+# It is set in the environment of a multissh session, so the suite passed from
+# an ordinary shell on that machine and failed over the link -- the same tree,
+# the same binary, the same commit.
+#
+# Unsetting it here scopes the decision to this script and the processes it
+# starts, and removes a dependency on the caller's environment that nobody
+# declared.
+#
+# 這份測試交給 csv2 的是由 `${0:A:h}` 組出的絕對路徑，而在 Windows 上那是 POSIX 形狀的
+# （`/c/Users/...`）。原生 Windows 程式打不開那種路徑；讓它能運作的，是 MSYS2 在把引數
+# 交給原生行程時改寫成 `C:/...`。這份測試從第一次在那裡執行起就依賴這件事——T58a／T58b
+# 的存在正是因為那個改寫會出現在 csv2 自己的錯誤訊息裡——但沒有任何地方說出來，也沒有任何
+# 東西確保它是開著的。
+#
+# `MSYS2_ARG_CONV_EXCL=*` 會把它整個關掉。一旦設了，這份測試傳出去的每一個路徑都不會被改寫：
+# 454 條裡有 276 條失敗，多數是 `cannot open input file`，讀起來就像一個壞得很徹底的程式。
+# 它被設在 multissh session 的環境裡，於是同一棵樹、同一個執行檔、同一個 commit，在那台機器
+# 上用普通 shell 跑會通過，經由連線跑就會失敗。
+#
+# 在此 unset，把這個決定的範圍限制在這支腳本與它啟動的行程內，並移除一個「沒有人宣告過」的
+# 對呼叫者環境的依賴。
+if (( IS_WINDOWS )); then unset MSYS2_ARG_CONV_EXCL; fi
 : ${CSV2:="$ROOT/release/csv2"}
 
 if [[ ! -x "$CSV2" ]]; then
