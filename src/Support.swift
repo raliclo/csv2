@@ -166,8 +166,27 @@ final class Logger {
         // failure.
         // 寫 log 失敗不得使操作失敗。反過來的設計會讓一個純粹的觀測功能
         // 變成一個新的失敗來源。
+        // Written through the ordinary WARN path rather than hand-assembled.
+        // This was the one message in the tool that matched none of the three
+        // documented shapes: one line carrying BOTH languages joined by " / ",
+        // no timestamp, no LEVEL token, and a lowercase "warning:" where every
+        // other diagnostic says WARN. A script written to the documented
+        // grammar mis-parses it -- and because it accompanies an rc=0 run,
+        // mis-parsing it means missing it entirely.
+        //
+        // It cannot go through `Logger.warn` directly: that writes to the log
+        // file too, and the log file is precisely what has just failed. So the
+        // line is built in the same shape and sent only to stderr.
+        //
+        // 改走一般的 WARN 形狀，而不是手工拼出來。這是整個工具裡唯一一則三種已記載形狀都不
+        // 符合的訊息：一行同時帶著兩種語言、以 " / " 相連、沒有時間戳、沒有層級記號，而且用
+        // 小寫的 "warning:"，而其他每一則診斷都寫 WARN。照文件的文法寫的腳本會剖析錯它——
+        // 而由於它伴隨的是一次 rc=0 的執行，剖析錯就等於完全錯過它。
+        //
+        // 它不能直接走 `Logger.warn`：那會同時寫進 log 檔，而剛剛失敗的正是那個 log 檔。
+        // 因此這一行以相同的形狀組出來，只送到 stderr。
         FileHandle.standardError.write(Data(
-            "csv2: warning: cannot write log file \(logPath ?? "?"); continuing / 警告：無法寫入 log 檔，操作照常繼續\n".utf8))
+            "csv2: \(Logger.timestamp()) WARN  cannot write log file \(logPath ?? "?"); continuing without one\n".utf8))
     }
 
     /// `message` is an @autoclosure, and the level test happens BEFORE anything

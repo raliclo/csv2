@@ -23,7 +23,7 @@ English: [README.md](./README.md)
 | `.csv2` 兩列標頭、`--json`、`-md`、`--pretty`（顯示寬度） | |
 | `-insert`/`-append`/`-delete`/`-update`、`-delete -cell`、`-delete -col` | |
 | `-hash`、`-encrypt`、`-decrypt`、`-keyfile`、`-debug`、`-log` | |
-| `-append` 的 O(1) 快路徑 | |
+| `-append` 快路徑——寫入的位元組數是 O(1)，讀取的位元組數是 O(n) | |
 | `.csv.index` / `.csv2.index` sidecar、`--verify-index` | |
 | 平行搜尋，且與單執行緒逐位元相同 | |
 | 可在 aarch64 Linux 上建置執行，且與 macOS 逐位元相同 | |
@@ -194,7 +194,13 @@ $ csv2 -r --json -i example.csv2 | head -1
                         **可重複**，且每個 N 都指向「輸入」：一次執行裡的三個
                         -insert，數的都是檔案送達時的樣子，不是它長大後的樣子。
                         見下方——同樣三個數字，分三次跑會得到不同的檔案
-  -append ROW           加在最後（就地寫入時為 O(1)）
+  -append ROW           加在最後。「寫入的位元組數」是 O(1)，「時間」不是：
+                        整個檔案會先被讀過一遍，因為「最後一筆不完整的檔案」不能
+                        安全地被追加，而沒有便宜的方法可以知道。實測為線性——
+                        1.9 MB 0.07 秒、8.2 MB 0.24 秒、34.6 MB 0.92 秒。
+                        2026-08-20 之前，那個檢查只在「檔案不以換行結尾」時才跑，
+                        於是「追加到一筆被未關閉引號留著的紀錄之後」會被接受、
+                        以 0 結束，產生一個 csv2 隨後拒絕讀取的檔案
   -delete a[,b]         刪除第 a 筆，或第 a 到第 b 筆
   -delete -cell r:c     清空一個儲存格（欄數不變）
   -delete -col N|名稱   從每一筆與兩列標頭中移除該欄——唯一能保持對齊的刪除
@@ -1119,7 +1125,8 @@ CSV 存的是十進位數字的文字。
 > 超過約 1 GiB 且有寫入流量，或需要依鍵值查詢時，改用 SQLite。
 
 每次編輯都會重寫整個檔案，因此改動 1 GiB 檔案中的一個儲存格要寫入 1 GiB，
-而 PostgreSQL 只需約 10 KB。`-append` 是例外，走 O(1) 的路徑。
+而 PostgreSQL 只需約 10 KB。`-append` 是例外：它只寫入那一列的位元組。但它仍然會先讀過整個檔案（見上面的旗標說明），
+因此省下的是寫入，不是時間。
 查詢是依位置而非依鍵值，所以「找出 `pkg_name = busybox` 那一列」是全檔掃描。
 
 真正的鄰居是 SQLite 而非 PostgreSQL——同樣是單一檔案、無 daemon、無 schema migration，

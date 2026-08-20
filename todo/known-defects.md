@@ -3341,3 +3341,53 @@ contradicting itself about what a file contains is this tool's core competence.
 
 那則舊訊息仍然存在,而且仍然正確——對一個**真的**在引號欄位內結束的檔案(T118d 守著它)。
 它原本唯一的錯,是被說給一個「還有下文」的讀者聽。
+
+## CZ. `-append` 不再是 O(1),而說它是 O(1) 的是我在第 43 回合之後沒改的文件
+
+```
+1,877,798 bytes   0.07 s
+8,177,798 bytes   0.24 s
+34,577,800 bytes  0.92 s
+```
+
+**完全線性。** 受測者在一個 591 MB 的檔案上量到「寫 6 個位元組花 11.4 秒」。
+
+成因是我自己的修正:第 43 回合修 **BB** 時,我讓就地追加**每一次都驗證整個檔案**——因為
+「最後一筆不完整的檔案」不能安全地被追加,而沒有便宜的方法可以知道。那個交換是對的:
+
+> 另一個選項是「一次被回報為成功的寫入,產生一個這個工具自己拒絕讀取的檔案」。
+
+**但我沒有回頭去改那三處說它是 O(1) 的文件。** 旗標說明、狀態表、以及與 PostgreSQL 的比較
+那一節,全都還寫著 O(1)。
+
+**這是同一個模式的第五次**(AF、AN、AO、CN,現在是 CZ):**做了一件正確的事,而沒有去作廢
+它所使之為假的東西。** 而這一次被作廢的不是一句描述,是一個**效能承諾**——那是有人會據以
+決定「要不要在 cron 裡對一個 591 MB 的檔案每分鐘跑一次」的東西。
+
+三處現在都寫出實測數字,以及那個交換本身。
+
+## DA. 整個工具裡唯一一則三種形狀都不符合的訊息
+
+```
+csv2: warning: cannot write log file nolog.log; continuing / 警告：無法寫入 log 檔，操作照常繼續
+```
+
+README 記載了三種形狀:錯誤是**恰好兩行**、英文在前中文在後;WARN 是**一行、只有英文**;
+而每一行診斷都以 `csv2: <ISO-8601 時間戳> 層級 ` 開頭。
+
+**這一則三種都不是**:一行同時帶著兩種語言、以 ` / ` 相連、沒有時間戳、沒有層級記號,而且
+用小寫的 `warning:`。
+
+受測者是在寫「給監控系統用的包裝腳本」時撞到的,而它指出了要害:**這一則訊息伴隨的是一次
+rc=0 的執行,因此剖析錯它,就等於完全錯過它。**
+
+它不能直接走 `Logger.warn`——那會同時寫進 log 檔,而剛剛失敗的正是那個 log 檔。因此現在
+以相同的形狀組出來,只送到 stderr。
+
+`-append` stopped being O(1) when I fixed BB in round 43 -- the in-place path
+now validates the whole file before appending, because a file whose last record
+is incomplete cannot be safely appended to and there is no cheap way to know.
+The trade was right. Not going back to the three places that promise O(1) was
+not. Fifth instance of that pattern, and the first where what was falsified is
+a performance promise rather than a description -- the kind of thing someone
+decides a cron schedule on.

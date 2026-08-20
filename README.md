@@ -23,7 +23,7 @@ and the macOS host it is built from.
 | two-row `.csv2` headers, `--json`, `-md`, `--pretty` (display widths) | |
 | `-insert`/`-append`/`-delete`/`-update`, `-delete -cell`, `-delete -col` | |
 | `-hash`, `-encrypt`, `-decrypt`, `-keyfile`, `-debug`, `-log` | |
-| the `-append` O(1) fast path | |
+| the `-append` fast path — O(1) in bytes written, O(n) in bytes read | |
 | `.csv.index` / `.csv2.index` sidecars, `--verify-index` | |
 | parallel search, byte-identical to the single-threaded run | |
 | builds and runs on aarch64 Linux, byte-identical to macOS | |
@@ -231,7 +231,15 @@ EDITING / 編輯
                         it arrived, not as it grows. See below -- the same three
                         numbers give a different file if you run them one at a
                         time
-  -append ROW           append at the end (O(1) when writing in place)
+  -append ROW           append at the end. O(1) in BYTES WRITTEN, not in time:
+                        the whole file is read first, because a file whose last
+                        record is incomplete cannot be safely appended to and
+                        there is no cheap way to know. Measured linear --
+                        0.07 s at 1.9 MB, 0.24 s at 8.2 MB, 0.92 s at 34.6 MB.
+                        Until 2026-08-20 the check ran only when the file did
+                        not end in a newline, which let an append onto a record
+                        left open by an unclosed quote through at rc=0 and
+                        produced a file csv2 then refused to read
   -delete a[,b]         delete record a, or records a through b
   -delete -cell r:c     clear one cell (the field count never changes)
   -delete -col N|NAME   remove that column from every record AND from both
@@ -1340,8 +1348,9 @@ decimal digits.
 > SQLite instead.
 
 Every edit rewrites the whole file, so changing one cell in a 1 GiB file writes
-1 GiB where PostgreSQL would write about 10 KB. `-append` is the exception and
-takes an O(1) path. Lookups are by position, not by key, so finding the row
+1 GiB where PostgreSQL would write about 10 KB. `-append` is the exception: it writes
+only that row's bytes. It still reads the whole file first (see its flag entry),
+so what it saves is the write, not the time. Lookups are by position, not by key, so finding the row
 where `pkg_name = busybox` is a full scan.
 
 SQLite is the real neighbour here, not PostgreSQL — one file, no daemon, no
