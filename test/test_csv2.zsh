@@ -6247,9 +6247,16 @@ assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t121.csv")" "-t" \
 # 這件事所依賴的旗標清單，必須與解析器自己的 case 相符，否則這個拒絕會在有人新增旗標時
 # 悄悄地不再涵蓋它。
 t121_cases=$(awk '/^func parseArgs/,/^\}/' "$ROOT/src/main.swift" \
-    | grep -oE '^\s+case "[a-z0-9-]+"(, "[a-z0-9-]+")*:' | grep -oE '"[a-z0-9-]+"' | tr -d '"' | sort -u)
+    | grep -oE '^\s+case "[a-zA-Z0-9-]+"(, "[a-zA-Z0-9-]+")*:' | grep -oE '"[a-zA-Z0-9-]+"' | tr -d '"' | sort -u)
+# Uppercase allowed on both sides. A single-letter alias like `-V` is spelled
+# "V" in the case list and in KNOWN_FLAGS, and a lowercase-only pattern skipped
+# the entire `case "version", "V":` line -- so the one flag missing from
+# KNOWN_FLAGS was the one this check could not see.
+# 兩邊都允許大寫。像 `-V` 這樣的單字母別名，在 case 清單與 KNOWN_FLAGS 裡都寫作 "V"，
+# 而「只允許小寫」的樣式會把整行 `case "version", "V":` 跳過——於是「KNOWN_FLAGS 唯一漏掉
+# 的那個旗標」，正好是這個檢查看不見的那一個。
 t121_listed=$(awk '/^let KNOWN_FLAGS/,/^\]/' "$ROOT/src/main.swift" \
-    | grep -oE '"[a-z0-9-]+"' | tr -d '"' | sort -u)
+    | grep -oE '"[a-zA-Z0-9-]+"' | tr -d '"' | sort -u)
 t121_missing=$(only_in_first "$t121_cases" "$t121_listed" | tr '\n' ' ')
 if [[ -z "${t121_missing// /}" ]]; then
     ok "T121h and KNOWN_FLAGS covers every case the parser has / 而 KNOWN_FLAGS 涵蓋了解析器的每一個 case"
@@ -7623,6 +7630,74 @@ if [[ $("$CSV2" -get 1:2 -i "$TMP/t153b.csv") == "Z" && $("$CSV2" -get 5:2 -i "$
     ok "T153d a call-per-address loop leaves the earlier edits written / 「每個位址跑一次」的迴圈會讓先前的編輯留在檔案裡"
 else
     bad "T153d the loop did not behave as the warning describes / 那個迴圈的行為與警告所述不符"
+fi
+
+# ---------------------------------------------------------------------
+# T154 -- the surface a user sees first, checked against the one the parser
+# actually has.
+#
+# T121h pins KNOWN_FLAGS against the parser's cases. Nothing pinned either
+# against `--help`, and `--build-index` was missing from it -- a real flag,
+# documented in both READMEs, absent from the text a user reads before
+# reaching either. The blind rounds could not have found it: they are forbidden
+# `--help`, which is what makes it the least-watched interface in the project.
+#
+# T154 —— 使用者最先看到的那份介面，對上解析器真正擁有的那一份。
+# T121h 把 KNOWN_FLAGS 與解析器的 case 釘在一起，而沒有任何東西把它們與 `--help` 釘在一起，
+# 於是 `--build-index` 從 help 裡缺席——一個真實存在、兩份 README 都寫了的旗標，卻不在
+# 「使用者在讀到那兩份文件之前會先讀的那段文字」裡。盲測回合找不到它：它們被禁止使用
+# `--help`，而那正是這個專案裡最沒有人在看的那個介面。
+# ---------------------------------------------------------------------
+echo
+echo "--- T154: --help against the flags that exist / T154：--help 對上真正存在的旗標 ---"
+
+"$CSV2" --help >/dev/null 2>&1
+assert_eq "$?" "0" \
+    "T154a --help exits 0 / --help 以 0 結束"
+
+# assert_same compares FILES, not strings: it takes two paths and cmp's them.
+# Handing it two strings compares two paths that do not exist, which "differ" --
+# and the case fails for a reason that has nothing to do with what it asks.
+# assert_same 比的是「檔案」不是字串：它收兩個路徑再 cmp。把兩個字串交給它，比的是兩個
+# 不存在的路徑，那當然「不同」——於是這個案例因為一個與它要問的事情無關的理由而失敗。
+"$CSV2" --help > "$TMP/t154_long.txt" 2>&1
+"$CSV2" -h     > "$TMP/t154_short.txt" 2>&1
+assert_same "$TMP/t154_long.txt" "$TMP/t154_short.txt" \
+    "T154b and -h prints the same thing / 而 -h 印出的是同一份東西"
+_t154_help=$(cat "$TMP/t154_long.txt")
+
+# Every flag the parser knows has to appear in the help.
+# 解析器認得的每一個旗標，都必須出現在 help 裡。
+_t154_missing=""
+# The KNOWN_FLAGS array only, taken between its brackets. Grepping the whole
+# file for quoted lowercase words picks up every other string literal in it,
+# and requiring a trailing comma misses the last element.
+# 只取 KNOWN_FLAGS 這個陣列，以它的括號為界。對整個檔案抓「引號包住的小寫字」會把其他
+# 字串字面值一起抓進來，而要求「結尾逗號」則會漏掉最後一個元素。
+_t154_known=$(awk '/^let KNOWN_FLAGS/,/^\]/' "$ROOT/src/main.swift" | grep -oE '"[a-zA-Z0-9-]+"' | tr -d '"')
+for _f in ${(f)_t154_known}; do
+    [[ -z $_f ]] && continue
+    print -r -- "$_t154_help" | grep -qE -- "--?$_f([^a-z0-9-]|\$)" || _t154_missing="$_t154_missing $_f"
+done
+if [[ -z ${_t154_missing// /} ]]; then
+    ok "T154c every flag the parser knows appears in --help / 解析器認得的每一個旗標都出現在 --help 裡"
+else
+    bad "T154c missing from --help:${_t154_missing} / --help 裡沒有這些"
+fi
+
+# And every flag in the help is one the parser knows -- the other direction,
+# which is how a help text starts advertising something that was removed.
+# 而 help 裡的每一個旗標，都必須是解析器認得的——另一個方向，那正是一份 help 開始宣傳
+# 「已經被移除的東西」的方式。
+_t154_ghost=""
+for _f in ${(f)"$(print -r -- "$_t154_help" | grep -oE '(^| )--?[a-z][a-z0-9-]+' | tr -d ' ' | sed 's/^-*//' | sort -u)"}; do
+    [[ -z $_f ]] && continue
+    print -r -- "$_t154_known" | grep -qx -- "$_f" || _t154_ghost="$_t154_ghost $_f"
+done
+if [[ -z ${_t154_ghost// /} ]]; then
+    ok "T154d and every flag in --help is one the parser knows / 而 --help 裡的每一個旗標都是解析器認得的"
+else
+    bad "T154d in --help but unknown to the parser:${_t154_ghost} / 在 --help 裡但解析器不認得"
 fi
 
 # ---------------------------------------------------------------------

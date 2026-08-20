@@ -194,6 +194,34 @@ let KNOWN_FLAGS: Set<String> = [
     "truncate-partial",
     "update",
     "verify-index",
+    // Four names the parser answers to that this list did not carry: version
+    // with its single-letter alias, and the three context flags. A flag absent
+    // from here is written into the file as data instead of being refused --
+    // measured, an edit whose value was the version flag stored it as text at
+    // rc=0, while a read flag in the same position was refused.
+    //
+    // T121h compares this list against the parser's cases and could not see
+    // them: its pattern allowed only lowercase inside an alias, so a case line
+    // carrying a capital-letter alias matched nothing at all and was skipped
+    // whole. Both sides accept capitals now.
+    //
+    // No flag names in quotes anywhere in this comment. The extraction reads
+    // every quoted token between the brackets, so a comment quoting one adds a
+    // flag that does not exist -- which happened while writing this, and cost
+    // two runs to see.
+    // 這份清單先前沒有帶著、而解析器認得的四個名字：版本旗標與它的單字母別名，以及三個
+    // 上下文旗標。一個不在這裡的旗標，會被當成資料寫進檔案而不是被拒絕——實測：一次
+    // 「值就是版本旗標」的編輯，以 rc=0 把它當文字存了進去，而同一個位置的讀取旗標會被拒絕。
+    // T121h 拿這份清單去對解析器的 case，卻看不見它們：它的樣式在別名處只允許小寫，因此一行
+    // 帶著大寫別名的 case 完全不匹配、整行被跳過。現在兩邊都接受大寫。
+    // 這段註解裡不放任何「加引號的旗標名稱」。抽取器會讀括號之間每一個帶引號的 token，
+    // 因此一段引用了旗標名的註解，會憑空多出一個不存在的旗標——寫這段時就發生了，花了兩次
+    // 執行才看出來。
+    "version",
+    "V",
+    "A",
+    "B",
+    "C",
     "yes",
     "zh"
 ]
@@ -1585,9 +1613,11 @@ func printHelp() {
       -debug             diagnostics to stderr
       -log FILE          append a timestamped operation record
       --no-index         never read or write a .index sidecar
+      --build-index      build the sidecar now; otherwise one appears only as a
+                         side effect of a write or a full read
       --verify-index     O(n) full check of the sidecar; the O(1) check the
                          normal path does is deliberately a heuristic
-      --version  --help
+      --version  -V      --help  -h
 
     NOTES / 注意
       * The record separator written is ALWAYS LF, on every platform. Bytes
