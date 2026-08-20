@@ -4576,6 +4576,73 @@ for pair in 26:'[Z2]' 27:'[AA2]' 52:'[AZ2]' 53:'[BA2]' 702:'[ZZ2]' 703:'[AAA2]';
         "T103 field ${pair%%:*} is ${pair##*:} / 第 ${pair%%:*} 欄是 ${pair##*:}"
 done
 
+# ---------------------------------------------------------------------
+# T104 -- "append" that was a seek, and lost half an audit trail.
+#
+# openLog opened the file for writing and called seekToEndOfFile(). The comment
+# above it said "append, never truncate", and with ONE process that is exactly
+# what it does. With two it is not: the seek fixes an offset at open time, so a
+# writer that opened before another appended goes on writing over what that
+# other one wrote. Eight processes logging 25 operations each left 98 entries
+# of 200 -- none malformed, every run exiting 0.
+#
+# The failure shape is this project's own: a comment declaring a property that
+# nothing derived, indistinguishable from the real thing until a second actor
+# appears. T79 was the same shape with `no_embedded_newlines`.
+#
+# It matters here more than most places because the file is an audit trail. Its
+# entire value is that what happened is still there later, and a trail that
+# silently drops half its entries is worse than no trail, since whoever reads
+# it believes it is complete. Nor is concurrency exotic: a script running csv2
+# over several files at once with a shared -log is what the flag is for.
+#
+# T104 —— 一個其實是 seek 的「追加」，弄丟了半份稽核軌跡。
+# openLog 以寫入開啟檔案並呼叫 seekToEndOfFile()。它上面那句註解寫著「一律追加，絕不覆寫」，
+# 而在「一個」行程下它做的正是那件事。兩個行程下就不是了：那個 seek 在開檔當下固定了位移，
+# 於是先開檔的寫入者會持續蓋掉後來者追加的內容。八個行程各記錄 25 次操作，200 筆只剩 98 筆
+# ——沒有一筆是壞的，每一次都以 0 結束。
+# 這個失敗的形狀正是本專案自己的：一句註解宣告了某個性質，而沒有任何東西推導過它；在第二個
+# 行為者出現之前，它與真貨無法區分。T79 的 `no_embedded_newlines` 是同一個形狀。
+# 它在這裡比在多數地方更要緊，因為那個檔案是稽核軌跡。它的全部價值就是「發生過的事日後
+# 還在」，而一份會靜默丟掉一半紀錄的軌跡比沒有軌跡更糟——讀它的人會相信它是完整的。並行
+# 也不是什麼奇特情境：一支同時對多個檔案跑 csv2、共用一個 -log 的腳本，正是這個旗標的用途。
+# ---------------------------------------------------------------------
+echo
+echo "--- T104: a shared -log under concurrent writers / 並行寫入者共用同一個 -log ---"
+
+print -r -- 'a,b'  > "$TMP/t104.csv"
+print -r -- '1,2' >> "$TMP/t104.csv"
+
+# Pre-existing content, so "never truncate" is measured at the same time as
+# "never overwrite". The two are different promises and only one of them was
+# ever broken.
+# 先放一些既有內容，讓「絕不截斷」與「絕不覆寫」同時被量到。這是兩個不同的承諾，而其中
+# 只有一個曾經被打破。
+print -r -- 'PRIOR' > "$TMP/t104.log"
+
+t104_writers=6
+t104_each=20
+for i in {1..$t104_writers}; do
+    ( for j in {1..$t104_each}; do
+          "$CSV2" -contains 1 -i "$TMP/t104.csv" -log "$TMP/t104.log" >/dev/null 2>&1
+      done ) &
+done
+wait
+
+t104_want=$(( t104_writers * t104_each + 1 ))    # +1 for the PRIOR line
+assert_eq "$(wc -l < "$TMP/t104.log" | tr -d ' ')" "$t104_want" \
+    "T104a $t104_writers concurrent writers lose no entries / $t104_writers 個並行寫入者不遺失任何紀錄"
+
+assert_eq "$(head -1 "$TMP/t104.log")" "PRIOR" \
+    "T104b and the file that already existed was appended to, not truncated / 而既有的檔案是被追加，不是被截斷"
+
+# Loss showed up as MISSING lines, never as broken ones, which is why nothing
+# noticed: every surviving entry looked perfect.
+# 遺失是以「少了幾行」的形式出現，從來不是「壞掉的行」——這正是沒有東西發現它的原因：
+# 每一筆活下來的紀錄看起來都完好無缺。
+assert_eq "$(grep -vc '^PRIOR$' "$TMP/t104.log" | tr -d ' ')" "$(( t104_want - 1 ))" \
+    "T104c and every surviving line is a real entry, since loss never looked like damage / 而每一行都是真正的紀錄——遺失從來不長得像損壞"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

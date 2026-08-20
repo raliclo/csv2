@@ -1768,3 +1768,63 @@ fixes, each right alone, wrong together. The existing T92g caught it. The shape
 is the mirror image of the others here: not a rule missed in one place, but a
 rule applied twice, and the same root cause -- no single designated point of
 enforcement. There is one now, and T102f holds it.
+---
+
+## AK. 註解寫「一律追加」,而程式做的是「開檔時 seek 一次」(2026-08-20 修正)
+
+八個行程各跑 25 次,同時寫同一個 `-log` 檔:
+
+```console
+$ for i in {1..8}; do ( repeat 25 csv2 -contains 1 -i c.csv -log shared.log ) & done; wait
+expected 200 lines, got: 98
+malformed lines (not starting with a timestamp): 0
+```
+
+**一半以上的紀錄消失了,而且沒有一行是壞掉的。** 不是交錯亂碼,是**寫入互相覆蓋**:
+每一次執行都 rc=0,每一次都「成功」寫了 log。
+
+成因在 `Logger.openLog`:
+
+```swift
+// Append, never truncate: overwriting defeats the only purpose the
+// file has, which is being read later.
+// 一律追加，絕不覆寫
+if let h = FileHandle(forWritingAtPath: path) {
+    h.seekToEndOfFile()
+```
+
+`seekToEndOfFile()` 是「**開檔的那一刻**跳到尾端」,不是 `O_APPEND`。單一行程下兩者
+沒有差別;有第二個行程在中間追加時,這個行程仍然寫在它開檔時記下的那個位移上,直接
+蓋掉別人的紀錄。
+
+**註解說的是意圖,程式做的是另一件事,而兩者在單行程下無法區分。** 這與本專案其他缺陷
+同形:一個名字或一句註解宣告了某個性質,而沒有任何東西推導過它——T79 的
+`no_embedded_newlines` 是同一回事。
+
+### 為什麼這條特別要緊
+
+`-log` 是稽核軌跡。它的**全部價值**在於「日後回頭查時,發生過的事都還在」。一份會在
+並行下靜默丟掉一半紀錄的稽核軌跡,比沒有稽核軌跡更糟——因為讀它的人會相信它是完整的。
+
+而並行不是罕見情境:一支在多個檔案上平行跑 csv2、共用同一個 `-log` 的腳本,正是這個
+旗標被設計出來要服務的用法。
+
+### 文件現況
+
+README 說 `-log FILE` 會「附加一筆帶時間戳的操作紀錄」,而**單行程下這是真的**。
+文件沒有說、也沒有理由讓人懷疑的是:同時有第二個 csv2 在寫時會發生什麼。
+
+The comment says "append, never truncate" and the code seeks to the end once,
+at open. Those are the same thing with one process and different things with
+two: eight processes appending to one -log file produced 98 of 200 entries,
+none malformed, every run exiting 0. An audit trail that silently loses half
+its entries under concurrency is worse than none, because whoever reads it
+believes it is complete.
+
+**已修**:新增 `Platform.openForAppend`,以 `O_APPEND`(Windows 為 `_O_APPEND`)開檔,
+把 seek 與 write 合成單一次核心操作。由 **T104** 斷言:6 個並行寫入者各 20 次,121 行
+全數留存;未修正的建置在同一個測試上只留下 69 行。
+
+**Windows 較弱,而文件說明而非假裝。** CRT 的 `_O_APPEND` 是「每次寫入前先 seek」,
+窗口極小但不為零。POSIX 上沒有窗口。這一點寫進了兩份 README——一個做不到的保證,
+比沒有保證更糟。

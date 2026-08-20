@@ -306,6 +306,51 @@ enum Platform {
         #endif
     }
 
+    /// Open a file for appending, with the append happening in the KERNEL on
+    /// every write rather than once at open.
+    ///
+    /// `FileHandle(forWritingAtPath:)` followed by `seekToEndOfFile()` is not
+    /// the same thing, and the difference is invisible with one process. The
+    /// seek fixes an offset at open time; a second process that appends in
+    /// between leaves this one writing over what it wrote. Eight processes
+    /// each logging 25 operations to one file produced 98 entries of 200, none
+    /// of them malformed and every run exiting 0 -- silent loss, in the one
+    /// file whose entire value is that what happened is still there later.
+    ///
+    /// `O_APPEND` moves the seek-and-write into a single kernel operation, so
+    /// concurrent writers cannot land on the same offset.
+    ///
+    /// **Windows is weaker and this says so rather than pretending.** The CRT
+    /// implements `_O_APPEND` by seeking before each write, which closes the
+    /// window to almost nothing but does not make it atomic across processes.
+    /// The honest summary is: POSIX loses nothing, Windows loses far less than
+    /// it did, and neither is a reason to keep the seek-once behaviour.
+    ///
+    /// 以「追加」開啟檔案，而追加發生在**核心**、在每一次寫入時，不是在開檔時發生一次。
+    ///
+    /// `FileHandle(forWritingAtPath:)` 之後接 `seekToEndOfFile()` 不是同一件事，而這個
+    /// 差別在單一行程下看不出來。那個 seek 在開檔當下固定了一個位移；若第二個行程在中間
+    /// 追加，這個行程就會蓋掉對方寫的東西。八個行程各記錄 25 次操作到同一個檔案，200 筆
+    /// 只留下 98 筆，沒有任何一筆是壞的，而且每一次都以 0 結束——靜默的遺失，發生在那個
+    /// 「全部價值就是日後回頭查時東西還在」的檔案上。
+    ///
+    /// `O_APPEND` 把 seek 與 write 合成單一次核心操作，並行的寫入者因此不可能落在同一個
+    /// 位移上。
+    ///
+    /// **Windows 較弱，而此處說明而非假裝。** CRT 對 `_O_APPEND` 的實作是「每次寫入前先
+    /// seek」，那把窗口縮到極小，卻沒有讓它在跨行程之間成為不可分割的操作。誠實的說法是：
+    /// POSIX 不會遺失，Windows 遺失的比原本少得多，而兩者都不構成保留「開檔時 seek 一次」
+    /// 的理由。
+    static func openForAppend(path: String) -> FileHandle? {
+        #if canImport(ucrt)
+        let fd = _open(path, _O_WRONLY | _O_APPEND | _O_CREAT, _S_IREAD | _S_IWRITE)
+        #else
+        let fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+        #endif
+        guard fd >= 0 else { return nil }
+        return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+    }
+
     // -----------------------------------------------------------------
     // MARK: - Peak memory / 峰值記憶體
     // -----------------------------------------------------------------

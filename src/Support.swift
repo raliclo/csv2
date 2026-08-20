@@ -59,16 +59,25 @@ final class Logger {
     /// 兩邊的事件排在同一條時間線上。
     static func timestamp() -> String { formatter.string(from: Date()) }
 
+    /// Append, never truncate: overwriting defeats the only purpose the file
+    /// has, which is being read later.
+    ///
+    /// This used to open for writing and `seekToEndOfFile()`, which is that
+    /// intention expressed as a seek that happens ONCE. With one process the
+    /// two are indistinguishable. With two they are not: the second writer
+    /// lands on the offset the first recorded at open and overwrites it.
+    /// Eight processes each logging 25 operations left 98 entries of 200 --
+    /// none malformed, every run exiting 0. `Platform.openForAppend` puts the
+    /// append in the kernel, where a concurrent writer cannot be raced.
+    /// 一律追加，絕不覆寫：覆寫會讓這個檔案唯一的用途（日後回頭查）失效。
+    /// 原本的寫法是「以寫入開啟後 seekToEndOfFile()」——也就是把上面那個意圖表達成一次
+    /// 「只發生一次」的 seek。單一行程下兩者無法區分；兩個行程下就不是了：後來的寫入者會
+    /// 落在前一個在開檔時記下的位移上並蓋掉它。八個行程各記錄 25 次操作，200 筆只剩 98 筆
+    /// ——沒有一筆是壞的，每一次都以 0 結束。`Platform.openForAppend` 把追加交給核心，
+    /// 並行的寫入者在那裡搶不到同一個位移。
     func openLog(path: String) {
         logPath = path
-        if !FileManager.default.fileExists(atPath: path) {
-            FileManager.default.createFile(atPath: path, contents: nil)
-        }
-        // Append, never truncate: overwriting defeats the only purpose the
-        // file has, which is being read later.
-        // 一律追加，絕不覆寫：覆寫會讓這個檔案唯一的用途（日後回頭查）失效。
-        if let h = FileHandle(forWritingAtPath: path) {
-            h.seekToEndOfFile()
+        if let h = Platform.openForAppend(path: path) {
             logHandle = h
         } else {
             warnLogUnavailable()

@@ -527,7 +527,17 @@ not emit an address for anything to be added to.
 
 ### What `-log` writes, and what it does not
 
-`-log FILE` appends a timestamped record of the operation. It is an audit trail,
+`-log FILE` appends a timestamped record of the operation. **Several csv2
+processes may share one log file**: the append happens in the kernel, so a
+concurrent writer cannot land on another's offset and overwrite it. That is
+worth stating because it was not always true — the file was opened for writing
+and seeked to the end once, which is the same thing with one process and not
+with two. Eight processes logging 25 operations each left 98 entries of 200,
+none of them malformed and every run exiting 0. Asserted by T104. On Windows
+the C runtime seeks before each write rather than appending atomically, so the
+window is very small but not zero; POSIX has no window.
+
+It is an audit trail,
 so it records what changed — which means it has to be explicit about what it
 will not record:
 
