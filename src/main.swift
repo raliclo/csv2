@@ -611,7 +611,16 @@ func parseDelete(_ spec: String, cell: Bool, col: Bool, argvTail: [String], inde
 /// 不會報錯，只會改到別的儲存格。`r:c` 也正是 `-contains` 印出來的格式，因此
 /// 一個指令的輸出可以直接接到下一個。
 func parseCellAddress(_ s: String, flag: String) throws -> (Int, String) {
-    let parts = s.split(separator: ":", maxSplits: 1).map(String.init)
+    // omittingEmptySubsequences: false, or "1:" splits into ONE part and every
+    // check below that asks for two is skipped -- which is how `-get 1:`
+    // reached "expected r:c" again after being given its own reason. Swift's
+    // default drops empty pieces, and the empty piece is the thing being
+    // diagnosed here.
+    // 要 omittingEmptySubsequences: false，否則 "1:" 只會切成「一段」，下面每一個「需要兩段」
+    // 的檢查都會被跳過——那正是 `-get 1:` 在有了自己的理由之後，又回到「需要 r:c」的原因。
+    // Swift 的預設會丟掉空的片段，而這裡要診斷的正是那個空片段。
+    let parts = s.split(separator: ":", maxSplits: 1,
+                        omittingEmptySubsequences: false).map(String.init)
     // A header address gets the reason, not "expected r:c". The form IS r:c --
     // the locating report printed it -- and answering a well-formed address
     // with a complaint about its shape sends the reader to check their quoting.
@@ -625,6 +634,16 @@ func parseCellAddress(_ s: String, flag: String) throws -> (Int, String) {
     if parts.count == 2, ["0", "0a", "0b"].contains(parts[0]), !parts[1].isEmpty {
         throw usageError("\(flag): \(s) names a header cell (the locating report prints 0 on a .csv and 0a/0b on a .csv2); header cells are not addressable by any verb, -get included. Records are numbered from 1",
                          "\(flag)：\(s) 指的是標頭儲存格（定位報告在 .csv 上印 0，在 .csv2 上印 0a／0b）；標頭儲存格不是任何動詞可以定址的，-get 也不行。紀錄從 1 開始編號")
+    }
+    // An empty column part gets its own reason. `-get 1:` answered "expected
+    // r:c", which is a complaint about shape when the shape is right and one
+    // half is missing -- and a file really can have a column whose name is
+    // empty, which is addressable, by its number.
+    // 空的欄位部分有自己的理由。`-get 1:` 原本回答「需要 r:c」，那是在形狀正確、只是缺了
+    // 一半時去挑剔形狀——而一個檔案確實可以有一個「名字是空的」欄位，它定址得到，用欄號。
+    if parts.count == 2, Int(parts[0]) != nil, parts[1].isEmpty {
+        throw usageError("\(flag): \(s) names no column -- the part after the colon is empty. A column whose NAME is empty is addressed by its number, as in 1:2",
+                         "\(flag)：\(s) 沒有指名任何欄位——冒號之後是空的。名字為空的欄位請用欄號定址，例如 1:2")
     }
     guard parts.count == 2, let r = Int(parts[0]), r >= 1, !parts[1].isEmpty else {
         throw usageError("\(flag): expected r:c, got \"\(s)\"",
@@ -1070,9 +1089,19 @@ func validate(_ o: inout Options) throws {
         // nothing, which is indistinguishable from "this flag is not working".
         // 兩者都是在「位址」上附加資訊，而唯一會印出位址的輸出就是定位報告。
         // 在其他地方它們會被接受卻毫無作用，那與「這個旗標壞了」無從分辨。
-        let which = [o.physical ? "--physical" : nil, o.a1 ? "--a1" : nil].compactMap { $0 }.joined(separator: " and ")
+        // One flag or two, and the sentence has to read correctly either way.
+        // Sharing a plural verb made `--a1 add to the address`, which reads as
+        // though one flag were several -- a small thing that tells the reader
+        // the message was assembled rather than written.
+        // 一個旗標或兩個，這句話兩種情況都必須讀得通。共用一個複數動詞會造出
+        // 「--a1 add to the address」，讀起來像是一個旗標卻用了複數——小事，但它會告訴讀者
+        // 這句話是「拼出來的」，不是「寫出來的」。
+        let flags = [o.physical ? "--physical" : nil, o.a1 ? "--a1" : nil].compactMap { $0 }
+        let which = flags.joined(separator: " and ")
+        let verb = flags.count > 1 ? "add" : "adds"
+        let need = flags.count > 1 ? "they need" : "it needs"
         throw usageError(
-            "\(which) add to the address in the locating report, so they need -contains without --filter, -md or --json",
+            "\(which) \(verb) to the address in the locating report, so \(need) -contains without --filter, -md or --json",
             "\(which) 是附加在定位報告的位址上的，因此需要搭配 -contains，且不能同時給 --filter、-md 或 --json")
     }
     if o.contains == nil && o.filter && o.edits.isEmpty {
@@ -1230,7 +1259,16 @@ func resolveColumn(_ token: String, header: Record) throws -> Int {
             "\"\(token)\" is an address as --physical or --a1 prints it; the trailing location is not part of the address. Use \"\(bare)\" for the column, and note that only the plain r:c form composes",
             "「\(token)」是 --physical 或 --a1 印出來的位址形式；結尾那段位置資訊不屬於位址本身。欄位請用「\(bare)」，並注意只有單純的 r:c 形式可以直接接下去")
     }
-    let names = header.fields.map { baseName(headerName($0)) }.joined(separator: ", ")
+    // Each name in quotes, because a name can contain the separator this list
+    // uses. A file whose first column is called `a,b` produced
+    //   the columns are: a,b, c
+    // which reads as three columns and is not parseable by a human or a
+    // script. The quotes cost nothing on ordinary names and are the only thing
+    // that makes the awkward ones legible.
+    // 每個名字都加引號，因為名字裡可以含有「這份清單用來分隔的那個字元」。第一欄叫做
+    // `a,b` 的檔案原本會印出「the columns are: a,b, c」——讀起來像三欄，人與腳本都解析不了。
+    // 對一般的名字加引號沒有任何代價，而它是讓那些尷尬的名字可讀的唯一辦法。
+    let names = header.fields.map { "\"\(baseName(headerName($0)))\"" }.joined(separator: ", ")
     throw fault("no column named \"\(token)\"; the columns are: \(names)",
               "沒有名為「\(token)」的欄位；本檔案的欄位是：\(names)")
 }

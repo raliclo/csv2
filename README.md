@@ -184,11 +184,18 @@ SELECTING / 選取
                         refused, and a start past the end gives empty output
                         at rc=0 -- but it says so: a single WARN line on
                         stderr naming the start you asked for and the last
-                        record there is. Every output shape carries it,
-                        including -md, which has no meta line to put it in.
-                        `records` on the trailing --json meta line answers the
-                        same question for a caller that would rather parse
-                        than read stderr. -head and -tail clamp the same way,
+                        record there is. The WARN goes to stderr whatever
+                        output shape was asked for, including -md, which has
+                        no meta line to put it in -- it is one line per RUN,
+                        not one per shape. It also fires on a file with a
+                        header and no records at all, where every window is
+                        past the end; until 2026-08-21 that was the one case
+                        it missed. `records` on the trailing --json meta line
+                        answers the same question for a caller that would
+                        rather parse than read stderr -- though on an empty
+                        file it reads `0` whether the window missed or the
+                        file was simply empty, which is why the WARN is the
+                        one that distinguishes them. -head and -tail clamp the same way,
                         silently, because clamping an END is what was asked
                         for
   -t                    include the header rows (off by default). It applies
@@ -305,7 +312,22 @@ PROTECTION / 保護
   --yes                 accept the default key without a prompt
 
 COLS is a comma-separated list of column names, 1-based column numbers, or a
-mix: `-hash license`, `-hash 7`, `-hash 6,license`.
+mix: `-hash license`, `-hash 7`, `-hash 6,license`. Three refusals go with it,
+all of them cases where guessing would be worse than stopping:
+
+- **An empty list is refused.** `-hash ""` used to exit 0 having protected
+  nothing at all; "no columns" and "a variable that came out empty" cannot be
+  told apart, and one of them leaves the file unprotected while every check
+  reports success.
+- **A token that is both a column number and a column name is refused.** On a
+  file whose columns are called `2` and `1`, `-hash 2` cannot be resolved
+  without guessing which the caller meant. Rename, or use a number that is not
+  also a name.
+- **A comma inside a name has no escape**, because the list separates on
+  commas. Reach such a column by its NUMBER, or with `-delete -col`, which
+  takes exactly one name and therefore takes the comma with it.
+
+Asserted by T140 and T144.
 
 INDEX / 索引
   --no-index            never read or write a .index sidecar. The sidecar is
@@ -527,6 +549,16 @@ itself it would read a UTF-16 file byte-transparently — correct for a tool tha
 promises bytes round-trip, and useless to the person holding it, because every
 second byte is NUL, the column names carry them, and the whole thing parses at
 rc=0 into records that mean nothing.
+
+**The guard is the BOM and only the BOM.** A UTF-16 file saved without one is
+exactly the case in the paragraph above: it parses at rc=0 into records that
+mean nothing, and csv2 has nothing to detect it by that would not also
+misfire on legitimate data. If you are handed UTF-16, convert it; do not rely
+on being told.
+
+**A zero-byte file is refused too**, with `expected 1 header row(s), found 0` —
+a file with no header does not declare its own shape, and guessing one is how a
+data row becomes a header.
 
 ```console
 $ csv2 -r -i export.csv

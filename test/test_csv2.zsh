@@ -1629,9 +1629,15 @@ assert_contains "$("$CSV2" -delete -col 2 -delete -col license -i "$TMP/dc.csv2"
     'busybox,"fork raliclo/busybox, branch develop"' \
     "T57d a quoted field containing a comma survives the shift / 含逗號的引號欄位在位移後仍完好"
 
+# Each name in quotes: a column name can contain the comma this list separates
+# on, and `the columns are: a,b, c` reads as three columns. Round 54 found that
+# on a file whose first column really is called `a,b`.
+# 每個名字都加引號：欄名裡可以含有「這份清單用來分隔的那個逗號」，而
+# 「the columns are: a,b, c」讀起來像三欄。第 54 回合是在一個第一欄真的叫 `a,b` 的檔案上
+# 發現這件事的。
 assert_eq "$("$CSV2" -delete -col b -i "$TMP/dc.csv2" -so 2>&1 >/dev/null | head -1)" \
-    'csv2: no column named "b"; the columns are: pkg, version, notes, license' \
-    "T57e an unknown column name names the columns that do exist / 未知的欄位名稱會列出實際存在的欄位"
+    'csv2: no column named "b"; the columns are: "pkg", "version", "notes", "license"' \
+    "T57e an unknown column name names the columns that do exist, each quoted / 未知的欄位名稱會列出實際存在的欄位，每個都加引號"
 
 assert_fails "T57f removing every column is refused: a file with no columns is not a CSV file / 移除全部欄位被拒：沒有欄位的檔案不是 CSV 檔" -- \
     "$CSV2" -delete -col 1 -delete -col 2 -delete -col 3 -delete -col 4 -i "$TMP/dc.csv2" -so
@@ -7024,6 +7030,55 @@ else
     fi
 fi
 unset CSV2_INDEX_MIN_BYTES CSV2_PARALLEL_MIN_BYTES CSV2_PARALLEL_CHUNK_BYTES
+
+# ---------------------------------------------------------------------
+# T144 -- names with a comma in them, and a column part that is empty.
+#
+# Round 54: a file whose first column is called `a,b` produced
+# `the columns are: a,b, c` -- three columns to any reader, human or script.
+# And `-get 1:` answered "expected r:c", a complaint about a shape that is
+# right, when what is missing is the column.
+#
+# T144 —— 名字裡有逗號的欄位，以及一個空的欄位部分。
+# ---------------------------------------------------------------------
+echo
+echo "--- T144: a comma inside a name / T144：名字裡的逗號 ---"
+
+print -r -- '"a,b",c'  > "$TMP/t144.csv"
+print -r -- '1,2'     >> "$TMP/t144.csv"
+
+_t144=$("$CSV2" -hash zz -i "$TMP/t144.csv" -o "$TMP/t144_out.csv" 2>&1)
+assert_contains "$_t144" '"a,b", "c"' \
+    "T144a the column list quotes each name, so a comma inside one is visible / 欄位清單為每個名字加引號，因此名字裡的逗號看得出來"
+
+# COLS splits on commas and has no escape, so a name containing one is reached
+# by NUMBER. That is the documented answer and it has to work.
+# COLS 以逗號分隔且沒有跳脫語法，因此含逗號的名字要用「欄號」定址。那是文件給的答案，
+# 它必須真的可用。
+"$CSV2" -hash 1 -i "$TMP/t144.csv" -o "$TMP/t144_out.csv"
+assert_contains "$(head -1 "$TMP/t144_out.csv")" 'a,b:hash' \
+    "T144b and the column number reaches a name a comma-separated list cannot / 而欄號抵達得了一個「逗號分隔清單」抵達不了的名字"
+
+# -delete -col takes ONE name, not a list, which is the other way to reach it.
+# Changing that would silently turn "delete this column" into "delete two".
+# -delete -col 收的是「一個」名字而不是清單，那是抵達它的另一條路。改掉它，會讓
+# 「刪掉這一欄」靜默地變成「刪掉兩欄」。
+"$CSV2" -delete -col 'a,b' -i "$TMP/t144.csv" -o "$TMP/t144_del.csv"
+assert_eq "$(head -1 "$TMP/t144_del.csv")" 'c' \
+    "T144c -delete -col takes one name, comma and all / -delete -col 收的是一個名字，連逗號一起"
+
+_t144_e=$("$CSV2" -get '1:' -i "$TMP/t144.csv" 2>&1)
+if [[ $_t144_e == *"the part after the colon is empty"* && $_t144_e != *"expected r:c"* ]]; then
+    ok "T144d an empty column part is named as one / 空的欄位部分會被指名出來"
+else
+    bad "T144d $(print -r -- $_t144_e | head -1) / 訊息如上"
+fi
+
+# The shape complaint still exists for things that really are the wrong shape.
+# 對「真的形狀不對」的東西，那句形狀的抱怨仍然存在。
+_t144_s=$("$CSV2" -get ':2' -i "$TMP/t144.csv" 2>&1)
+assert_contains "$_t144_s" "expected r:c" \
+    "T144e while a genuinely malformed address still gets the shape complaint / 而真正格式錯誤的位址仍然得到那句形狀的抱怨"
 
 # ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
