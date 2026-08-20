@@ -772,6 +772,31 @@ func runEdit(_ o: Options) throws {
     //
     // 位址是相對於輸入的，這正是此處判斷得出來的原因：`-delete 1,1` 與 `-update 1:2` 依定義
     // 就是在說同一筆紀錄，不需要知道檔案裡有什麼。
+    // Two edits aimed at the SAME cell: the first cannot survive the second,
+    // and it used to be applied and then overwritten, at rc=0, with nothing
+    // said. The refusal for `-update` colliding with `-delete` gives the
+    // reason in words that describe this exactly -- "the edit would have no
+    // effect and would still be reported as done".
+    //
+    // Two `-insert`s at one N are different and stay legal: they produce two
+    // records, in the order written, and both survive. That is documented.
+    // Two updates produce one value, and one of them was never going to be it.
+    //
+    // 兩個瞄準「同一個儲存格」的編輯：第一個不可能在第二個之下存活，而它原本會先被套用、
+    // 再被覆蓋，rc=0，什麼都不說。「`-update` 撞上 `-delete`」那個拒絕給出的理由，逐字
+    // 描述了這裡發生的事——「該編輯不會有任何效果，卻仍會被回報為已完成」。
+    //
+    // 同一個 N 上的兩次 `-insert` 是另一回事，仍然合法：它們產生兩筆紀錄、依書寫順序，兩筆
+    // 都留下來。那是記錄在案的。兩次更新只會產生一個值，而其中一個從一開始就不會是它。
+    for (rn, ups) in updates where ups.count > 1 {
+        var seen = Set<String>()
+        for (c, _) in ups where !seen.insert(c).inserted {
+            throw fault(
+                "-update \(rn):\(c) is given more than once; the earlier one would have no effect and would still be reported as done",
+                "-update \(rn):\(c) 被給了不只一次；較早的那一個不會有任何效果，卻仍會被回報為已完成")
+        }
+    }
+
     if !deletes.isEmpty {
         func deleted(_ r: Int) -> (Int, Int)? {
             for (a, b) in deletes where r >= a && r <= b { return (a, b) }
@@ -1370,6 +1395,45 @@ func runAppendFast(_ o: Options) throws {
     // 先寫資料，再更新索引。中間被打斷的話索引是過期的，會被驗證擋下並退回掃描
     // ——安全的降級。
     if let idx = existingIndex {
+        // A record that spans lines makes `no_embedded_newlines` false, and
+        // this path used to update the count, the offsets and the freshness
+        // stamp while leaving that claim exactly as it was.
+        //
+        // The result is the defect T79 was written for, arriving through a
+        // different door: an index asserting a property of the file that
+        // nothing re-derived. The O(1) check then passes -- the stamp is
+        // current, because this path just refreshed it -- `-contains` takes
+        // the parallel path, and every record after the first chunk boundary
+        // past the appended one is numbered one too high. At rc=0. Following
+        // the README's own find-then-edit recipe writes into the wrong row.
+        //
+        // `-append` with `-o` and `-update` were both correct; only the
+        // in-place fast path, which is the only one that edits an index rather
+        // than rebuilding it, had this to get wrong.
+        //
+        // Counting line feeds is enough: every appended record ends with
+        // exactly one, so more of them than records means at least one record
+        // carries a newline inside a quoted field.
+        //
+        // 一筆跨行的紀錄會讓 `no_embedded_newlines` 變成假的，而這條路徑原本會更新筆數、
+        // 偏移量與新鮮度戳記，卻把那個宣稱原封不動地留著。
+        //
+        // 結果就是 T79 當初要處理的那個缺陷從另一扇門回來：一份索引宣稱了一個「沒有任何東西
+        // 重新推導過」的檔案性質。O(1) 檢查於是通過——戳記是最新的，因為這條路徑剛剛才更新
+        // 過它——`-contains` 走上平行路徑，而「被追加那一筆之後的第一個區塊邊界」以後的每一筆
+        // 編號都大了一。rc=0。照著 README 自己那套「先找再改」的寫法做，值會被寫進錯的那一列。
+        //
+        // `-append` 搭配 `-o` 與 `-update` 都是對的；只有就地的快路徑——唯一一條「編輯」索引
+        // 而不是重建它的路徑——有這件事可以做錯。
+        //
+        // 數換行就夠了：每一筆被追加的紀錄都恰好以一個換行結尾，因此換行比筆數多，就代表
+        // 至少有一筆在引號欄位裡帶著換行。
+        let lfInPayload = payload.filter { $0 == BYTE_LF }.count - prefix.count
+        if lfInPayload > appendOffsets.count {
+            idx.noEmbeddedNewlines = false
+            Logger.shared.info(
+                "append: a record spans lines, so the index beside \(path) no longer claims one record per line")
+        }
         var n = Int(idx.records)
         for off in appendOffsets {
             n += 1

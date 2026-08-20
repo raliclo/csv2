@@ -325,6 +325,30 @@ func parseArgs(_ argv: [String]) throws -> Options {
         }
         i += 1
     }
+    // A modifier left over at the end never found a verb to attach to. It used
+    // to be accepted and ignored: `csv2 -cell -r -i f.csv` exited 0, and
+    // `csv2 -insert 1 'z,z,z' -cell` exited 0 as well -- because the refusal
+    // for `-insert -cell` reads the modifier at the moment the verb is parsed,
+    // so writing `-cell` AFTER the two positional arguments walks straight
+    // past it. The refusal was positional, not semantic.
+    //
+    // This is the "swallowed option" failure this project already has on
+    // record from multissh: a flag that changes nothing and says nothing, so
+    // the caller believes they asked for something they did not.
+    //
+    // 留到最後的修飾符，代表它從未找到可以依附的動詞。原本它會被接受並忽略：
+    // `csv2 -cell -r -i f.csv` 以 0 結束，而 `csv2 -insert 1 'z,z,z' -cell` 也是——因為
+    // 「-insert 不可與 -cell 併用」那個拒絕，是在「解析到該動詞的那一刻」去讀修飾符的，
+    // 於是把 `-cell` 寫在兩個位置參數之後就直接繞了過去。那個拒絕是位置性的，不是語意性的。
+    //
+    // 這正是本專案已經記錄過的、multissh 被咬過的那種「被吞掉的選項」：一個什麼都不改、
+    // 也什麼都不說的旗標，於是呼叫端以為自己要求了一件他其實沒有要求到的事。
+    if o.cellModifier || o.colModifier {
+        let which = o.cellModifier ? "-cell" : "-col"
+        throw usageError(
+            "\(which) is a modifier and has no verb to modify here; it attaches to the -delete (or -insert) that FOLLOWS it, so `-delete 1:2 \(which)` is not the same as `-delete \(which) 1:2`",
+            "\(which) 是修飾符，此處沒有可修飾的動詞；它依附在「其後」的 -delete（或 -insert）上，因此 `-delete 1:2 \(which)` 與 `-delete \(which) 1:2` 不是同一件事")
+    }
     return o
 }
 

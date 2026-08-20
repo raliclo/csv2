@@ -3044,3 +3044,117 @@ time hours apart rather than days.
 而這一次多學到一件事:那則 WARN 是**一行、只有英文**,而那與這個工具裡每一則診斷一致——
 「兩行雙語」屬於「結束一次執行」的那則訊息。**我原本以為那是不一致,查了程式才知道那是慣例。**
 文件現在把那個分界寫出來了,而它原本從來沒有被寫下來過。
+---
+
+# 第 46 回合(2026-08-20)—— 把拒絕表逐條打一遍、刻意製造 rc=0 的錯誤答案
+
+**這一輪找到目前為止最嚴重的一條,而它是這個工具自己造出來的那種失敗。**
+
+## CQ. `-append --in-place` 弄壞它自己的索引,於是 `-contains` 在 rc=0 下給出錯的位址(2026-08-20 修正,T116a–d)
+
+```console
+$ csv2 --build-index -i a.csv                       # 1100 筆
+$ csv2 -append "$(printf '1101,"two\nlines",x')" -i a.csv --in-place
+rc=0
+$ csv2 --verify-index -i a.csv
+index MISMATCH: no_embedded_newlines: index says the file has none, but record 1101 spans lines
+```
+
+那筆被追加的紀錄是**合法的 CSV**——引號欄位裡的換行,正是這個工具存在所要處理的東西。而
+就地追加的快路徑更新了索引的**筆數、偏移量與新鮮度戳記**,唯獨沒有動 `no_embedded_newlines`。
+
+於是 O(1) 檢查通過了——**戳記是最新的,因為這條路徑剛剛才更新過它**——`-contains` 走上平行
+路徑,而「被追加那一筆之後的第一個區塊邊界」以後的每一筆,編號都大了一。
+
+受測者量到的後果:
+
+```
+$ csv2 -contains …                     1102:2
+$ csv2 -get 1102:2 -i …                no such record; the file has 1101 records
+```
+
+**照著 README 自己那套「先找再改」的寫法做,值被寫進了錯的那一列**,rc=0,而稽核軌跡裡那
+一筆對「位元組」是真的、對「意圖」是假的。
+
+### 這是 T79 那個缺陷從另一扇門回來
+
+T79 修的是「三個呼叫點設定 `no_embedded_newlines`,其中兩個傳常數」。這一次是第四個地方
+——一條**編輯**索引而不是重建它的路徑,而那是唯一一條有這件事可以做錯的路徑。
+`-append` 搭配 `-o`、以及 `-update`,都是對的,因為它們重建索引。
+
+**一份索引宣稱了一個沒有任何東西重新推導過的檔案性質。** 一字不差,就是 T79 的那句話。
+
+## CR. 同一格上的兩次 `-update`,第一次被靜默丟棄(2026-08-20 修正,T116e–g)
+
+```console
+$ csv2 -update 1:2 'FIRST' -update 1:2 'SECOND' -i u.csv --in-place
+rc=0
+$ csv2 -get 1:2 -i u.csv
+SECOND
+```
+
+而這個工具對「`-update` 撞上同一次執行的 `-delete`」的拒絕,理由是:
+
+> **「該編輯不會有任何效果,卻仍會被回報為已完成。」**
+
+那句話**逐字描述了它在這裡做的事**。
+
+值得對照的是「同一個 N 上的兩次 `-insert`」——那是**記錄在案的**行為,兩筆都會寫入,依書寫
+順序。兩者的差別是真的:兩次插入產生兩筆紀錄,兩次更新只有一次會留下。
+
+## CS. 一個沒有歸屬動詞的修飾符會被接受並忽略(2026-08-20 修正,T116h–j)
+
+```console
+$ csv2 -cell -r -i f.csv
+rc=0
+$ csv2 -insert 1 'z,z,z' -cell -i i.csv --in-place
+rc=0                                    ← 那個「-insert 不可與 -cell 併用」的拒絕沒有觸發
+```
+
+`-cell` 與 `-col` 是修飾符,必須依附在一個動詞上。單獨出現時它們什麼也不做,而且不出聲。
+
+而「`-insert -cell` 被拒絕」這件事因此是**位置性**的,不是語意性的:把 `-cell` 寫在兩個位置
+參數之後就繞過去了。
+
+**README 記過 multissh 被「被吞掉的選項」咬過一次,而這是同一個形狀。**
+
+## 一條沒有重現:引數錯誤回報了一個不存在的位置
+
+受測者說一個壞掉的 `-append` 引數會被回報成 `header row 0a (line 1), field 3`。
+
+我這裡得到的是:
+
+```
+csv2: -append has 2 fields but the header has 3; csv2 will not pad or truncate to fit
+```
+
+**沒有位置,而且是對的。** 可能是它的構造不同,也可能是同一天稍早的某個修正順手改掉了。
+記在這裡,因為若它再出現,這一段可以省下一次重新量測。
+
+Round 46 found the worst defect so far, and the tool produced it itself: the
+in-place append fast path updates an index's record count, offsets and
+freshness stamp while leaving its `no_embedded_newlines` claim untouched. Append
+a legitimate multi-line record and the index now asserts a property of the file
+that nothing re-derived -- T79's sentence, word for word, arriving through a
+fourth call site that EDITS an index rather than rebuilding one. The O(1) check
+then passes because this path just refreshed the stamp, -contains takes the
+parallel path, and following the README's own find-then-edit recipe writes into
+the wrong row at rc=0.
+
+### 而 T116 的 fixture 被同一個 zsh 陷阱弄壞了第三次
+
+`local` 用在大括號群組(不是函式)裡,zsh 會拒絕;那個拒絕走 stderr,而群組的 stdout 仍然
+寫進檔案,於是 fixture 是壞的、腳本照常往下跑。
+
+**T108、T110,現在是 T116。** 前兩次我都修好了、也都在旁邊寫下了成因,而第三次照樣發生。
+
+「寫下來」擋不住它。三處現在都在出事的那一行旁邊有註解,而那是目前唯一試過還沒失敗的做法
+——雖然這句話在第二次之後我也說過。
+
+### CQ 的修法:數換行
+
+每一筆被追加的紀錄都恰好以一個換行結尾。因此 payload 裡的換行數若多於被追加的筆數,就代表
+至少有一筆在引號欄位裡帶著換行——而那時 `no_embedded_newlines` 必須變成 false。
+
+不用去解析那一列。**這條路徑之所以是快路徑,正是因為它不解析**;而讓它為了維持一個宣稱而
+開始解析,會把它變成它原本要避開的那個東西。

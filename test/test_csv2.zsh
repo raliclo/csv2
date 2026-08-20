@@ -5672,6 +5672,108 @@ assert_succeeds "T115h while a UTF-8 BOM is still stripped rather than refused /
 assert_contains "$("$CSV2" -contains 1 -i "$TMP/t115_bom.csv" 2>/dev/null)" "1:1" \
     "T115i and the first column is still addressable / 而第一欄仍然定址得到"
 
+# ---------------------------------------------------------------------
+# T116 -- the tool producing its own signature failure.
+#
+# (a) `-append --in-place` updated the index's record count, its offsets and
+#     its freshness stamp, and left `no_embedded_newlines` exactly as it found
+#     it. Append a legitimate multi-line record -- a quoted newline, which is
+#     the thing this tool exists to handle -- and the index now asserts a
+#     property of the file that nothing re-derived.
+#
+#     T79's sentence, word for word, through a fourth call site: the one that
+#     EDITS an index instead of rebuilding it. `-append -o` and `-update`
+#     rebuild, so neither could get this wrong.
+#
+#     The consequence is the worst kind: the O(1) check PASSES, because this
+#     path just refreshed the stamp itself. `-contains` then takes the parallel
+#     path and numbers every record after the next chunk boundary one too high,
+#     at rc=0 -- so following the README's own find-then-edit recipe writes into
+#     the wrong row.
+#
+# (b) Two `-update`s on one cell: the first was applied and then overwritten,
+#     rc=0, silently. The refusal for `-update` colliding with `-delete` states
+#     the reason in words that describe this exactly.
+#
+# (c) A modifier with no verb was accepted and ignored, which made the
+#     `-insert -cell` refusal positional: writing `-cell` after the positional
+#     arguments walked past it.
+#
+# T116 —— 這個工具自己造出了它的招牌失敗。
+# (a) `-append --in-place` 更新了索引的筆數、偏移量與新鮮度戳記，卻把 `no_embedded_newlines`
+#     原封不動地留著。追加一筆合法的跨行紀錄——引號內的換行，正是這個工具存在所要處理的東西
+#     ——索引於是宣稱了一個沒有任何東西重新推導過的檔案性質。那是 T79 那句話的逐字重演，
+#     發生在第四個呼叫點：唯一一條「編輯」索引而不是重建它的路徑。
+#     後果是最糟的一種：O(1) 檢查會「通過」，因為這條路徑剛剛才自己更新過戳記。
+# (b) 同一格上的兩次 `-update`：第一次被套用後覆蓋，rc=0，靜默。
+# (c) 沒有動詞可依附的修飾符被接受並忽略，於是「-insert 不可與 -cell 併用」變成位置性的。
+# ---------------------------------------------------------------------
+echo
+echo "--- T116: an index that edited itself into a lie / 一份把自己編輯成謊言的索引 ---"
+
+# No `local` in a brace group: zsh rejects it outside a function, the rejection
+# goes to stderr while the group's stdout still reaches the file, and the
+# fixture ends up wrong while the script carries on. Third time today -- T108,
+# T110, and here.
+# 大括號群組裡不用 `local`：zsh 不允許它出現在函式外，那個拒絕走 stderr，而群組的 stdout
+# 仍然寫進檔案，於是 fixture 是壞的而腳本照常往下跑。今天第三次了——T108、T110，以及這裡。
+{ print -r -- 'id,name,note'
+  for i in {1..400}; do print -r -- "$i,name$i,\"note $i\""; done
+} > "$TMP/t116.csv"
+"$CSV2" --build-index -i "$TMP/t116.csv" >/dev/null 2>&1
+
+# A legitimate multi-line record: a quoted newline is ordinary CSV.
+# 一筆合法的跨行紀錄：引號內的換行就是普通的 CSV。
+"$CSV2" -append "$(printf '401,"two\nlines",x')" -i "$TMP/t116.csv" --in-place >/dev/null 2>&1
+
+assert_succeeds "T116a after appending a record that spans lines, the index still describes the file / 追加一筆跨行的紀錄之後，索引仍然描述著這個檔案" -- \
+    "$CSV2" --verify-index -i "$TMP/t116.csv"
+
+# The protection that matters: the parallel path must decline, because a record
+# number is no longer a line number here.
+# 真正要緊的保護：平行路徑必須退場，因為在這裡紀錄號已經不是行號了。
+dbg=$(CSV2_PARALLEL_MIN_BYTES=1000 CSV2_PARALLEL_CHUNK_BYTES=4096 \
+      "$CSV2" -contains "note 399" -i "$TMP/t116.csv" -debug 2>&1 >/dev/null)
+assert_contains "$dbg" "records a record spanning lines" \
+    "T116b and the parallel path declines, because a record number is not a line number now / 而平行路徑退場，因為此刻紀錄號已經不是行號"
+
+# The address -contains reports must be one -get can use. That equality is the
+# whole find-then-edit recipe.
+# `-contains` 回報的位址，必須是 `-get` 用得上的那一個。那個相等，就是整套「先找再改」。
+addr=$(CSV2_PARALLEL_MIN_BYTES=1000 CSV2_PARALLEL_CHUNK_BYTES=4096 \
+       "$CSV2" -contains "note 399" -i "$TMP/t116.csv" 2>/dev/null | head -1 | cut -f1)
+assert_eq "$("$CSV2" -get "$addr" -i "$TMP/t116.csv" 2>&1)" "note 399" \
+    "T116c and the address it reports is the address -get resolves / 而它回報的位址，就是 -get 解析得到的那一個"
+
+# An ordinary append must still leave a usable index, or the fix has traded one
+# failure for another.
+# 普通的追加必須仍然留下一份可用的索引，否則這個修正只是把一種失敗換成另一種。
+"$CSV2" -append '402,plain,y' -i "$TMP/t116.csv" --in-place >/dev/null 2>&1
+assert_succeeds "T116d while an ordinary append still leaves a usable index / 而普通的追加仍然留下一份可用的索引" -- \
+    "$CSV2" --verify-index -i "$TMP/t116.csv"
+
+# (b) The same cell twice.
+# (b) 同一格兩次。
+print -r -- 'a,b,c'   > "$TMP/t116b.csv"
+print -r -- '1,x,p'  >> "$TMP/t116b.csv"
+cp "$TMP/t116b.csv" "$TMP/t116b.bak"
+assert_fails "T116e two -updates on one cell are refused, not applied and overwritten / 同一格上的兩次 -update 會被拒絕，而不是先套用再覆蓋" -- \
+    "$CSV2" -update 1:2 'FIRST' -update 1:2 'SECOND' -i "$TMP/t116b.csv" --in-place
+assert_same "$TMP/t116b.csv" "$TMP/t116b.bak" \
+    "T116f and nothing was written / 而且什麼都沒有寫入"
+
+assert_succeeds "T116g while two -updates on DIFFERENT cells still run / 而瞄準「不同儲存格」的兩次 -update 照常執行" -- \
+    "$CSV2" -update 1:2 'A' -update 1:3 'B' -i "$TMP/t116b.csv" --in-place
+
+# (c) A modifier with nothing to modify.
+# (c) 沒有東西可修飾的修飾符。
+assert_fails "T116h a -cell with no verb to attach to is refused / 沒有動詞可依附的 -cell 會被拒絕" -- \
+    "$CSV2" -cell -r -i "$TMP/t116b.csv"
+assert_fails "T116i and writing it after the positionals no longer walks past the refusal / 把它寫在位置參數之後，也不再繞得過那個拒絕" -- \
+    "$CSV2" -insert 1 'z,z,z' -cell -i "$TMP/t116b.csv" -o "$TMP/t116c.csv"
+assert_succeeds "T116j while the form that means something still works / 而真正有意義的那個寫法照常運作" -- \
+    "$CSV2" -delete -cell 1:2 -i "$TMP/t116b.csv" --in-place
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
