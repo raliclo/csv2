@@ -4269,3 +4269,28 @@ section, which is the last place someone worried about correctness will look.」
 
 **流程修正:每一回合派出之前,先執行 `install.zsh`,並以「比對檔案身分」確認**——不是比對
 `csv2 --version`,兩個建置都會說 `csv2 0.1.0`(那正是 multissh 的 helper 已經記取的教訓)。
+
+---
+
+## ED. guest 上沒有 `comm`,於是三個案例在那裡從來沒有真的執行過(2026-08-21 修正)
+
+EA 那個 `command_not_found_handler` 在它存在後的**第一次 guest 執行**就抓到了這個:
+
+```
+FAIL  T117a cited in English only: FAIL  the suite called "comm", which does not exist …
+FAIL  T117b cited in Chinese only: …
+FAIL  T121h KNOWN_FLAGS is missing: …
+```
+
+這個 rootfs 的 busybox 沒有 `comm` applet。`comm -23 A B` 因此什麼也不產出,而三個案例
+比較的都是空字串——**在 guest 上一律 PASS,而它們一次也沒有真的比對過任何東西。**
+兩份 README 的案例編號一致性、以及 `KNOWN_FLAGS` 對解析器 case 的覆蓋,在 aarch64 上
+從來沒有被檢查過。
+
+改用 `grep -Fxv -f`(每一個 busybox 建置都有)做集合差集。
+
+**這是 EA 那個守衛的第一份回報,而它報的是一個存在已久的洞。** 一個「安靜地什麼都不做」
+的外部指令,與一個「不存在的 helper」是同一種失敗;而在此之前,兩者都不會被說出來。
+
+順帶:T135c(讀不到的 sidecar)在 guest 上會 SKIP,因為那裡以 root 執行,而 root 讀得到
+mode 000 的檔案。T69b 的預期 SKIP 數已用「與 T135c 相同的探測方式」納入這一項。

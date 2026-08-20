@@ -5900,11 +5900,29 @@ assert_succeeds "T116j while the form that means something still works / 而真�
 echo
 echo "--- T117: both READMEs cite the same cases / 兩份 README 引用同一組案例 ---"
 
+# Set difference without comm: this rootfs's busybox has no comm applet, and
+# until T137's command-not-found guard existed, its absence turned T117a,
+# T117b and T121h into empty comparisons that reported PASS in the guest --
+# three cases that had never once run there. `grep -Fxv -f` is in every
+# busybox build here and says the same thing: the lines of A that are not
+# whole lines of B.
+# 不用 comm 做集合差集：這個 rootfs 的 busybox 沒有 comm applet，而在 T137 那個
+# command-not-found 守衛出現之前，它的缺席會把 T117a、T117b 與 T121h 變成空的比較，
+# 在 guest 上回報 PASS——那三個案例在那裡一次也沒有真的執行過。`grep -Fxv -f` 在這裡的
+# 每一個 busybox 建置裡都有，說的是同一件事：A 當中「不是 B 的完整某一行」的那些行。
+only_in_first() {   # first-list second-list
+    local second_file
+    second_file=$(mktemp "${TMPDIR:-/tmp}/csv2_setdiff.XXXXXX")
+    print -r -- "$2" > "$second_file"
+    print -r -- "$1" | grep -Fxv -f "$second_file"
+    rm -f "$second_file"
+}
+
 t117_en=$(grep -oE '\bT[0-9]+[a-z0-9]*\b' "$ROOT/README.md" | sort -u)
 t117_zh=$(grep -oE '\bT[0-9]+[a-z0-9]*\b' "$ROOT/README.zh-TW.md" | sort -u)
 
-t117_only_en=$(comm -23 <(print -r -- "$t117_en") <(print -r -- "$t117_zh") | tr '\n' ' ')
-t117_only_zh=$(comm -13 <(print -r -- "$t117_en") <(print -r -- "$t117_zh") | tr '\n' ' ')
+t117_only_en=$(only_in_first "$t117_en" "$t117_zh" | tr '\n' ' ')
+t117_only_zh=$(only_in_first "$t117_zh" "$t117_en" | tr '\n' ' ')
 
 if [[ -z "${t117_only_en// /}" ]]; then
     ok "T117a every case the English README cites is cited in the Chinese one / 英文 README 引用的每一個案例，中文 README 也引用了"
@@ -6206,7 +6224,7 @@ t121_cases=$(awk '/^func parseArgs/,/^\}/' "$ROOT/src/main.swift" \
     | grep -oE '^\s+case "[a-z0-9-]+"(, "[a-z0-9-]+")*:' | grep -oE '"[a-z0-9-]+"' | tr -d '"' | sort -u)
 t121_listed=$(awk '/^let KNOWN_FLAGS/,/^\]/' "$ROOT/src/main.swift" \
     | grep -oE '"[a-z0-9-]+"' | tr -d '"' | sort -u)
-t121_missing=$(comm -23 <(print -r -- "$t121_cases") <(print -r -- "$t121_listed") | tr '\n' ' ')
+t121_missing=$(only_in_first "$t121_cases" "$t121_listed" | tr '\n' ' ')
 if [[ -z "${t121_missing// /}" ]]; then
     ok "T121h and KNOWN_FLAGS covers every case the parser has / 而 KNOWN_FLAGS 涵蓋了解析器的每一個 case"
 else
@@ -7195,6 +7213,16 @@ else
     _t69_probe=$(stat -c '%a' "$TMP" 2>/dev/null)
     [[ $_t69_probe == <-> ]] || _t69_probe=$(stat -f '%Lp' "$TMP" 2>/dev/null)
     [[ $_t69_probe == <-> ]] || (( want_skip += 1 ))   # T129e
+    # T135c needs a file it cannot read. Root can read anything, so in the
+    # guest -- which runs as root -- that case skips and this count has to know
+    # it. Probed the same way T135c decides, on a file made for the purpose.
+    # T135c 需要一個「它讀不到」的檔案。root 什麼都讀得到，因此在以 root 執行的 guest 上
+    # 那個案例會 SKIP，而這個數字必須知道這件事。用與 T135c 相同的方式、在一個為此建立的
+    # 檔案上探測。
+    : > "$TMP/t69_probe_unreadable"
+    chmod 000 "$TMP/t69_probe_unreadable" 2>/dev/null
+    [[ -r "$TMP/t69_probe_unreadable" ]] && (( want_skip += 1 ))   # T135c
+    chmod 644 "$TMP/t69_probe_unreadable" 2>/dev/null
 fi
 if [[ "$skip" == "$want_skip" ]]; then
     ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
