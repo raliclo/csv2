@@ -7807,7 +7807,15 @@ fi
 # --en / --zh change the report and not the JSON, which is what the README now
 # says and the opposite of what a reader would guess.
 # --en／--zh 改變的是報告、不是 JSON——那是 README 現在寫的，也與讀者會猜的相反。
-assert_same <(print -r -- "$_t156_two") <(print -r -- "$("$CSV2" -contains x --json --zh -i "$TMP/t156.csv2" | sed -n 2p)") \
+# Real files, not process substitution: assert_same runs cmp on two PATHS, and
+# /dev/fd entries do not behave the same everywhere -- this passed on macOS and
+# failed in the guest, which is the wrong reason to fail.
+# 用真正的檔案，不用 process substitution：assert_same 是對兩個「路徑」跑 cmp，而 /dev/fd
+# 的行為不是每個地方都一樣——這個案例在 macOS 上通過、在 guest 上失敗，而那是一個錯誤的
+# 失敗理由。
+print -r -- "$_t156_two" > "$TMP/t156_plain.json"
+"$CSV2" -contains x --json --zh -i "$TMP/t156.csv2" | sed -n 2p > "$TMP/t156_zh.json"
+assert_same "$TMP/t156_plain.json" "$TMP/t156_zh.json" \
     "T156c and --zh changes nothing in --json / 而 --zh 在 --json 裡什麼也不改"
 assert_contains "$("$CSV2" -contains x --zh -i "$TMP/t156.csv2")" "乙" \
     "T156d while it does change the report's column name / 而它確實會改變報告裡的欄名"
