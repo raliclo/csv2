@@ -1092,7 +1092,7 @@ func runEdit(_ o: Options) throws {
                 // 也與其他每一行一樣做跳脫，因此一筆紀錄就是一則紀錄。
                 let contents = r.fields.enumerated().map { (i, f) -> String in
                     let n = i < headers[0].count ? baseName(headerName(headers[0].fields[i])) : "\(i + 1)"
-                    return "\(n)=\(Logger.shared.redact(column: n, value: f.value))"
+                    return "\(Logger.shared.nameForLog(n))=\(Logger.shared.redact(column: n, value: f.value))"
                 }.joined(separator: ", ")
                 Logger.shared.info("delete record \(r.number): \(contents)")
                 return true

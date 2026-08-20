@@ -7349,7 +7349,12 @@ assert_contains "$(cat "$TMP/t148_blank.log")" 'blank 1:notes: "secret-value"' \
 cp "$TMP/t148.csv" "$TMP/t148_del.csv"
 rm -f "$TMP/t148_del.log"
 "$CSV2" -delete 1 -i "$TMP/t148_del.csv" --in-place -log "$TMP/t148_del.log"
-assert_contains "$(cat "$TMP/t148_del.log")" 'delete record 1: a="1", notes="secret-value"' \
+# Both sides quoted: a column name can contain the comma this entry separates
+# on, and `delete record 1: a,b="1"` reads as three fields. Round 58 found that
+# a day after the entry was added.
+# 兩邊都加引號：欄名裡可以含有「這則紀錄用來分隔的那個逗號」，而 `delete record 1: a,b="1"`
+# 讀起來像三個欄位。第 58 回合在這則紀錄加上去的隔天就發現了。
+assert_contains "$(cat "$TMP/t148_del.log")" 'delete record 1: "a"="1", "notes"="secret-value"' \
     "T148b and deleting a record records its contents, by column / 而刪除一筆紀錄會逐欄記下它的內容"
 
 cp "$TMP/t148.csv" "$TMP/t148_h.csv"
@@ -7370,7 +7375,7 @@ rm -f "$TMP/t148_r.log"
 cp "$TMP/t148_h_out.csv" "$TMP/t148_r.csv"
 "$CSV2" -delete 1 -i "$TMP/t148_r.csv" --in-place -log "$TMP/t148_r.log"
 _t148_r=$(cat "$TMP/t148_r.log")
-if [[ $_t148_r == *"notes=<redacted>"* ]]; then
+if [[ $_t148_r == *'"notes"=<redacted>'* ]]; then
     ok "T148d while a protected column is still redacted in that record / 而該紀錄裡受保護的欄位仍然被遮蔽"
 else
     bad "T148d $(print -r -- $_t148_r | grep -o 'delete record.*' | head -1) / log 內容如上"
@@ -7715,6 +7720,56 @@ if [[ -z ${_t154_doc// /} ]]; then
 else
     bad "T154e a flag the parser knows is missing from a README:${_t154_doc} / 有旗標在某份 README 裡缺席"
 fi
+
+# ---------------------------------------------------------------------
+# T155 -- an output shape asked for on a path that writes CSV, and a log
+# entry a parser can read.
+#
+# Round 58: `--json` and `-md` with an edit verb were accepted, ignored and
+# exited 0, while `--a1` in the same position was refused and `-md` without -t
+# on an edit was refused for a different reason -- three flags on one axis,
+# three behaviours. And the `delete record` entry added the day before wrote
+# column names unquoted, so a name containing `, ` made the entry unparseable;
+# the invocation line quoted nothing, so a path with a space in it named a
+# command nobody ran.
+#
+# T155 —— 在一條「寫出 CSV」的路徑上要求一種輸出形狀，以及一則解析得了的 log 紀錄。
+# ---------------------------------------------------------------------
+echo
+echo "--- T155: shapes on an edit, and a parseable log / T155：編輯路徑上的形狀，以及可解析的 log ---"
+
+print -r -- 'a,b'  > "$TMP/t155.csv"
+print -r -- '1,x' >> "$TMP/t155.csv"
+
+for _shape in --json -md; do
+    _t155=$("$CSV2" -update 1:2 Z $_shape -t -i "$TMP/t155.csv" -o "$TMP/t155_out.csv" 2>&1)
+    _t155_rc=$?
+    if (( _t155_rc == 1 )) && [[ $_t155 == *"output shape"* ]]; then
+        ok "T155a $_shape with an edit is refused / $_shape 與編輯併用會被拒絕"
+    else
+        bad "T155a $_shape exited $_t155_rc: $(print -r -- $_t155 | head -1) / 結果如上"
+    fi
+done
+
+assert_succeeds "T155b while an edit without one still works / 而不帶輸出形狀的編輯照常運作" -- \
+    "$CSV2" -update 1:2 Z -i "$TMP/t155.csv" -o "$TMP/t155_out.csv"
+assert_succeeds "T155c and a read with one still works / 而帶著輸出形狀的讀取照常運作" -- \
+    "$CSV2" -r -t --json -i "$TMP/t155.csv"
+
+# A log a parser can read: names quoted, arguments with spaces quoted.
+# 一份解析得了的 log：欄名加引號，含空白的引數加引號。
+print -r -- '"a,b",c'  > "$TMP/t155_comma.csv"
+print -r -- '1,2'     >> "$TMP/t155_comma.csv"
+rm -f "$TMP/t155_comma.log"
+"$CSV2" -delete 1 -i "$TMP/t155_comma.csv" --in-place -log "$TMP/t155_comma.log"
+assert_contains "$(cat "$TMP/t155_comma.log")" 'delete record 1: "a,b"="1", "c"="2"' \
+    "T155d a column name containing a comma is quoted in the log / 名字裡含逗號的欄位，在 log 裡會被加上引號"
+
+cp "$TMP/t155.csv" "$TMP/t155 spaced.csv"
+rm -f "$TMP/t155_sp.log"
+"$CSV2" -r -t -i "$TMP/t155 spaced.csv" -log "$TMP/t155_sp.log" >/dev/null
+assert_contains "$(head -1 "$TMP/t155_sp.log")" '-i "' \
+    "T155e and a path containing a space is quoted in the invocation line / 而含空白的路徑，在那行指令紀錄裡會被加上引號"
 
 # ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.

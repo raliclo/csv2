@@ -1183,6 +1183,28 @@ func validate(_ o: inout Options) throws {
     if o.contains == nil && o.filter && o.edits.isEmpty {
         throw usageError("--filter needs -contains", "--filter 需要搭配 -contains")
     }
+    // An output SHAPE with an edit verb. An edit writes CSV -- that is what it
+    // is for -- so --json and -md were accepted, ignored and exited 0, while
+    // --a1 in the same position was refused and -md without -t on an edit was
+    // refused for a different reason entirely. Three flags on one axis, three
+    // behaviours.
+    //
+    // Refusing rather than honouring: writing a Markdown table to a .csv path
+    // would produce a file this tool then refuses to read, which is the
+    // failure the format rules exist to prevent.
+    // 一個「輸出形狀」旗標與一個編輯動詞併用。編輯寫出的是 CSV——那正是它的用途——因此
+    // --json 與 -md 被接受、被忽略、以 0 結束，而同一個位置的 --a1 會被拒絕，`-md` 少了 -t
+    // 又會因為完全不同的理由被拒絕。同一個軸上的三個旗標，三種行為。
+    // 選擇「拒絕」而不是「照做」：把一張 Markdown 表格寫進 .csv 路徑，會產生一個這支工具
+    // 隨後拒絕讀取的檔案，而那正是格式規則要防止的失敗。
+    if !o.edits.isEmpty || o.encryptCols != nil || o.decryptCols != nil || o.hashCols != nil {
+        let shape = o.json ? "--json" : (o.markdown ? "-md" : nil)
+        if let shape = shape {
+            throw usageError(
+                "\(shape) is an output shape and an edit writes CSV, so the two cannot be combined. Read with \(shape) in a separate run",
+                "\(shape) 是一種輸出形狀，而編輯寫出的是 CSV，兩者不能併用。要用 \(shape) 讀，請另外執行一次")
+        }
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -1654,21 +1676,35 @@ func printHelp() {
 /// 把每一則訊息跳脫過；這裡再跳脫一次，會讓輸入中的換行變成 `\\n`——一個再也還原不回去
 /// 的值，而它來自兩個各自都正確的修正。跳脫只能發生在「一個」地方，而那個地方是建行的
 /// 那一點，因為只有它涵蓋得到「還沒有人寫出來的訊息」。
+/// An argument as the log can carry it: escaped, and quoted when it contains
+/// anything that would make the line read as a different command. Without the
+/// quoting, `-i "my file.csv"` logged as `-i my file.csv` -- an audit entry
+/// naming a command nobody ran, and one that a reader would take as two
+/// arguments.
+/// 一個「log 載得動」的引數：經過跳脫，並在它含有「會讓這一行讀成另一個指令」的東西時加上
+/// 引號。少了這一步，`-i "my file.csv"` 會記成 `-i my file.csv`——一則指名了「沒有人執行過的
+/// 指令」的稽核紀錄，而讀者會把它讀成兩個引數。
+private func loggedArg(_ a: String) -> String {
+    let e = reportEscape(a)
+    guard e.isEmpty || e.contains(" ") || e.contains("\"") || e.contains("\t") else { return e }
+    return "\"\(e.replacingOccurrences(of: "\"", with: "\"\""))\""
+}
+
 func sanitizedCommandLine(_ argv: [String]) -> String {
     var out: [String] = []
     var i = 0
     while i < argv.count {
         let a = argv[i]
-        out.append(reportEscape(a))
+        out.append(loggedArg(a))
         switch normalizeFlag(a) {
         case "update":
             // keep the address, drop the value / 保留位址，去掉值
-            if i + 1 < argv.count { out.append(reportEscape(argv[i + 1])) }
+            if i + 1 < argv.count { out.append(loggedArg(argv[i + 1])) }
             if i + 2 < argv.count { out.append("<value>") }
             i += 3
             continue
         case "insert":
-            if i + 1 < argv.count { out.append(reportEscape(argv[i + 1])) }
+            if i + 1 < argv.count { out.append(loggedArg(argv[i + 1])) }
             if i + 2 < argv.count { out.append("<row>") }
             i += 3
             continue

@@ -311,6 +311,18 @@ final class Logger {
     /// 看得懂這個格式的人不必再學一套；而且它不含反斜線，因此 `log` 裡那道整行跳脫完全
     /// 不會碰它——若寫成 `\"`，它的反斜線會在輸出時被加倍，那正是這件事第一次做錯時的
     /// 那種兩層跳脫。
+    /// A column NAME as a log entry can carry it: escaped and quoted the same
+    /// way a value is. `delete record 1: a,b="1"` -- a real name with a comma
+    /// in it -- reads as three fields and cannot be parsed back; the file
+    /// format this tool exists for allows that name, and the README explains
+    /// how to address it.
+    /// 一個「log 紀錄載得動」的欄位名稱：與值以同一種方式跳脫並加引號。
+    /// `delete record 1: a,b="1"`——一個名字裡真的有逗號的欄位——讀起來像三個欄位，
+    /// 解析不回去；而這支工具為之存在的那個檔案格式允許這種名字，README 也講了怎麼定址它。
+    func nameForLog(_ name: String) -> String {
+        "\"\(reportEscape(name).replacingOccurrences(of: "\"", with: "\"\""))\""
+    }
+
     func redact(column: String, value: [UInt8]) -> String {
         if redactedColumns.contains(column) { return "<redacted>" }
         let v = reportEscape(echoValue(value, limit: nil))
