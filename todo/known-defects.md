@@ -3193,3 +3193,80 @@ remembered. AE's own conclusion was "a retry must re-run the whole script", and
 I did not follow it. T117 now compares the case numbers cited by the two
 READMEs, which would have caught this one, and does not depend on anyone
 remembering.
+---
+
+# 第 47 回合(2026-08-20)—— 把每一個範例跑一遍、索引的每一種不一致、事前成本、可依賴性
+
+受測者的結論值得抄下來:
+
+> 「這個工具狀況良好。**它有一個洞,它知道那個洞,而它選擇了記錄它而不是守住它。**」
+
+## CU. 每一個診斷範例都少了它真正會印出來的前綴
+
+README 印的是:
+
+```
+DEBUG parallel: 9 chunks, 10 workers, chunk 512 bytes
+```
+
+實際印出來的是:
+
+```
+csv2: 2026-08-20T19:32:39.922+08:00 DEBUG parallel: 9 chunks, …
+```
+
+**照著印出來的形狀寫的腳本,一行都比對不到。** 兩份 README 加起來約十個這種範例。
+
+而同一段的第一個例子在逐字執行時給出的是**相反的答案**:它展示 `parallel: 9 chunks`,而一個
+44 bytes 的檔案得到的是 `single-threaded: file is 44 bytes, under CSV2_PARALLEL_MIN_BYTES`。
+那個範例需要的環境變數沒有寫出來。
+
+## CV. 「`records` 是讀了多少筆資料紀錄」在走索引時不成立
+
+受測者量到:`-tail 1` 在讀了 12,288 bytes、只解析一筆之後,回報 `records:600000`。
+
+**它是「抵達的紀錄編號」,不是「讀過的筆數」。** 對一個拿它來估算成本的人,那個差別是全部。
+
+## CW. 「下一個讀完整個檔案的操作會寫回一份好的索引」與旗標說明互相矛盾
+
+`-contains` 與 `-r` 各自讀完了 38 MB,而**兩者都沒有寫索引**。只有 `-tail` 與寫入類的操作會
+——那正是 `--build-index` 那個旗標條目自己說的。
+
+**同一份文件的兩節說了不同的事。**
+
+## CX. `-contains` 的旗艦範例,少了它自己下一段所承諾的那個記號
+
+範例展示被截短的值,而**沒有 `…[+N more chars]`**;緊接在它下方的句子寫著「csv2 會標記那個
+截斷——絕不靜默」。
+
+## 而第 4 類只有一條,它是一個論證,不是一個新缺陷
+
+受測者把「被信任的過期索引 → 錯誤紀錄編號、rc=0」歸進第 4 類,而且說明了為什麼要這樣歸:
+
+> 「這個工具的宗旨是『**其他任何情況都必須大聲失敗,而不是靜默產生一個半對的檔案**』。
+> 一個 rc=0 的錯誤 `record:field` 位址,就是一個靜默的半對答案,而它出自那條 README 自己
+> 指認為『唯一可能靜默出錯』的路徑。文件的回應是一段文字。**沒有旗標能說「未經證明的索引
+> 就不要信」、沒有自動降級、也沒有 WARN——而 WARN 機制存在,還用在更小的事情上**
+> (`-mid` 起點越界就有一個)。」
+
+**它的前提有一半是錯的,而那一半正是重點。**
+
+```console
+$ csv2 -contains 'note 39999' -i z.csv          # 被信任的過期索引
+40000:2                                          ← 錯
+$ csv2 --no-index -contains 'note 39999' -i z.csv
+39999:2                                          ← 對
+```
+
+**那個旗標存在,而且做的正是它要的事。** 缺的是:README 從來沒有把 `--no-index` 與這個風險
+連起來。它被寫成一個機制(「絕不讀寫 sidecar」),而不是一個「你正在問的問題的答案」。
+
+它的第二半則是對的:**在那個唯一可能靜默出錯的分支上,能提醒你的只有一行 DEBUG**,而一個
+「起點越界的 `-mid`」拿到的是預設可見的 WARN。這個不對稱是真的。
+
+Round 47's category 4 is one entry and it is an argument rather than a new
+defect: the trusted-stale-index gap is documented and unguarded, while the WARN
+machinery exists and is spent on smaller things. Half its premise is wrong --
+`--no-index` is exactly the flag it says does not exist, and it returns the
+right answer -- and that half is the point: the README presents `--no-index` as
+a mechanism, never as the answer to the question a reader is actually asking.

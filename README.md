@@ -825,9 +825,13 @@ accepting a wrong guess. The **last** line carries the counts: they cannot be
 in the first line without reading the whole input before emitting anything,
 which is the streaming guarantee.
 
-Read those two counts precisely. `records` is how many data records were
-**read**, not how many the file holds — `-mid 5,5` on a 21-record file reports
-5, because it stopped there. `matched` counts matching **records**, while the
+Read those two counts precisely. `records` is the highest data record number
+**reached**, not how many the file holds and not how many were parsed —
+`-mid 5,5` on a 21-record file reports 5, because it stopped there. On a path
+that uses the index the difference matters: `-tail 1` on a 600,000-record file
+reports `records:600000` after seeking, reading a few kilobytes and parsing one
+record. It is the position it got to, which is what makes it the answer to
+"did my window exist" and not an answer to "how much work was done". `matched` counts matching **records**, while the
 lines between the two meta lines are one per matching **cell**, so the two
 numbers differ whenever a record matches in more than one column.
 
@@ -1177,14 +1181,34 @@ boundary-straddling test most wants to construct.
 **`-debug` says which path ran, always**, including when it is the ordinary one
 and why:
 
+Every diagnostic line really begins `csv2: <ISO-8601 timestamp> LEVEL `, and
+the examples in this document **elide that prefix** so the message itself fits
+on one line. One shown in full, once, so a script can be written against the
+real shape:
+
 ```console
-$ csv2 -contains xyz -i pkgs.csv2 -debug     # 2>&1
+$ csv2 -r -i pkgs.csv -debug     # 2>&1
+csv2: 2026-08-20T19:32:39.922+08:00 DEBUG single-threaded: not a search; parallelism applies to -contains only
+```
+
+With the prefix elided from here on:
+
+```console
+$ CSV2_PARALLEL_MIN_BYTES=1000 CSV2_PARALLEL_CHUNK_BYTES=512 \
+      csv2 -contains xyz -i pkgs.csv2 -debug     # 2>&1
 DEBUG parallel: 9 chunks, 10 workers, chunk 512 bytes
 $ csv2 -contains xyz -i pkgs.csv -debug
 DEBUG single-threaded: .csv with no index proving one record per line; build one with --build-index
 $ csv2 -r -i pkgs.csv2 -debug
 DEBUG single-threaded: not a search; parallelism applies to -contains only
 ```
+
+**The two environment variables in the first line are not decoration.** Without
+them that command prints `single-threaded: file is 44 bytes, under
+CSV2_PARALLEL_MIN_BYTES (16777216)` — the opposite of what the example is
+showing — because a fixture small enough to print here is far below the 16 MiB
+threshold. An example that gives the opposite answer when run verbatim is worse
+than no example.
 
 Reporting only the interesting case would make silence ambiguous, and that
 ambiguity bites exactly here: comparing a "parallel" run against a
@@ -1214,6 +1238,19 @@ the record that spans lines, whose own number survives, but from the first
 chunk boundary after it, because what a stale `no_embedded_newlines` corrupts
 is each later chunk's starting record number.
 
+**If you cannot accept that risk on a given run, `--no-index` is the answer**,
+and it is worth naming here rather than leaving it as a mechanism described
+elsewhere. It means "never read or write a sidecar", so the search reads the
+file and counts for itself: slower, and right by construction. On the file
+above, the trusted stale index reports `40000:2` for a record whose true
+address is `39999:2`; `--no-index` reports `39999:2`. `--verify-index` answers
+the same question the other way — it proves the sidecar before you rely on it,
+once, instead of on every run.
+
+A blind-test subject reading this section concluded there was "no flag that
+says refuse to trust an index unless it was proven". There is; it was simply
+never presented as the answer to the question they were asking.
+
 
 ## Design decisions worth knowing before reading the code
 
@@ -1237,7 +1274,11 @@ Each of these is argued in full in [plan/plan.md](./plan/plan.md).
   gives you the wrong data is far worse than no index. That covers the index's
   own contents too: the header carries a checksum over the whole index, offsets
   included, so a damaged one is discarded rather than followed, and the next
-  operation that reads the whole file writes a good one back. Asserted by T68.
+  operation that WRITES the file, or that has to read it to the end anyway —
+  `-tail`, an edit — puts a good one back. A plain `-contains` or `-r` reads
+  every byte and writes nothing, because building an index is not free and a
+  read was not asked to pay for one; the `--build-index` entry says the same
+  thing from the other side. Asserted by T68.
   **What the checksum is not:** it catches corruption — a flipped bit, a short
   write, a partially overwritten file — and is not a signature. Anyone who can
   rewrite the offsets can rewrite eight more bytes. It also cannot help when the
