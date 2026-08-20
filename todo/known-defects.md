@@ -2524,7 +2524,7 @@ Check the header first if you have a key you believe in
 不足以擋住第二次,把理由放在出事的那一行旁邊或許可以。
 ---
 
-## BA. 下游離開時,csv2 在 Linux 與 Windows 上崩潰(macOS 不會)
+## BA. 下游離開時,csv2 在 Linux 與 Windows 上崩潰(macOS 不會)(2026-08-20 修正,T110d/e)
 
 第 42 回合的受測者量到「141、不印任何東西、0.04 秒」並稱讚那是正確的 Unix 行為。**它在
 macOS 上跑。** 我把那件事寫進兩份 README,並補上 T110d／T110e 去守住它——然後那兩條在
@@ -2573,3 +2573,48 @@ fatal error and the process dies of SIGILL with a backtrace on stderr instead
 of dying of SIGPIPE in silence. Same shape as AT earlier the same day -- a
 behaviour measured on one platform only -- except this time the test existed
 first, so it surfaced the moment the other platforms ran it.
+
+### BA 的修法走了三步,而中間兩步各弄壞一個平台
+
+| 步 | 做法 | 結果 |
+|---|---|---|
+| 1 | `Platform.writeAll(FileHandle, …)`,取 `.fileDescriptor` | Windows **編不過**:Swift 把 `fileDescriptor` 標為不可用(「Cannot perform non-owning handle to fd conversion」) |
+| 2 | 改成 `writeAll(fd:)`,只有 stdout／stderr 走它 | Windows **43 條失敗** |
+| 3 | 加上 `_setmode(1, _O_BINARY)`、`_setmode(2, _O_BINARY)` | 四個平台皆零失敗 |
+
+第 2 步的失敗方式值得留下:
+
+```
+FAIL T28b --in-place edits via temp file and rename (got 'zzz', want 'zzz')
+FAIL T43c ... (got 'ap3,v,s,src,purpose,note,MIT', want 'ap3,v,s,src,purpose,note,MIT')
+```
+
+**兩個值印出來一模一樣,而它們不相等。** Windows 的 CRT 以「文字模式」開啟 fd 1 與 fd 2,
+於是每一個 `\n` 都變成 `\r\n`。Foundation 寫的是 Win32 handle 而不是 CRT 描述子,所以這個
+翻譯在此之前從來沒有出現過。
+
+唯一說出真正問題的是 **T4**——因為它明確去「數 CR 位元組」,而不是去「比對字串」:
+
+```
+FAIL T4 mixed CRLF/LF (got 3 lines, 3 CR)
+```
+
+**一個為了量測而寫的案例,在 43 個為了比對而寫的案例都只能說「兩個看起來一樣的東西不一樣」
+時,說出了原因。**
+
+### 今天第三次:改動弄壞了那個從這裡檢查不到的平台
+
+AK(`_open` 不可用)、AT(`FILE_APPEND_DATA` 之前的 seek-then-write)、以及這一次。
+
+AT 之後我養成了「先送探針上去編一次」的習慣,而**這一次那個習慣沒有擋住**:我探的是
+「那個 API 存不存在」,不是「它對位元組做了什麼」。`_write` 存在、編得過、在本機正確——
+而它在 Windows 上對每一個換行做的事,探針沒有問。
+
+Fixing BA took three steps and the middle two each broke a platform. Step 2
+moved stdout onto `_write` and hit Windows' text-mode CRT: 43 cases failed with
+values that print identically and are not equal. The only case that named the
+cause was T4, which counts CR bytes instead of comparing strings -- a case
+written to measure rather than to compare. Third time today a change that
+builds and passes here broke the one platform that cannot be checked from here,
+and the probe habit learned from the second one did not help, because the probe
+asked whether the API existed and not what it did to the bytes.
