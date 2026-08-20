@@ -7250,6 +7250,57 @@ else
 fi
 
 # ---------------------------------------------------------------------
+# T147 -- output pasted into an example that csv2 never printed.
+#
+# Round 56 found a directory listing inside a ```console block, twice in one
+# example, in output csv2 does not produce. It arrived when a message quoted in
+# the README was updated by capturing a command's output and substituting it
+# whole -- the capture carried a bare `ls` with it, and the case that pins the
+# quoted message (T58) passed, because the message line was still there.
+#
+# The check is deliberately narrow: three or more consecutive lines inside a
+# console block that are bare filenames. That is what a pasted `ls` looks like
+# and nothing else in these examples does -- CSV output has commas, reports
+# have tabs, messages have spaces. A wider rule would have to decide what csv2
+# "would" print, which is the question the examples exist to answer.
+#
+# T147 —— 被貼進範例、而 csv2 從來不會印出的輸出。
+# 第 56 回合在一個 ```console 區塊裡找到一段目錄列表，同一個範例裡出現兩次。它是這樣進去的：
+# 更新 README 引用的一則訊息時，我以「捕獲指令輸出再整段替換」的方式進行，而那次捕獲把一段
+# 裸的 `ls` 一起帶了進來；而釘住那則引用訊息的案例（T58）照樣通過，因為那一行訊息還在。
+# 這個檢查刻意寫得很窄：console 區塊裡連續三行以上的「裸檔名」。一段被貼進來的 `ls` 就長那樣，
+# 而這些範例裡沒有別的東西長那樣——CSV 輸出有逗號、報告有 tab、訊息有空白。更寬的規則就得去
+# 判斷 csv2「會不會」印出某段東西，而那正是這些範例本身要回答的問題。
+# ---------------------------------------------------------------------
+echo
+echo "--- T147: no pasted listings in the examples / T147：範例裡沒有被貼進來的目錄列表 ---"
+
+t147_scan() {   # file -> prints offending line numbers
+    LC_ALL=C awk '
+        /^```console/ { inblock = 1; run = 0; next }
+        /^```/        { inblock = 0; run = 0; next }
+        !inblock      { next }
+        {
+            line = $0
+            gsub(/^[ \t]+|[ \t]+$/, "", line)
+            if (line ~ /^[A-Za-z0-9_.-]+\.(csv|csv2|txt|log|bak|keep|index|out|err)$/) {
+                run++
+                if (run >= 3) print FILENAME ":" NR ": " line
+            } else {
+                run = 0
+            }
+        }
+    ' "$1"
+}
+
+t147_hits="$(t147_scan "$ROOT/README.md")$(t147_scan "$ROOT/README.zh-TW.md")"
+if [[ -z ${t147_hits//[[:space:]]/} ]]; then
+    ok "T147a no console block carries a pasted directory listing / 沒有任何 console 區塊帶著被貼進來的目錄列表"
+else
+    bad "T147a pasted listing in an example: $(print -r -- $t147_hits | head -3) / 範例裡有被貼進來的列表"
+fi
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one
