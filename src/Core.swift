@@ -1053,23 +1053,26 @@ final class ByteSink {
 
     func flush() {
         if buf.isEmpty { return }
-        // stdout does NOT go through handle.write: on Linux and Windows that
-        // turns a broken pipe into a fatal error and a Swift backtrace. A file
-        // sink keeps handle.write, which cannot meet one. See
-        // Platform.writeAll.
-        // stdout 不走 handle.write：在 Linux 與 Windows 上，它會把「管線斷掉」變成一個
-        // 致命錯誤與一段 Swift backtrace。檔案 sink 仍走 handle.write，它不可能遇到那件事。
-        // 見 Platform.writeAll。
-        // Every sink writes the same way now. The file branch used to call
+        // Every sink writes the same way. The file branch used to call
         // handle.write, on the reasoning that a file cannot meet a broken pipe
         // -- true, and beside the point: it can meet a full disk, and
         // FileHandle.write answers that with an exception nobody catches. A
         // -o edit onto a full volume aborted with exit 134, no diagnostic at
         // all, and its temp file left behind.
-        // 現在每個 sink 都以同一種方式寫出。檔案那一支原本呼叫 handle.write，理由是「檔案
+        // 每個 sink 都以同一種方式寫出。檔案那一支原本呼叫 handle.write，理由是「檔案
         // 不可能遇到管線斷掉」——那是對的，而且不是重點：它會遇到磁碟寫滿，而 FileHandle.write
         // 對此的回答是一個沒有人接的例外。一次寫到滿磁碟的 -o 編輯以 134 中止、一個字的
         // 診斷也沒有，並留下它的暫存檔。
+        // 這裡原本還有一段更早的註解，說「stdout 不走 handle.write，而檔案 sink 仍然走」。
+        // 那段話在改動之後就不再成立，卻與新的說明並排放著——兩段文字互相矛盾，而讀者沒有
+        // 辦法知道哪一段是現在的。那正是本專案一再犯的第二種形狀：**新增文字，卻沒有作廢
+        // 它所推翻的那一段。** 一併刪掉了。
+        // An older comment sat here saying stdout does not go through
+        // handle.write "while a file sink keeps it". That stopped being true
+        // with this change and was left beside the new explanation, so two
+        // paragraphs contradicted each other with nothing to say which was
+        // current -- this project's second recurring shape: adding text
+        // without invalidating what it makes false. Removed.
         if let fd = writeFD {
             let failure = Platform.writeAll(fd: fd, buf)
             if failure != 0 { writeFailed(failure) }
