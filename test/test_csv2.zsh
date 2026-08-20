@@ -7109,7 +7109,18 @@ assert_contains "$_t144_s" "expected r:c" \
 echo
 echo "--- T145: following the message / T145：照著訊息去做 ---"
 
-_t145_msg=$("$CSV2" -r --headers 1 -i "$ROOT/compare/vs-sqlite.csv2" 2>&1 | head -1)
+# Its own fixture, not compare/vs-sqlite.csv2: that directory is not in the
+# payload the guest is built from, and the suffix/--headers check runs before
+# the file is opened -- so T145a passed there against a file that did not
+# exist, while T145b compared two empty strings. A case that passes because
+# its input is missing is not a case.
+# 自己的 fixture，不用 compare/vs-sqlite.csv2：那個目錄不在 guest 的 payload 裡，而
+# 「副檔名對 --headers」的檢查在開檔之前就跑了——於是 T145a 在那裡對著一個不存在的檔案通過，
+# 而 T145b 比較的是兩個空字串。一個「因為輸入不存在而通過」的案例，不是一個案例。
+print -r -- 'pkg,note'      > "$TMP/t145_two.csv2"
+print -r -- '套件,備註'     >> "$TMP/t145_two.csv2"
+print -r -- 'busybox,small' >> "$TMP/t145_two.csv2"
+_t145_msg=$("$CSV2" -r --headers 1 -i "$TMP/t145_two.csv2" 2>&1 | head -1)
 if [[ $_t145_msg == *"Drop --headers"* && $_t145_msg == *"becomes data record 1"* ]]; then
     ok "T145a the --headers mismatch names the lossless remedy and what the other one costs / --headers 不符時，訊息指出無損的那條路，以及另一條的代價"
 else
@@ -7119,10 +7130,10 @@ fi
 # The hazard the message now warns about, measured: the rename really does turn
 # a header row into a record.
 # 訊息現在警告的那個風險，實測：改檔名確實會把一列標頭變成一筆紀錄。
-cp "$ROOT/compare/vs-sqlite.csv2" "$TMP/t145_renamed.csv"
-_t145_two=$("$CSV2" -r --json -i "$ROOT/compare/vs-sqlite.csv2" | tail -1)
+cp "$TMP/t145_two.csv2" "$TMP/t145_renamed.csv"
+_t145_two=$("$CSV2" -r --json -i "$TMP/t145_two.csv2" | tail -1)
 _t145_one=$("$CSV2" -r --json -i "$TMP/t145_renamed.csv" | tail -1)
-if [[ $_t145_two != $_t145_one ]]; then
+if [[ -n $_t145_two && $_t145_two != $_t145_one ]]; then
     ok "T145b and renaming really does change the record count / 而改檔名確實會改變紀錄數"
 else
     bad "T145b both said $_t145_two, so the warning describes something that does not happen / 兩者都是 $_t145_two，那則警告描述的事情並未發生"
@@ -7158,7 +7169,17 @@ else
     # 若把 stdout 導到 /dev/null，較早那道檢查本來就會發動——這個案例的那個寫法，對「還帶著
     # 這個缺陷的建置」照樣通過。
     _t145_dev=$("$CSV2" -r -t -i "$TMP/t145.csv" -o /dev/stdout 2>&1 > "$TMP/t145_capture.txt")
-    if [[ $_t145_dev == *"/dev/stdout"* && $_t145_dev == *"-so"* && $_t145_dev != *"/dev/fd/1"* ]]; then
+    if [[ -z ${_t145_dev//[[:space:]]/} ]]; then
+        # Some systems can create a file beside /dev/fd/1 -- the guest, running
+        # as root, is one -- and then this is not a failure at all. The
+        # property under test is what the message says WHEN it fails, so there
+        # is nothing here to check rather than something that passed.
+        # 有些系統在 /dev/fd/1 旁邊建得了檔案——以 root 執行的 guest 就是——那時這根本不是
+        # 一次失敗。這裡要測的性質是「失敗時那則訊息說了什麼」，因此此處沒有東西可檢查，
+        # 而不是「有東西通過了」。
+        T145E_SKIPPED=1
+        skipt "T145e -o into a directory that cannot take a new file / -o 指向一個放不下新檔案的目錄 (this system can create one beside /dev/fd/1 / 此系統在 /dev/fd/1 旁邊建得了檔案)"
+    elif [[ $_t145_dev == *"/dev/stdout"* && $_t145_dev == *"-so"* && $_t145_dev != *"/dev/fd/1"* ]]; then
         ok "T145e it names the path as typed and points at -so / 它指名打出來的那個路徑，並指向 -so"
     else
         bad "T145e $(print -r -- $_t145_dev | head -1) / 訊息如上"
@@ -7219,9 +7240,11 @@ if (( $+commands[iconv] )); then
         assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t146_u8.csv")" "1" \
             "T146e and following it produces a file csv2 reads / 而照著它做，產生的檔案 csv2 讀得了"
     else
+        T146E_SKIPPED=1
         skipt "T146e following the UTF-16 recipe / 照著 UTF-16 那條建議做 (iconv here cannot do UTF-16LE / 此處的 iconv 做不了 UTF-16LE)"
     fi
 else
+    T146E_SKIPPED=1
     skipt "T146e following the UTF-16 recipe / 照著 UTF-16 那條建議做 (no iconv on this platform / 此平台沒有 iconv)"
 fi
 
@@ -7881,6 +7904,15 @@ fi
 # 放在分支外面。它原本在 POSIX 那一支裡，於是 Windows 回報的 SKIP 比預期多一個：一個
 # 「依平台而定」的數字，去學了一件其實不依平台而定的差異。
 (( ${T143_SKIPPED:-0} )) && (( want_skip += 1 ))
+# T146e needs iconv, which the guest's busybox does not carry; T145e needs a
+# directory that refuses a new file, which a root shell does not meet. Both
+# are recorded by the case that skipped, for the same reason T143 is: the
+# condition is not a property of the platform's name.
+# T146e 需要 iconv，而 guest 的 busybox 沒有它；T145e 需要一個「拒絕新檔案」的目錄，而
+# 一個 root shell 遇不到。兩者都由「跳過的那個案例」自己記錄，理由與 T143 相同：那個條件
+# 不是「平台叫什麼名字」的性質。
+(( ${T146E_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T145E_SKIPPED:-0} )) && (( want_skip += 1 ))
 if [[ "$skip" == "$want_skip" ]]; then
     ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
 else
