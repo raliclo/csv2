@@ -7772,6 +7772,47 @@ assert_contains "$(head -1 "$TMP/t155_sp.log")" '-i "' \
     "T155e and a path containing a space is quoted in the invocation line / 而含空白的路徑，在那行指令紀錄裡會被加上引號"
 
 # ---------------------------------------------------------------------
+# T156 -- the JSON shape a consumer would validate against.
+#
+# Round 58: a `.csv2` object carries a sixth key, `header_zh`, which appears
+# nowhere in either README -- "a schema-validating consumer breaks on the first
+# .csv2". And `--en`/`--zh`, documented as changing the report's middle field,
+# change nothing here. Both are now written down, so both need holding.
+#
+# T156 —— 一個消費端會拿去驗證的那個 JSON 形狀。
+# ---------------------------------------------------------------------
+echo
+echo "--- T156: the keys, and who changes them / T156：那些鍵，以及誰會改變它們 ---"
+
+print -r -- 'a,b'  > "$TMP/t156.csv"
+print -r -- '1,x' >> "$TMP/t156.csv"
+print -r -- 'a,b'   > "$TMP/t156.csv2"
+print -r -- '甲,乙' >> "$TMP/t156.csv2"
+print -r -- '1,x'  >> "$TMP/t156.csv2"
+
+_t156_csv=$("$CSV2" -contains x --json -i "$TMP/t156.csv" | sed -n 2p)
+_t156_two=$("$CSV2" -contains x --json -i "$TMP/t156.csv2" | sed -n 2p)
+
+if [[ $_t156_csv == *'"header_en"'* && $_t156_csv != *'"header_zh"'* ]]; then
+    ok "T156a a .csv object carries header_en and no header_zh / .csv 的物件帶 header_en，沒有 header_zh"
+else
+    bad "T156a $_t156_csv / 物件如上"
+fi
+if [[ $_t156_two == *'"header_en":"b"'* && $_t156_two == *'"header_zh":"乙"'* ]]; then
+    ok "T156b while a .csv2 object carries both names / 而 .csv2 的物件兩個名字都帶著"
+else
+    bad "T156b $_t156_two / 物件如上"
+fi
+
+# --en / --zh change the report and not the JSON, which is what the README now
+# says and the opposite of what a reader would guess.
+# --en／--zh 改變的是報告、不是 JSON——那是 README 現在寫的，也與讀者會猜的相反。
+assert_same <(print -r -- "$_t156_two") <(print -r -- "$("$CSV2" -contains x --json --zh -i "$TMP/t156.csv2" | sed -n 2p)") \
+    "T156c and --zh changes nothing in --json / 而 --zh 在 --json 裡什麼也不改"
+assert_contains "$("$CSV2" -contains x --zh -i "$TMP/t156.csv2")" "乙" \
+    "T156d while it does change the report's column name / 而它確實會改變報告裡的欄名"
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one

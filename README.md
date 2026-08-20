@@ -427,6 +427,13 @@ per hit, so a 400-byte cell would otherwise carry the format away with it. The
 cut is marked, never silent. It means the third column is a PREVIEW — `-get`
 returns the whole value, and `--json` carries it in full.
 
+**The cut bounds the VALUE, not the line.** 200 characters of the value are
+kept and `N` counts the characters dropped — both before escaping. Escaping
+happens afterwards, so a value made of control characters still produces a long
+line: 200 raw characters can become 800 written ones. `\xNN` is written with
+the hex in upper case. If you are measuring a length from this column, add
+`preview` and `N` in RAW characters and do not measure the bytes on the line.
+
 Three fields separated by a **TAB**: the address, the column name, the value.
 One line per matching **cell**, so two matching columns in one record print two
 lines, while the same string twice inside one cell prints one. In a script,
@@ -982,6 +989,18 @@ it is reading, so a caller can assert `headers` is what it expected instead of
 accepting a wrong guess. The **last** line carries the counts: they cannot be
 in the first line without reading the whole input before emitting anything,
 which is the streaming guarantee.
+
+**On a `.csv2` each object carries a sixth key, `header_zh`**, holding the
+second header row's name for that column — the example above is a `.csv`, which
+has five. `--en` and `--zh` change the middle field of the locating report and
+change nothing here: `--json` always carries both names, because a consumer
+that wanted one of them can pick, and one that wanted the other cannot invent
+it.
+
+**The last line is absent when the stream is cut short** — a reader that left
+(exit 141), or a `-so` edit that failed after emitting records. There is no
+in-band marker for that: if the counts matter, check that the last line you
+received is a `meta` object rather than assuming it is.
 
 Read those two counts precisely. `records` is the highest data record number
 **reached**, not how many the file holds and not how many were parsed —
