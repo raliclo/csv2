@@ -6560,6 +6560,89 @@ else
 fi
 
 # ---------------------------------------------------------------------
+# T131 -- a write that fails for a reason other than a departed reader.
+#
+# Two failures used to be treated as one. `Platform.writeAll` called
+# readerHasGone() for ANY failed write, so a full disk raised SIGPIPE and csv2
+# exited 141 with an empty stderr and a half-written file -- and 141 is the
+# status the README tells callers to disregard. The file sink meanwhile used
+# FileHandle.write, on the reasoning that a file cannot meet a broken pipe:
+# true, and beside the point, because it can meet ENOSPC, and Foundation
+# answers that with an exception nobody catches (exit 134, no diagnostic, temp
+# file left behind).
+#
+# ENOSPC itself is not reachable portably -- it needs a filesystem this suite
+# has no business creating -- so it is verified by hand in
+# todo/known-defects.md (DV) and the property is pinned here with a failure
+# that IS portable: writing to a descriptor the shell has closed.
+#
+# T131 —— 一次「不是因為讀端離開」而失敗的寫入。
+# 兩種失敗曾被當成同一種：`Platform.writeAll` 對任何失敗的寫入都呼叫 readerHasGone()，
+# 於是磁碟寫滿會引發 SIGPIPE、csv2 以 141 結束、stderr 空白、磁碟上留著寫到一半的檔案
+# ——而 141 正是 README 叫呼叫端不必理會的那個狀態。檔案 sink 則走 FileHandle.write，
+# 理由是「檔案不可能遇到管線斷掉」：那是對的，也不是重點，因為它會遇到 ENOSPC，而
+# Foundation 對此的回答是一個沒有人接的例外（rc=134、沒有診斷、暫存檔留下）。
+# ENOSPC 本身無法可攜地重現——那需要一個本測試沒有立場去建立的檔案系統——因此它由
+# todo/known-defects.md（DV）以手動方式驗證，而這裡用一個「可攜的」失敗來釘住同一個
+# 性質：寫入一個已被 shell 關掉的描述子。
+# ---------------------------------------------------------------------
+echo
+echo "--- T131: a failed write is reported, not disguised / 失敗的寫入會被回報，而不是被偽裝 ---"
+
+print -r -- 'a,b'  > "$TMP/t131.csv"
+print -r -- '1,x' >> "$TMP/t131.csv"
+
+"$CSV2" -r -t -i "$TMP/t131.csv" -so >&- 2>"$TMP/t131a.err"
+_t131_rc=$?
+assert_eq "$_t131_rc" "1" \
+    "T131a a write that fails for another reason exits 1, not 141 / 因其他理由失敗的寫入以 1 結束，不是 141"
+assert_eq "$(wc -l < "$TMP/t131a.err" | tr -d ' ')" "2" \
+    "T131b and it says so in the documented two lines / 而它以文件所述的兩行說出來"
+if grep -q 'cannot write to standard output' "$TMP/t131a.err"; then
+    ok "T131c naming the destination it could not write / 指出它寫不進去的是哪一個目的地"
+else
+    bad "T131c the message does not name the destination / 訊息沒有指出目的地：$(head -1 "$TMP/t131a.err")"
+fi
+
+# With stderr closed as well there is nowhere to report to, and the status is
+# the only thing left. It still has to be 1, and csv2 still has to stop.
+# 連 stderr 也關掉時，沒有地方可以回報，剩下的只有結束狀態。它仍然必須是 1，而 csv2 仍然
+# 必須停下來。
+"$CSV2" -r -t -i "$TMP/t131.csv" -so >&- 2>&-
+assert_eq "$?" "1" \
+    "T131d with nowhere to report to, the status still says it failed / 連回報的地方都沒有時，結束狀態仍然說它失敗了"
+
+# T131e -- the temp file after a signal. The README says a failed in-place edit
+# leaves none beside the target; that was true of the error paths and false of
+# a killed process, which left a hidden multi-megabyte file nobody would see.
+#
+# The mid-run check is not decoration: without it this case passes when csv2
+# exits before the signal arrives, which is the same "cannot tell the two
+# apart" hole T43h had.
+# T131e —— 訊號之後的暫存檔。README 說失敗的就地編輯不會在目標旁留下暫存檔；那在錯誤路徑上
+# 成立，在「行程被殺死」時不成立——它會留下一個沒有人看得到的隱藏檔，好幾 MB。
+# 「執行中」那一步不是裝飾：少了它，這個案例在「csv2 早在訊號到達前就結束了」時照樣通過，
+# 那與 T43h 曾有的「分不出兩者」是同一個洞。
+if (( IS_WINDOWS )); then
+    skipt "T131e a killed edit leaves no temp file beside the target / 被殺死的編輯不會在目標旁留下暫存檔 (POSIX signal handlers; a native Windows binary is not stopped this way / 這是 POSIX 訊號處理，原生 Windows 程式不是這樣被停下的)"
+else
+    rm -f "$TMP"/.t131_out.csv.csv2tmp.* "$TMP/t131_out.csv"
+    ( print -r -- 'a,b'; print -r -- '1,x'; sleep 5 ) \
+        | "$CSV2" -r -t -si --headers 1 -o "$TMP/t131_out.csv" 2>/dev/null &
+    _t131_pid=$!
+    sleep 1
+    _t131_mid=$(print -r -- "$TMP"/.t131_out.csv.csv2tmp.*(N))
+    kill -TERM $_t131_pid 2>/dev/null
+    wait $_t131_pid 2>/dev/null
+    _t131_left=$(print -r -- "$TMP"/.t131_out.csv.csv2tmp.*(N))
+    if [[ -n $_t131_mid && -z $_t131_left ]]; then
+        ok "T131e a killed edit leaves no temp file beside the target / 被殺死的編輯不會在目標旁留下暫存檔"
+    else
+        bad "T131e mid-run temp=${_t131_mid:-none}, left behind=${_t131_left:-none} / 執行中的暫存檔與殘留如上"
+    fi
+fi
+
+# ---------------------------------------------------------------------
 # T130 -- -o and what "this file" means. The other half of T129.
 # T130 —— -o，以及「這個檔案」指的是什麼。T129 的另一半。
 # ---------------------------------------------------------------------

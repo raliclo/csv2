@@ -925,6 +925,14 @@ final class ByteSink {
     /// 只有 stdout 那個 sink 會設定它。檔案 sink 走 `handle` 寫出——它不可能遇到管線斷掉，
     /// 而在 Windows 上，指向檔案的 FileHandle 根本取不到描述子。
     private let pipeSafeFD: Int32?
+    /// The descriptor every sink writes through. Kept beside the FileHandle
+    /// because Windows will not hand one out from a FileHandle, and because a
+    /// write has to be able to report WHY it failed -- which is what
+    /// FileHandle.write cannot do without throwing an exception nobody catches.
+    /// 每個 sink 實際寫出所用的描述子。與 FileHandle 並存，因為 Windows 不會從 FileHandle
+    /// 交出描述子，也因為一次寫入必須說得出「為什麼失敗」——那正是 FileHandle.write 做不到
+    /// 的事，它只會擲出一個沒有人接的例外。
+    private let writeFD: Int32?
     private let tmpPath: String?
     private let finalPath: String?
     private var closed = false
@@ -934,6 +942,7 @@ final class ByteSink {
     init(stdout limit: Int = 1 << 16) {
         handle = FileHandle.standardOutput
         pipeSafeFD = 1
+        writeFD = 1
         self.limit = limit
         tmpPath = nil
         finalPath = nil
@@ -948,6 +957,7 @@ final class ByteSink {
     init(memory: Void) {
         handle = FileHandle.nullDevice
         pipeSafeFD = nil
+        writeFD = nil
         self.limit = Int.max
         tmpPath = nil
         finalPath = nil
@@ -968,6 +978,7 @@ final class ByteSink {
         // stderr 是 fd 2，而診斷串流與 stdout 一樣會遇到管線斷掉——
         // `csv2 -debug … 2>&1 | head` 是很平常的寫法。
         pipeSafeFD = 2
+        writeFD = 2
         self.limit = limit
         tmpPath = nil
         finalPath = nil
@@ -985,12 +996,15 @@ final class ByteSink {
         let base = (path as NSString).lastPathComponent
         let dirPart = dir.isEmpty ? "." : dir
         let tmp = "\(dirPart)/.\(base).csv2tmp.\(Platform.processID())"
-        FileManager.default.createFile(atPath: tmp, contents: nil)
-        guard let h = FileHandle(forWritingAtPath: tmp) else {
-            throw fault("cannot create temporary file beside \(path)", "無法在 \(path) 旁建立暫存檔")
+        guard let opened = Platform.openForWrite(path: tmp) else {
+            let e = Platform.errorText(errno)
+            throw fault("cannot create temporary file beside \(path): \(e)",
+                        "無法在 \(path) 旁建立暫存檔：\(e)")
         }
-        handle = h
+        handle = opened.handle
         pipeSafeFD = nil
+        writeFD = opened.fd
+        Platform.rememberTemp(tmp)
         self.limit = limit
         tmpPath = tmp
         finalPath = path
@@ -1013,13 +1027,61 @@ final class ByteSink {
         // stdout 不走 handle.write：在 Linux 與 Windows 上，它會把「管線斷掉」變成一個
         // 致命錯誤與一段 Swift backtrace。檔案 sink 仍走 handle.write，它不可能遇到那件事。
         // 見 Platform.writeAll。
-        if let fd = pipeSafeFD {
-            Platform.writeAll(fd: fd, buf)
-        } else {
-            handle.write(Data(buf))
+        // Every sink writes the same way now. The file branch used to call
+        // handle.write, on the reasoning that a file cannot meet a broken pipe
+        // -- true, and beside the point: it can meet a full disk, and
+        // FileHandle.write answers that with an exception nobody catches. A
+        // -o edit onto a full volume aborted with exit 134, no diagnostic at
+        // all, and its temp file left behind.
+        // 現在每個 sink 都以同一種方式寫出。檔案那一支原本呼叫 handle.write，理由是「檔案
+        // 不可能遇到管線斷掉」——那是對的，而且不是重點：它會遇到磁碟寫滿，而 FileHandle.write
+        // 對此的回答是一個沒有人接的例外。一次寫到滿磁碟的 -o 編輯以 134 中止、一個字的
+        // 診斷也沒有，並留下它的暫存檔。
+        if let fd = writeFD {
+            let failure = Platform.writeAll(fd: fd, buf)
+            if failure != 0 { writeFailed(failure) }
         }
         bytesWritten += buf.count
         buf.removeAll(keepingCapacity: true)
+    }
+
+    /// A write that could not be completed. Reported here and not thrown,
+    /// because `flush()` is called from `write()`, which is called from every
+    /// formatter in the program: making it throwing would put a `try` on every
+    /// line of output for a condition that ends the run either way.
+    ///
+    /// The two-line bilingual shape and the exit status are the same ones
+    /// main.swift produces for any other refusal, deliberately -- a caller
+    /// reading stderr must not have to know that this one came from further
+    /// down. The temp file goes first, so a failed run leaves nothing beside
+    /// the target.
+    /// 一次無法完成的寫入。在此回報而不是擲出，因為 `flush()` 是由 `write()` 呼叫的，而
+    /// `write()` 被程式裡每一個格式化器呼叫：把它改成 throwing，等於為了一個「無論如何都
+    /// 會結束這次執行」的狀況，在每一行輸出上加一個 `try`。
+    /// 兩行雙語的形狀與結束狀態，與 main.swift 對其他任何拒絕所產生的完全相同，這是刻意的
+    /// ——讀 stderr 的呼叫端，不該需要知道這一次是從更底層來的。暫存檔先刪，好讓一次失敗的
+    /// 執行不會在目標旁邊留下任何東西。
+    private func writeFailed(_ code: Int32) -> Never {
+        let e = Platform.errorText(code)
+        // Named in each language rather than once in English: "無法寫入 standard
+        // output" is the kind of half-translated line that tells a reader the
+        // Chinese half was an afterthought.
+        // 兩種語言各自命名，而不是共用一份英文：「無法寫入 standard output」正是那種
+        // 半翻譯的句子，它會告訴讀者中文那一半是事後補的。
+        let whatEn = tmpPath != nil ? (finalPath ?? "the output file")
+                                    : (pipeSafeFD == 2 ? "standard error" : "standard output")
+        let whatZh = tmpPath != nil ? (finalPath ?? "輸出檔")
+                                    : (pipeSafeFD == 2 ? "標準錯誤" : "標準輸出")
+        if let tmp = tmpPath {
+            try? handle.close()
+            try? FileManager.default.removeItem(atPath: tmp)
+            Platform.forgetTemp()
+        }
+        let en = "cannot write to \(whatEn): \(e)"
+        let zh = "無法寫入 \(whatZh)：\(e)"
+        Platform.writeAll(fd: 2, [UInt8]("csv2: \(lineEscape(en))\ncsv2：\(lineEscape(zh))\n".utf8))
+        Logger.shared.close()
+        exit(1)
     }
 
     func close() throws {
@@ -1069,6 +1131,7 @@ final class ByteSink {
             // umask 的模式，因此少了這一步，一次編輯會把 0600 靜默改寫成 0644——一個「工作
             // 就只是改一格」的操作，悄悄地改變了誰讀得到這個檔案。
             Platform.copyMode(from: final, to: tmp)
+            Platform.forgetTemp()
             if !Platform.replaceFile(tmp, final) {
                 let e = Platform.lastErrorText()
                 try? FileManager.default.removeItem(atPath: tmp)
@@ -1087,6 +1150,7 @@ final class ByteSink {
         if let tmp = tmpPath {
             try? handle.close()
             try? FileManager.default.removeItem(atPath: tmp)
+            Platform.forgetTemp()
         }
     }
 }

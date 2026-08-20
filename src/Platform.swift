@@ -474,10 +474,28 @@ enum Platform {
         #endif
     }
 
-    static func writeAll(fd: Int32, _ bytes: [UInt8]) {
-        if bytes.isEmpty { return }
+    /// Writes every byte, or returns the errno that stopped it. 0 means all of
+    /// them went.
+    ///
+    /// EPIPE is the one failure that is not an error: the reader left, and a
+    /// filter should die of SIGPIPE like every other one. Everything else IS an
+    /// error and is handed back to the caller, who knows which file it was and
+    /// can say so. Treating them alike is how a full disk came to look exactly
+    /// like `| head`: ENOSPC raised SIGPIPE, csv2 exited 141 with nothing on
+    /// stderr and a half-written file on disk, and 141 is the status the README
+    /// tells callers to disregard.
+    /// 把每一個位元組寫出去，或回傳讓它停下來的 errno。0 表示全部寫完。
+    /// EPIPE 是唯一「不算錯誤」的失敗：讀端走了，而一個 filter 應該像其他每一個那樣死於
+    /// SIGPIPE。其餘都**是**錯誤，交還給呼叫端——它知道那是哪一個檔案，說得出口。把兩者
+    /// 一視同仁，正是「磁碟寫滿」長得跟 `| head` 一模一樣的原因：ENOSPC 引發了 SIGPIPE，
+    /// csv2 以 141 結束、stderr 上一個字也沒有、磁碟上留著寫到一半的檔案，而 141 正是
+    /// README 叫呼叫端不必理會的那個狀態。
+    @discardableResult
+    static func writeAll(fd: Int32, _ bytes: [UInt8]) -> Int32 {
+        if bytes.isEmpty { return 0 }
         ensureBinaryMode(fd)
         var off = 0
+        var failure: Int32 = 0
         bytes.withUnsafeBufferPointer { buf in
             guard let base = buf.baseAddress else { return }
             while off < bytes.count {
@@ -488,12 +506,113 @@ enum Platform {
                 let n = write(fd, base + off, remaining)
                 #endif
                 if n > 0 { off += n; continue }
-                #if !canImport(ucrt)
+                #if canImport(ucrt)
+                // No EPIPE on a Windows CRT descriptor: a closed pipe surfaces
+                // as EINVAL or EBADF, and there is no SIGPIPE to die of. The
+                // caller reports it like any other write failure.
+                // Windows 的 CRT 描述子上沒有 EPIPE：管線關閉時會是 EINVAL 或 EBADF，
+                // 也沒有 SIGPIPE 可死。交由呼叫端當成一般寫入失敗回報。
+                failure = errno == 0 ? EIO : errno
+                return
+                #else
                 if n < 0 && errno == EINTR { continue }
+                if n < 0 && errno == EPIPE { readerHasGone() }
+                failure = n < 0 ? errno : EIO
+                return
                 #endif
-                readerHasGone()
             }
         }
+        return failure
+    }
+
+    /// Open a file for writing, truncating it, and hand back both a FileHandle
+    /// and the descriptor underneath it.
+    ///
+    /// Both, because each platform withholds one of them: `FileHandle` is what
+    /// flushToDisk and close take, and `FileHandle.fileDescriptor` is
+    /// unavailable on Windows, so the descriptor has to be carried separately
+    /// rather than asked for later.
+    /// 以寫入開啟並截斷一個檔案，同時交回 FileHandle 與它底下的描述子。
+    /// 兩個都要，因為每個平台各扣住一個：flushToDisk 與 close 收的是 `FileHandle`，
+    /// 而 `FileHandle.fileDescriptor` 在 Windows 上不可用，因此描述子必須一路帶著，
+    /// 不能事後再要。
+    static func openForWrite(path: String) -> (handle: FileHandle, fd: Int32)? {
+        #if canImport(ucrt)
+        let h: HANDLE = path.withCString(encodedAs: UTF16.self) { wpath in
+            CreateFileW(wpath,
+                        DWORD(GENERIC_WRITE),
+                        DWORD(FILE_SHARE_READ),
+                        nil,
+                        DWORD(CREATE_ALWAYS),
+                        DWORD(FILE_ATTRIBUTE_NORMAL),
+                        nil)
+        }
+        guard h != INVALID_HANDLE_VALUE else { return nil }
+        let fd = _open_osfhandle(intptr_t(bitPattern: h), _O_BINARY)
+        guard fd >= 0 else { CloseHandle(h); return nil }
+        return (FileHandle(fileDescriptor: fd, closeOnDealloc: true), fd)
+        #else
+        let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+        guard fd >= 0 else { return nil }
+        return (FileHandle(fileDescriptor: fd, closeOnDealloc: true), fd)
+        #endif
+    }
+
+    /// The system's text for an errno, as a message can print it.
+    /// 一個 errno 對應的系統文字，可直接印在訊息裡。
+    static func errorText(_ code: Int32) -> String {
+        String(cString: strerror(code))
+    }
+
+    // -----------------------------------------------------------------
+    // MARK: - Removing the temp file when the run is killed / 被殺死時清掉暫存檔
+    // -----------------------------------------------------------------
+
+    /// The path a signal handler is allowed to unlink, as a C string.
+    ///
+    /// Preallocated on purpose. A handler may not allocate, may not take a
+    /// lock, and may not call into Swift's runtime -- so the path cannot be
+    /// converted from a String at the moment the signal arrives. It is
+    /// converted when the temp file is created and freed when it is gone.
+    /// 一個訊號處理常式可以 unlink 的路徑，以 C 字串形式。
+    /// 刻意預先配置。處理常式不可配置記憶體、不可取鎖、不可呼叫 Swift runtime——因此那個
+    /// 路徑不能等訊號到達時才從 String 轉換。它在暫存檔建立時轉換，在暫存檔消失時釋放。
+    private static var doomedTemp: UnsafeMutablePointer<CChar>?
+
+    /// Remember a temp file for the duration of the write, so an interrupted
+    /// run does not leave it beside the target.
+    ///
+    /// The README promises a failed in-place edit "leaves no temp file beside
+    /// it", and that was true only of the error paths: a SIGINT, SIGTERM or
+    /// SIGHUP part-way through a 32 MB edit left a hidden 4 MB file behind,
+    /// invisible to `ls` and never cleaned up. SIGKILL still can, and always
+    /// will -- it cannot be caught -- which is why the README now says so.
+    /// 在寫入期間記住一個暫存檔，好讓一次被中斷的執行不會把它留在目標旁邊。
+    /// README 承諾「失敗的就地編輯不會在旁邊留下暫存檔」，而那只在錯誤路徑上成立：一次
+    /// 32 MB 編輯進行到一半收到 SIGINT／SIGTERM／SIGHUP，會留下一個 4 MB 的隱藏檔，
+    /// `ls` 看不到，也沒有人會清掉。SIGKILL 仍然會、而且永遠會——它攔不下來——所以 README
+    /// 現在把這件事寫出來了。
+    static func rememberTemp(_ path: String) {
+        forgetTemp()
+        doomedTemp = strdup(path)
+        #if !canImport(ucrt)
+        for sig in [SIGINT, SIGTERM, SIGHUP] {
+            signal(sig, { received in
+                if let p = Platform.doomedTempPointer { unlink(p) }
+                signal(received, SIG_DFL)
+                raise(received)
+            })
+        }
+        #endif
+    }
+
+    /// Readable from a signal handler: a plain pointer load, no Swift runtime.
+    /// 供訊號處理常式讀取：單純載入一個指標，不經過 Swift runtime。
+    static var doomedTempPointer: UnsafeMutablePointer<CChar>? { doomedTemp }
+
+    static func forgetTemp() {
+        if let p = doomedTemp { free(p) }
+        doomedTemp = nil
     }
 
     /// Exit as a filter does when its reader has gone: no message, no output

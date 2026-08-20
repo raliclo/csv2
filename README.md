@@ -906,6 +906,14 @@ is a property of the OUTPUT SIZE, not of the command: the same pipeline gives 0
 on a small file, because everything fit in the 64 KiB buffer and was written
 before the reader left, and 141 on a large one.
 
+**141 means only that, and a write that fails for any other reason is an
+error.** A full disk under `-so` used to produce 141 as well, with nothing on
+stderr and a half-written file on disk — indistinguishable from the benign case
+above, in the one status this section tells you to disregard. A write that
+fails because the destination is full, the descriptor is closed, or the device
+errors now exits `1` and names the destination in the usual two lines. Asserted
+by T131; the disk-full reproduction is in `todo/known-defects.md` (DV).
+
 **Every refusal exits `1`, and there is nothing else to tell them apart by.**
 Measured across 28 distinct refusals: exit status `1` every time, exactly two
 stderr lines every time, nothing on stdout, no error code, no category token,
@@ -940,7 +948,10 @@ not an implementation detail: it is why the temp-file-and-rename is there.
 
 **The same holds for `--in-place`, where it matters more:** a failed in-place
 edit leaves the original **byte-for-byte unchanged**, and leaves no temp file
-beside it. This is the one guarantee with no fallback — with `-o` you still have
+beside it — including when the run is killed by `SIGINT`, `SIGTERM` or `SIGHUP`
+part-way through, which used to leave a hidden multi-megabyte file next to the
+target (T131e). `SIGKILL` and a power cut cannot be caught and will leave one;
+it is named `.<file>.csv2tmp.<pid>` and is safe to delete. This is the one guarantee with no fallback — with `-o` you still have
 the input if the output is wrong, and with `--in-place` the input *is* the
 output. Asserted by T28c.
 

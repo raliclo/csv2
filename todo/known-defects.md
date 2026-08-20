@@ -4047,3 +4047,69 @@ a,b
 
 修法:`-o` 的輸出路徑也解析 symlink(與 `--in-place` 同一條規則),同檔比較改用解析後的
 路徑,拒絕的訊息改成成立的理由。
+
+---
+
+## DV. 磁碟寫滿:一條路徑當掉並留下暫存檔(rc=134),另一條被 SIGPIPE 殺死(rc=141)(2026-08-21 修正,T131a–d)
+
+第 53 回合盲測發現,以現行建置在一個 8 MiB 的 RAM disk 上重現。
+
+**`-o` / `--in-place`:未捕捉的例外,沒有任何診斷,而且留下暫存檔。**
+
+```
+$ df -k . | tail -1        # 只剩約 300 KiB，輸入 540 KB
+$ csv2 -update 1:2 'ZZZ' -i d.csv -o out.csv 2>err.txt ; echo rc=$?
+rc=134
+$ wc -l < err.txt
+0                          ← csv2 一個字也沒說
+$ ls -la | grep tmp
+-rw-r--r--  364544  .out.csv.csv2tmp.90763    ← 而且留在那裡
+```
+
+134 是 SIGABRT:`ByteSink.flush()` 的檔案分支走的是 `handle.write(Data(buf))`,而
+Foundation 的那個 API 在寫入失敗時會擲出一個沒有人接的例外。原檔逐位元未變——資料保證守住了
+——但失敗的形狀是「當掉」,不是「拒絕」。而 README 說錯誤是 stderr 上恰好兩行、每一次拒絕
+都以 1 結束。
+
+**`-so`:被 SIGPIPE 殺死,而 README 告訴呼叫者那個狀態是無害的。**
+
+```
+$ csv2 -r -t -i d.csv -so > o2.csv ; echo rc=$?
+rc=141                     ← 訊號 13
+$ ls -l o2.csv
+233472                     ← 寫到一半的輸出，stderr 上什麼也沒有
+```
+
+`Platform.writeAll` 對**任何**寫入失敗都呼叫 `readerHasGone()`,而它會還原 SIGPIPE 的預設
+處置並重新引發。ENOSPC 不是 EPIPE。141 恰好是 README 明講「不是 csv2 的錯誤、可以當成
+正常結束」的那一個,於是一個把輸出寫壞的磁碟寫滿事件,長得跟 `| head` 一模一樣。
+
+**兩者是同一句話只想到一半。** `writeAll` 的註解說的是管線斷掉,`flush()` 檔案分支的註解
+說的是「它不可能遇到管線斷掉」——兩邊都對,而兩邊都沒有想到「寫入還會因為別的理由失敗」。
+
+## DW. 被訊號中斷時,暫存檔留在目標檔旁邊(README 說不會)(2026-08-21 修正,T131e)
+
+```
+$ csv2 -update 1:2 ZZZ -i work.csv --in-place &   # 32 MB 檔
+$ kill -INT %1
+$ ls -la
+-rw-r--r--  4392234  .work.csv.csv2tmp.90673      ← 留下
+-rw-r--r--  32400007 work.csv                     ← 原檔完好
+```
+
+README:「a failed in-place edit leaves the original **byte-for-byte unchanged**, and
+leaves no temp file beside it」。前半成立,後半在「被訊號殺死」時不成立——T28c 測的是一次
+**失敗的編輯**(錯誤路徑會呼叫 `abort()`),而不是一個被殺死的行程。SIGINT、SIGTERM、SIGHUP
+都會留下,ENOSPC 那條(DV)也會留下。
+
+暫存檔是隱藏檔(`.名字.csv2tmp.PID`),那讓遺留物在 `ls` 下看不見——隱藏本身有它的理由
+(避免別的工具用 `*.csv` 掃到一個寫到一半的檔案),但它使這個缺陷更難被發現。
+
+DV／DW 的修法與它們可驗證的邊界:每個 sink 都改走 `Platform.writeAll`,而它現在只在
+`errno == EPIPE` 時死於 SIGPIPE,其餘 errno 一律回傳給呼叫端,由 sink 印出慣常的兩行、
+刪掉暫存檔、以 1 結束。暫存檔的路徑在建立時就轉成 C 字串並記住,好讓 SIGINT／SIGTERM／
+SIGHUP 的處理常式能在不配置任何記憶體的情況下 `unlink` 它。
+
+**ENOSPC 本身沒有進測試,而那是刻意的**——重現它需要建立一個檔案系統,那不是這份測試該做的事。
+T131 用的是一個可攜的等價失敗(寫入一個已被 shell 關掉的描述子),而磁碟寫滿的重現步驟留在
+上面。SIGKILL 仍然會留下暫存檔,永遠都會;README 現在把這件事、連同那個檔名一起寫出來了。
