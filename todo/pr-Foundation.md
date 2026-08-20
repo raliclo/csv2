@@ -55,22 +55,20 @@ swiftc -o pipecrash pipecrash.swift
 ./pipecrash | head -c 10 ; echo "exit=${PIPESTATUS[0]}"
 ```
 
-| 平台 / Platform | 結束狀態 / Exit | stderr |
-|---|---|---|
-| macOS(Darwin Foundation) | 141(SIGPIPE) | 空 / empty |
-| Linux(swift-corelibs-foundation) | **132(SIGILL)** | **~2 KB backtrace** |
-| Windows(swift-corelibs-foundation) | **132** | **~2 KB backtrace** |
+| 平台 / Platform | 結束狀態 / Exit | stderr | 來源 / Source |
+|---|---|---|---|
+| macOS 15,Swift 6.4,Darwin Foundation | **141**(SIGPIPE) | **0 bytes** | 上面那支程式,實測 |
+| x86_64 Linux,Swift 6.3.3,corelibs | **132**(SIGILL) | **2511 bytes** | 上面那支程式,實測 |
+| x86_64 Windows MSVC,Swift 6.3.3,corelibs | 132 | ~2 KB | csv2 的 T110d／T110e,尚未用這支程式重跑 |
 
-**上面那支四行的重現,在 macOS 上已經親自跑過**:結束狀態 141,stderr 0 bytes——與 csv2
-自己的行為一致,也確認了「Darwin 這一側是對的」。Linux／Windows 兩列目前來自 csv2 測試套件
-(T110d／T110e)在那兩個節點上的實測,**尚未用這支獨立程式在那裡重跑**。送出之前補上,
-否則就是請上游相信一個沒有被單獨執行過的簡化版本。
+macOS 與 Linux 兩列是用**這一支四行程式**跑出來的,不是從 csv2 推得的。
 
-The four-line reproduction has been run on macOS: exit 141, zero bytes of
-stderr, matching csv2's own behaviour and confirming the Darwin side is
-correct. The Linux/Windows rows still come from csv2's test cases T110d/T110e
-on those nodes rather than from this standalone program; run it there before
-filing, or the report asks upstream to trust a simplification nobody executed.
+**macOS 與 Linux 兩列都是用這支獨立程式親自跑出來的**,不是從 csv2 的行為推得的。
+Windows 那一列仍來自 csv2 的 T110d／T110e,標示如上,送出之前應該在那裡也跑一次同一支程式。
+
+The macOS and Linux rows were produced by running this standalone program, not
+inferred from csv2's behaviour. The Windows row still comes from csv2's own
+T110d/T110e and is labelled as such; run the same program there before filing.
 
 ## 環境 / Environment
 
@@ -118,7 +116,8 @@ stdout 與 stderr 在 C runtime 中固定是 fd 1 與 2,不需要轉換。
 ## 送出之前 / Before filing
 
 - [x] macOS:141 / stderr 0 bytes(2026-08-20 實測)
-- [ ] 在 Linux 與 Windows 上跑同一支獨立重現,補上實際結束狀態
+- [x] Linux:132 / stderr 2511 bytes(2026-08-20 實測,同一支程式)
+- [ ] Windows:用同一支程式重跑,目前那一列來自 csv2 的測試案例
 - [ ] 確認 `FileHandle.swift:709` 在目前 main 分支上仍是同一段程式
 - [ ] 搜尋既有 issue——這個形狀的問題不太可能沒有人回報過
 - [ ] 決定送 issue 還是直接送 PR(第 1 項修法的 patch 很小)
