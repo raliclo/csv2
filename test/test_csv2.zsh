@@ -1029,6 +1029,64 @@ if grep -q 'append fast path' "$TMP/a3.log"; then
 else
     ok "T43e while -o rewrites instead, which is what lets it promise a failed run writes nothing / 而 -o 改為重寫，那正是它得以承諾「失敗的執行不留下任何東西」的原因"
 fi
+
+# T43g-T43h -- the same guarantee, typed the way people actually type it.
+#
+# T43d passes an absolute path that happens to be canonical already. That is
+# not what a caller writes. `--in-place` resolves symlinks on the output path
+# (T129), and resolvingSymlinksInPath() ALSO normalises: a relative path
+# becomes absolute, and on macOS /private/tmp becomes /tmp. The fast path was
+# gated on the two paths being equal STRINGS, so from 9132e66 until this test
+# existed, `-append -i data.csv --in-place` rewrote the whole file -- correct
+# output, O(n) bytes written, and T43d green throughout.
+#
+# T43g–T43h —— 同一條保證，用人們實際會打的寫法。
+# T43d 傳的是一個剛好已是正規形式的絕對路徑，而那不是呼叫者會寫的東西。`--in-place`
+# 會解析輸出路徑上的 symlink（T129），而 resolvingSymlinksInPath() 同時也會正規化：
+# 相對路徑變絕對，macOS 上 /private/tmp 變 /tmp。快路徑的守衛比的是兩個「字串」是否
+# 相等，因此從 9132e66 起、直到有了這個測試為止，`-append -i data.csv --in-place`
+# 一直在重寫整個檔案——輸出正確、寫入 O(n)，而 T43d 全程是綠的。
+rm -f "$TMP/a5.log"
+cp "$TMP/big.csv" "$TMP/big_rel.csv"
+( cd "$TMP" && "$CSV2" -append 'zz,v,s,src,purpose,note,MIT' -i big_rel.csv --in-place \
+    -log a5.log 2>/dev/null )
+if grep -q 'append fast path' "$TMP/a5.log"; then
+    ok "T43g a relative path takes the fast path too / 相對路徑同樣會走快路徑"
+else
+    bad "T43g a relative path fell back to a full rewrite / 相對路徑退回了全檔重寫"
+fi
+
+# Through a symlink: the fast path opens the path as given, and O_APPEND
+# follows the link, so the target grows and the link survives. That has to be
+# checked rather than assumed -- it is the same property T129 pins for the
+# rewrite path, and the two paths reach the file by different means.
+# 經 symlink：快路徑就用給定的路徑開檔，而 O_APPEND 會跟著連結走，因此目標長大、連結
+# 存活。這件事要驗，不能假設——它與 T129 為重寫路徑釘住的是同一個性質，而兩條路徑
+# 抵達那個檔案的方式並不相同。
+if (( IS_WINDOWS )); then
+    skipt "T43h an append through a symlink keeps the link and grows the target / 經 symlink 的追加會保留連結並讓目標長大 (no symlinks under MSYS2 / MSYS2 下沒有 symlink)"
+else
+    rm -f "$TMP/a6.log" "$TMP/big_sym.csv"
+    cp "$TMP/big.csv" "$TMP/big_target.csv"
+    ln -sf "$TMP/big_target.csv" "$TMP/big_sym.csv"
+    _t43_before=$(wc -c < "$TMP/big_target.csv")
+    "$CSV2" -append 'zz,v,s,src,purpose,note,MIT' -i "$TMP/big_sym.csv" --in-place \
+        -log "$TMP/a6.log" 2>/dev/null
+    _t43_after=$(wc -c < "$TMP/big_target.csv")
+    # The fast-path line is required as well. Without it this case passed even
+    # with the fast path dead: the rewrite path keeps the link too (T129), so
+    # link-plus-growth alone cannot tell the two apart -- and a test that cannot
+    # tell them apart is not pinning the thing its name claims.
+    # 也要求那一行「快路徑」。少了它，這個案例在快路徑已死時照樣通過：重寫那條路也會保留
+    # 連結（T129），因此「連結還在且長大了」分不出這兩者——而一個分不出來的測試，並沒有
+    # 釘住它名字所宣稱的東西。
+    if [[ -L "$TMP/big_sym.csv" && $_t43_after -gt $_t43_before ]] \
+       && grep -q 'append fast path' "$TMP/a6.log"; then
+        ok "T43h an append through a symlink takes the fast path, keeps the link and grows the target / 經 symlink 的追加會走快路徑、保留連結並讓目標長大"
+    else
+        bad "T43h symlink=$([[ -L "$TMP/big_sym.csv" ]] && echo kept || echo replaced), target $_t43_before -> $_t43_after, fast path=$(grep -c 'append fast path' "$TMP/a6.log") / symlink、目標大小與快路徑如上"
+    fi
+fi
 assert_contains "$(cat "$TMP/a3.log")" 'atomic rename OK' \
     "T43f and -o reports the rename, the guarantee it is paying for / 而 -o 會回報那次 rename，也就是它付出代價換來的那條保證"
 

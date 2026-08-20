@@ -1238,7 +1238,24 @@ func runEdit(_ o: Options) throws {
 func canUseAppendFastPath(_ o: Options) -> Bool {
     guard o.edits.count >= 1, o.input != nil else { return false }
     guard o.encryptCols == nil, o.decryptCols == nil, o.hashCols == nil else { return false }
-    guard o.output == o.input else { return false }
+    // What decides this is whether the run is an in-place append, and o.inPlace
+    // answers that directly. Comparing the two PATHS was the same mistake DP
+    // was about: `--in-place` sets o.output to the symlink-resolved path, and
+    // resolvingSymlinksInPath() also normalises -- a relative path becomes
+    // absolute, and on macOS /private/tmp becomes /tmp. From 9132e66 until this
+    // line, `-append -i data.csv --in-place` -- a relative path, the ordinary
+    // way to type it -- silently rewrote the whole file. T43d kept passing
+    // because it happens to pass an already-canonical absolute path.
+    // `-o` naming the input is refused in main.swift, so nothing else can reach
+    // this path by accident.
+    // 決定這件事的是「這是不是一次就地追加」，而 o.inPlace 直接回答了。比較兩個「路徑」
+    // 犯的是 DP 那個一樣的錯：`--in-place` 會把 o.output 設成解析過 symlink 的路徑，而
+    // resolvingSymlinksInPath() 同時也會正規化——相對路徑變絕對，macOS 上 /private/tmp
+    // 變 /tmp。從 9132e66 起到這一行為止，`-append -i data.csv --in-place`（相對路徑，
+    // 也就是一般人會打的那種）一直在靜默重寫整個檔案。T43d 之所以照樣通過，是因為它剛好
+    // 傳了一個已是正規形式的絕對路徑。`-o` 指向輸入在 main.swift 已被拒絕，因此沒有別的
+    // 東西會意外走到這裡。
+    guard o.inPlace else { return false }
     for e in o.edits {
         if case .append = e { continue }
         return false

@@ -3951,3 +3951,45 @@ Windows 上會先 unset 它。**同一個變數、同一個原因、同一台機
 
 順帶:那段遠端指令在一個雙引號字串裡,**註解裡的反引號一樣會開啟命令替換**——
 `git -C <posix path>` 於是被當成重導向來解析,`parse error near '>'`。
+
+---
+
+## DT. 我修 DP 的那一行,把 O(1) 的 append 快路徑關掉了——而測試還在說它活著(2026-08-21 修正,T43g/T43h)
+
+DP 的修法是讓 `--in-place` 的輸出路徑改為解析過 symlink 的路徑。而快路徑的守衛是:
+
+```swift
+guard o.output == o.input else { return false }   // canUseAppendFastPath
+```
+
+**兩個字串。** `resolvingSymlinksInPath()` 不只解 symlink,它還會把路徑正規化:相對路徑
+變成絕對路徑,macOS 上 `/private/tmp/...` 變成 `/tmp/...`。於是只要輸入不是「已經是正規
+形式的絕對路徑」,`o.output` 就不再等於 `o.input`,快路徑靜默退回全檔重寫。
+
+重現(20 MB、40 萬筆):
+
+```
+$ csv2 -append '9,nine,pad' -i ap.csv --in-place -log ap.log
+0.48s user   ← 與整檔重寫同一個量級
+$ tail -1 ap.log
+INFO  wrote 400002 records, 3 fields, atomic rename OK   ← 全檔重寫那條路的訊息
+$ grep -c 'append fast path' ap.log
+0
+```
+
+而 T43d 依然通過,因為它傳的是 `$TMP/big_o.csv`——一個剛好已是正規形式的絕對路徑。
+**那個測試釘住的是「快路徑會說自己走了快路徑」,不是「使用者實際會打的路徑會走到它」。**
+相對路徑是這支工具最常見的用法,而它從 9132e66 起就一直落在慢路徑上。
+
+這是本輪第三次同一個形狀:一條規則只套用到它成立之處的一部分。DP 想的是「路徑同一性
+不能用字串比」,而 `canUseAppendFastPath` 正是另一處用字串比路徑同一性的地方,距離
+那一行三個檔案。
+
+修法:快路徑的守衛不該比較路徑。決定它的是「這是不是一次就地追加」,那由 `o.inPlace`
+直接回答——而 `-o` 指向輸入本來就已被 main.swift 的同檔拒絕擋掉。測試補上「相對路徑」
+與「經 symlink」兩種寫法,因為那正是原本那條測試沒有覆蓋的部分。
+
+補記一筆,因為它自己就是同一個病:第一版的 T43h 只檢查「連結還在、目標長大了」,而**它在
+快路徑已死的情況下照樣通過**——重寫那條路也會保留連結(那正是 DP 修的),所以那兩個條件
+分不出兩條路。加上 `grep 'append fast path'` 之後,負向控制才讓它跟著 T43g 一起紅。
+一個分不出兩者的測試,並沒有釘住它名字所宣稱的東西。

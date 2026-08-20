@@ -67,7 +67,7 @@ running `csv2 --version` in a fresh shell and comparing.
 |---|---|
 | drop-in `install.zsh` | **done** — `$(brew --prefix)/bin`, `/usr/local/bin` where the guest's PATH already has it, `~/.local/bin` fallback, `--uninstall`, `--dry-run`, verified by running / **已完成** |
 | Homebrew tap + formula | blocked: `raliclo/csv2` is private / 被擋住：repo 尚未公開 |
-| Windows scoop shim | **done, and by not creating one** — `install.zsh` writes to `%LOCALAPPDATA%\csv2\csv2.exe`, the path the machine's existing shim already names; measured 2026-08-20: `command -v csv2` resolves through `~/scoop/shims/csv2.shim` to the build just made, and the suite runs 568 PASS / 0 FAIL / 5 SKIP there / **已完成，而且是靠「不建立 shim」完成的**——`install.zsh` 寫到該機器既有 shim 本來就指著的位置；2026-08-20 實測如上 |
+| Windows scoop shim | **done, and by not creating one** — `install.zsh` writes to `%LOCALAPPDATA%\csv2\csv2.exe`, the path the machine's existing shim already names; measured 2026-08-20: `command -v csv2` resolves through `~/scoop/shims/csv2.shim` to the build just made, and the suite runs there with no failures, skipping only what MSYS2 cannot offer / **已完成，而且是靠「不建立 shim」完成的**——`install.zsh` 寫到該機器既有 shim 本來就指著的位置；2026-08-20 實測如上 |
 
 `install.zsh` puts the built `csv2` binary where the platform's package manager
 already has a directory on `PATH`, so that using the tool does not require
