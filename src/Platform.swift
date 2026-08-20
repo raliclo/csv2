@@ -446,8 +446,37 @@ enum Platform {
     /// `FileHandle.fileDescriptor` 標為不可用。只有 stdout 那個 sink 需要這條路徑——
     /// 檔案 sink 不可能遇到管線斷掉——而 stdout 在 csv2 建置的每個平台上、於 C runtime 中
     /// 都是 fd 1，因此沒有任何東西需要轉換。
+    /// Windows' C runtime opens fd 1 and fd 2 in TEXT mode, where every `\n`
+    /// written becomes `\r\n`. Foundation's `FileHandle.write` never met this
+    /// because it writes through the Win32 handle and not the CRT descriptor;
+    /// moving stdout onto `_write` walked straight into it, and 43 cases
+    /// failed with output that looked identical and was not -- `got 'zzz',
+    /// want 'zzz'`, differing by an invisible CR.
+    ///
+    /// Set once, before the first write. It restores the promise the README
+    /// makes in one line: output always uses `\n`, on every platform.
+    ///
+    /// Windows 的 C runtime 以「文字模式」開啟 fd 1 與 fd 2，在那裡每一個寫出的 `\n` 都會
+    /// 變成 `\r\n`。Foundation 的 `FileHandle.write` 從未遇到這件事，因為它寫的是 Win32
+    /// handle 而不是 CRT 描述子；把 stdout 改走 `_write` 就正面撞上了它，43 個案例因此失敗，
+    /// 而它們的輸出「看起來一模一樣」卻不相同——`got 'zzz', want 'zzz'`，差在一個看不見的 CR。
+    ///
+    /// 在第一次寫出之前設定一次。它守住 README 用一句話給出的那個承諾：輸出一律使用 `\n`，
+    /// 在每一個平台上。
+    private static var binaryModeSet = false
+
+    private static func ensureBinaryMode(_ fd: Int32) {
+        #if canImport(ucrt)
+        if binaryModeSet { return }
+        binaryModeSet = true
+        _ = _setmode(1, _O_BINARY)
+        _ = _setmode(2, _O_BINARY)
+        #endif
+    }
+
     static func writeAll(fd: Int32, _ bytes: [UInt8]) {
         if bytes.isEmpty { return }
+        ensureBinaryMode(fd)
         var off = 0
         bytes.withUnsafeBufferPointer { buf in
             guard let base = buf.baseAddress else { return }
