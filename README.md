@@ -420,7 +420,11 @@ lines, while the same string twice inside one cell prints one. In a script,
 
 **Values are escaped**, using the same backslash convention `.csv2` uses plus
 `\t`: a literal tab becomes `\t`, a newline `\n`, a carriage return `\r`, a
-backslash `\\`. Without that a cell containing a tab or a newline would break
+backslash `\\`. **Every other control character becomes `\xNN`**, because this
+report is printed to a terminal and a control character is not text there: a
+cell holding `ESC [ 3 1 m` used to recolour the output from inside the third
+column, and an ESC can also erase the line it is being printed on — the line
+carrying the address. Asserted by T149. Without that a cell containing a tab or a newline would break
 the format the report promises — and quoted prose containing both is exactly
 the data this tool was written for.
 

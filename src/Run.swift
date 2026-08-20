@@ -1430,6 +1430,34 @@ func runAppendFast(_ o: Options) throws {
         }
     }
 
+    // Does this file end its records with CRLF? Appending an LF record to a
+    // CRLF file leaves one file written two ways -- csv2 reads it back (record
+    // endings are decided per record) and plenty of other tools do not. The
+    // fast path writes bytes rather than rewriting the file, so "output is
+    // always LF" cannot apply here without changing every other line too;
+    // matching what is already there is the only answer that leaves the file
+    // internally consistent.
+    // 這個檔案的紀錄是以 CRLF 結尾的嗎？把一筆 LF 紀錄追加到一個 CRLF 檔案上，會留下一個
+    // 「用兩種方式寫成」的檔案——csv2 讀得回來（紀錄結尾是逐筆判斷的），而很多別的工具不行。
+    // 快路徑寫的是位元組、不是重寫整個檔案，因此「輸出一律用 LF」在這裡無法適用，除非把其他
+    // 每一行也一起改掉；配合檔案「已經是的樣子」，是唯一能讓它保持自身一致的答案。
+    var endsWithCRLF = false
+    if size >= 2 {
+        h.seek(toFileOffset: size - 2)
+        let tail = [UInt8](h.readData(ofLength: 2))
+        endsWithCRLF = tail == [BYTE_CR, BYTE_LF]
+    }
+    // The encoder always terminates a record with LF, and it is the same
+    // encoder every write path uses -- so the ending is adjusted here, on the
+    // final byte only. A record may hold LFs of its own inside quotes and
+    // those are data.
+    // 編碼器一律以 LF 結束一筆紀錄，而那是每一條寫入路徑共用的同一個編碼器——因此在這裡調整
+    // 行尾，而且只動最後一個位元組。一筆紀錄的引號內可能有它自己的 LF，那些是資料。
+    func terminated(_ bytes: [UInt8]) -> [UInt8] {
+        guard endsWithCRLF, bytes.last == BYTE_LF else { return bytes }
+        return bytes.dropLast() + [BYTE_CR, BYTE_LF]
+    }
+
     var prefix: [UInt8] = []
     if size > 0 {
         h.seek(toFileOffset: size - 1)
@@ -1472,7 +1500,7 @@ func runAppendFast(_ o: Options) throws {
         // Same encoder as every other write path, so the fast path cannot
         // drift away from the escaping rules.
         // 與其他寫入路徑用同一個編碼器，快路徑因此不會偏離跳脫規則。
-        payload.append(contentsOf: FieldEncoder.encodeRecord(rec, format: fmt, preserveRaw: false))
+        payload.append(contentsOf: terminated(FieldEncoder.encodeRecord(rec, format: fmt, preserveRaw: false)))
     }
 
     // Where each appended record will start, needed before the write so the
@@ -1485,7 +1513,7 @@ func runAppendFast(_ o: Options) throws {
             guard case .append(let row) = e else { continue }
             appendOffsets.append(at)
             let rec = try parseRowLiteral(row, format: fmt, expected: expected, what: "-append")
-            at += UInt64(FieldEncoder.encodeRecord(rec, format: fmt, preserveRaw: false).count)
+            at += UInt64(terminated(FieldEncoder.encodeRecord(rec, format: fmt, preserveRaw: false)).count)
         }
     }
 

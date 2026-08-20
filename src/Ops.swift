@@ -261,7 +261,25 @@ func reportEscape(_ s: String) -> String {
         case "\t": out += "\\t"
         case "\n": out += "\\n"
         case "\r": out += "\\r"
-        default: out.unicodeScalars.append(u)
+        default:
+            // Every other C0 control, and DEL, as \\xNN. The report is written to a
+            // terminal, and ESC is not text there: a value can start a colour
+            // sequence, move the cursor, or erase the line it is being printed on --
+            // including the address printed before it. A round put an ESC-[-3-1-m in
+            // a cell and the report handed it to the terminal unchanged.
+            // The three that already have names keep their short forms. This does not
+            // make the third column reversible -- the README says it is a display form
+            // and not for feeding back -- it makes it one that cannot rewrite what the
+            // other columns said.
+            // 其餘每一個 C0 控制字元與 DEL，一律寫成 \\xNN。這份報告是印到終端機上的，而 ESC
+            // 在那裡不是文字：一個值可以起一段顏色序列、移動游標，或抹掉它正被印出的那一行
+            // ——連同印在它前面的那個位址。已經有名字的那三個保留短形式。這不會讓第三欄變得
+            // 可逆，它讓那個形式無法改寫其他欄位說過的話。
+            if u.value < 0x20 || u.value == 0x7F {
+                out += String(format: "\\x%02X", u.value)
+            } else {
+                out.unicodeScalars.append(u)
+            }
         }
     }
     return out

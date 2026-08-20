@@ -7366,6 +7366,72 @@ assert_eq "$(grep -c 'delete record' "$TMP/t148_nl.log")" "1" \
     "T148e and a record holding a newline is still one log entry / 而含換行的紀錄在 log 裡仍然是一則"
 
 # ---------------------------------------------------------------------
+# T149 -- what a value can do to the terminal, and to a file's line endings.
+#
+# Round 56, two findings from "someone else's file":
+#
+#   - the locating report escaped \t \n \r \\ and passed every other control
+#     through, so a cell holding ESC-[-31m recoloured the terminal from inside
+#     the third column -- and an ESC can also erase the line it is printed on,
+#     which is the line carrying the address;
+#   - `-append --in-place` on a CRLF file appended an LF record, leaving one
+#     file written two ways. csv2 reads it back (endings are decided per
+#     record); plenty of other tools do not.
+#
+# T149 —— 一個值能對終端機、以及對一個檔案的行尾做什麼。
+# ---------------------------------------------------------------------
+echo
+echo "--- T149: control characters and line endings / T149：控制字元與行尾 ---"
+
+printf 'a,b\n1,"pre\x1b[31mRED\x1b[0m"\n' > "$TMP/t149_esc.csv"
+_t149_rep=$("$CSV2" -contains RED -i "$TMP/t149_esc.csv")
+if [[ $_t149_rep == *'\x1B['* ]]; then
+    ok "T149a an ESC in a value is escaped in the report / 值裡的 ESC 在報告中會被跳脫"
+else
+    bad "T149a the report carried it raw / 報告原樣帶著它：$(print -r -- $_t149_rep | od -c | head -1)"
+fi
+if [[ $_t149_rep != *$'\x1b'* ]]; then
+    ok "T149b and no raw escape byte reaches the terminal / 沒有任何原始的 escape 位元組抵達終端機"
+else
+    bad "T149b a raw ESC byte is still in the report / 報告裡仍有原始的 ESC 位元組"
+fi
+assert_eq "$(print -r -- $_t149_rep | wc -l | tr -d ' ')" "1" \
+    "T149c while the report is still one line per hit / 而報告仍然是每個命中一行"
+
+# The value itself is unchanged: escaping is display, not storage.
+# 值本身沒有變：跳脫屬於顯示，不屬於儲存。
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t149_esc.csv" | od -A n -c | tr -s ' ')" \
+    "$(printf 'pre\x1b[31mRED\x1b[0m\n' | od -A n -c | tr -s ' ')" \
+    "T149d and -get still returns the stored bytes / 而 -get 回傳的仍然是儲存的位元組"
+
+# Line endings: an append matches what the file already uses.
+# 行尾：追加時配合檔案已經在用的那一種。
+printf 'a,b\r\n1,x\r\n' > "$TMP/t149_crlf.csv"
+"$CSV2" -append '2,y' -i "$TMP/t149_crlf.csv" --in-place
+if od -c "$TMP/t149_crlf.csv" | tr -s ' ' | grep -q '2 , y \\r \\n'; then
+    ok "T149e an append to a CRLF file ends its record with CRLF / 對 CRLF 檔案的追加，其紀錄以 CRLF 結尾"
+else
+    bad "T149e the file now mixes endings / 這個檔案現在混用了行尾：$(od -c "$TMP/t149_crlf.csv" | head -1)"
+fi
+
+printf 'a,b\n1,x\n' > "$TMP/t149_lf.csv"
+"$CSV2" -append '2,y' -i "$TMP/t149_lf.csv" --in-place
+if [[ $(od -c "$TMP/t149_lf.csv" | grep -c '\\r') -eq 0 ]]; then
+    ok "T149f while an LF file stays LF / 而 LF 檔案維持 LF"
+else
+    bad "T149f a CR appeared in an LF file / LF 檔案裡出現了 CR"
+fi
+
+# And reading either back still writes LF, which is what the README promises
+# of OUTPUT.
+# 而把兩者讀回來時輸出仍然是 LF，那正是 README 對「輸出」的承諾。
+if [[ $("$CSV2" -r -t -i "$TMP/t149_crlf.csv" | od -c | grep -c '\\r') -eq 0 ]]; then
+    ok "T149g reading a CRLF file still writes LF / 讀一個 CRLF 檔案，輸出仍然是 LF"
+else
+    bad "T149g the output carried CR / 輸出帶著 CR"
+fi
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one
