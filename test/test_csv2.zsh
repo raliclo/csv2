@@ -6427,7 +6427,21 @@ print -r -- 'a,b'  > "$TMP/t129_mode.csv"
 print -r -- '1,x' >> "$TMP/t129_mode.csv"
 chmod 600 "$TMP/t129_mode.csv"
 "$CSV2" -update 1:2 'Z' -i "$TMP/t129_mode.csv" --in-place >/dev/null 2>&1
-assert_eq "$(stat -f '%Lp' "$TMP/t129_mode.csv" 2>/dev/null || stat -c '%a' "$TMP/t129_mode.csv")" "600" \
+# BSD stat and GNU stat both take -f, and they mean opposite things: the mode
+# format on macOS, "filesystem status" on Linux. The GNU one prints a block of
+# filesystem facts to STDOUT and then exits 1, so `A || B` runs B and the
+# substitution captures both. Ask each one only what it understands.
+# BSD 與 GNU 的 stat 都收 -f，意思卻相反：在 macOS 是模式格式，在 Linux 是「檔案系統
+# 狀態」。GNU 那個會把一整段檔案系統資訊印到 stdout 之後才以 1 結束，於是 `A || B`
+# 兩半都會跑，而 $() 把兩份都收下。只問每一個它聽得懂的那一句。
+file_mode() {
+    local m
+    m=$(stat -c '%a' "$1" 2>/dev/null)          # GNU / busybox
+    [[ $m == <-> ]] || m=$(stat -f '%Lp' "$1" 2>/dev/null)   # BSD / macOS
+    print -r -- "$m"
+}
+
+assert_eq "$(file_mode "$TMP/t129_mode.csv")" "600" \
     "T129d and an edit does not widen the file's permissions / 而一次編輯不會放寬這個檔案的權限"
 
 echo
