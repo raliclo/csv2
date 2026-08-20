@@ -7226,7 +7226,15 @@ skipt "T47 macOS and aarch64 Linux produce byte-identical output / mac 與 Linux
 # 讓這個數字變成自我實現。
 want_skip=1                                   # T47, on every platform / 每個平台都有
 if (( IS_WINDOWS )); then
-    (( want_skip += 4 ))                      # T61a, T61c, T98a-g, T129a-d
+    # T61a, T61c and T98a-g are the environment's limits; the other four are
+    # properties that need a POSIX filesystem or POSIX signals to test at all:
+    # symlinks (T43h, T129a-d, T130a-c) and killing a process mid-write
+    # (T131e). T135c needs a file the user cannot read, and chmod does not
+    # bite here.
+    # T61a、T61c 與 T98a-g 是「環境」的限制；其餘四項是「非 POSIX 檔案系統或訊號就測不了」
+    # 的性質：symlink（T43h、T129a-d、T130a-c）與「寫到一半殺掉行程」（T131e）。T135c 需要
+    # 一個使用者讀不到的檔案，而 chmod 在這裡咬不住。
+    (( want_skip += 8 ))
 else
     _t69_probe=$(stat_mode "$TMP")
     [[ $_t69_probe == <-> ]] || (( want_skip += 1 ))   # T129e

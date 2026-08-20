@@ -470,11 +470,22 @@ enum Platform {
                 #endif
                 if n > 0 { off += n; continue }
                 #if canImport(ucrt)
-                // No EPIPE on a Windows CRT descriptor: a closed pipe surfaces
-                // as EINVAL or EBADF, and there is no SIGPIPE to die of. The
-                // caller reports it like any other write failure.
-                // Windows 的 CRT 描述子上沒有 EPIPE：管線關閉時會是 EINVAL 或 EBADF，
-                // 也沒有 SIGPIPE 可死。交由呼叫端當成一般寫入失敗回報。
+                // Windows has no SIGPIPE, and csv2 emulates one deliberately:
+                // `| head -1` must end in 141 here as it does everywhere else,
+                // which is what T110d pins. So a departed reader has to be
+                // told apart from every other write failure, and the CRT's
+                // errno is not enough -- the answer is in GetLastError.
+                // ERROR_BROKEN_PIPE is the reader closing its end;
+                // ERROR_NO_DATA is the same thing on a named pipe.
+                // Windows 沒有 SIGPIPE，而 csv2 是刻意模擬它的：`| head -1` 在這裡也必須以
+                // 141 結束，一如其他每一個平台，那正是 T110d 釘住的東西。因此「讀端走了」
+                // 必須與其他每一種寫入失敗分開，而 CRT 的 errno 不足以分辨——答案在
+                // GetLastError 裡。ERROR_BROKEN_PIPE 是讀端關掉了它那一端；具名管線上
+                // 的同一件事則是 ERROR_NO_DATA。
+                let winErr = GetLastError()
+                if errno == EPIPE || winErr == ERROR_BROKEN_PIPE || winErr == ERROR_NO_DATA {
+                    readerHasGone()
+                }
                 failure = errno == 0 ? EIO : errno
                 return
                 #else
