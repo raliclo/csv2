@@ -7700,6 +7700,22 @@ else
     bad "T154d in --help but unknown to the parser:${_t154_ghost} / 在 --help 裡但解析器不認得"
 fi
 
+# The same question of the two READMEs. T117 compares them against each other
+# by case number; this compares both against the parser, which is the direction
+# that catches a flag added to the code and to one document.
+# 對兩份 README 問同一個問題。T117 以案例編號把兩份 README 互相比對；這裡把兩份都拿去對
+# 解析器——那是「一個旗標被加進程式碼與其中一份文件」時，抓得到的那個方向。
+_t154_doc=""
+for _f in ${(f)_t154_known}; do
+    grep -qE -- "--?$_f([^a-zA-Z0-9-]|\$)" "$ROOT/README.md"       || _t154_doc="$_t154_doc en:$_f"
+    grep -qE -- "--?$_f([^a-zA-Z0-9-]|\$)" "$ROOT/README.zh-TW.md" || _t154_doc="$_t154_doc zh:$_f"
+done
+if [[ -z ${_t154_doc// /} ]]; then
+    ok "T154e and every flag the parser knows is in both READMEs / 而解析器認得的每一個旗標，兩份 README 都有"
+else
+    bad "T154e a flag the parser knows is missing from a README:${_t154_doc} / 有旗標在某份 README 裡缺席"
+fi
+
 # ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #

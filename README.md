@@ -322,6 +322,8 @@ PROTECTION / 保護
                         refused: losing data for a security reason is the
                         worse trade
   --yes                 accept the default key without a prompt
+  --version  -V         print the version and exit
+  --help  -h            print the flag list and exit
   --                    the NEXT argument is data, not a flag: write a value
                         that begins with a dash as `-update 1:2 -- --in-place`.
                         It is not "everything after this is data" -- flags that
