@@ -2522,3 +2522,54 @@ Check the header first if you have a key you believe in
 **同一天稍早,T108 的 fixture 就是被同一個錯誤弄壞的**(見那一節)。第一次我修好它並寫下了
 成因;第二次我照樣又犯了。兩處現在都有註解說明為什麼那裡不能用 `local`——而「寫下來」顯然
 不足以擋住第二次,把理由放在出事的那一行旁邊或許可以。
+---
+
+## BA. 下游離開時,csv2 在 Linux 與 Windows 上崩潰(macOS 不會)
+
+第 42 回合的受測者量到「141、不印任何東西、0.04 秒」並稱讚那是正確的 Unix 行為。**它在
+macOS 上跑。** 我把那件事寫進兩份 README,並補上 T110d／T110e 去守住它——然後那兩條在
+WSL 與 Windows 上失敗了:
+
+```
+FAIL T110d ... (got '132', want '141')
+FAIL T110e ... (got '2305', want '0')
+```
+
+`132 = 128 + 4`,SIGILL。那不是 SIGPIPE,那是崩潰。stderr 上的 2 KB 是這個:
+
+```
+Foundation/FileHandle.swift:709: Fatal error: 'try!' expression unexpectedly raised an error:
+Error Domain=NSCocoaErrorDomain Code=512 "(null)"
+UserInfo={NSUnderlyingError=Error Domain=NSPOSIXErrorDomain Code=32 "Broken pipe"}
+
+*** Signal 4: Backtracing from 0x7fb7a36f8d71... done ***
+*** Program crashed: Illegal instruction at 0x00007fb7a36f8d71 ***
+```
+
+**swift-corelibs-foundation 的 `FileHandle.write` 內部用 `try!`。** 於是 `EPIPE` 不是被
+處理,而是成為 fatal error;程式以 SIGILL 崩潰,並印出一段 backtrace。Darwin 的 Foundation
+不是這個實作,所以 macOS 上看不到。
+
+### 這條為什麼要緊
+
+README 有一節叫「In a pipeline」。`| head`、`| less` 提早離開,是管線工具最常見的非成功
+結局——而在三個平台中的兩個上,那個結局是**崩潰加上一段對使用者毫無意義的 Swift backtrace**。
+
+而它也讓我昨天寫的那句話變成假的:「它不印任何東西、不留下任何東西」。在 Linux 上它印
+2 KB。
+
+### 又是「只在一個平台上量過」
+
+**這與 AT 是同一個形狀,而 AT 是同一天早上的事。** 那次是:Windows 從來沒有跑過 T104,
+於是一個真實的缺陷看起來是好的。這次是:那個行為只在 macOS 上被量過,於是我把一個
+「只有一個平台為真」的宣稱寫進了文件。
+
+差別在於這一次**測試先寫好了**,所以它在我把節點跑一遍時立刻現形——而寫那個測試的理由,
+正是「每一條新寫進文件的宣稱都要有測試撐著」。那條規則今天賺回了它的成本。
+
+csv2 crashes when its reader leaves, on Linux and Windows but not macOS:
+swift-corelibs-foundation's FileHandle.write uses `try!`, so EPIPE becomes a
+fatal error and the process dies of SIGILL with a backtrace on stderr instead
+of dying of SIGPIPE in silence. Same shape as AT earlier the same day -- a
+behaviour measured on one platform only -- except this time the test existed
+first, so it surfaced the moment the other platforms ran it.

@@ -407,6 +407,76 @@ enum Platform {
         h.write(data)
     }
 
+    /// Write every byte, and when the reader has gone, stop the way a Unix
+    /// filter stops.
+    ///
+    /// `FileHandle.write` cannot be used for this. swift-corelibs-foundation
+    /// implements it with `try!`, so `EPIPE` is not an error to handle but a
+    /// fatal one: on Linux and Windows csv2 died of SIGILL, exit 132, printing
+    /// a Swift backtrace to the stderr of whoever ran `| head`. Darwin's
+    /// Foundation does not do that, which is why the behaviour looked correct
+    /// for as long as it was only ever measured on macOS.
+    ///
+    /// A filter whose reader has left has nothing left to do and nothing to
+    /// say. On POSIX it dies of SIGPIPE, which is exit 141 and is what the
+    /// shell and every other tool in the pipeline expect. Windows has no
+    /// SIGPIPE, so 141 is produced directly -- the number is a convention
+    /// there rather than a signal, and using the same one keeps a script that
+    /// checks for it portable.
+    ///
+    /// 把每一個位元組寫出去；而當讀取端已經離開時，以「一個 Unix filter 該有的方式」停下來。
+    ///
+    /// 這裡不能用 `FileHandle.write`。swift-corelibs-foundation 用 `try!` 實作它，於是
+    /// `EPIPE` 不是一個「要處理的錯誤」而是一個「致命錯誤」：csv2 在 Linux 與 Windows 上
+    /// 死於 SIGILL、結束狀態 132，並把一段 Swift backtrace 印進那個執行 `| head` 的人的
+    /// stderr。Darwin 的 Foundation 不是這個實作——而那正是「這個行為看起來一直是對的」的
+    /// 原因：它只在 macOS 上被量過。
+    ///
+    /// 一個讀取端已經離開的 filter，沒有事情要做，也沒有話要說。在 POSIX 上它死於 SIGPIPE，
+    /// 也就是結束狀態 141，那是 shell 與管線中其他每一個工具所預期的。Windows 沒有 SIGPIPE，
+    /// 因此直接產生 141——在那裡這個數字是一個約定而不是訊號，而沿用同一個數字，可以讓
+    /// 「會去檢查它」的腳本保持可攜。
+    static func writeAll(_ h: FileHandle, _ bytes: [UInt8]) {
+        if bytes.isEmpty { return }
+        let fd = h.fileDescriptor
+        var off = 0
+        bytes.withUnsafeBufferPointer { buf in
+            guard let base = buf.baseAddress else { return }
+            while off < bytes.count {
+                let remaining = bytes.count - off
+                #if canImport(ucrt)
+                let n = Int(_write(fd, base + off, UInt32(remaining)))
+                #else
+                let n = write(fd, base + off, remaining)
+                #endif
+                if n > 0 { off += n; continue }
+                #if !canImport(ucrt)
+                if n < 0 && errno == EINTR { continue }
+                #endif
+                readerHasGone()
+            }
+        }
+    }
+
+    /// Exit as a filter does when its reader has gone: no message, no output
+    /// file, the status the shell expects.
+    /// 以「讀取端離開時 filter 該有的方式」結束：不留訊息、不留輸出檔，狀態就是 shell 預期的
+    /// 那一個。
+    private static func readerHasGone() -> Never {
+        #if canImport(ucrt)
+        ucrt._exit(141)
+        #else
+        // Restored to the default and re-raised rather than calling exit(141):
+        // the shell distinguishes "killed by signal 13" from "exited with 141"
+        // in $?-adjacent places, and a filter should look like every other one.
+        // 先還原成預設處置再重新引發，而不是直接 exit(141)：shell 在某些地方會區分「被訊號
+        // 13 殺死」與「以 141 結束」，而一個 filter 應該與其他每一個長得一樣。
+        signal(SIGPIPE, SIG_DFL)
+        raise(SIGPIPE)
+        _exit(141)
+        #endif
+    }
+
     // -----------------------------------------------------------------
     // MARK: - Peak memory / 峰值記憶體
     // -----------------------------------------------------------------

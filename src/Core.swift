@@ -862,7 +862,11 @@ final class ByteSink {
 
     func flush() {
         if buf.isEmpty { return }
-        handle.write(Data(buf))
+        // Not handle.write: on Linux and Windows that turns a broken pipe into
+        // a fatal error and a Swift backtrace. See Platform.writeAll.
+        // 不用 handle.write：在 Linux 與 Windows 上，它會把「管線斷掉」變成一個致命錯誤
+        // 與一段 Swift backtrace。見 Platform.writeAll。
+        Platform.writeAll(handle, buf)
         bytesWritten += buf.count
         buf.removeAll(keepingCapacity: true)
     }
