@@ -7033,6 +7033,20 @@ else
         ok "T143a the documented hazard is still reachable: indexed says $_t143_indexed, a scan says $_t143_scanned / 有文件記載的那個風險仍然可達：索引說 $_t143_indexed，掃描說 $_t143_scanned"
         assert_contains "$_t143_verify" "MISMATCH" \
             "T143b while --verify-index still catches it / 而 --verify-index 仍然抓得到"
+        # Only -contains reads the sidecar, which is the mechanism behind the
+        # corruption the READMEs describe: the ADDRESS is wrong, and the verb
+        # you hand it to is not. With this stale index in place, -get agrees
+        # with itself under --no-index -- so the two halves of the compose
+        # recipe disagree while each behaves correctly.
+        # An earlier version of this check looked for the word "index" in
+        # -debug output from each verb and compared two silences.
+        # 只有 -contains 會讀 sidecar，而那正是兩份 README 所描述的那個損壞的機制：錯的是
+        # 「位址」，不是你把它交給的那個動詞。在這份過期索引存在的情況下，-get 與它自己
+        # 在 --no-index 下的答案一致——於是「組合配方」的兩半彼此矛盾，而各自都沒有做錯。
+        # 這個檢查的較早版本，是在各動詞的 -debug 輸出裡找「index」這個字，比較的是兩片沉默。
+        assert_eq "$("$CSV2" -get 200:2 -i "$TMP/t143.csv")" \
+                  "$("$CSV2" -get 200:2 --no-index -i "$TMP/t143.csv")" \
+            "T143c while -get gives the same answer with the sidecar and without it / 而 -get 在「有 sidecar」與「沒有 sidecar」下給的是同一個答案"
     else
         bad "T143a the hazard did not reproduce (both said $_t143_indexed); if that is now impossible, the README's description of the O(1) check must change / 那個風險沒有重現（兩邊都是 $_t143_indexed）；若它確實已不可能發生，README 對 O(1) 檢查的描述就必須修改"
     fi
@@ -7467,6 +7481,42 @@ fi
 _t150_d=$("$CSV2" -decrypt all -i "$TMP/t150_plain.csv" -o "$TMP/t150_out.csv" 2>&1)
 assert_contains "$_t150_d" "no encrypted columns found" \
     "T150c and -decrypt all still means every marked column / 而 -decrypt all 仍然代表「每一個被標記的欄位」"
+
+# ---------------------------------------------------------------------
+# T151 -- three sentences the READMEs now make, which nothing was checking.
+#
+# `-so` as a dry run before an irreversible edit, and `--` as the way to write
+# a value that begins with a dash -- which csv2's own error message recommends
+# and the README never mentioned. The third sentence from the same batch, that
+# only -contains reads the sidecar, is checked in T143c, where a stale index is
+# already staged and the claim can be measured instead of inferred.
+#
+# T151 —— 兩份 README 現在說出口、而先前沒有任何東西在檢查的三句話。
+# ---------------------------------------------------------------------
+echo
+echo "--- T151: the dry run and the dash / T151：乾跑與減號 ---"
+
+print -r -- 'a,b'  > "$TMP/t151.csv"
+print -r -- '1,x' >> "$TMP/t151.csv"
+print -r -- '2,y' >> "$TMP/t151.csv"
+_t151_before=$(cksum < "$TMP/t151.csv")
+
+_t151_dry=$("$CSV2" -update 1:2 'CHANGED' -t -i "$TMP/t151.csv" -so)
+assert_eq "$(cksum < "$TMP/t151.csv")" "$_t151_before" \
+    "T151a -so previews an edit without touching the file / -so 預覽一次編輯，而不碰那個檔案"
+assert_contains "$_t151_dry" "CHANGED" \
+    "T151b and shows what the edit would produce / 並顯示那次編輯會產生什麼"
+
+"$CSV2" -update 99:2 'CHANGED' -t -i "$TMP/t151.csv" -so >/dev/null 2>&1
+assert_eq "$?" "1" \
+    "T151c while an out-of-range address is refused in the dry run too / 而越界的位址在乾跑時同樣會被拒絕"
+
+# `--`, which the tool's own message recommends.
+# `--`，那是工具自己的訊息推薦的寫法。
+"$CSV2" -update 1:2 -- --in-place -i "$TMP/t151.csv" -o "$TMP/t151_dash.csv"
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t151_dash.csv")" "--in-place" \
+    "T151d -- lets a value that looks like a flag be written / -- 讓一個「長得像旗標」的值可以被寫入"
+
 
 # ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.

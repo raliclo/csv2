@@ -320,6 +320,9 @@ PROTECTION / 保護
                         refused: losing data for a security reason is the
                         worse trade
   --yes                 accept the default key without a prompt
+  --                    end of flags: everything after it is data, so a value
+                        that begins with a dash can be written
+                        `-update 1:2 -- --in-place`
 
 COLS is a comma-separated list of column names, 1-based column numbers, or a
 mix: `-hash license`, `-hash 7`, `-hash 6,license`. Three refusals go with it,
@@ -457,7 +460,13 @@ csv2 -contains "old" --no-index -i f.csv2   # or do not use one at all
 ```
 
 `--no-index` is the flag for "refuse to trust a sidecar"; it is listed under
-the index flags and named here because this recipe is where it matters. See
+the index flags and named here because this recipe is where it matters.
+
+**Only `-contains` reads the sidecar.** `-get` and the edit verbs scan, so a
+stale index does not make them miscount — it makes the ADDRESS you carry over
+from the report wrong, and the verb you hand it to then works perfectly on the
+wrong record. The two halves of the recipe disagree and each is behaving
+correctly. See
 **The index sidecar** below for what the stamp can and cannot notice.
 
 Matching is **case-sensitive** and there is no flag to change that. **The way
@@ -1087,6 +1096,19 @@ is running brings it back** — the `rm` lands on the old inode and the rename
 puts the new one where the name was. This is the one guarantee with no fallback — with `-o` you still have
 the input if the output is wrong, and with `--in-place` the input *is* the
 output. Asserted by T28c.
+
+**Before an edit you cannot undo, `-so` is a dry run.** It writes what the edit
+would produce to stdout, touches nothing, and refuses out-of-range addresses
+exactly as the real run would — so `csv2 -update 12:6 X -i f.csv -so | head`
+answers "what will this do" before `--in-place` answers "what did it do".
+
+**That sentence is about the input, and `-o` says nothing about the
+destination: an existing file there is overwritten, silently, at rc=0.** There
+is no flag to guard against it — `>` behaves the same way and csv2 does not
+try to be different — so the guard is yours: write to a new name, or check
+first. A blind round lost a file to this while treating `-o` as the safe
+alternative to `--in-place`, which is exactly how the sentence above reads if
+you stop at "safe".
 
 **Temp-file-and-rename has a cost, and it lands on symlinks and permissions.**
 A rename replaces a *name*, so writing to a symlink's own path would swap the
