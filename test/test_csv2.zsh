@@ -5839,6 +5839,93 @@ else
     bad "T117c cited by a README but not defined here:${t117_missing} / README 引用了、但本檔案沒有定義：${t117_missing}"
 fi
 
+# ---------------------------------------------------------------------
+# T118 -- the parser telling two stories about one file.
+#
+# A parallel worker calls finish() at the end of its CHUNK. The message there
+# was written for the end of the INPUT, and on a chunk boundary that lands
+# inside a quoted field it said three wrong things at once:
+#
+#   csv2: record 3: the input ends inside a quoted field -- the closing quote
+#         is missing. The record is incomplete; pass --truncate-partial …
+#
+#   * the input did not end; the worker's view of it did
+#   * the fault is at record 1; the worker counts from its own chunk
+#   * --truncate-partial does nothing here, and had it worked it would have
+#     discarded a COMPLETE record
+#
+# The same file at a larger chunk size got the correct message. A parser
+# contradicting itself about what a file contains, with an environment variable
+# casting the deciding vote, in the one area that is this tool's whole reason
+# for existing.
+#
+# The fix is not a better sentence. A chunk ending mid-quote means the file is
+# not one-record-per-line, which is the premise the format or the index handed
+# the parallel path -- so the run does what this tool does everywhere else with
+# a premise that turns out false: discards it and scans. Both paths then give
+# the same diagnosis because it is the same code producing it.
+#
+# T118 —— 解析器對同一個檔案說了兩種故事。
+# 平行工作者是在自己那「一塊」的結尾呼叫 finish()。那裡的訊息是為「輸入的結尾」寫的，而當
+# 區塊邊界落在引號欄位中間時，它一次說錯三件事：輸入並沒有結束（結束的是工作者的視野）、
+# 出問題的是第 1 筆而不是第 3 筆（它從自己那一塊的開頭數）、以及 --truncate-partial 在這裡
+# 什麼也不做，而若它真的作用了，丟掉的會是一筆「完整」的紀錄。
+# 同一個檔案在較大的 chunk 下得到正確訊息——決定權落在一個環境變數手上。
+# 修法不是換一句更好的話：區塊在引號中間結束，代表這個檔案不是一筆一行，而那正是格式或索引
+# 交給平行路徑的前提；於是這次執行做這個工具在其他每一處對「前提被推翻」所做的事——丟掉它、
+# 改用掃描。兩條路徑因此說法一致，因為說話的是同一段程式。
+# ---------------------------------------------------------------------
+echo
+echo "--- T118: one file, one story / 同一個檔案，同一個說法 ---"
+
+# A `.csv2` containing something a `.csv2` may not contain: a raw newline in a
+# cell. The format promises one record per line, so the parallel path believes
+# it -- which is exactly how a chunk boundary gets inside a quoted field.
+# 一個 `.csv2` 裡出現了 `.csv2` 不允許的東西：儲存格裡的裸換行。這個格式承諾一筆一行，
+# 而平行路徑相信它——那正是區塊邊界會落進引號欄位裡的原因。
+printf 'pkg,note\ntext,text\nzlib,"has a\nraw newline"\nzstd,ok\n' > "$TMP/t118.csv2"
+
+t118_single=$("$CSV2" -r -i "$TMP/t118.csv2" 2>&1 | head -1)
+assert_contains "$t118_single" "a raw newline inside a cell" \
+    "T118a single-threaded names the raw newline / 單執行緒指出那個裸換行"
+
+# Every chunk size has to give the SAME answer. The sizes below straddle the
+# boundary where the behaviour used to change.
+# 每一個 chunk 大小都必須給出「同一個」答案。下面這幾個尺寸跨越了原本行為改變的那個界線。
+t118_bad=0
+for cb in 4 8 16 64 4194304; do
+    got=$(CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=$cb \
+          "$CSV2" -contains ok -i "$TMP/t118.csv2" 2>&1 | head -1)
+    [[ "$got" == "$t118_single" ]] || { t118_bad=1; t118_seen="$got"; t118_at=$cb }
+done
+if (( t118_bad )); then
+    bad "T118b chunk=$t118_at tells a different story: $t118_seen / chunk=$t118_at 說了另一個故事"
+else
+    ok "T118b and every chunk size gives that same message / 而每一個 chunk 大小都給出同一則訊息"
+fi
+
+# The old message must not come back for a chunked read. It is still correct
+# for a genuinely truncated file, which the next case checks.
+# 舊的那則訊息不能在「分塊讀取」時回來。它對一個真正被截斷的檔案仍然正確，由下一個案例檢查。
+for cb in 4 8; do
+    got=$(CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=$cb \
+          "$CSV2" -contains ok -i "$TMP/t118.csv2" 2>&1)
+    if [[ "$got" == *"the input ends inside a quoted field"* ]]; then
+        bad "T118c chunk=$cb still says the INPUT ended when its chunk did / chunk=$cb 仍然把「區塊結束」說成「輸入結束」"
+        break
+    fi
+done
+[[ "$got" == *"the input ends inside a quoted field"* ]] || \
+    ok "T118c and never says the input ended when a chunk did / 而絕不把「區塊結束」說成「輸入結束」"
+
+# A file that really does end inside a quoted field must still get the message
+# that was written for it -- the fix must not have removed a true diagnosis.
+# 一個真的在引號欄位內結束的檔案，仍然必須拿到那則為它而寫的訊息——這個修正不能把一個
+# 為真的診斷一起移除。
+printf 'a,b\nA,B\n1,"unclosed\n' > "$TMP/t118_trunc.csv2"
+assert_contains "$("$CSV2" -r -i "$TMP/t118_trunc.csv2" 2>&1 | head -1)" "the input ends inside a quoted field" \
+    "T118d while a genuinely truncated file still gets that message / 而一個真的被截斷的檔案仍然拿到那則訊息"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

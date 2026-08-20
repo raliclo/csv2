@@ -333,8 +333,32 @@ func runSelect(_ o: Options) throws {
     if let p = o.input, canRunParallelSearch(o, format: Format.from(path: p) ?? .csv) {
         try checkTornAppend(path: p, format: Format.from(path: p) ?? .csv,
                             truncatePartial: o.truncatePartial)
-        try runParallelSearch(o)
-        return
+        do {
+            try runParallelSearch(o)
+            return
+        } catch let e as CSV2Error where e.message.hasPrefix("a chunk boundary fell inside") {
+            // The premise was false: the format or the index said one record
+            // per line and a chunk boundary landed inside a quoted field. This
+            // tool's answer to a premise that turns out false is the same
+            // everywhere -- discard it and scan -- so the run continues below,
+            // single-threaded, and produces whatever the real diagnosis is.
+            //
+            // Falling back rather than reporting is what makes the two paths
+            // agree. Before this, the same file got a raw-newline error at one
+            // chunk size and an unclosed-quote error at another, with a wrong
+            // record number and a remedy that would have discarded a complete
+            // record.
+            //
+            // 前提是假的：格式或索引說「一筆一行」，而某個區塊邊界落在了引號欄位中間。
+            // 這個工具對「前提被推翻」的回答在每一處都相同——丟掉它、改用掃描——因此這次
+            // 執行會往下繼續，以單執行緒進行，並產生真正的診斷。
+            //
+            // 選擇「退回」而不是「回報」，正是讓兩條路徑說法一致的原因。在此之前，同一個
+            // 檔案在某個 chunk 大小下得到「裸換行」的錯誤，在另一個大小下得到「引號未關閉」
+            // 的錯誤，附帶錯誤的紀錄號，以及一個會丟掉完整紀錄的補救建議。
+            Logger.shared.debug(
+                "single-threaded: a chunk boundary fell inside a quoted field, so the one-record-per-line premise was false; re-reading without it")
+        }
     }
     if let p = o.input {
         try checkTornAppend(path: p, format: Format.from(path: p) ?? .csv,

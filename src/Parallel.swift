@@ -503,6 +503,7 @@ func runParallelSearch(_ o: Options) throws {
                     }
                 }
 
+                parser.chunked = true
                 var remaining = Int(span.end - span.start)
                 while remaining > 0 {
                     let more = try Platform.drainingPool { () -> Bool in

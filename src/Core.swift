@@ -328,6 +328,12 @@ final class RecordParser {
     /// 目前解析中的欄位在引號內含原始換行時設立。`.csv2` 拒絕，`.csv` 允許。
     private var quotedNewlineInField = false
 
+    /// True when this parser is reading ONE CHUNK of a file rather than the
+    /// whole of it. Only the parallel workers set it, and it changes exactly
+    /// one thing: what "the input ended" is allowed to mean.
+    /// 當這個解析器讀的是一個檔案的「一塊」而不是全部時為真。只有平行工作者會設定它，
+    /// 而它只改變一件事：「輸入結束了」這句話可以指什麼。
+    var chunked = false
     private(set) var sawLF = false
     private(set) var sawCRAsData = false
     /// Counted, not just flagged. The CR-line-ending check used to ask "was
@@ -756,6 +762,38 @@ final class RecordParser {
                 return
             }
             if insideQuote {
+                // A parallel worker calls finish() at the end of its CHUNK, not
+                // at the end of the file, and this message was written for the
+                // latter. On a chunk boundary that lands inside a quoted field
+                // it said three wrong things at once: that the input ended
+                // (the worker's view ended), which record was at fault (it
+                // counts from the start of the chunk), and that
+                // --truncate-partial would help (it would discard a complete
+                // record). The same file gave the correct diagnosis at a
+                // larger chunk size -- the parser contradicting itself about
+                // what a file contains, decided by an environment variable.
+                //
+                // A chunk ending mid-quote means one thing: the file does not
+                // have one record per line, which is the premise the parallel
+                // path was given by the format or by an index. So say that,
+                // and let the caller do what this tool does everywhere else
+                // with a premise that turned out false -- discard it and scan.
+                //
+                // 平行工作者是在自己那「一塊」的結尾呼叫 finish()，不是在檔案結尾，而這則
+                // 訊息是為後者寫的。當區塊邊界落在引號欄位中間，它一次說錯三件事：輸入結束了
+                // （結束的是工作者的視野）、是哪一筆出問題（它是從區塊開頭數的）、以及
+                // --truncate-partial 會有幫助（它會丟掉一筆完整的紀錄）。同一個檔案在較大的
+                // chunk 下得到的是正確診斷——解析器對一個檔案的內容與自己矛盾，而決定權在一個
+                // 環境變數手上。
+                //
+                // 區塊在引號中間結束只代表一件事：這個檔案不是一筆一行，而那正是格式或索引
+                // 交給平行路徑的前提。所以就說那件事，讓呼叫端做這個工具在其他每一處對
+                // 「前提被推翻」所做的事——丟掉它，改用掃描。
+                if chunked {
+                    throw fault(
+                        "a chunk boundary fell inside a quoted field, so this file does not have one record per line -- which is what the parallel path was told it had",
+                        "有一個區塊邊界落在引號欄位中間，因此這個檔案並不是一筆一行——而「一筆一行」正是平行路徑被告知的前提")
+                }
                 throw fault(
                     "record \(recordsEmitted + 1): the input ends inside a quoted field -- the closing quote is missing. The record is incomplete; pass --truncate-partial to discard it.",
                     "第 \(recordsEmitted + 1) 筆：輸入在引號欄位內就結束了——缺少收尾的引號。該紀錄不完整；要丟棄它請給 --truncate-partial。")

@@ -3270,3 +3270,74 @@ machinery exists and is spent on smaller things. Half its premise is wrong --
 `--no-index` is exactly the flag it says does not exist, and it returns the
 right answer -- and that half is the point: the README presents `--no-index` as
 a mechanism, never as the answer to the question a reader is actually asking.
+---
+
+# 第 48 回合(2026-08-20)—— 讓工具與自己矛盾、無人看管的 cron、可證偽的效能宣稱、監控包裝
+
+## CY. 平行路徑把「區塊結束了」說成「輸入結束了」,而紀錄號也是錯的(2026-08-20 修正,T118)
+
+```console
+$ printf 'pkg,note\ntext,text\nzlib,"has a\nraw newline"\nzstd,ok\n' > r.csv2
+
+$ csv2 -r -i r.csv2
+csv2: record 1 (line 3), field 2: a raw newline inside a cell; .csv2 keeps one
+      record per line, so newlines must be written as \n          ← 正確
+
+$ CSV2_PARALLEL_CHUNK_BYTES=8 csv2 -contains ok -i r.csv2
+csv2: record 3: the input ends inside a quoted field -- the closing quote is
+      missing. The record is incomplete; pass --truncate-partial to discard it.
+```
+
+**三件事同時錯了:**
+
+| | |
+|---|---|
+| 診斷 | 沒有任何引號未關閉;那是一個 `.csv2` 裡不合法的裸換行 |
+| 位置 | 問題在第 1 筆,訊息說第 3 筆 |
+| 補救 | `--truncate-partial` 在這裡什麼也不做,而若它真的作用了,它會丟掉一筆**完整**的紀錄 |
+
+而同一個檔案在 chunk ≥ 16 時得到的是正確訊息。**同一支解析器對同一個檔案的內容,說了兩種
+互相矛盾的話,取決於一個環境變數。**
+
+### 成因:結束的是「區塊」,不是「輸入」
+
+平行工作者只看得到自己那一塊。當一個區塊邊界落在引號欄位中間,那個工作者讀到自己的結尾時
+仍在引號裡,於是報出「輸入在引號欄位中結束」——**而輸入根本沒有結束,是它的視野結束了。**
+
+`CSV2_PARALLEL_CHUNK_BYTES=8` 顯然是荒謬的設定,但那個機制不是:預設 4 MiB 之下,任何一個
+大於 4 MiB 的引號儲存格都會產生同一件事。真正的觸發條件是「一個宣稱一筆一行、而實際上不是
+的檔案」——而那正是平行路徑所依賴的前提。
+
+**兩者都以 1 結束,所以這是一次大聲的失敗配上一個錯的故事**——是壞掉的種類裡最不糟的一種。
+但受測者說得對:**「解析器對一個檔案的內容與自己矛盾」正是這個工具的核心能力所在。**
+
+## 而第 4 類的另一條,是第 47 回合那個論證的再次提出
+
+「被信任的過期索引 → rc=0 的錯誤紀錄編號」。受測者這次明白寫出它為何仍歸在這一類:
+
+> 「被記錄在案並不等於沒有壞。在一個 19.5 MB 的檔案上、沒有任何環境變數、沒有任何不尋常的
+> 旗標,`csv2 -contains` 與 `csv2 -get` 對同一個儲存格給出互相矛盾的事實,兩者都是 rc=0,
+> 而那個位址會餵給 `-update` 去覆寫錯的那一筆。」
+
+這與第 47 回合是同一個論證,而它上一次促成的是文件修正(把 `--no-index` 寫成那個問題的答案)。
+**連續兩輪、兩個獨立的受測者提出同一件事,本身就是一項資料**:那一段文件說服不了讀者,
+而那通常代表要改的不是文字。
+
+Round 48. The parallel path tells a different story about the same file
+depending on a chunk-size environment variable: a worker whose chunk boundary
+lands inside a quoted field reports that the INPUT ended inside a quoted field,
+with the wrong record number and a remedy that would discard a complete record.
+What ended was the worker's view, not the file. Both paths exit 1, so it is a
+loud failure with a wrong story -- the least bad kind of broken -- but a parser
+contradicting itself about what a file contains is this tool's core competence.
+
+### CY 的修法不是換一句更好的話
+
+一個在引號中間結束的區塊,只代表一件事:**這個檔案不是一筆一行**,而那正是格式或索引交給
+平行路徑的前提。
+
+於是這次執行做這個工具在其他每一處對「前提被推翻」所做的事——**丟掉它、改用掃描**。兩條
+路徑因此說法一致,因為說話的是同一段程式。
+
+那則舊訊息仍然存在,而且仍然正確——對一個**真的**在引號欄位內結束的檔案(T118d 守著它)。
+它原本唯一的錯,是被說給一個「還有下文」的讀者聽。
