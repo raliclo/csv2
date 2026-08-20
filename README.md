@@ -52,7 +52,11 @@ newline can still be seeked into. (A third item, "an error instead of empty
 output when `-mid`'s START record is past the end", was on this list until
 2026-08-20 and is now a WARN naming both numbers — see `-mid` above.) A measured 5.6 ms per 40-record window on a
 19.5 MB file is why the viewer will call this binary rather than embed a copy
-of its parser. **Do not write a script against any of that; it is a plan, not
+of its parser. **That number needs a sidecar, and `-mid` never builds one** —
+run `--build-index` first, or measure 277 ms and conclude the figure is
+fiction, which is what a reader following this document exactly will do. The
+file behind it is 450,000 records of about 40 bytes each; the shape matters,
+because the same size in wide prose records is a different measurement. **Do not write a script against any of that; it is a plan, not
 an interface.**
 
 It is **not** shipped in the LinuxCS guest rootfs for now — the scripts that
@@ -270,7 +274,9 @@ EDITING / 編輯
                         the whole file is read first, because a file whose last
                         record is incomplete cannot be safely appended to and
                         there is no cheap way to know. Measured linear --
-                        0.07 s at 1.9 MB, 0.24 s at 8.2 MB, 0.92 s at 34.6 MB.
+                        0.07 s at 1.9 MB, 0.24 s at 8.2 MB, 0.92 s at 34.6 MB
+                        on records of about 77 bytes; the curve is linear in
+                        BYTES, so the same sizes in wider records take longer.
                         Until 2026-08-20 the check ran only when the file did
                         not end in a newline, which let an append onto a record
                         left open by an unclosed quote through at rc=0 and
