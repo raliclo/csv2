@@ -343,12 +343,49 @@ enum Platform {
     /// 的理由。
     static func openForAppend(path: String) -> FileHandle? {
         #if canImport(ucrt)
-        let fd = _open(path, _O_WRONLY | _O_APPEND | _O_CREAT, _S_IREAD | _S_IWRITE)
+        // Swift on Windows marks `_open` unavailable, so the flag is not
+        // reachable and the property has to be produced another way -- see
+        // appendWrite, which seeks before every write. Found by building on the
+        // Windows node: this file compiles on two platforms out of three, and
+        // the third is the one that cannot be checked from here.
+        // Swift for Windows 把 `_open` 標為不可用，因此那個旗標拿不到，這個性質只能換個
+        // 方式產生——見 appendWrite，它在每一次寫入前先 seek。這是在 Windows 節點上建置時
+        // 發現的：這個檔案在三個平台中的兩個編得過，而編不過的那一個正是從這裡檢查不到的。
+        if !FileManager.default.fileExists(atPath: path) {
+            FileManager.default.createFile(atPath: path, contents: nil)
+        }
+        guard let h = FileHandle(forWritingAtPath: path) else { return nil }
+        h.seekToEndOfFile()
+        return h
         #else
         let fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
-        #endif
         guard fd >= 0 else { return nil }
         return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        #endif
+    }
+
+    /// Write to a handle from `openForAppend`, keeping the append property on
+    /// every platform.
+    ///
+    /// On POSIX the kernel already holds it and this is a plain write. On
+    /// Windows, where `O_APPEND` is out of reach, the seek is done here, before
+    /// each write, instead of once at open. That is the same thing the C
+    /// runtime does for `_O_APPEND`: it shrinks the window between deciding
+    /// where the end is and writing there, from "the whole life of the handle"
+    /// down to a few instructions. It does not close it. The docs say so
+    /// rather than claiming a guarantee this cannot deliver.
+    /// 寫入由 `openForAppend` 取得的 handle，並在每個平台上維持「追加」這個性質。
+    ///
+    /// 在 POSIX 上核心已經持有它，這裡就是一次單純的寫入。在 Windows 上，`O_APPEND` 拿不到，
+    /// 於是那個 seek 改在這裡做——在每一次寫入之前，而不是在開檔時做一次。那與 C runtime
+    /// 對 `_O_APPEND` 的做法相同：它把「判斷尾端在哪」與「寫到那裡」之間的窗口，從「這個
+    /// handle 的整個生命期」縮到幾個指令。它並沒有把窗口關上。文件如實說明，而不是宣稱一個
+    /// 這個做法給不出的保證。
+    static func appendWrite(_ h: FileHandle, _ data: Data) {
+        #if canImport(ucrt)
+        h.seekToEndOfFile()
+        #endif
+        h.write(data)
     }
 
     // -----------------------------------------------------------------

@@ -142,7 +142,7 @@ final class Logger {
         // 淹沒在除錯輸出裡，而那正是 -debug 與 -log 是兩個旗標而不是一個的理由。
         // 只有在 -debug 明確要求時，它們才會進入檔案。
         if let h = logHandle, belongsInFile {
-            h.write(Data(line.utf8))
+            Platform.appendWrite(h, Data(line.utf8))
         } else if logPath != nil && belongsInFile {
             warnLogUnavailable()
         }
@@ -162,7 +162,7 @@ final class Logger {
     /// 但再往 stderr 印一次只是重複。
     func logToFileOnly(_ level: LogLevel, _ message: String) {
         guard let h = logHandle else { return }
-        h.write(Data("\(Logger.timestamp()) \(level.label) \(reportEscape(message))\n".utf8))
+        Platform.appendWrite(h, Data("\(Logger.timestamp()) \(level.label) \(reportEscape(message))\n".utf8))
     }
 
     func debug(_ m: @autoclosure () -> String) { log(.debug, m()) }

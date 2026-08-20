@@ -1828,3 +1828,28 @@ believes it is complete.
 **Windows 較弱,而文件說明而非假裝。** CRT 的 `_O_APPEND` 是「每次寫入前先 seek」,
 窗口極小但不為零。POSIX 上沒有窗口。這一點寫進了兩份 README——一個做不到的保證,
 比沒有保證更糟。
+
+### 而那個修法在 Windows 上編不過,是同一天稍後才知道的
+
+`3b90777` 在 macOS 與兩個 Linux 節點上都通過,推上去之後升級 Windows 節點才發現:
+
+```
+error: '_open' is unavailable
+      |                              `- note: '_open' has been explicitly marked unavailable here
+```
+
+Swift for Windows 把 `_open` 標為不可用,那個 `_O_APPEND` 旗標根本拿不到。
+
+**這條的教訓不在於旗標,而在於順序。** 我在本機測完、跑完 guest、提交、推送,然後才
+去建 Windows——而 Windows 是三個平台裡**唯一從這裡檢查不到**的那個。前面每一步都
+「通過」了,而它們合起來並沒有回答「這段程式編得起來嗎」這個問題。
+
+改法:POSIX 仍用 `O_APPEND`;Windows 改由 `Platform.appendWrite` 在**每一次寫入前**
+seek。那與 CRT 對 `_O_APPEND` 的做法相同——把窗口從「handle 的整個生命期」縮到幾個
+指令,但沒有關上它。README 兩份都如實寫明這一點。
+
+The fix did not compile on Windows, which was learned only after it had been
+committed and pushed: `_open` is marked unavailable in Swift for Windows, so
+the flag is unreachable. The lesson is the order, not the flag -- local tests,
+guest tests, commit and push all passed, and together they never answered
+whether the code builds on the one platform that cannot be checked from here.
