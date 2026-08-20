@@ -121,3 +121,55 @@ stdout 與 stderr 在 C runtime 中固定是 fd 1 與 2,不需要轉換。
 - [ ] 確認 `FileHandle.swift:709` 在目前 main 分支上仍是同一段程式
 - [ ] 搜尋既有 issue——這個形狀的問題不太可能沒有人回報過
 - [ ] 決定送 issue 還是直接送 PR(第 1 項修法的 patch 很小)
+
+
+---
+
+# 附錄:同一個家族的另外兩件(2026-08-21 加入)
+# Appendix: two more from the same family
+
+上面那一件是 EPIPE。**同一個 API 對「其他寫入失敗」的回答同樣是「不回報,直接爆」,而它
+在 macOS 上也會發生**——這一點與上面那件不同,上面那件 macOS 是安全的。
+
+## 2. 磁碟寫滿:`FileHandle.write` 擲出沒有人接的例外(macOS 亦然)
+
+以一個 8 MiB 的 RAM disk 實測(2026-08-21):
+
+```
+$ csv2 -update 1:2 'ZZZ' -i d.csv -o out.csv 2>err.txt ; echo rc=$?
+rc=134            ← SIGABRT
+$ wc -l < err.txt
+0                 ← 一個字也沒有
+```
+
+`ByteSink.flush()` 當時對檔案分支呼叫 `handle.write(Data(buf))`。ENOSPC 在 Darwin 上
+會變成一個 `NSException`,沒有 Swift 的 `catch` 攔得住它(它不是 Swift error),於是行程以
+SIGABRT 結束、沒有任何診斷、並留下寫到一半的暫存檔。
+
+**它與第 1 件的差別在於:第 1 件只打 Linux 與 Windows,這一件連 macOS 都打。** 一支
+「把輸出寫到檔案」的 Swift 工具,在磁碟寫滿時的表現是當掉,而不是回報。
+
+繞法與第 1 件相同:低階 `write(2)`／`_write`,自己看 errno。
+
+## 3. Windows:對「包住 CRT 描述子的 FileHandle」呼叫 `synchronize()` 會讓行程消失
+
+```swift
+let h = CreateFileW(...)                      // GENERIC_WRITE, CREATE_ALWAYS
+let fd = _open_osfhandle(intptr_t(bitPattern: h), _O_BINARY)
+let fh = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+try fh.synchronize()                          // ← 行程在此消失
+```
+
+沒有例外、沒有訊息、結束狀態在 MSYS 下顯示為 127。同一個 `FileHandle(fileDescriptor:)`
+拿去做 `write` 是可以的(csv2 的 log 用了好幾個月),死的是 `synchronize()`。
+
+推測:Windows 上的 `FileHandle` 內部持有的是一個 `HANDLE`,而「由別人交來的 CRT 描述子」
+建構出來的實例,那個欄位並不是同一個東西;`synchronize()` 對它呼叫 `FlushFileBuffers`
+就落在一個無效的 handle 上。**未經上游確認,這一段是觀察加推測,寫給要送 issue 的人當
+起點,不要當成結論。**
+
+繞法:不建立 `FileHandle`,直接用描述子做 `_commit`。csv2 現在整條暫存檔路徑都是這樣。
+
+**這三件的共通點,也是真正該送出去的那一句:** `FileHandle` 的失敗處理在三個平台上是
+三份不同的實作,而它們對「寫入失敗」的共同回答是「終止行程」,不是「回報」。一支命令列
+工具沒有辦法從那裡面把控制權要回來。
