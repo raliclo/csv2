@@ -8019,6 +8019,33 @@ else
     else
         bad "T131e mid-run temp=${_t131_mid:-none}, left behind=${_t131_left:-none} / 執行中的暫存檔與殘留如上"
     fi
+
+    # Not only the signal that came to mind. A round killed an edit with
+    # SIGXFSZ, SIGPIPE, SIGALRM and SIGUSR1 and got a hidden temp file each
+    # time -- SIGXFSZ being what an `ulimit -f` or a filesystem quota produces,
+    # which is not exotic at all.
+    # 不只是「當初想到的那個訊號」。有一個回合用 SIGXFSZ、SIGPIPE、SIGALRM、SIGUSR1 各殺了
+    # 一次編輯，每次都留下一個隱藏的暫存檔——而 SIGXFSZ 正是 `ulimit -f` 或檔案系統配額會
+    # 產生的那一個，一點也不罕見。
+    _t131_leaks=""
+    for _t131_sig in HUP QUIT XFSZ ALRM USR1 PIPE; do
+        rm -f "$TMP"/.t131_out.csv.csv2tmp.*(N) "$TMP/t131_out.csv"
+        ( print -r -- 'a,b'; print -r -- '1,x'; sleep 5 ) \
+            | "$CSV2" -r -t -si --headers 1 -o "$TMP/t131_out.csv" 2>/dev/null &
+        _t131_pid=$!
+        sleep 1
+        [[ -z $(print -r -- "$TMP"/.t131_out.csv.csv2tmp.*(N)) ]] && \
+            { _t131_leaks="$_t131_leaks $_t131_sig(no-temp-to-lose)"; kill -TERM $_t131_pid 2>/dev/null; continue }
+        kill -$_t131_sig $_t131_pid 2>/dev/null
+        wait $_t131_pid 2>/dev/null
+        [[ -n $(print -r -- "$TMP"/.t131_out.csv.csv2tmp.*(N)) ]] && _t131_leaks="$_t131_leaks $_t131_sig"
+    done
+    if [[ -z ${_t131_leaks// /} ]]; then
+        ok "T131f and the same holds for every catchable signal that ends a run / 而每一個「可攔截且會結束執行」的訊號都是如此"
+    else
+        bad "T131f a temp file survived:${_t131_leaks} / 這些訊號之後暫存檔還在"
+    fi
+    rm -f "$TMP"/.t131_out.csv.csv2tmp.*(N)
 fi
 
 # ---------------------------------------------------------------------

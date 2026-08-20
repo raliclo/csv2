@@ -320,9 +320,16 @@ PROTECTION / 保護
                         refused: losing data for a security reason is the
                         worse trade
   --yes                 accept the default key without a prompt
-  --                    end of flags: everything after it is data, so a value
-                        that begins with a dash can be written
-                        `-update 1:2 -- --in-place`
+  --                    the NEXT argument is data, not a flag: write a value
+                        that begins with a dash as `-update 1:2 -- --in-place`.
+                        It is not "everything after this is data" -- flags that
+                        follow are still flags, which is what lets `-i` and
+                        `-o` come after the value in the same command
+  a value that looks    only a KNOWN flag name is refused in a data position:
+  like a flag           `-5 degrees`, `--nope` and `-` are written as data,
+                        while `-r` is refused and told about `--`. So a script
+                        breaks on the day its data equals a flag name, not
+                        before -- and the refusal names the way through
 
 COLS is a comma-separated list of column names, 1-based column numbers, or a
 mix: `-hash license`, `-hash 7`, `-hash 6,license`. Three refusals go with it,
@@ -1088,8 +1095,12 @@ yourself rather than writing over it.
 **The same holds for `--in-place`, where it matters more:** a failed in-place
 edit leaves the original **byte-for-byte unchanged**, and leaves no temp file
 beside it — including when the run is killed by `SIGINT`, `SIGTERM` or `SIGHUP`
-part-way through, which used to leave a hidden multi-megabyte file next to the
-target (T131e). `SIGKILL` and a power cut cannot be caught and will leave one;
+part-way through, and the same for every other catchable signal that ends a run
+— `SIGQUIT`, `SIGXFSZ`, `SIGALRM`, `SIGUSR1` and the rest. That list started at
+three, and a blind round found a hidden multi-megabyte file left by each of the
+others; `SIGXFSZ` is what an `ulimit -f` or a filesystem quota produces, which
+is not exotic (T131e, T131f). `SIGKILL` and a power cut cannot be caught and
+will leave one;
 it is named `.<file>.csv2tmp.<pid>` and is safe to delete. A consequence worth
 knowing: rename recreates the destination, so **deleting the file while an edit
 is running brings it back** — the `rm` lands on the old inode and the rename

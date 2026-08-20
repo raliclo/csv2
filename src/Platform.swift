@@ -699,7 +699,24 @@ enum Platform {
         forgetTemp()
         doomedTemp = strdup(path)
         #if !canImport(ucrt)
-        for sig in [SIGINT, SIGTERM, SIGHUP] {
+        // Every catchable signal whose default action ends the process, not
+        // the three that came to mind. A round killed an edit with SIGXFSZ,
+        // SIGPIPE, SIGALRM and SIGUSR1 and got a 13 MB hidden temp file each
+        // time, against a README that names SIGKILL as the one that leaves
+        // one. SIGXFSZ is not exotic -- an `ulimit -f` or a filesystem quota
+        // produces it.
+        //
+        // SIGPIPE is included and does not disturb readerHasGone(): that path
+        // restores SIG_DFL before re-raising, so the handler runs at most once
+        // and the process still dies of the signal.
+        // 每一個「可攔截、且預設動作是結束行程」的訊號，而不是當初想到的那三個。有一個回合
+        // 用 SIGXFSZ、SIGPIPE、SIGALRM、SIGUSR1 各殺了一次編輯，每次都留下一個 13 MB 的
+        // 隱藏暫存檔——而 README 寫的是「SIGKILL 是那個會留下暫存檔的」。SIGXFSZ 一點也不
+        // 罕見：一個 `ulimit -f` 或檔案系統配額就會產生它。
+        // SIGPIPE 也在其中，且不會干擾 readerHasGone()：那條路徑會先還原 SIG_DFL 再重新
+        // 引發，因此處理常式最多跑一次，而行程仍然死於那個訊號。
+        for sig in [SIGINT, SIGTERM, SIGHUP, SIGQUIT, SIGXFSZ, SIGXCPU,
+                    SIGALRM, SIGUSR1, SIGUSR2, SIGPIPE, SIGVTALRM, SIGPROF] {
             signal(sig, { received in
                 if let p = Platform.doomedTempPointer { unlink(p) }
                 signal(received, SIG_DFL)

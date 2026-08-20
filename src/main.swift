@@ -257,8 +257,18 @@ func parseArgs(_ argv: [String]) throws -> Options {
         let v = try need(flag)
         if !dataIsLiteral, v.hasPrefix("-"), KNOWN_FLAGS.contains(normalizeFlag(v)) {
             throw usageError(
-                "\(flag) \(v): \(v) is a flag, and this position takes DATA. csv2 will not write a flag into your file. If the value really is \(v), end flag parsing first: \(flag) -- \(v)",
-                "\(flag) \(v)：\(v) 是一個旗標，而這個位置要的是「資料」。csv2 不會把一個旗標寫進你的檔案。若這個值真的就是 \(v)，請先結束旗標解析：\(flag) -- \(v)")
+                // "end flag parsing" overstates what `--` does here: it marks
+                // the NEXT argument as data and leaves later flags alone,
+                // which is what lets -i and -o follow the value. A round read
+                // the phrase, wrote it into the README as "everything after it
+                // is data", and the next round proved that false in one
+                // command.
+                // 「結束旗標解析」把 `--` 在這裡做的事說大了：它讓「下一個」引數成為資料，
+                // 而後面的旗標依然是旗標——那正是 -i、-o 可以接在值後面的原因。有一個回合
+                // 讀了這個說法、把它寫成 README 裡的「其後一律視為資料」，而下一個回合用
+                // 一個指令就證明那是錯的。
+                "\(flag) \(v): \(v) is a flag, and this position takes DATA. csv2 will not write a flag into your file. If the value really is \(v), mark it as data with --: \(flag) -- \(v)",
+                "\(flag) \(v)：\(v) 是一個旗標，而這個位置要的是「資料」。csv2 不會把一個旗標寫進你的檔案。若這個值真的就是 \(v)，請用 -- 把它標成資料：\(flag) -- \(v)")
         }
         dataIsLiteral = false
         // argv[0] is the program, and `argv` here is CommandLine.arguments
