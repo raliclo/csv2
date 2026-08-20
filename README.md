@@ -460,10 +460,33 @@ formats); reading one cannot be, and that asymmetry is deliberate — csv2
 believes the name because inventing a detector would mean guessing, which is
 the thing the suffix rule exists to prevent. Asserted by T97.
 
-### A BOM is stripped, and never reaches a column name
+### A UTF-8 BOM is stripped; a UTF-16 one is refused
 
-A file that opens with a UTF-8 BOM — anything exported by Excel, typically —
-has it removed on read and not written back. What matters more than either is
+A file that opens with a **UTF-8** BOM — anything exported by Excel, typically —
+has it removed on read and not written back.
+
+**A UTF-16 BOM is a different file and gets a different answer: refused, with
+the conversion named.** `FF FE` and `FE FF` cannot begin a UTF-8 file, so this
+is not a guess. csv2 reads bytes and does not convert encodings; left to
+itself it would read a UTF-16 file byte-transparently — correct for a tool that
+promises bytes round-trip, and useless to the person holding it, because every
+second byte is NUL, the column names carry them, and the whole thing parses at
+rc=0 into records that mean nothing.
+
+```console
+$ csv2 -r -i export.csv
+csv2: this file begins with a UTF-16LE byte-order mark; csv2 reads bytes and
+does not convert encodings, so it would parse as records that mean nothing.
+Convert it first with: iconv -f UTF-16LE -t UTF-8 file > file.utf8
+```
+
+**CR line endings get the same treatment** — the pre-OS X Mac convention, which
+CSV does not support. The check is that bare CRs outnumber LFs, so it fires on
+a CR-separated file whether or not something appended a stray LF at the end.
+It used to ask whether there was *no* LF at all, and one trailing LF was enough
+to silence it: the file then read as **zero records at rc=0**, `-contains`
+found nothing, and `--verify-index` reported the index fine. A bare CR inside a
+quoted field is data and is left alone. Asserted by T115. What matters more than either is
 where it does **not** end up: the first column's name is `pkg_name`, never
 `\ufeffpkg_name`.
 

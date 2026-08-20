@@ -3158,3 +3158,38 @@ the wrong row at rc=0.
 
 不用去解析那一列。**這條路徑之所以是快路徑,正是因為它不解析**;而讓它為了維持一個宣稱而
 開始解析,會把它變成它原本要避開的那個東西。
+
+## CT. 雙語編輯又只落地了一半,而這次是我在修 CP 的時候
+
+第 46 回合的受測者指出:**UTF-16 與 CR 的拒絕只寫在中文 README 裡,英文版完全沒有。**
+一個只讀英文的人不知道它們存在。
+
+成因與 **AE** 一模一樣:一支同時改兩份檔案的 Python 腳本,在中文那半的 anchor 上 assert
+失敗,而**寫入發生在腳本結尾**——於是兩份都沒寫。我重試時只補了中文那一半,因為那是我記得
+還沒做的部分。
+
+**AE 之後我寫下的結論是:「失敗之後的重試必須從頭再跑一次完整的腳本。」而我沒有照做。**
+
+同一段時間裡還有第二處:我修掉了英文 `csv2view` 清單裡「`-mid` 起點越界要報錯」那一項
+(它已經以 WARN 出貨),卻沒有動中文那一份。中文因此同時說「三件事」又只列了兩件。
+
+### 這一條的修法不是「下次小心」
+
+`T117` 現在比對兩份 README 引用的測試編號集合。一節在某一種語言裡寫著「由 T115 斷言」而在
+另一種語言裡根本不存在,會立刻浮出來,**而且不必有人記得去檢查**。
+
+那個不變式本來就會抓到這一次:英文缺 T115,中文有。
+
+它另外還檢查第三件事——README 引用的每一個案例編號,在測試檔裡真的存在。那是反方向的漂移:
+文字活得比測試久。
+
+**兩次「雙語只落地一半」都是盲測受測者找到的,而這棵樹上沒有任何東西在看。現在有了。**
+
+Bilingual edits keep landing on one side only, and both times it was a
+blind-test subject who noticed. The cause is identical to AE: one script
+editing both files, an assertion failing on the second file's anchor, writes
+deferred to the end so NEITHER lands, and a retry that only covers the half I
+remembered. AE's own conclusion was "a retry must re-run the whole script", and
+I did not follow it. T117 now compares the case numbers cited by the two
+READMEs, which would have caught this one, and does not depend on anyone
+remembering.

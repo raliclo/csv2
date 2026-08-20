@@ -5774,6 +5774,71 @@ assert_fails "T116i and writing it after the positionals no longer walks past th
 assert_succeeds "T116j while the form that means something still works / 而真正有意義的那個寫法照常運作" -- \
     "$CSV2" -delete -cell 1:2 -i "$TMP/t116b.csv" --in-place
 
+# ---------------------------------------------------------------------
+# T117 -- the two READMEs must cite the same test cases.
+#
+# Bilingual edits keep landing on one side only. It has happened twice that
+# anyone noticed: AE (a fingerprint table row written in English and lost in
+# Chinese, because a Python script asserted mid-way and wrote nothing, and the
+# retry only reproduced part of the work) and again on 2026-08-20, when the
+# UTF-16 and CR refusals were documented in the Chinese README alone for an
+# hour -- the same failure, the same cause, the same retry.
+#
+# Both times a blind-test subject found it. Nothing in the tree was looking.
+#
+# Case numbers are the cheapest mechanical proxy for "the same content is in
+# both". A section that says "Asserted by T115" in one language and does not
+# exist in the other shows up here immediately, and it does not depend on
+# anyone remembering to check.
+#
+# T117 —— 兩份 README 必須引用同一組測試案例。
+# 雙語編輯一再只落地一半。被發現的有兩次：AE（指紋表的一列寫進了英文、中文那半消失了，
+# 因為一支 Python 腳本中途 assert、整份未寫入，而重試只重現了其中一部分），以及 2026-08-20
+# 那次——UTF-16 與 CR 的拒絕有一小時只存在於中文 README 裡。同樣的失敗、同樣的成因、
+# 同樣的重試。
+# 兩次都是盲測受測者找到的。這棵樹上沒有任何東西在看。
+# 案例編號是「兩邊有同樣內容」最便宜的機械替代指標：一節在某一種語言裡寫著「由 T115 斷言」
+# 而在另一種語言裡根本不存在，會立刻在這裡浮出來，而且不必有人記得去檢查。
+# ---------------------------------------------------------------------
+echo
+echo "--- T117: both READMEs cite the same cases / 兩份 README 引用同一組案例 ---"
+
+t117_en=$(grep -oE '\bT[0-9]+[a-z0-9]*\b' "$ROOT/README.md" | sort -u)
+t117_zh=$(grep -oE '\bT[0-9]+[a-z0-9]*\b' "$ROOT/README.zh-TW.md" | sort -u)
+
+t117_only_en=$(comm -23 <(print -r -- "$t117_en") <(print -r -- "$t117_zh") | tr '\n' ' ')
+t117_only_zh=$(comm -13 <(print -r -- "$t117_en") <(print -r -- "$t117_zh") | tr '\n' ' ')
+
+if [[ -z "${t117_only_en// /}" ]]; then
+    ok "T117a every case the English README cites is cited in the Chinese one / 英文 README 引用的每一個案例，中文 README 也引用了"
+else
+    bad "T117a cited in English only: ${t117_only_en}— that half of the edit did not land in the Chinese README / 只有英文引用：${t117_only_en}——那一半的編輯沒有落地到中文 README"
+fi
+
+if [[ -z "${t117_only_zh// /}" ]]; then
+    ok "T117b and the other way round / 反過來也是"
+else
+    bad "T117b cited in Chinese only: ${t117_only_zh}— that half of the edit did not land in the English README / 只有中文引用：${t117_only_zh}——那一半的編輯沒有落地到英文 README"
+fi
+
+# A README that cites a case number nothing defines is the opposite drift: the
+# text outlived the test.
+# 一份 README 引用了「沒有任何東西定義」的案例編號，是反方向的漂移：文字活得比測試久。
+t117_missing=""
+for c in ${(f)t117_en}; do
+    # A README cites the FAMILY (T101); the suite defines its members
+    # (T101a, T101b). The optional lowercase suffix allows that, and refusing
+    # a following digit keeps T10 from matching T101a.
+    # README 引用的是「家族」（T101），而套件定義的是它的成員（T101a、T101b）。允許一個
+    # 小寫字母後綴即可涵蓋，而「不允許其後再接數字」可避免 T10 比對到 T101a。
+    grep -qE "\"$c([a-z][a-z0-9]*)?[ /]" "$HERE/test_csv2.zsh" || t117_missing="$t117_missing $c"
+done
+if [[ -z "${t117_missing// /}" ]]; then
+    ok "T117c and every case they cite exists in this file / 而它們引用的每一個案例都存在於本檔案中"
+else
+    bad "T117c cited by a README but not defined here:${t117_missing} / README 引用了、但本檔案沒有定義：${t117_missing}"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
