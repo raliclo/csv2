@@ -253,10 +253,10 @@ func runVerifyIndex(_ o: Options) throws {
         // 卻把兩者合成了一句。
         let sidecar = CSVIndex.path(for: path)
         if FileManager.default.fileExists(atPath: sidecar) {
-            let why = CSVIndex.lastDiscardReason ?? "reason not recorded"
+            let why = CSVIndex.lastDiscardReason ?? ("reason not recorded", "沒有記錄到理由")
             throw fault(
-                "index \(sidecar) exists but cannot be used: \(why). It was not compared against the data; --build-index replaces it",
-                "索引 \(sidecar) 存在但無法使用：\(why)。它並未與資料比對過；--build-index 可以重建它")
+                "index \(sidecar) exists but cannot be used: \(why.en). It was not compared against the data; --build-index replaces it",
+                "索引 \(sidecar) 存在但無法使用：\(why.zh)。它並未與資料比對過；--build-index 可以重建它")
         }
         throw fault("no index beside \(path); --build-index creates one",
                     "\(path) 旁沒有索引；--build-index 可以建立一個")

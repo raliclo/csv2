@@ -213,7 +213,7 @@ func parallelDeclineReason(_ o: Options, format: Format) -> String? {
         // 理由寫「進」訊息裡。原本寫的是「用 -debug 看原因」，那是給「沒有在用 -debug 的人」
         // 的建議——而這一行只有正在用 -debug 的人看得到。讀者被叫去做他已經在做的事，
         // 而答案就在上一行的 INFO 裡。
-        let why = CSVIndex.lastDiscardReason ?? "reason not recorded"
+        let why = CSVIndex.lastDiscardReason?.en ?? "reason not recorded"
         return ".csv whose index \(sidecar) was discarded (\(why)); --build-index replaces it"
     }
     return ".csv with no index proving one record per line; build one with --build-index"

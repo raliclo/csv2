@@ -44,7 +44,7 @@ satisfy are reported as SKIP with the reason rather than quietly left out.
 
 **Designed but not built: `csv2view`, a native SwiftUI viewer.** Nothing below
 describes it, because none of it exists yet — the design lives in
-[plan/plan.md](./plan/plan.md) and names the three things csv2 has to gain
+[plan/plan.md](./plan/plan.md) and names the two things csv2 has to gain
 first: a `-count` verb and line numbers in the index so a file with a quoted
 newline can still be seeked into. (A third item, "an error instead of empty
 output when `-mid`'s START record is past the end", was on this list until

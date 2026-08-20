@@ -5926,6 +5926,110 @@ printf 'a,b\nA,B\n1,"unclosed\n' > "$TMP/t118_trunc.csv2"
 assert_contains "$("$CSV2" -r -i "$TMP/t118_trunc.csv2" 2>&1 | head -1)" "the input ends inside a quoted field" \
     "T118d while a genuinely truncated file still gets that message / 而一個真的被截斷的檔案仍然拿到那則訊息"
 
+# ---------------------------------------------------------------------
+# T119 -- the one verb that did not refuse zero, and it is the one that writes.
+#
+#   csv2 -insert 0 'z,z,z' -i g.csv --in-place -log L.log
+#   rc=0, stderr empty, file byte-for-byte unchanged
+#   L.log: wrote 2 records, 3 fields, atomic rename OK
+#
+# An audit entry corroborating a write that never included the row. In a batch
+# it dropped its own row and applied the others, so the file came out partially
+# edited at rc=0.
+#
+# Every sibling already refused zero -- `-delete 0,0`, `-head 0`, `-mid 0,2`,
+# `-update 0:1`. The documented range is `1..N`; the upper bound was enforced
+# (`-insert 11` on a ten-record file is refused) and the lower was not.
+#
+# T119 —— 唯一一個不拒絕 0 的動詞，而它正是會「寫入」的那一個。
+# rc=0、stderr 空無一物、檔案逐位元未變，而 -log 記著「wrote 2 records … atomic rename OK」
+# ——一筆替「從未包含那一列的寫入」作證的稽核紀錄。在批次裡它會丟掉自己那一列、套用其餘的，
+# 於是檔案以 rc=0 的狀態被改成一半。
+# 每一個同輩動詞早就拒絕 0 了。文件寫的範圍是 `1..N`：上界有檢查，下界沒有。
+# ---------------------------------------------------------------------
+echo
+echo "--- T119: -insert and zero / -insert 與 0 ---"
+
+print -r -- 'a,b,c'  > "$TMP/t119.csv"
+print -r -- '1,x,p' >> "$TMP/t119.csv"
+print -r -- '2,y,q' >> "$TMP/t119.csv"
+cp "$TMP/t119.csv" "$TMP/t119.bak"
+
+assert_fails "T119a -insert 0 is refused, not discarded / -insert 0 會被拒絕，而不是被丟棄" -- \
+    "$CSV2" -insert 0 'z,z,z' -i "$TMP/t119.csv" --in-place
+assert_fails "T119b and -insert -1 likewise / -insert -1 同樣如此" -- \
+    "$CSV2" -insert -1 'z,z,z' -i "$TMP/t119.csv" --in-place
+assert_same "$TMP/t119.csv" "$TMP/t119.bak" \
+    "T119c and neither touched the file / 兩者都沒有動到檔案"
+
+# The refusal must happen before anything is written, or the audit trail
+# corroborates a write again -- which is what made this worth finding.
+# 拒絕必須發生在任何寫入之前，否則稽核軌跡又會替一次寫入作證——而那正是這件事值得被找出來
+# 的原因。
+rm -f "$TMP/t119.log"
+"$CSV2" -insert 0 'z,z,z' -i "$TMP/t119.csv" --in-place -log "$TMP/t119.log" >/dev/null 2>&1
+if grep -q "atomic rename OK" "$TMP/t119.log" 2>/dev/null; then
+    bad "T119d the log still records a completed write for a refused insert / log 仍然為一次被拒絕的 insert 記下「已完成的寫入」"
+else
+    ok "T119d and the log records no completed write / 而 log 沒有記下任何已完成的寫入"
+fi
+
+# A batch must refuse as a whole rather than dropping one edit and applying the
+# rest, which is the partial result the tool exists to refuse.
+# 批次必須「整批拒絕」，而不是丟掉其中一個編輯、套用其餘的——那種部分完成的結果，正是這個
+# 工具存在所要拒絕的。
+assert_fails "T119e a batch containing -insert 0 is refused as a whole / 含有 -insert 0 的批次會整批被拒絕" -- \
+    "$CSV2" -insert 0 'z,z,z' -update 1:2 'CHANGED' -i "$TMP/t119.csv" --in-place
+assert_same "$TMP/t119.csv" "$TMP/t119.bak" \
+    "T119f leaving the other edits unapplied too / 其餘的編輯也一併沒有被套用"
+
+assert_succeeds "T119g while -insert 1 still works / 而 -insert 1 照常運作" -- \
+    "$CSV2" -insert 1 'z,z,z' -i "$TMP/t119.csv" --in-place
+assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t119.csv")" "z" \
+    "T119h and the row landed first / 而那一列落在第一位"
+
+# ---------------------------------------------------------------------
+# T120 -- a bilingual message with one language in it.
+#
+# The index-discard reasons were written once, in English, and interpolated
+# into BOTH halves of a two-line bilingual message:
+#
+#   csv2：索引 s.csv.index 存在但無法使用：stale: the data file changed。
+#
+# "Exactly two lines, English then Chinese" held by count and not by language,
+# and it held that way because a string written once got used twice.
+#
+# T120 —— 一則雙語訊息，裡面只有一種語言。
+# 那些「索引被丟棄的理由」被寫了一次、只有英文，然後被插進一則雙語兩行訊息的「兩」半裡。
+# 「恰好兩行、英文在前中文在後」依行數成立、依語言不成立——而它之所以如此，是因為一個
+# 只寫了一次的字串被用了兩次。
+# ---------------------------------------------------------------------
+echo
+echo "--- T120: both halves in their own language / 兩半各說自己的語言 ---"
+
+print -r -- 'a,b' > "$TMP/t120.csv"
+for i in {1..300}; do print -r -- "$i,x$i"; done >> "$TMP/t120.csv"
+"$CSV2" --build-index -i "$TMP/t120.csv" >/dev/null 2>&1
+print -r -- 'a,b' > "$TMP/t120.csv"
+for i in {1..300}; do print -r -- "$i,y$i"; done >> "$TMP/t120.csv"
+
+t120=$("$CSV2" --verify-index -i "$TMP/t120.csv" 2>&1)
+t120_zh=$(print -r -- "$t120" | sed -n '2p')
+
+assert_contains "$t120_zh" "過期：資料檔已經改變" \
+    "T120a the Chinese line carries the reason in Chinese / 中文那一行帶著中文的理由"
+
+# The English reason must not appear in the Chinese line at all. Checking for
+# its absence is the assertion; checking only that Chinese is present would
+# pass on a line containing both.
+# 英文的理由完全不能出現在中文那一行裡。斷言的是「它不在」——只斷言「中文在」的話，一行
+# 同時含有兩者也會通過。
+if [[ "$t120_zh" == *"stale: the data file"* ]]; then
+    bad "T120b the Chinese line still carries the English reason / 中文那一行仍然帶著英文的理由"
+else
+    ok "T120b and not the English one / 而不帶英文的那一個"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

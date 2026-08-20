@@ -246,11 +246,22 @@ final class CSVIndex {
     /// 而 `--verify-index` 說「旁邊沒有可用的索引」，當時 sidecar 就在那裡，把「不存在」與
     /// 「存在但不能用」合成了一句話。兩者都寫於 2026-08-20，相隔數小時，而兩者要的理由
     /// 都只差一次呼叫。
-    private(set) static var lastDiscardReason: String?
+    ///
+    /// Carried as a PAIR. The first version was English only, and the callers
+    /// interpolate it into both halves of a two-line bilingual message -- so
+    /// the Chinese line read `…無法使用：stale: the data file changed。`. The
+    /// "exactly two lines, English then Chinese" contract held by count and
+    /// not by language, and it held that way because the reason was written
+    /// once, in one language, by someone who then used it twice.
+    /// 以「一對」的形式攜帶。第一版只有英文，而呼叫端會把它插進一則雙語兩行訊息的「兩」半裡
+    /// ——於是中文那一行讀起來是「…無法使用：stale: the data file changed。」。
+    /// 「恰好兩行、英文在前中文在後」這個契約依行數成立、依語言不成立，而它之所以如此，
+    /// 是因為那個理由被寫了一次、用了兩次。
+    private(set) static var lastDiscardReason: (en: String, zh: String)?
 
     private static func announceDiscard(_ message: @autoclosure () -> String, for sidecar: String,
-                                        reason: String) {
-        lastDiscardReason = reason
+                                        reason: String, reasonZh: String) {
+        lastDiscardReason = (reason, reasonZh)
         guard !announced.contains(sidecar) else { return }
         announced.insert(sidecar)
         Logger.shared.info(message())
@@ -271,16 +282,16 @@ final class CSVIndex {
         // 一個短到裝不下檔頭的 sidecar，原本是唯一一種「什麼都不說」的丟棄——從外面看，
         // 與「根本沒有 sidecar」無法區分。下面每一種拒絕都會說出自己。
         guard d.count >= INDEX_HEADER_SIZE else {
-            announceDiscard("index \(p): shorter than an index header (\(d.count) bytes), ignoring and scanning", for: p, reason: "too short to hold a header")
+            announceDiscard("index \(p): shorter than an index header (\(d.count) bytes), ignoring and scanning", for: p, reason: "too short to hold a header", reasonZh: "檔案短到裝不下一個索引檔頭")
             return nil
         }
         let b = [UInt8](d)
         guard Array(b.prefix(8)) == INDEX_MAGIC else {
-            announceDiscard("index \(p): bad magic, ignoring and scanning", for: p, reason: "not an index file (bad magic)")
+            announceDiscard("index \(p): bad magic, ignoring and scanning", for: p, reason: "not an index file (bad magic)", reasonZh: "不是索引檔（magic 不符）")
             return nil
         }
         guard getU32(b, 8) == INDEX_VERSION else {
-            announceDiscard("index \(p): version mismatch, ignoring and scanning", for: p, reason: "written by a different INDEX_VERSION")
+            announceDiscard("index \(p): version mismatch, ignoring and scanning", for: p, reason: "written by a different INDEX_VERSION", reasonZh: "由不同的 INDEX_VERSION 寫出")
             return nil
         }
         let flags = getU32(b, 12)
@@ -310,7 +321,7 @@ final class CSVIndex {
         // 是正確的，因為它不使用索引。那正是本設計所稱「比沒有索引糟得多」的情況，
         // 而它出自那個唯一沒有被檢查的東西。
         guard getU64(b, INDEX_SUM_OFFSET) == indexChecksum(b) else {
-            announceDiscard("index \(p): checksum mismatch, ignoring and scanning", for: p, reason: "its own checksum does not match (damaged)")
+            announceDiscard("index \(p): checksum mismatch, ignoring and scanning", for: p, reason: "its own checksum does not match (damaged)", reasonZh: "它自己的檢查碼不符（已損毀）")
             return nil
         }
 
@@ -321,7 +332,7 @@ final class CSVIndex {
             // error, because the operation must succeed identically without it.
             // 過期而非損毀。以 INFO 記錄後忽略——絕不是錯誤，因為沒有它時操作
             // 必須以完全相同的方式成功。
-            announceDiscard("index \(p) is stale, ignoring and scanning", for: p, reason: "stale: the data file changed")
+            announceDiscard("index \(p) is stale, ignoring and scanning", for: p, reason: "stale: the data file changed", reasonZh: "過期：資料檔已經改變")
             return nil
         }
 
@@ -330,7 +341,7 @@ final class CSVIndex {
         guard have >= want else {
             // Truncated. Same treatment: discard, scan. Not an error.
             // 被截斷。同樣處理：丟棄、掃描。不是錯誤。
-            announceDiscard("index \(p) is truncated (\(have) of \(want) entries), ignoring and scanning", for: p, reason: "truncated: fewer grid entries than its record count needs")
+            announceDiscard("index \(p) is truncated (\(have) of \(want) entries), ignoring and scanning", for: p, reason: "truncated: fewer grid entries than its record count needs", reasonZh: "被截斷：格點項目少於它自己的筆數所需")
             return nil
         }
         var offsets = [UInt64]()

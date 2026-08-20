@@ -3391,3 +3391,84 @@ The trade was right. Not going back to the three places that promise O(1) was
 not. Fifth instance of that pattern, and the first where what was falsified is
 a performance promise rather than a description -- the kind of thing someone
 decides a cron schedule on.
+---
+
+# 第 49 回合(2026-08-20)—— 可量測的句子、三條路做同一件事、每一個數字的邊界、兩份 README 的決策差異
+
+## DB. `-insert 0` 靜默丟掉那一列,而稽核軌跡替它背書(2026-08-20 修正,T119)
+
+```console
+$ csv2 -insert 0 'z,z,z' -i g.csv --in-place -log L.log
+rc=0                       stderr 0 bytes      檔案逐位元未變
+
+$ grep wrote L.log
+2026-08-20T20:43:42.230+08:00 INFO  wrote 2 records, 3 fields, atomic rename OK
+```
+
+**「寫了 2 筆、3 欄、atomic rename OK」——而那一列從未進去。** `-insert -1` 也一樣。
+
+而每一個同輩動詞都拒絕 0:
+
+```
+-delete 0,0     csv2: -delete takes N or a,b
+-head 0         csv2: -head 0: a count must be at least 1
+-mid 0,2        csv2: -mid: a must be >= 1; records are numbered from 1
+-update 0:1     csv2: -update: expected r:c, got "0:1"
+```
+
+**上界有檢查**(`-insert 11` 在 10 筆的檔案上會被拒絕),**下界沒有**。而文件說的是
+「合法範圍是 `1..N`」——那句話是我第 43 回合寫的,它描述的是應然,而程式只做了一半。
+
+在批次裡它更糟:**丟掉自己那一列、套用其餘的**,於是產生一個部分完成的結果,rc=0。
+
+受測者的話:
+
+> 「這是一次靜默的、看起來成功的、半對的寫入,而且有一筆稽核紀錄替它作證——正是 README
+> 前兩頁說 csv2 是為了終結它而存在的那種失敗。」
+
+## DC. 中文訊息裡夾著沒翻譯的英文,而它們有一半是我今天寫的(2026-08-20 修正,T120)
+
+```
+csv2：record 1 (line 2) 有 2 欄…
+csv2：…無法使用：stale: the data file changed。
+csv2：…its own checksum does not match (damaged)。
+```
+
+後兩則裡那些英文,是我在 CG／CH 修正時加的 `lastDiscardReason` 字串——**我只寫了英文,然後
+把它插進兩種語言的訊息裡。**
+
+「錯誤恰好兩行、英文在前中文在後」這個契約**依行數成立,依語言不成立**。
+
+## 而第 1 類裡有一條也是我的
+
+英文版的 `csv2view` 一節現在說「csv2 必須先具備的三件事」,而它只列了兩件——因為我在第 47
+回合移走了第三件,卻沒改那個數字;中文版我當時改成了「兩件」。
+
+**同一次編輯,兩份檔案,一份改了數字一份沒改。** 與 CT 是同一天的同一個模式,只是方向相反。
+
+Round 49. `-insert 0` discards its row at rc=0 with an audit entry saying the
+write happened -- the exact failure this tool's first two pages say it exists to
+end -- while every sibling verb refuses zero. The upper bound of the documented
+`1..N` is enforced and the lower is not.
+
+### DB 的修法要連「批次」一起管
+
+`-insert 0` 單獨出現時只是丟掉那一列;但在批次裡,它會丟掉自己那一列、**套用其餘的**,
+於是產生一個「部分完成」的檔案,rc=0。
+
+因此拒絕發生在**引數解析時**,而不是在套用編輯時——整批一起被擋在任何寫入之前。
+T119e/T119f 釘住的正是這一點:含有 `-insert 0` 的批次,其他編輯也不會被套用。
+
+### DC 的成因值得說清楚:一個只寫了一次的字串,被用了兩次
+
+`lastDiscardReason` 是我在 CG／CH 修正時加的,而我只寫了英文。呼叫端把它插進一則雙語兩行
+訊息的**兩**半裡,於是中文那一行讀起來是:
+
+```
+csv2：索引 … 存在但無法使用：stale: the data file changed。
+```
+
+**「恰好兩行、英文在前中文在後」依行數成立、依語言不成立。**
+
+現在它是一對 `(en, zh)`。而 T120b 斷言的是「英文那句**不在**中文行裡」——只斷言「中文在」
+的話,一行同時含有兩者也會通過。

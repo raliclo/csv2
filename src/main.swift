@@ -251,6 +251,31 @@ func parseArgs(_ argv: [String]) throws -> Options {
         // 而 -col 接受任何欄位標記，因此沒有東西攔得住。
         case "insert":
             let at = try intVal(arg, try need(arg))
+            // The upper bound of the documented `1..N` was enforced and the
+            // lower was not. `-insert 0` and `-insert -1` exited 0 with the
+            // file byte-for-byte unchanged, nothing on stderr, and `-log`
+            // recording `wrote 2 records, 3 fields, atomic rename OK` -- an
+            // audit entry corroborating a write that never included the row.
+            // In a batch it dropped its own row and applied the others,
+            // producing a partial result at rc=0.
+            //
+            // Every sibling verb already refused zero: -delete, -head, -tail,
+            // -mid, -update. This one verb did not, and it is the one that
+            // WRITES.
+            //
+            // 文件寫的 `1..N`，上界有檢查，下界沒有。`-insert 0` 與 `-insert -1` 都以 0
+            // 結束，檔案逐位元未變、stderr 空無一物，而 `-log` 記著
+            // `wrote 2 records, 3 fields, atomic rename OK`——一筆替「從未包含那一列的寫入」
+            // 作證的稽核紀錄。在批次裡它會丟掉自己那一列、套用其餘的，產生一個部分完成的
+            // 結果，rc=0。
+            //
+            // 每一個同輩動詞早就拒絕 0 了：-delete、-head、-tail、-mid、-update。
+            // 只有這一個沒有——而它正是會「寫入」的那一個。
+            guard at >= 1 else {
+                throw usageError(
+                    "-insert \(at): a record number must be at least 1; records are numbered from 1, and -insert puts a row BEFORE record N",
+                    "-insert \(at)：紀錄編號至少要是 1；紀錄從 1 開始編號，而 -insert 是把一列放在第 N 筆「之前」")
+            }
             let row = try needData(arg)
             if o.cellModifier {
                 throw usageError(
