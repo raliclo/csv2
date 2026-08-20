@@ -7230,9 +7230,20 @@ else
     bad "T69b expected $want_skip SKIP(s) on this platform, the suite produced $skip / 本平台預期 $want_skip 個 SKIP，測試產生了 $skip 個"
 fi
 
-# Anything the handler caught, added back here because it could not add itself.
-# 處理常式抓到的東西，在這裡加回去——它自己加不了。
+# Anything the handler caught, added back here because it could not add itself
+# -- and NAMED here, because its own FAIL line goes wherever the caller's
+# stdout went. When the missing command sat inside `x=$(...)`, that line was
+# captured into a variable and never reached the log: the guest reported eight
+# failures with no names at all, which is a worse report than the one it
+# replaced.
+# 處理常式抓到的東西，在這裡加回去——它自己加不了——並且在這裡「點名」，因為它自己那一行
+# FAIL 會跟著呼叫端的 stdout 走。當那個不存在的指令位在 `x=$(...)` 裡時，那一行會被收進
+# 一個變數、永遠到不了 log：guest 於是回報了八個「沒有名字」的失敗，而那比它取代掉的報告
+# 更糟。
 if [[ -s $MISSING_LOG ]]; then
+    for _missing in ${(f)"$(sort -u "$MISSING_LOG")"}; do
+        print -r -- "FAIL  the suite called \"$_missing\", which does not exist here / 測試呼叫了「$_missing」，而它在這個平台上不存在"
+    done
     fail=$((fail + $(wc -l < "$MISSING_LOG")))
 fi
 rm -f "$MISSING_LOG"
