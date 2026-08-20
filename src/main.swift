@@ -1330,7 +1330,18 @@ func strippedLocation(_ token: String) -> String? {
     return nil
 }
 
-func resolveColumnList(_ spec: String, header: Record) throws -> [Int] {
+/// `allMeansMarked` is true only for `-decrypt`, which is the only verb the
+/// README gives the `all` keyword to: "COLS may be `all` to take every marked
+/// column". The implementation gave it to every verb, so `-hash all` on a file
+/// with no encrypted columns selected NOTHING and exited 0 having done nothing
+/// -- the same silent no-op an empty column list used to be, reached by
+/// another road. It also made a column genuinely named `all` unaddressable.
+/// `allMeansMarked` 只在 `-decrypt` 時為真——README 只把 `all` 這個關鍵字給了它:
+/// 「COLS 可以是 `all`，代表每一個被標記的欄位」。而實作把它給了每一個動詞，於是
+/// `-hash all` 在一個沒有加密欄位的檔案上什麼也沒選中、以 0 結束、什麼也沒做——那正是
+/// 「空欄位清單」曾經的那個靜默無操作，只是換了一條路走回來。它同時也讓一個真的叫做
+/// `all` 的欄位無法被定址。
+func resolveColumnList(_ spec: String, header: Record, allMeansMarked: Bool = false) throws -> [Int] {
     // An empty COLS is a refusal, not "protect nothing". `-hash ""` used to
     // exit 0 having done nothing at all: output byte-identical to the input, no
     // marker in the header, nothing on stderr -- while a WRONG column name was
@@ -1348,7 +1359,7 @@ func resolveColumnList(_ spec: String, header: Record) throws -> [Int] {
         throw fault("no columns named: the column list is empty. Naming no columns cannot be distinguished from a variable that came out empty, so it is refused rather than treated as \"none\"",
                     "沒有指名任何欄位：欄位清單是空的。「一個欄位都不指」與「某個變數算成了空字串」無法區分，因此拒絕，而不是當成「零個」")
     }
-    if spec == "all" {
+    if spec == "all" && allMeansMarked {
         return header.fields.enumerated().compactMap { (i, f) in
             EncMarker.parse(headerName(f)) != nil ? i : nil
         }

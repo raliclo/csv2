@@ -7432,6 +7432,43 @@ else
 fi
 
 # ---------------------------------------------------------------------
+# T150 -- `all` belongs to -decrypt, and to no other verb.
+#
+# Round 56: "a column named `all` cannot be addressed by name with -decrypt".
+# Checking it turned up the larger half: `all` was special for EVERY verb, so
+# `-hash all` on a file with no encrypted columns selected nothing and exited 0
+# having done nothing -- the silent no-op T140 closed for an empty list,
+# reached by another road. The README gives the keyword to -decrypt alone.
+#
+# T150 —— `all`屬於 -decrypt，不屬於任何其他動詞。
+# 第 56 回合說「名為 `all` 的欄位無法以名字被 -decrypt 定址」。查它時翻出了更大的那一半：
+# `all` 對「每一個」動詞都是特別的，於是 `-hash all` 在一個沒有加密欄位的檔案上什麼也沒選中、
+# 以 0 結束、什麼也沒做——那正是 T140 為「空清單」關掉的那個靜默無操作，換了一條路走回來。
+# ---------------------------------------------------------------------
+echo
+echo "--- T150: the all keyword / T150：all 這個關鍵字 ---"
+
+print -r -- 'all,b'  > "$TMP/t150_named.csv"
+print -r -- '1,x'   >> "$TMP/t150_named.csv"
+"$CSV2" -hash all -i "$TMP/t150_named.csv" -o "$TMP/t150_out.csv"
+assert_contains "$(head -1 "$TMP/t150_out.csv")" "all:hash" \
+    "T150a a column named all is hashed by name / 名為 all 的欄位可以用名字雜湊"
+
+print -r -- 'a,b'  > "$TMP/t150_plain.csv"
+print -r -- '1,x' >> "$TMP/t150_plain.csv"
+_t150=$("$CSV2" -hash all -i "$TMP/t150_plain.csv" -o "$TMP/t150_out.csv" 2>&1)
+_t150_rc=$?
+if (( _t150_rc == 1 )) && [[ $_t150 == *'no column named "all"'* ]]; then
+    ok "T150b while -hash all on a file with no such column is refused, not a no-op / 而在沒有該欄位的檔案上，-hash all 會被拒絕，不是什麼也不做"
+else
+    bad "T150b exited $_t150_rc: $(print -r -- $_t150 | head -1) / 結果如上"
+fi
+
+_t150_d=$("$CSV2" -decrypt all -i "$TMP/t150_plain.csv" -o "$TMP/t150_out.csv" 2>&1)
+assert_contains "$_t150_d" "no encrypted columns found" \
+    "T150c and -decrypt all still means every marked column / 而 -decrypt all 仍然代表「每一個被標記的欄位」"
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one

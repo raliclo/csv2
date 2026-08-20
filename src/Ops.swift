@@ -1085,7 +1085,7 @@ func buildTransform(_ o: Options, headers: [Record]) throws -> CellTransform {
         return .encrypt(columns: cols, key: key, fingerprint: fp, salt: salt, names: names)
     }
     if let spec = o.decryptCols {
-        let cols = try resolveColumnList(spec, header: header)
+        let cols = try resolveColumnList(spec, header: header, allMeansMarked: true)
         guard !cols.isEmpty else {
             throw fault("no encrypted columns found", "找不到任何已加密的欄位")
         }
