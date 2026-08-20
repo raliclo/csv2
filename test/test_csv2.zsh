@@ -7734,8 +7734,16 @@ else
     # T143：在 `touch -r` 不帶奈秒的平台上會跳過。這裡取的是那個案例設下的旗標，而不是重新
     # 推導：要讀到那個精度的時間戳需要 stat，而會跳過的那個平台正好沒有它。若 T143 哪天
     # 「不再執行」，這個變數就不會被設定、want_skip 會變小、數量對不上——那正是這個檢查的用途。
-    (( ${T143_SKIPPED:-0} )) && (( want_skip += 1 ))
 fi
+# T143 can skip on ANY platform whose touch -r drops the nanoseconds -- the
+# guest and Windows both do -- so this sits outside the branch. It was inside
+# the POSIX arm first, and Windows then reported one skip more than expected:
+# a per-platform count that had learned about a difference which is not
+# per-platform.
+# T143 在「touch -r 會丟掉奈秒」的任何平台上都可能跳過——guest 與 Windows 都是——因此這一行
+# 放在分支外面。它原本在 POSIX 那一支裡，於是 Windows 回報的 SKIP 比預期多一個：一個
+# 「依平台而定」的數字，去學了一件其實不依平台而定的差異。
+(( ${T143_SKIPPED:-0} )) && (( want_skip += 1 ))
 if [[ "$skip" == "$want_skip" ]]; then
     ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
 else
