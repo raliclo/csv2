@@ -3993,3 +3993,57 @@ $ grep -c 'append fast path' ap.log
 快路徑已死的情況下照樣通過**——重寫那條路也會保留連結(那正是 DP 修的),所以那兩個條件
 分不出兩條路。加上 `grep 'append fast path'` 之後,負向控制才讓它跟著 T43g 一起紅。
 一個分不出兩者的測試,並沒有釘住它名字所宣稱的東西。
+
+---
+
+## DU. `-o` 指向一個 symlink:連結被換掉,目標沒被寫到,rc=0
+
+DP 已經替 `--in-place` 決定了:連結存活、被編輯的是它指向的那個檔案。`-o` 是同一件事的
+另一半,而它沒有被一起改。
+
+```
+$ printf 'a,b\n1,x\n2,y\n3,z\n' > src.csv
+$ printf 'a,b\n9,old\n' > dst.csv ; chmod 600 dst.csv
+$ ln -sf dst.csv dlink.csv
+$ csv2 -head 2 -t -i src.csv -o dlink.csv ; echo rc=$?
+rc=0
+$ [[ -L dlink.csv ]] && echo link || echo replaced
+replaced
+$ cat dst.csv
+a,b
+9,old            ← 目標一個字都沒變
+```
+
+shell 的 `>` 會跟著連結走,寫進目標。csv2 用的是 temp+rename,而 rename 必然取代那個
+「名字」——除非先解析。使用者以為自己寫進了資料目錄裡的那個檔案,實際上是把指路牌拆了、
+在原地放了一份複本;而下一次讀那個目標的人,拿到的是舊資料。
+
+第二半更安靜:
+
+```
+$ printf 'a,b\n1,x\n2,y\n3,z\n' > s2.csv ; ln -sf s2.csv s2link.csv
+$ csv2 -head 2 -t -i s2.csv -o s2link.csv ; echo rc=$?
+rc=0
+$ cat s2.csv        ← 完全沒變，而 s2link.csv 現在是一個獨立的檔案
+```
+
+`-i` 與 `-o` 指的是同一個檔案,而**同檔拒絕比的是字串**,所以它沒有觸發。那條拒絕存在的
+理由是「這應該用 `--in-place`」,而繞過它只需要換一種寫法。
+
+**順帶,那條拒絕的說詞對它自己的程式不成立。** 它說「開啟輸出會在輸入讀完前把它截斷」,
+但 `-o` 走的是 temp+rename(T43e 正是為此存在的),什麼也不會被截斷:
+
+```
+$ printf 'a,b\n1,x\n2,y\n3,z\n' > f.csv
+$ csv2 -head 1 -t -i f.csv -o ./f.csv ; echo rc=$?
+rc=0
+$ cat f.csv
+a,b
+1,x              ← 正確的結果，沒有資料遺失
+```
+
+拒絕仍然是對的——那個操作應該走 `--in-place`,因為只有那條路會保留連結與模式——但理由
+要改成真的那一個。
+
+修法:`-o` 的輸出路徑也解析 symlink(與 `--in-place` 同一條規則),同檔比較改用解析後的
+路徑,拒絕的訊息改成成立的理由。

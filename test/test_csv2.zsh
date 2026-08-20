@@ -6559,6 +6559,69 @@ else
     fi
 fi
 
+# ---------------------------------------------------------------------
+# T130 -- -o and what "this file" means. The other half of T129.
+# T130 —— -o，以及「這個檔案」指的是什麼。T129 的另一半。
+# ---------------------------------------------------------------------
+echo
+echo "--- T130: -o, on the right file / -o，而且是對的那個檔案 ---"
+
+if (( IS_WINDOWS )); then
+    skipt "T130a-c -o through a symlink, and the same file spelled two ways / 經 symlink 的 -o，以及同一個檔案的兩種寫法 (no symlinks under MSYS2 / MSYS2 下沒有 symlink)"
+    # The path-spelling half needs no symlinks, so it runs everywhere.
+    # 「同一個檔案的兩種寫法」那一半不需要 symlink，因此每個平台都跑。
+    print -r -- 'a,b'  > "$TMP/t130_f.csv"
+    print -r -- '1,x' >> "$TMP/t130_f.csv"
+    assert_fails "T130d -i and -o the same file spelled differently is refused / -i 與 -o 是同一個檔案的不同寫法，會被拒絕" -- \
+        "$CSV2" -head 1 -t -i "$TMP/t130_f.csv" -o "$TMP/./t130_f.csv"
+else
+    # `-o` reaches its destination by temp+rename, so without resolving first it
+    # replaces the LINK and leaves the target untouched -- at rc=0, while the
+    # shell's own `>` would have written through it.
+    # `-o` 也是以暫存檔 + rename 抵達目的地，因此不先解析就會把「連結」換掉、目標動也沒動
+    # ——而且 rc=0，儘管 shell 自己的 `>` 是會寫穿過去的。
+    print -r -- 'a,b'   > "$TMP/t130_src.csv"
+    print -r -- '1,x'  >> "$TMP/t130_src.csv"
+    print -r -- '2,y'  >> "$TMP/t130_src.csv"
+    print -r -- 'a,b'   > "$TMP/t130_dst.csv"
+    print -r -- '9,old'>> "$TMP/t130_dst.csv"
+    chmod 600 "$TMP/t130_dst.csv"
+    ln -sf "$TMP/t130_dst.csv" "$TMP/t130_link.csv"
+
+    assert_succeeds "T130a -o through a symlink succeeds / 經 symlink 的 -o 會成功" -- \
+        "$CSV2" -head 1 -t -i "$TMP/t130_src.csv" -o "$TMP/t130_link.csv"
+
+    if [[ -L "$TMP/t130_link.csv" ]]; then
+        ok "T130a1 and the symlink is still a symlink / 而那個 symlink 仍然是 symlink"
+    else
+        bad "T130a1 the symlink was replaced by a regular file / 那個 symlink 被換成了一般檔案"
+    fi
+
+    assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t130_dst.csv")" "1" \
+        "T130b and the data landed in the file it points at / 而資料落在它所指向的檔案裡"
+
+    assert_eq "$(file_mode "$TMP/t130_dst.csv")" "600" \
+        "T130c and writing there does not widen its permissions / 而寫入那裡不會放寬它的權限"
+
+    # Same file, two spellings: as typed, and through a link to it. Neither used
+    # to be refused, and neither is equivalent to --in-place.
+    # 同一個檔案的兩種寫法：直接打，以及經由一個指向它的連結。兩者過去都不會被拒絕，
+    # 而兩者都不等同於 --in-place。
+    print -r -- 'a,b'  > "$TMP/t130_f.csv"
+    print -r -- '1,x' >> "$TMP/t130_f.csv"
+    assert_fails "T130d -i and -o the same file spelled differently is refused / -i 與 -o 是同一個檔案的不同寫法，會被拒絕" -- \
+        "$CSV2" -head 1 -t -i "$TMP/t130_f.csv" -o "$TMP/./t130_f.csv"
+
+    ln -sf "$TMP/t130_f.csv" "$TMP/t130_flink.csv"
+    assert_fails "T130e -o through a link to the input is refused as well / 經由指向輸入的連結來 -o，同樣會被拒絕" -- \
+        "$CSV2" -head 1 -t -i "$TMP/t130_f.csv" -o "$TMP/t130_flink.csv"
+
+    # And the refusal must not have swallowed the ordinary case.
+    # 而那條拒絕不能連一般情況也一起吞掉。
+    assert_succeeds "T130f -o to an unrelated file still works / -o 寫到一個無關的檔案仍然可用" -- \
+        "$CSV2" -head 1 -t -i "$TMP/t130_src.csv" -o "$TMP/t130_new.csv"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

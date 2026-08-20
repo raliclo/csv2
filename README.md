@@ -944,6 +944,23 @@ beside it. This is the one guarantee with no fallback — with `-o` you still ha
 the input if the output is wrong, and with `--in-place` the input *is* the
 output. Asserted by T28c.
 
+**Temp-file-and-rename has a cost, and it lands on symlinks and permissions.**
+A rename replaces a *name*, so writing to a symlink's own path would swap the
+link for a regular file and leave the target untouched — while the shell's `>`
+writes through it. Both `-o` and `--in-place` therefore resolve the destination
+first: the link keeps pointing where it did, and the file it points at is the
+one written. The original file's permission bits are carried onto the temp file
+before the rename, so an edit does not change who can read it. Asserted by
+T129 and T130.
+
+Two things it still does not preserve, both deliberate: a **hard link** is
+broken, because rename cannot do otherwise, and a **read-only file** in a
+writable directory is still replaced, because rename asks permission of the
+DIRECTORY and never looks at the file. Restoring the mode stops an edit from
+widening who can read a file, which is the half that hands data to someone
+else; refusing to write a read-only file would be csv2 having an opinion about
+your directory permissions, which is not its business.
+
 `--build-index` and `--verify-index` each print one line to **stdout** — they
 are explicit administrative actions, not the normal path, but if you pipe them
 anywhere that line is in your stream.
@@ -1008,7 +1025,7 @@ Each of these exits non-zero with a message saying why:
 | `-si` without `--headers 1` or `2` | stdin has no suffix, so the format is not declared; a default here would be a guess |
 | `-head` with `-tail` | no single reading of both is obviously right |
 | `-mid 7,3` | `a > b`; not swapped for you, because a range written backwards usually means the logic is backwards too |
-| `-i x -o x` without `--in-place` | opening the output truncates it before the input has been read |
+| `-i x -o x` without `--in-place`, however the two are spelled | that IS an in-place edit, and `--in-place` also keeps a symlink pointing where it did and leaves the permissions alone |
 | `-delete 12:6` | that is a cell address; add `-cell`, or give a record number |
 | `-delete -cell -col 3` | they are opposites: `-cell` blanks a field and keeps the column, `-col` removes the column |
 | `-delete -col` removing every column | a file with no columns is not a CSV file |

@@ -86,6 +86,30 @@ struct Options {
 
 func usageError(_ en: String, _ zh: String) -> CSV2Error { fault(en, zh) }
 
+/// A path with symlinks followed and the spelling normalised.
+///
+/// Used for deciding WHERE to write and whether two paths are one file; never
+/// for what a message says, because a caller should be told about the file they
+/// named. resolvingSymlinksInPath() also normalises -- a relative path becomes
+/// absolute, and on macOS /private/tmp becomes /tmp -- which is why the result
+/// must not be compared against a path as typed. That comparison is what broke
+/// the append fast path (DT).
+/// 解析過 symlink、且拼法已正規化的路徑。
+/// 只用來決定「寫到哪裡」與「兩個路徑是不是同一個檔案」，絕不用於訊息內容——訊息要指名
+/// 呼叫端說出口的那個檔案。resolvingSymlinksInPath() 同時也會正規化（相對變絕對、macOS 上
+/// /private/tmp 變 /tmp），因此它的結果不能拿去和「打出來的路徑」比較；append 快路徑就是
+/// 那樣被弄斷的（DT）。
+func resolved(_ path: String) -> String {
+    URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+}
+
+/// Whether two paths name one file, decided by resolving both. Both are
+/// normalised the same way, so a relative path and an absolute one that reach
+/// the same file compare equal.
+/// 兩個路徑是不是同一個檔案，以「兩邊都解析」來判定。兩者以同一種方式正規化，因此一個
+/// 相對路徑與一個抵達同一個檔案的絕對路徑會相等。
+func sameFile(_ a: String, _ b: String) -> Bool { resolved(a) == resolved(b) }
+
 // ---------------------------------------------------------------------
 // MARK: - Argument parsing / 參數解析
 // ---------------------------------------------------------------------
@@ -851,12 +875,29 @@ func validate(_ o: inout Options) throws {
         // 就走紀錄形狀的輸出，與 grep 相同。
         o.filter = true
     }
-    if let inp = o.input, let out = o.output, inp == out, !o.inPlace {
-        // Opening the output truncates it, and the input has not been read
-        // yet. Refusing by default is the only safe behaviour.
-        // 開啟輸出即截斷，而那時輸入還沒讀完。預設拒絕是唯一安全的做法。
-        throw usageError("-i and -o name the same file; opening the output truncates it before the input has been read. Use --in-place, which writes a temp file and renames.",
-                         "-i 與 -o 指向同一個檔案；開啟輸出會在輸入讀完前把它截斷。要就地編輯請用 --in-place，它會寫暫存檔再 rename。")
+    if let inp = o.input, let out = o.output, sameFile(inp, out), !o.inPlace {
+        // Compared after resolving, not as typed. `-o ./data.csv` and
+        // `-o link-to-data.csv` name the same file as `-i data.csv` and used to
+        // slip past this, which mattered because the two are NOT equivalent:
+        // only --in-place keeps a symlink and carries the original mode.
+        //
+        // The reason given here used to be "opening the output truncates it
+        // before the input has been read". That is not true of this program --
+        // -o writes a temp file and renames (T43e), so nothing is truncated and
+        // the data survives. A refusal that explains itself with a danger the
+        // code does not have teaches the reader something false about the tool.
+        // The real reason is that this is an in-place edit written the long way
+        // round, and the flag for it does more.
+        // 比較的是解析過的路徑，不是打出來的字串。`-o ./data.csv` 與
+        // `-o 指向 data 的連結` 都與 `-i data.csv` 是同一個檔案，過去都能繞過這條拒絕；
+        // 而那是有差別的：只有 --in-place 會保留 symlink 並帶過原本的模式。
+        //
+        // 這裡原本的理由是「開啟輸出會在輸入讀完前把它截斷」。那對這支程式不成立——
+        // -o 走的是暫存檔 + rename（T43e），沒有東西被截斷，資料也不會遺失。一條用
+        // 「程式並不存在的危險」來解釋自己的拒絕，會讓讀者學到關於這支工具的錯誤知識。
+        // 真正的理由是：這就是一次就地編輯，只是繞遠路寫，而那個旗標做的事更多。
+        throw usageError("-i and -o name the same file; that is an in-place edit, so use --in-place, which also keeps a symlink pointing where it did and leaves the file's permissions as they were.",
+                         "-i 與 -o 指向同一個檔案；那就是一次就地編輯，請用 --in-place——它還會讓 symlink 繼續指向原處，並保留該檔案原本的權限。")
     }
     if o.inPlace {
         guard let inp = o.input else {
@@ -879,8 +920,21 @@ func validate(_ o: inout Options) throws {
         // 只有「輸出」被解析。輸入保留呼叫端打出來的路徑，好讓訊息指名的是他問的那個檔案，
         // 而不是一個他從未見過的。
         if o.output == nil {
-            o.output = URL(fileURLWithPath: inp).resolvingSymlinksInPath().path
+            o.output = resolved(inp)
         }
+    }
+    // The same rule on the other half. `-o` reaches its destination by
+    // temp+rename too, so writing to a symlink's own path REPLACES the link
+    // with a regular file and leaves the target byte-for-byte unchanged, at
+    // rc=0 -- the shell's `>` follows the link and writes through it, which is
+    // what a caller has every reason to expect. DP settled this for --in-place
+    // and this is where the same sentence also applies.
+    // 同一條規則的另一半。`-o` 也是以暫存檔 + rename 抵達目的地，因此寫到一個 symlink
+    // 自身的路徑上，會把連結換成一般檔案，而目標檔逐位元未變、rc=0——shell 的 `>` 是
+    // 跟著連結走、寫進目標的，而呼叫端完全有理由那樣預期。DP 為 --in-place 定下了這件事，
+    // 而這裡是同一句話同樣成立的地方。
+    if !o.inPlace, let out = o.output {
+        o.output = resolved(out)
     }
     if o.encryptCols != nil || o.decryptCols != nil || o.hashCols != nil {
         // ALWAYS write the header, selection or not.
