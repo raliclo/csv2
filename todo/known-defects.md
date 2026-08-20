@@ -3680,7 +3680,7 @@ INFO  csv2 -decrypt all -keyfile /…/.test_csv2.Xs1abc/t100.key -i …
 `mktemp -d .test_csv2.XXXXXX` 產生六個英數字元。**幾百次執行裡就會有一次含 `s1`**,於是
 那個案例為了一個與明文毫無關係的理由失敗。
 
-它在 2026-08-20 觸發了一次:那一次執行是 568 PASS / 1 FAIL,而緊接著的三次都是 569 / 0。
+它在 2026-08-20 觸發了一次:那一次執行有一條失敗,而緊接著的三次都是零失敗。
 
 **一份會亂叫的測試比沒有測試更糟**——它會侵蝕對整套測試的信任,而信任正是那 569 條斷言
 唯一的用途。明文現在是 `PLAINTEXT-CANARY-ONE`,一個不可能出現在別處的記號。
@@ -3688,7 +3688,7 @@ INFO  csv2 -decrypt all -keyfile /…/.test_csv2.Xs1abc/t100.key -i …
 掃過整份測試檔找同類:其餘「短字串」比對的都是**指令輸出**(報告位址、解密後的檔案內容、
 錯誤訊息),不是含有隨機路徑的檔案。只有這一個。
 
-## 而那次 commit 的訊息說了 569 PASS / 0 FAIL
+## 而那次 commit 的訊息說了「零失敗」
 
 我在同一條指令裡跑測試並提交,訊息是事先寫好的。那次執行實際顯示 568 / 1。
 
@@ -3706,7 +3706,24 @@ once on 2026-08-20: that run was 568/1 and the next three were 569/0. A suite
 that cries wolf stops being read, and being read is the only thing 569
 assertions are for.
 
-And the commit message for that run claimed 569 PASS / 0 FAIL. The suite and
+And the commit message for that run claimed zero failures. The suite and
 the commit went out in one command, with the number written in advance. Nothing
 mechanical can catch that -- a commit message is outside every test's view --
 so the only remedy is to read the result before writing the number.
+
+### 而 T69a 抓到的正是這一段
+
+我在寫「那次執行是 568 / 1」時,又把一個會過期的數字寫進了文件——**而 T69 存在的理由就是
+那個**。它在 WSL 與 Windows 上失敗,在 macOS 上沒有,因為我在 macOS 上跑測試的時間點早於
+我加上那段文字。
+
+**還有一件事因此浮出來:guest 的 payload 不含 `todo/`**,所以 T69 在 guest 裡根本看不到
+`known-defects.md`——它在那裡是一個較弱的檢查。三個平台通過、一個平台失敗,而失敗的那兩個
+才是看得到全部檔案的。
+
+T69a caught this very section: writing "568 / 1" put another number that will
+go stale into a document, which is precisely what T69 exists to stop. It failed
+on WSL and Windows and not on macOS, because the macOS run happened before the
+text was added -- and it surfaced something else: the guest payload does not
+include `todo/`, so T69 cannot see this file there at all. Three platforms
+green and one red, and the red ones were the ones that could see everything.
