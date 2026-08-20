@@ -4451,6 +4451,131 @@ env $P "$CSV2" -contains "needle" -i "$TMP/t101.csv" >/dev/null 2> "$TMP/t101d_e
 assert_eq "$(wc -c < "$TMP/t101d_err.txt" | tr -d ' ')" "0" \
     "T101h and without -debug the line is absent, as the pipeline requires / 而沒有 -debug 時那行不存在，一如管線的要求"
 
+# ---------------------------------------------------------------------
+# T102 -- the audit trail could be forged through the one line it always
+# writes.
+#
+# `-log` records the invocation on EVERY run, and that line was joined from
+# the raw arguments with no escaping. A newline inside any argument therefore
+# opened a second line in the log whose entire content -- including its own
+# timestamp -- came from the input: a complete, plausible entry for an
+# operation that never happened, at rc=0.
+#
+# The escaping rule already existed and was already documented; it had been
+# applied to logged VALUES and not here. This is the wider of the two
+# openings, because a value needs an edit and this needs only `-contains` --
+# no write access to the data at all.
+#
+# T102 —— 稽核軌跡可以透過它「一定會寫」的那一行被偽造。
+# `-log` 每一次執行都會記下呼叫方式，而那一行是把原始引數直接以空白接起來的，沒有跳脫。
+# 於是任一引數裡的換行會在 log 中開出第二行，那一行的全部內容——連同它自己的時間戳——
+# 都來自輸入：一筆完整、看起來合理、卻從未發生過的紀錄，rc=0。
+# 這條跳脫規則本來就存在、也已經寫在文件裡，只是被套在記入 log 的「值」上而沒有套到這裡。
+# 而這是兩個開口中較大的那個：值需要一次編輯，這裡只需要 `-contains`——完全不需要對資料
+# 有寫入權限。
+# ---------------------------------------------------------------------
+echo
+echo "--- T102: the logged invocation cannot open a second line / 記入 log 的呼叫無法開出第二行 ---"
+
+print -r -- 'a,b' > "$TMP/t102.csv"
+print -r -- '1,2' >> "$TMP/t102.csv"
+
+rm -f "$TMP/t102.log"
+"$CSV2" -contains $'needle\n2026-01-01T00:00:00+00:00 INFO  csv2 -delete everything' \
+    -i "$TMP/t102.csv" -log "$TMP/t102.log" >/dev/null 2>&1
+
+assert_eq "$(wc -l < "$TMP/t102.log" | tr -d ' ')" "1" \
+    "T102a a newline in an argument does not add a line to the audit trail / 引數裡的換行不會在稽核軌跡中多出一行"
+
+# The forged text must still be PRESENT -- escaping is not redaction. An audit
+# trail that dropped the argument would hide what was attempted, which is the
+# opposite of the point.
+# 被偽造的文字必須「仍然存在」——跳脫不是遮蔽。一份把該引數丟掉的稽核軌跡會藏起「有人
+# 試過什麼」，那與它的用意正好相反。
+logged=$(cat "$TMP/t102.log")
+assert_contains "$logged" '\n2026-01-01T00:00:00' \
+    "T102b and the attempted text is kept, escaped rather than dropped / 而被嘗試的文字保留下來，是跳脫而不是丟棄"
+
+rm -f "$TMP/t102b.log"
+"$CSV2" -contains $'a\tb\\c' -i "$TMP/t102.csv" -log "$TMP/t102b.log" >/dev/null 2>&1
+logged2=$(cat "$TMP/t102b.log")
+assert_contains "$logged2" 'a\tb\\c' \
+    "T102c TAB and backslash use the same convention as everywhere else / TAB 與反斜線沿用與他處相同的慣例"
+
+# Text reaches the log by TWO routes -- the invocation, and the messages -- and
+# the first fix touched only the invocation. This case takes the second route:
+# an address that names no column produces an error message quoting the name
+# back, and that message carried the newline. Note the destination: without one
+# the run is refused before anything is logged, and a first draft of this case
+# passed for that reason, testing nothing.
+# 文字進入 log 有「兩條」路徑——呼叫，以及訊息——而第一次修正只碰了呼叫。這個案例走第二條：
+# 一個指不到任何欄位的位址會產生「把那個名字引述回來」的錯誤訊息，而那則訊息帶著換行。
+# 注意那個目的地：沒有它，這次執行會在任何東西被記錄之前就被拒絕——本案例的第一版正是
+# 因此而通過的，它什麼也沒測到。
+print -r -- 'a,b' > "$TMP/t102c.csv"
+print -r -- '1,2' >> "$TMP/t102c.csv"
+rm -f "$TMP/t102c.log"
+"$CSV2" -update $'1:1\n2026-01-01T00:00:00+00:00 INFO  forged' 'x' \
+    -i "$TMP/t102c.csv" --in-place -log "$TMP/t102c.log" > /dev/null 2> "$TMP/t102c.err"
+
+assert_eq "$(wc -l < "$TMP/t102c.log" | tr -d ' ')" "2" \
+    "T102d an error message quoting the input cannot open a line either / 引述輸入的錯誤訊息同樣無法開出一行"
+
+# The stderr promise is its own: exactly two lines, English then Chinese. The
+# same unescaped message made it four, and a script reading the pair took the
+# injected line for part of the error.
+# stderr 那個承諾是它自己的：恰好兩行，英文在前中文在後。同一則未跳脫的訊息讓它變成四行，
+# 而依「兩行」去讀的腳本會把被注入的那一行當成錯誤訊息的一部分。
+assert_eq "$(wc -l < "$TMP/t102c.err" | tr -d ' ')" "2" \
+    "T102e and stderr stays at exactly two lines, as documented / 而 stderr 維持恰好兩行，一如文件所述"
+
+# Escaped ONCE. Two fixes, each correct alone, escaped the invocation twice and
+# turned a newline into a literal backslash-n that no longer round-trips.
+# Escaping lives at one point now, and this is what holds it there.
+# 只跳脫「一次」。兩個各自正確的修正，讓呼叫那一行被跳脫了兩次，把一個換行變成再也還原不回
+# 去的字面反斜線 n。跳脫現在只發生在一個地方，而這條斷言就是把它固定在那裡的東西。
+if grep -q '\\\\n' "$TMP/t102c.log"; then
+    bad "T102f the log escaped the same newline twice (\\\\n), so the value no longer round-trips / log 把同一個換行跳脫了兩次（\\\\n），該值再也還原不回去"
+else
+    ok "T102f and escaped exactly once, so the value round-trips / 而且恰好跳脫一次，該值可以還原"
+fi
+
+# ---------------------------------------------------------------------
+# T103 -- `--a1` past column Z.
+#
+# The README said "field 3 is C" and stopped there, so a reader addressing a
+# wide sheet had to guess. Spreadsheet columns are BIJECTIVE base-26 -- there
+# is no zero digit, so Z is followed by AA and not by BA, and ZZ by AAA. Plain
+# base-26 gets every boundary wrong. The implementation is right; nothing held
+# it there, and nothing said so.
+#
+# T103 —— `--a1` 在 Z 之後。
+# README 只說到「field 3 是 C」就停了，於是要處理寬表的人只能用猜的。試算表的欄名是
+# 「雙射」26 進位——沒有代表零的位數，因此 Z 之後是 AA 而不是 BA，ZZ 之後是 AAA。用普通
+# 26 進位會在每一個邊界上都算錯。實作是對的，只是沒有東西守著它，也沒有東西說出來。
+# ---------------------------------------------------------------------
+echo
+echo "--- T103: --a1 column letters past Z / --a1 在 Z 之後的欄名 ---"
+
+{ n=705
+  line1=""; line2=""
+  for i in {1..$n}; do
+      line1="${line1}c$i"; line2="${line2}$i"
+      (( i < n )) && { line1="$line1,"; line2="$line2," }
+  done
+  print -r -- "$line1"; print -r -- "$line2"
+} > "$TMP/t103.csv"
+
+a1_of() {   # field number -> the [..] address csv2 prints for it
+    "$CSV2" --a1 -contains "$1" -i "$TMP/t103.csv" 2>/dev/null \
+        | awk -v want="1:$1" '$1 == want { print $2; exit }'
+}
+
+for pair in 26:'[Z2]' 27:'[AA2]' 52:'[AZ2]' 53:'[BA2]' 702:'[ZZ2]' 703:'[AAA2]'; do
+    assert_eq "$(a1_of ${pair%%:*})" "${pair##*:}" \
+        "T103 field ${pair%%:*} is ${pair##*:} / 第 ${pair%%:*} 欄是 ${pair##*:}"
+done
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

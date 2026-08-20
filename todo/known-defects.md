@@ -1638,3 +1638,133 @@ used, and says nothing when one *was*. By Z, the index-trusting path is the
 only one that can be silently wrong -- so the run that most needs a trace
 leaves the least. An operator holding those four lines has no way to tell the
 answer rested on a sidecar they never checked.
+---
+
+## AI. 稽核軌跡可以被偽造,而修法早就存在、只是沒有套到這一行(2026-08-20 修正)
+
+`-log` 寫進去的第一行是「這次是怎麼被呼叫的」,而它是**每一次執行都會寫**的一行。
+那一行沒有跳脫。於是:
+
+```console
+$ csv2 -contains $'needle\n2026-01-01T00:00:00+00:00 INFO  csv2 -delete everything' \
+       -i s.csv -log L2.txt
+$ cat L2.txt
+2026-08-20T08:34:52.967+08:00 INFO  csv2 -contains needle
+2026-01-01T00:00:00+00:00 INFO  csv2 -delete everything -i s.csv -log L2.txt
+```
+
+**第二行整行都是輸入決定的,包含它自己的時間戳。** 稽核軌跡裡因此有一筆
+`-delete everything`,發生在一月一日,而那件事從來沒有發生過。rc=0。
+
+### 這正是 README 說已經修好的那個缺陷
+
+> 「**一筆是一行,而值會被跳脫以維持這一點。** 值裡的換行、TAB、CR 或反斜線寫成
+> `\n`、`\t`、`\r`、`\\`。沒有這個,一個含換行的值會開啟新的一行,而那一行的全部內容
+> 由那個值決定——一筆偽造的紀錄,帶著它自己選的時間戳,寫在稽核軌跡裡,rc=0。」
+
+一字不差,就是上面發生的事。**修正只套在「值」上,沒有套到「呼叫」那一行。**
+
+而兩者的暴露面不同,且較大的那個沒被修到:`sanitizedCommandLine` 只替換
+`-update`／`-insert`／`-append` 的值,其餘引數原樣接上;而值的路徑需要一次編輯,
+**這一行只需要 `-contains`**——連對資料的寫入權限都不需要。
+
+### 又是「兩個呼叫點,只修了一個」
+
+與 T79 那條(`no_embedded_newlines` 由三個呼叫點設定、兩個傳常數)、以及 AH 那條
+(拒絕的路徑都說話、採信的那條不說)是同一個形狀:**一條規則被建立起來,卻沒有被套到
+它適用的每一個地方**,而沒套到的那個地方沒有任何東西會指出來。
+
+### 不在此次修正範圍內的一件事
+
+引數裡的**空白**同樣讓那一行無法被可靠地重新剖析(`-contains "a b"` 與
+`-contains a b` 在 log 裡看起來一樣)。那是「歧義」,不是「偽造」——它產生不了一筆
+額外的紀錄。這裡要守住的保證是「一筆是一行、而且沒有人能憑輸入寫出一整筆」,
+先把那個補上;引號化是另一個決定,需要先想清楚要不要讓那一行變成可以貼回 shell 執行的
+東西(那有它自己的風險)。
+
+The audit trail could be forged, and the fix already existed -- it had simply
+never been applied to this line. The invocation record, written on EVERY run,
+was not escaped, so a newline in any argument opened a second line whose entire
+content, including its timestamp, came from the input. That is verbatim the
+failure the README describes as fixed; the fix was applied to values only. The
+exposure is the larger of the two: values need an edit, this needs only
+-contains.
+---
+
+## AJ. 同一個偽造,從錯誤訊息那條路照樣成立——而它還打破了第二個保證(2026-08-20 修正)
+
+修好 AI(呼叫那一行)之後,同一個構造換一條路仍然有效:
+
+```console
+$ csv2 -update $'1:1\n2026-01-01T00:00:00+00:00 INFO  forged' 'x' -i u2.csv --in-place -log U2.log
+$ cat U2.log
+2026-08-20T08:40:13.910+08:00 INFO  csv2 -update 1:1\n2026-01-01T00:00:00+00:00 INFO  forged <value> …
+2026-08-20T08:40:13.911+08:00 ERROR no column named "1
+2026-01-01T00:00:00+00:00 INFO  forged"; the columns are: a, b
+```
+
+第一行(AI 已修)是**一行**;第二行不是。錯誤訊息把那個欄名原樣插進去,於是 log 裡多出
+第三行,而那一行同樣是一筆完整、帶著自己時間戳的偽造 INFO 紀錄。
+
+**訊息文字進入 log 的路徑有兩條,AI 只修了其中一條。** 又是同一個形狀。
+
+### 而它同時打破了 stderr 那個保證
+
+README 說:
+
+> 「錯誤輸出到 stderr,**恰好兩行**,英文在前、中文在後。」
+
+實際輸出是四行:
+
+```
+csv2: no column named "1
+2026-01-01T00:00:00+00:00 INFO  forged"; the columns are: a, b
+csv2：沒有名為「1
+2026-01-01T00:00:00+00:00 INFO  forged」的欄位；本檔案的欄位是：a, b
+```
+
+**一個依「兩行」去讀 stderr 的腳本,會把偽造出來的那一行當成錯誤訊息的一部分。**
+這條缺陷因此同時使兩份文件宣稱為假,而兩者都是本專案明確承諾過的介面。
+
+### 修在哪一層
+
+修在 `Logger.log` / `logToFileOnly` 建行的那一點,以及 `main.swift` 直接寫 stderr 的
+那兩行錯誤。理由是它涵蓋現在與**日後**每一個訊息:任何一則把輸入插進去的訊息都自動
+受保護,而不必每加一則訊息就記得跳脫一次——AI 與 AJ 合起來說明的正是「靠記得」行不通。
+
+先確認過沒有任何 log 訊息是刻意帶換行的(唯二兩處 `\n` 是行尾本身),因此在這一層跳脫
+不會破壞任何既有輸出。
+
+The same forgery works through the error-message path, which AI did not touch:
+text reaches the log by two routes and only one was fixed. It also falsifies a
+second documented guarantee -- errors on stderr are promised as exactly two
+lines, English then Chinese, and this produces four. Fixed at the line-building
+point in Logger and at the two direct stderr writes, because that covers every
+message present and future rather than relying on each new one remembering.
+
+### 而修好 AJ 之後,AI 的修法就變成了缺陷
+
+把跳脫放進 `Logger` 的建行處之後,`sanitizedCommandLine`(AI 的修法)與 `redact()` 各自
+那一次跳脫就變成第二次:
+
+```
+INFO  csv2 -update 1:1\\n2026-01-01T00:00:00+00:00 INFO  forged <value> …
+```
+
+`\n` 變成 `\\n`——**那個值再也還原不回去了**。抓到它的是既有的 T92g,而不是我。
+
+**兩個各自都正確的修正,合起來是錯的。** 這與這棵樹上其他缺陷是同一個形狀的反面:那些是
+「一條規則沒有被套到所有地方」,這一個是「一條規則被套了兩次」。兩者的共同根源相同——
+**規則的施行點沒有被指定成唯一的一個**。
+
+現在它是唯一的一個:`Logger.log` / `logToFileOnly` 建行處,加上 `main.swift` 直接寫 stderr
+的兩處。`Ops.swift` 裡那兩次 `reportEscape` 不在此列,它們餵的是「報告」那條 TAB 分隔的
+輸出串流,不是 log。由 **T102f** 守住「恰好一次」。
+
+Fixing AJ turned AI's fix into a defect: with escaping centralised at the
+line-building point, the earlier per-argument and per-value escapes became a
+second pass, and `\n` became `\\n` -- a value that no longer round-trips. Two
+fixes, each right alone, wrong together. The existing T92g caught it. The shape
+is the mirror image of the others here: not a rule missed in one place, but a
+rule applied twice, and the same root cause -- no single designated point of
+enforcement. There is one now, and T102f holds it.

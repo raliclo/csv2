@@ -514,6 +514,13 @@ $ csv2 -contains zlib --a1 -i pkgs.csv2      # 2 header rows
 Both are data record 1. `A2` and `A3` are what you would click on. The column
 letter comes from the field number the same way: field 3 is `C`.
 
+**Past column Z the letters carry the way a spreadsheet's do**, which is not
+the way a plain base-26 counter would: there is no digit for zero, so field 27
+is `AA` and not `BA`, field 52 is `AZ`, field 53 is `BA`, and field 702 is `ZZ`
+followed by `AAA`. Asserted at each of those boundaries by T103 — the
+implementation was right from the start, but nothing held it there and nothing
+said so, which left anyone addressing a wide sheet to guess.
+
 `--a1` and `--physical` add to the **locating report**, so they need
 `-contains` and are refused with `-r`, `--filter`, `-md` and `--json` — those do
 not emit an address for anything to be added to.
@@ -532,12 +539,23 @@ will not record:
 | old and new values in an **ordinary** column | in full, never truncated; that is the point of an audit trail |
 | old and new values in a **protected** column | `<redacted>` |
 
-**One entry is one line, and values are escaped to keep it that way.** A
-newline, tab, CR or backslash in a value is written as `\n`, `\t`, `\r` or
-`\\`. Without that a value containing a newline started a new line whose
-entire content the value chose — a forged entry, with a timestamp of its
-choosing, in the audit trail, at rc=0. Truncating the value did not prevent
-that; it only shortened the forged line.
+**One entry is one line, and every line is escaped to keep it that way.** A
+newline, tab, CR or backslash is written as `\n`, `\t`, `\r` or `\\`. Without
+that, text containing a newline started a new line whose entire content that
+text chose — a forged entry, with a timestamp of its choosing, in the audit
+trail, at rc=0. Truncating did not prevent that; it only shortened the forged
+line.
+
+**"Every line" was not always true, and the gap is worth knowing about**, since
+it says what the guarantee now rests on. The escaping was applied to logged
+*values* and to nothing else. Two other routes reached the log unescaped: the
+invocation record, written on **every** run — so `-contains` alone forged an
+entry, with no write access to the data at all — and any error message quoting
+input back, such as the name in `no column named "…"`. Escaping now happens
+once, where a log line is built, which is the only point that also covers
+messages nobody has written yet. Asserted by T102, including that it happens
+exactly once: two fixes each correct on its own escaped the invocation twice
+and turned a newline into a literal `\\n` that no longer round-trips.
 
 **"In full" has no upper bound, and above 1 MiB it says so.** A value larger
 than that is still written whole, with a `WARN` naming its size: a cap would
@@ -766,9 +784,12 @@ output. Asserted by T28c.
 are explicit administrative actions, not the normal path, but if you pipe them
 anywhere that line is in your stream.
 
-Errors go to stderr as exactly **two** lines, English then Chinese. With
-`-log FILE` the same failure is also appended there with a timestamp; without it
-nothing else is printed. On the normal path csv2 prints nothing at all — it has
+Errors go to stderr as exactly **two** lines, English then Chinese — escaped
+by the same rule as the log, which is what makes the count reliable: a message
+quoting an input value that contained a newline used to print four, and a script
+reading the pair took the injected line for part of the error. Asserted by T102.
+With `-log FILE` the same failure is also appended there with a timestamp;
+without it nothing else is printed. On the normal path csv2 prints nothing at all — it has
 to work inside a pipeline.
 
 **How much of a location an error carries depends on how much there is.** Do not

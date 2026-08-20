@@ -1060,6 +1060,18 @@ func printHelp() {
 /// 呼叫方式記入 log，是為了日後能回答「這個檔案被誰改成這樣」——但它帶的「值」
 /// 就是資料本身。把 `-update 12:6 <秘密>` 原樣記下來，等於把那個秘密寫進一個
 /// 沒有人在保護的檔案，也就抵銷了其他地方的遮蔽。因此保留旗標與位址，把值換掉。
+///
+/// This function does NOT escape, deliberately. The line it returns is written
+/// through `Logger`, which escapes every message as it builds the line, so
+/// escaping here too produced `\\n` where the input had a newline -- a value
+/// that no longer round-trips, arrived at by two fixes each of which was right
+/// on its own. Escaping belongs at exactly one point, and that point is where
+/// the line is built, because it is the only one that covers messages nobody
+/// has written yet.
+/// 此處刻意「不」跳脫。它回傳的那一行是經由 `Logger` 寫出的，而 `Logger` 在建行時已經
+/// 把每一則訊息跳脫過；這裡再跳脫一次，會讓輸入中的換行變成 `\\n`——一個再也還原不回去
+/// 的值，而它來自兩個各自都正確的修正。跳脫只能發生在「一個」地方，而那個地方是建行的
+/// 那一點，因為只有它涵蓋得到「還沒有人寫出來的訊息」。
 func sanitizedCommandLine(_ argv: [String]) -> String {
     var out: [String] = []
     var i = 0
@@ -1122,7 +1134,16 @@ func main() -> Int32 {
         // caught by the next tool; it is caught months later, if ever.
         // 以非零結束，並指出是哪一筆、哪一欄。錯的 CSV 不會被下一個工具發現，
         // 而是在數個月後才被發現——如果還有機會被發現的話。
-        FileHandle.standardError.write(Data("csv2: \(e.message)\ncsv2：\(e.messageZh)\n".utf8))
+        // Escaped for the same reason the log line is, and for a promise of
+        // its own: errors on stderr are documented as EXACTLY two lines,
+        // English then Chinese. A message interpolating a column name that
+        // contained a newline produced four, and a script reading the pair
+        // took the injected line for part of the error.
+        // 與 log 那一行同理，而且它自己還有一個承諾：stderr 上的錯誤在文件裡是「恰好兩行」，
+        // 英文在前中文在後。一則插入了含換行欄名的訊息會產生四行，而依「兩行」去讀的腳本
+        // 會把被注入的那一行當成錯誤訊息的一部分。
+        FileHandle.standardError.write(Data(
+            "csv2: \(reportEscape(e.message))\ncsv2：\(reportEscape(e.messageZh))\n".utf8))
         // Recorded in the -log FILE, not echoed to stderr again. ERROR is above
         // the default WARN threshold, so routing it through Logger printed the
         // same failure a third time, with a timestamp, even when no -log was
@@ -1134,7 +1155,7 @@ func main() -> Int32 {
         Logger.shared.close()
         return 1
     } catch {
-        FileHandle.standardError.write(Data("csv2: \(error)\n".utf8))
+        FileHandle.standardError.write(Data("csv2: \(reportEscape("\(error)"))\n".utf8))
         Logger.shared.close()
         return 1
     }

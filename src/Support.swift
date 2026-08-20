@@ -107,7 +107,21 @@ final class Logger {
         let belongsInFile = level >= .info || threshold <= .debug
         let wantsFile = belongsInFile && (logHandle != nil || logPath != nil)
         if !wantsFile && level < threshold { return }
-        let line = "\(Logger.timestamp()) \(level.label) \(message())\n"
+        // One entry is one line, and the message is escaped to keep it that
+        // way. The rule was already documented and already applied to logged
+        // VALUES; it was not applied here, so any message interpolating input
+        // -- a column name, a path, a field -- could open a second line in the
+        // log whose whole content, timestamp included, came from that input.
+        // Escaping at the point the line is built covers every message that
+        // exists and every one added later, which is the difference that
+        // matters: the two call sites this defect reached were both cases of
+        // a rule that had to be remembered separately in each place.
+        // 一筆是一行，而訊息會被跳脫以維持這一點。這條規則本來就寫在文件裡，也已經套用在
+        // 記入 log 的「值」上；只是沒有套到這裡，於是任何把輸入插進去的訊息——欄名、路徑、
+        // 欄位——都可能在 log 中開出第二行，而那一行的全部內容連同時間戳都來自那個輸入。
+        // 在「建行」這一點跳脫，涵蓋的是現在與日後的每一則訊息，而那正是關鍵差別：這個
+        // 缺陷所到過的兩個呼叫點，都是「一條規則必須在每個地方各被記得一次」的例子。
+        let line = "\(Logger.timestamp()) \(level.label) \(reportEscape(message()))\n"
         // The log FILE is an operation record: what was done, to what, with
         // what result. DEBUG and TRACE are for someone chasing a problem right
         // now -- high volume, thrown away when done -- and letting them into
@@ -139,7 +153,7 @@ final class Logger {
     /// 但再往 stderr 印一次只是重複。
     func logToFileOnly(_ level: LogLevel, _ message: String) {
         guard let h = logHandle else { return }
-        h.write(Data("\(Logger.timestamp()) \(level.label) \(message)\n".utf8))
+        h.write(Data("\(Logger.timestamp()) \(level.label) \(reportEscape(message))\n".utf8))
     }
 
     func debug(_ m: @autoclosure () -> String) { log(.debug, m()) }
@@ -151,23 +165,29 @@ final class Logger {
     /// into a file nobody is guarding.
     /// 屬於加密或雜湊欄位的值絕不出現在 log 中。否則對受保護欄位的 `-update`
     /// 會把明文寫進一個沒有人在保護的檔案。
-    /// Escaped, and NOT truncated. The escaping is the load-bearing half: the
-    /// log is one entry per line, and this wrote the value with quotes and
-    /// nothing else -- so a newline inside a value opened a new line whose
-    /// entire content the value chose. A forged entry with an attacker-picked
-    /// timestamp landed in the audit trail at rc=0. The 40-character
-    /// truncation did not prevent that, it only shortened the forged line,
-    /// which is why lifting the limit had to wait for the escaping: otherwise
-    /// the forgery would have gone from truncated to complete.
-    /// 有跳脫，且**不截斷**。跳脫是承重的那一半：log 是一行一筆，而原本只是把值加上引號、
-    /// 別的什麼都沒做——因此值裡的一個換行就會開啟新的一行，而那一行的全部內容由值決定。
-    /// 一筆時間戳由攻擊者挑選的偽造紀錄，就這樣以 rc=0 落進稽核軌跡。40 字元的截斷擋不住
-    /// 那件事，它只是把偽造的那一行剪短——這正是「解除上限」必須等「跳脫」先做的原因：
-    /// 否則偽造會從被剪斷變成完整。
+    /// NOT truncated, and NOT escaped here. The escaping is load-bearing --
+    /// the log is one entry per line, and writing a value with quotes and
+    /// nothing else let a newline inside it open a new line whose entire
+    /// content the value chose, a forged entry with an attacker-picked
+    /// timestamp at rc=0 -- but it now happens once, where the log line is
+    /// built, so it also covers the invocation and every message. Escaping
+    /// again here produced `\\n` for a newline: a value that no longer
+    /// round-trips, arrived at by two fixes each of which was right alone.
+    /// The 40-character truncation never prevented the forgery, it only
+    /// shortened the forged line, which is why lifting the limit had to wait
+    /// for the escaping: otherwise the forgery would have gone from truncated
+    /// to complete.
+    /// **不截斷**，而且此處**不跳脫**。跳脫是承重的那一半——log 是一行一筆，而只把值加上
+    /// 引號、別的什麼都不做，會讓值裡的一個換行開啟新的一行，那一行的全部內容由值決定，
+    /// 是一筆時間戳由攻擊者挑選、以 rc=0 落進稽核軌跡的偽造紀錄——但它現在只發生一次，
+    /// 在建構 log 行的地方，因此同時涵蓋了「呼叫」與每一則訊息。在這裡再跳脫一次會讓換行
+    /// 變成 `\\n`：一個再也還原不回去的值，而它來自兩個各自都正確的修正。40 字元的截斷
+    /// 從來擋不住那個偽造，它只是把偽造的那一行剪短——這正是「解除上限」必須等「跳脫」先做
+    /// 的原因：否則偽造會從被剪斷變成完整。
     func redact(column: String, value: [UInt8]) -> String {
         redactedColumns.contains(column)
             ? "<redacted>"
-            : "\"\(reportEscape(echoValue(value, limit: nil)))\""
+            : "\"\(echoValue(value, limit: nil))\""
     }
 
     /// Whether a value about to be logged is large enough that the person
