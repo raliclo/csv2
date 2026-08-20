@@ -6400,49 +6400,106 @@ assert_fails "T128d --include-headers without -contains is refused, as its sibli
 echo
 echo "--- T129: in place, on the right file / 就地，而且是對的那個檔案 ---"
 
-print -r -- 'a,b'  > "$TMP/t129_target.csv"
-print -r -- '1,x' >> "$TMP/t129_target.csv"
-ln -sf "$TMP/t129_target.csv" "$TMP/t129_link.csv"
-
-assert_succeeds "T129a --in-place through a symlink succeeds / 透過 symlink 的 --in-place 會成功" -- \
-    "$CSV2" -update 1:2 'Z' -i "$TMP/t129_link.csv" --in-place
-
-# The link must survive, because replacing it means the next run edits a
-# different file than the last one did.
-# 那個連結必須存活，因為把它換掉，等於「下一次執行編輯的檔案」與「上一次的」不是同一個。
-if [[ -L "$TMP/t129_link.csv" ]]; then
-    ok "T129b and the symlink is still a symlink / 而那個 symlink 仍然是 symlink"
+# Neither half of T129 has a meaning on Windows. MSYS2's `ln -s` copies the
+# file unless winsymlinks is set, so there is no link to preserve; and the mode
+# bits it reports are a POSIX-shaped fiction over an ACL. copyMode is compiled
+# out there for the same reason -- there is nothing it could carry.
+# T129 的兩半在 Windows 上都沒有意義。MSYS2 的 `ln -s` 在未設 winsymlinks 時是複製，
+# 沒有連結可保留；它回報的模式位元則是覆在 ACL 之上、形似 POSIX 的虛構。copyMode 在
+# 那裡也基於同一個理由被編譯掉——沒有東西可以搬。
+if (( IS_WINDOWS )); then
+    skipt "T129a-d --in-place on a symlink, and the mode it carries / symlink 上的 --in-place 與它帶過去的模式 (no symlinks and no POSIX modes under MSYS2 / MSYS2 下沒有 symlink，也沒有 POSIX 模式)"
 else
-    bad "T129b the symlink was replaced by a regular file / 那個 symlink 被換成了一般檔案"
+    print -r -- 'a,b'  > "$TMP/t129_target.csv"
+    print -r -- '1,x' >> "$TMP/t129_target.csv"
+    ln -sf "$TMP/t129_target.csv" "$TMP/t129_link.csv"
+
+    assert_succeeds "T129a --in-place through a symlink succeeds / 透過 symlink 的 --in-place 會成功" -- \
+        "$CSV2" -update 1:2 'Z' -i "$TMP/t129_link.csv" --in-place
+
+    # The link must survive, because replacing it means the next run edits a
+    # different file than the last one did.
+    # 那個連結必須存活，因為把它換掉，等於「下一次執行編輯的檔案」與「上一次的」不是同一個。
+    if [[ -L "$TMP/t129_link.csv" ]]; then
+        ok "T129b and the symlink is still a symlink / 而那個 symlink 仍然是 symlink"
+    else
+        bad "T129b the symlink was replaced by a regular file / 那個 symlink 被換成了一般檔案"
+    fi
+
+    assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t129_target.csv")" "Z" \
+        "T129c and the edit landed on the file it points at / 而那次編輯落在它所指向的檔案上"
+
+    # Mode: a temp file is created with the umask's mode, so without carrying the
+    # original's an edit silently widens who can read the file.
+    # 模式：暫存檔以 umask 的模式建立，因此不把原檔的模式帶過去，一次編輯就會悄悄放寬
+    # 「誰讀得到這個檔案」。
+    print -r -- 'a,b'  > "$TMP/t129_mode.csv"
+    print -r -- '1,x' >> "$TMP/t129_mode.csv"
+    chmod 600 "$TMP/t129_mode.csv"
+    "$CSV2" -update 1:2 'Z' -i "$TMP/t129_mode.csv" --in-place >/dev/null 2>&1
+    # Reading a file's mode is the least portable thing in this suite.
+    #   - BSD stat and GNU stat both take -f, and they mean opposite things: the
+    #     mode format on macOS, "filesystem status" on Linux. The GNU one prints a
+    #     block of filesystem facts to STDOUT before exiting 1, so `A || B` runs B
+    #     as well and the substitution captures both.
+    #   - The aarch64 guest has NO stat at all: this busybox was built without the
+    #     applet, and zsh/stat is not in its module set either. Both branches then
+    #     produce nothing, which is why T129d failed there while passing on macOS
+    #     with the program behaving identically on both.
+    # So: ask each stat only what it understands, require the answer to look like
+    # a mode, and fall back to the one listing every Unix has.
+    # 讀一個檔案的模式，是這份測試裡可攜性最差的一件事。BSD 與 GNU 的 stat 都收 -f，
+    # 意思卻相反；而 aarch64 guest 上根本沒有 stat——這份 busybox 沒把該 applet 編進去，
+    # zsh/stat 模組也不在。兩條分支都給不出東西，於是 T129d 在那裡失敗、在 macOS 上通過，
+    # 而程式在兩邊的行為其實一樣。
+    file_mode() {
+        local m
+        m=$(stat -c '%a' "$1" 2>/dev/null)                        # GNU / busybox
+        [[ $m == <-> ]] || m=$(stat -f '%Lp' "$1" 2>/dev/null)    # BSD / macOS
+        [[ $m == <-> ]] || m=$(mode_from_ls "$1")                 # anywhere else
+        print -r -- "$m"
+    }
+
+    # rwxrwxrwx -> 755. Only the nine permission characters are read; setuid and
+    # the sticky bit show up in the same columns as x and are NOT decoded, because
+    # nothing here sets them and a half-decoded answer is worse than a missing one.
+    # 只讀那九個權限字元。setuid 與 sticky 佔用與 x 相同的欄位，此處刻意不解讀——
+    # 這裡沒有任何東西會設定它們，而一個解讀到一半的答案比沒有答案更糟。
+    mode_from_ls() {
+        local perm d i n=0 out=""
+        perm=$(ls -ld "$1" 2>/dev/null) || return 1
+        perm=${perm[2,10]}
+        [[ $perm == [-r][-w][-xsS][-r][-w][-xsS][-r][-w][-xtT] ]] || return 1
+        for i in 1 4 7; do
+            n=0
+            [[ ${perm[i]}   == r ]] && (( n += 4 ))
+            [[ ${perm[i+1]} == w ]] && (( n += 2 ))
+            [[ ${perm[i+2]} == [xst] ]] && (( n += 1 ))
+            out="$out$n"
+        done
+        print -r -- "$out"
+    }
+
+    assert_eq "$(file_mode "$TMP/t129_mode.csv")" "600" \
+        "T129d and an edit does not widen the file's permissions / 而一次編輯不會放寬這個檔案的權限"
+
+    # The fallback above only runs where stat is missing -- that is, only where
+    # nothing can check it. Compare the two here, on every platform that has
+    # both, so a wrong rwx decoder cannot sit unnoticed until the one place it
+    # is relied upon.
+    # 上面那條後備只在「沒有 stat」的地方會用到——也就是只在沒有東西能檢查它的地方。
+    # 所以在每一個兩者兼具的平台上把它們對起來，免得一個解錯的 rwx 解碼器一路潛伏到
+    # 唯一依賴它的那個地方。
+    chmod 754 "$TMP/t129_mode.csv"
+    _t129_stat=$(stat -c '%a' "$TMP/t129_mode.csv" 2>/dev/null)
+    [[ $_t129_stat == <-> ]] || _t129_stat=$(stat -f '%Lp' "$TMP/t129_mode.csv" 2>/dev/null)
+    if [[ $_t129_stat == <-> ]]; then
+        assert_eq "$(mode_from_ls "$TMP/t129_mode.csv")" "$_t129_stat" \
+            "T129e the ls fallback reads the same mode stat does / ls 後備讀到的模式與 stat 相同"
+    else
+        skipt "T129e the ls fallback reads the same mode stat does / ls 後備讀到的模式與 stat 相同 (no stat on this platform to compare against / 此平台沒有 stat 可供比對)"
+    fi
 fi
-
-assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t129_target.csv")" "Z" \
-    "T129c and the edit landed on the file it points at / 而那次編輯落在它所指向的檔案上"
-
-# Mode: a temp file is created with the umask's mode, so without carrying the
-# original's an edit silently widens who can read the file.
-# 模式：暫存檔以 umask 的模式建立，因此不把原檔的模式帶過去，一次編輯就會悄悄放寬
-# 「誰讀得到這個檔案」。
-print -r -- 'a,b'  > "$TMP/t129_mode.csv"
-print -r -- '1,x' >> "$TMP/t129_mode.csv"
-chmod 600 "$TMP/t129_mode.csv"
-"$CSV2" -update 1:2 'Z' -i "$TMP/t129_mode.csv" --in-place >/dev/null 2>&1
-# BSD stat and GNU stat both take -f, and they mean opposite things: the mode
-# format on macOS, "filesystem status" on Linux. The GNU one prints a block of
-# filesystem facts to STDOUT and then exits 1, so `A || B` runs B and the
-# substitution captures both. Ask each one only what it understands.
-# BSD 與 GNU 的 stat 都收 -f，意思卻相反：在 macOS 是模式格式，在 Linux 是「檔案系統
-# 狀態」。GNU 那個會把一整段檔案系統資訊印到 stdout 之後才以 1 結束，於是 `A || B`
-# 兩半都會跑，而 $() 把兩份都收下。只問每一個它聽得懂的那一句。
-file_mode() {
-    local m
-    m=$(stat -c '%a' "$1" 2>/dev/null)          # GNU / busybox
-    [[ $m == <-> ]] || m=$(stat -f '%Lp' "$1" 2>/dev/null)   # BSD / macOS
-    print -r -- "$m"
-}
-
-assert_eq "$(file_mode "$TMP/t129_mode.csv")" "600" \
-    "T129d and an edit does not widen the file's permissions / 而一次編輯不會放寬這個檔案的權限"
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
