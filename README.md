@@ -221,12 +221,18 @@ OUTPUT SHAPE / 輸出形狀
                         cell -- `pkg<br>套件` -- because Markdown has one
                         header row and the data has two; --en or --zh gives
                         one clean row instead.
-                        In DATA cells a `|` is escaped to `\|` and an
-                        embedded newline becomes <br>, because either would
-                        otherwise end the cell and shift every column after
-                        it. Note this before writing a checker: splitting a
-                        rendered row on `|` counts the escaped ones too and
-                        reports an alignment fault that is not there.
+                        In DATA cells `|` becomes `\|`, `\` becomes `\\`
+                        and an embedded newline becomes <br>. A TAB is passed
+                        through unchanged. Note this before writing a checker:
+                        splitting a rendered row on `|` counts the escaped
+                        ones too and reports an alignment fault that is not
+                        there. -md is a RENDERING and is not reversible: a
+                        cell holding the text <br> and a cell holding a real
+                        newline emit the same bytes. Use --json or -get to
+                        recover a value; -md is for reading.
+                        --pretty pads with spaces, so an empty cell and a
+                        cell of spaces look the same; that is display, not
+                        data, and --json still tells them apart.
                         --pretty aligns by DISPLAY width and therefore gives
                         up streaming. That width is grapheme clusters with
                         emoji presentation applied, NOT a per-code-point UAX
@@ -312,7 +318,15 @@ INDEX / 索引
   --verify-index        O(n) full check of all three of the index's claims --
                         the grid offsets, the record count, and whether any
                         record spans lines. The O(1) check on the normal path
-                        is deliberately a heuristic, not a proof
+                        is deliberately a heuristic, not a proof.
+                        Exit 0 when the index is there and accurate, 1 when
+                        there is none or it cannot be used. It runs the O(n)
+                        comparison only when the cheap stamp already agrees:
+                        an index the stamp rejects is reported unusable
+                        WITHOUT being compared against the data, and says so.
+                        That exit 1 is about this command, which was asked to
+                        prove the sidecar; on every other path an unusable
+                        sidecar is discarded for a scan and is not an error
 
 DIAGNOSTICS / 診斷
   -debug                diagnostics to stderr, including a metrics: line on

@@ -6595,6 +6595,81 @@ else
 fi
 
 # ---------------------------------------------------------------------
+# T136 -- claims the README makes that nothing had checked.
+#
+# Round 53 found each of these by reading the README and then measuring:
+#   - -md escapes more than the two things listed (a backslash is doubled) and
+#     passes a TAB through raw;
+#   - -md is not reversible: `<br>` as text and a real newline emit the same
+#     bytes, so a checker cannot tell them apart;
+#   - --verify-index's exit statuses were documented nowhere, and it declines
+#     to run its O(n) comparison when the cheap stamp already says no.
+# Each is now stated in both READMEs, so each needs something behind it.
+#
+# T136 —— README 現在說出口、而先前沒有任何東西檢查的幾項宣稱。
+# ---------------------------------------------------------------------
+echo
+echo "--- T136: what -md escapes, and what --verify-index answers / T136：-md 跳脫了什麼，而 --verify-index 回答什麼 ---"
+
+printf 'a,b\n"C:\\path","x\ty"\n"<br>","p\nq"\n' > "$TMP/t136.csv"
+_t136_md=$("$CSV2" -md -t -i "$TMP/t136.csv")
+
+assert_contains "$_t136_md" 'C:\\path' \
+    "T136a -md doubles a backslash, as the README now says / -md 會把反斜線變成兩個，一如 README 現在所寫"
+if [[ $_t136_md == *$'\t'* ]]; then
+    ok "T136b and passes a TAB through unchanged / 而 TAB 原樣通過"
+else
+    bad "T136b the TAB did not survive / TAB 沒有留下來"
+fi
+
+# The collision, stated as a fact rather than discovered by someone relying on
+# it: two different values, the same bytes out.
+# 那個碰撞，作為一個「先說出來」的事實，而不是留給依賴它的人去撞見：兩個不同的值，
+# 輸出相同的位元組。
+# Two different files, one rendering. That is what "not reversible" means, and
+# it is stronger than counting <br> in one file's output.
+# 兩個不同的檔案，一份算繪。那才是「不可逆」的意思，也比在同一份輸出裡數 <br> 更有力。
+printf 'a\n"p<br>q"\n' > "$TMP/t136_lit.csv"
+printf 'a\n"p\nq"\n'   > "$TMP/t136_nl.csv"
+assert_eq "$("$CSV2" -md -t -i "$TMP/t136_lit.csv")" "$("$CSV2" -md -t -i "$TMP/t136_nl.csv")" \
+    "T136c a literal <br> and a real newline render to the same bytes, so -md is not reversible / 字面的 <br> 與真正的換行算繪出相同的位元組，因此 -md 不可逆"
+if [[ "$("$CSV2" -r -t --json -i "$TMP/t136_lit.csv")" != "$("$CSV2" -r -t --json -i "$TMP/t136_nl.csv")" ]]; then
+    ok "T136c1 while --json keeps them apart, which is why it is the shape to check against / 而 --json 分得出它們，那正是它才是「用來比對」的那個形狀"
+else
+    bad "T136c1 --json rendered both the same / --json 把兩者算繪成同一個樣子"
+fi
+# And the shape that IS reversible still is.
+# 而那個「可逆」的形狀仍然可逆。
+assert_eq "$("$CSV2" -get 2:1 -i "$TMP/t136.csv")" '<br>' \
+    "T136d while -get returns the value itself / 而 -get 回傳的是那個值本身"
+
+print -r -- 'a,b'  > "$TMP/t136i.csv"
+print -r -- '1,x' >> "$TMP/t136i.csv"
+"$CSV2" --build-index -i "$TMP/t136i.csv" >/dev/null
+"$CSV2" --verify-index -i "$TMP/t136i.csv" >/dev/null 2>&1
+assert_eq "$?" "0" \
+    "T136e --verify-index exits 0 when the index is there and accurate / 索引存在且正確時 --verify-index 以 0 結束"
+
+rm -f "$TMP/t136i.csv.index"
+"$CSV2" --verify-index -i "$TMP/t136i.csv" >/dev/null 2>&1
+assert_eq "$?" "1" \
+    "T136f and 1 when there is none / 沒有索引時是 1"
+
+"$CSV2" --build-index -i "$TMP/t136i.csv" >/dev/null
+print -r -- '1,y' >> "$TMP/t136i.csv"
+_t136_v=$("$CSV2" --verify-index -i "$TMP/t136i.csv" 2>&1)
+_t136_rc=$?
+assert_eq "$_t136_rc" "1" \
+    "T136g and 1 when the stamp rejects it / 戳記否決它時也是 1"
+assert_contains "$_t136_v" "not compared against the data" \
+    "T136h saying it did not run the O(n) comparison, rather than implying it did / 並說明它沒有做那次 O(n) 比對，而不是讓人以為做了"
+
+# The ordinary path is unaffected by all of that: still right, still rc=0.
+# 一般路徑不受上述任何一項影響：照樣正確、照樣 rc=0。
+assert_eq "$("$CSV2" -get 2:2 -i "$TMP/t136i.csv")" "y" \
+    "T136i while an ordinary read scans and is right / 而一般的讀取會改為掃描，且是對的"
+
+# ---------------------------------------------------------------------
 # T135 -- three situations, one sentence, and a reason the system had already
 # given us.
 #
