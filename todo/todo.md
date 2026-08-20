@@ -36,10 +36,13 @@ guest 比對吞掉 csv2 的結束狀態（已修——csv2 單獨執行、檢查
 
 ## 1. Install into the package manager's bin directory / 安裝到套件管理員的 bin 目錄
 
-**Status (corrected 2026-08-20): the drop-in half and the Windows half are both
-DONE. Only the Homebrew tap remains, and it is blocked outside this repository.
-/ 狀態（2026-08-20 更正）：drop-in 與 Windows 兩半**都已完成**。只剩 Homebrew tap，
-而它被本 repo 之外的東西擋著。**
+**Status (corrected 2026-08-20): the drop-in half is DONE, and so is the local
+Windows half. What remains -- a Homebrew tap and a public scoop manifest -- is
+one blockage wearing two names: this repository is private, and both need a URL
+the installing machine can fetch.
+/ 狀態（2026-08-20 更正）：drop-in 那一半、以及 Windows 的「本機」那一半**都已完成**。
+剩下的——Homebrew tap 與一份公開的 scoop manifest——是同一個阻礙的兩個名字：本 repo 尚未
+公開，而兩者都需要一個「安裝端抓得到」的 URL。**
 
 This line was corrected once already, on 2026-08-19, and it went stale again
 within a day: "no Windows build exists" survived a round in which the Windows
@@ -67,7 +70,7 @@ running `csv2 --version` in a fresh shell and comparing.
 |---|---|
 | drop-in `install.zsh` | **done** — `$(brew --prefix)/bin`, `/usr/local/bin` where the guest's PATH already has it, `~/.local/bin` fallback, `--uninstall`, `--dry-run`, verified by running / **已完成** |
 | Homebrew tap + formula | blocked: `raliclo/csv2` is private / 被擋住：repo 尚未公開 |
-| Windows scoop shim | **done, and by not creating one** — `install.zsh` writes to `%LOCALAPPDATA%\csv2\csv2.exe`, the path the machine's existing shim already names; measured 2026-08-20: `command -v csv2` resolves through `~/scoop/shims/csv2.shim` to the build just made, and the suite runs there with no failures, skipping only what MSYS2 cannot offer / **已完成，而且是靠「不建立 shim」完成的**——`install.zsh` 寫到該機器既有 shim 本來就指著的位置；2026-08-20 實測如上 |
+| Windows scoop shim (the local half) | **done, and by not creating one** — `install.zsh` writes to `%LOCALAPPDATA%\csv2\csv2.exe`, the path the machine's existing shim already names; measured 2026-08-20: `command -v csv2` resolves through `~/scoop/shims/csv2.shim` to the build just made, and the suite runs there with no failures, skipping only what MSYS2 cannot offer / **已完成，而且是靠「不建立 shim」完成的**——`install.zsh` 寫到該機器既有 shim 本來就指著的位置；2026-08-20 實測如上。**一份公開的 scoop manifest（讓別人 `scoop install csv2`）與 Homebrew tap 被同一件事擋著：repo 尚未公開**——`plan/plan.md` 第 7 階段講的是那一半，這一列講的是本機這一半 |
 
 `install.zsh` puts the built `csv2` binary where the platform's package manager
 already has a directory on `PATH`, so that using the tool does not require
