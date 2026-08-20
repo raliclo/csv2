@@ -123,6 +123,26 @@ skipt(){ print -r -- "SKIP  $1"; skip=$((skip + 1)) }
 # zsh 是在「子 shell」裡執行這個處理常式的，因此在它裡面做 `fail=$((fail + 1))` 會遺失
 # ——FAIL 那一行印得出來，而計數不動，那是一個「看起來有效」的守衛。改為把名字寫進檔案，
 # 在結算時加回去。
+# `stat` is OPTIONAL here: the aarch64 guest's busybox does not include the
+# applet, which is why file_mode has an ls fallback at all (T129e). Asking
+# whether it exists before calling it matters now that a missing command is a
+# failure -- the guard cannot tell a deliberate probe from a typo, and eight
+# probes made eight failures on the first guest run after it landed. The
+# distinction has to be made HERE, by the code that knows the command is
+# optional.
+# `stat` 在這裡是「可有可無」的：aarch64 guest 的 busybox 沒有把該 applet 編進去，那正是
+# file_mode 會有 ls 後備的原因（T129e）。既然「呼叫不存在的指令」現在算是失敗，就得先問它
+# 在不在——守衛分不出「刻意的探測」與「打錯字」，而在它落地後的第一次 guest 執行裡，八次
+# 探測就成了八個失敗。這個區分必須在「知道那個指令是選用的」這一端做，也就是這裡。
+stat_mode() {   # path -> octal mode, or empty when no stat is available
+    local m=""
+    if (( $+commands[stat] )); then
+        m=$(stat -c '%a' "$1" 2>/dev/null)                       # GNU / busybox
+        [[ $m == <-> ]] || m=$(stat -f '%Lp' "$1" 2>/dev/null)   # BSD / macOS
+    fi
+    [[ $m == <-> ]] && print -r -- "$m"
+}
+
 MISSING_LOG="${TMPDIR:-/tmp}/.csv2_missing_commands.$$"
 rm -f "$MISSING_LOG"
 command_not_found_handler() {
@@ -6565,8 +6585,7 @@ else
     # 而程式在兩邊的行為其實一樣。
     file_mode() {
         local m
-        m=$(stat -c '%a' "$1" 2>/dev/null)                        # GNU / busybox
-        [[ $m == <-> ]] || m=$(stat -f '%Lp' "$1" 2>/dev/null)    # BSD / macOS
+        m=$(stat_mode "$1")
         [[ $m == <-> ]] || m=$(mode_from_ls "$1")                 # anywhere else
         print -r -- "$m"
     }
@@ -6602,8 +6621,7 @@ else
     # 所以在每一個兩者兼具的平台上把它們對起來，免得一個解錯的 rwx 解碼器一路潛伏到
     # 唯一依賴它的那個地方。
     chmod 754 "$TMP/t129_mode.csv"
-    _t129_stat=$(stat -c '%a' "$TMP/t129_mode.csv" 2>/dev/null)
-    [[ $_t129_stat == <-> ]] || _t129_stat=$(stat -f '%Lp' "$TMP/t129_mode.csv" 2>/dev/null)
+    _t129_stat=$(stat_mode "$TMP/t129_mode.csv")
     if [[ $_t129_stat == <-> ]]; then
         assert_eq "$(mode_from_ls "$TMP/t129_mode.csv")" "$_t129_stat" \
             "T129e the ls fallback reads the same mode stat does / ls 後備讀到的模式與 stat 相同"
@@ -7210,8 +7228,7 @@ want_skip=1                                   # T47, on every platform / 每個�
 if (( IS_WINDOWS )); then
     (( want_skip += 4 ))                      # T61a, T61c, T98a-g, T129a-d
 else
-    _t69_probe=$(stat -c '%a' "$TMP" 2>/dev/null)
-    [[ $_t69_probe == <-> ]] || _t69_probe=$(stat -f '%Lp' "$TMP" 2>/dev/null)
+    _t69_probe=$(stat_mode "$TMP")
     [[ $_t69_probe == <-> ]] || (( want_skip += 1 ))   # T129e
     # T135c needs a file it cannot read. Root can read anything, so in the
     # guest -- which runs as root -- that case skips and this count has to know
