@@ -1225,7 +1225,10 @@ arguments that failed to parse.
 ### What it refuses, and why
 
 Refusals are the point of the tool, so they are listed rather than discovered.
-Each of these exits non-zero with a message saying why:
+Each of these exits non-zero with a message saying why. **The right-hand column
+is the reason, not the message**: the text csv2 prints is often shorter and
+names the argument it saw, so match on exit status and read the message, rather
+than matching the message against this table:
 
 | Combination | Why it is refused |
 |---|---|
