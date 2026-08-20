@@ -193,6 +193,12 @@ OUTPUT SHAPE / 輸出形狀
                         cell -- `pkg<br>套件` -- because Markdown has one
                         header row and the data has two; --en or --zh gives
                         one clean row instead.
+                        In DATA cells a `|` is escaped to `\|` and an
+                        embedded newline becomes <br>, because either would
+                        otherwise end the cell and shift every column after
+                        it. Note this before writing a checker: splitting a
+                        rendered row on `|` counts the escaped ones too and
+                        reports an alignment fault that is not there.
                         --pretty aligns by DISPLAY width and therefore gives
                         up streaming. That width is grapheme clusters with
                         emoji presentation applied, NOT a per-code-point UAX
@@ -243,7 +249,17 @@ PROTECTION / 保護
                         encrypted and cannot be decrypted by anything:
                         hashing is one-way
   -keyfile PATH         key file; defaults to multissh's private key.
-                        With -hash it selects HMAC over plain SHA-256
+                        With -hash it selects HMAC over plain SHA-256.
+                        ANY file of at least 16 bytes; its bytes are key
+                        MATERIAL, run through a KDF, so there is no format to
+                        get right. Make one with
+                        `head -c 32 /dev/urandom > key.bin`.
+                        Creating protection from fewer than 16 bytes is
+                        REFUSED -- a one-byte keyfile used to be accepted
+                        silently, and the column came back in 98 tries.
+                        Reading a file already made with a short key is not
+                        refused: losing data for a security reason is the
+                        worse trade
   --yes                 accept the default key without a prompt
 
 COLS is a comma-separated list of column names, 1-based column numbers, or a
@@ -595,15 +611,26 @@ derives with a fixed salt, so the same keyfile always yields the same number;
 `-encrypt` draws a fresh 16-byte salt per run and stores it in the marker, so
 the derived key — and the fingerprint — is per file.
 
+Those loops print **nothing** — csv2 prints nothing on the normal path — so the
+markers have to be read out of the files afterwards:
+
 ```console
 $ for i in 1 2 3; do csv2 -encrypt secret -keyfile k.bin -i s.csv -o e$i.csv -t; done
+$ for i in 1 2 3; do head -1 e$i.csv | rev | cut -d, -f1 | rev; done
 secret:enc:d88cdbf1:…      # one keyfile,
 secret:enc:e16b394a:…      # three runs,
 secret:enc:869e54ce:…      # three fingerprints
 
 $ for i in 1 2 3; do csv2 -hash secret -keyfile k.bin -i s.csv -o h$i.csv -t; done
+$ for i in 1 2 3; do head -1 h$i.csv | rev | cut -d, -f1 | rev; done
 secret:hmac:9acc9081       # the same number every time; a different keyfile changes it
 ```
+
+An earlier version of this section showed those markers as the output of the
+loops themselves. They are file *headers*; a reader who ran the loop verbatim
+got a blank screen and no way to tell whether anything had happened. It is the
+same mistake this document owns up to in the `-log` section, made twice more
+here, and it survived until a reader ran the loop instead of reading it.
 
 **So do not carry a `:enc:` fingerprint between files.** Comparing it *within*
 one file is exactly right, and is what the refusal does — csv2 re-derives with
@@ -810,8 +837,16 @@ nothing arrives until close. Asserted by T61.
 
 ### Exit status
 
-`0` on success, non-zero on any error, and there is no third case: csv2 does
-not partially succeed. A run that fails writes nothing to `-o`, because output
+`0` on success, non-zero on any error. csv2 does not partially succeed.
+
+**There is one exit status that is neither, and a pipeline meets it constantly:
+141.** When the downstream consumer of `-so` goes away first — `| head -1`, a
+reader that stops early — csv2 dies of `SIGPIPE` and exits `128 + 13 = 141`. It
+prints nothing, leaves nothing behind, and does not drain the input first: on a
+400 MB stream, `| head -1` returns in 0.04 s where `| wc -c` takes 9.7 s. That
+is correct Unix behaviour and not a csv2 error, so **a caller that treats every
+non-zero status as "csv2 failed" will misreport a perfectly ordinary
+`| head`.** Check for 141 explicitly if your script cares. A run that fails writes nothing to `-o`, because output
 goes to a temp file that is renamed only after everything else worked.
 
 **The same holds for `--in-place`, where it matters more:** a failed in-place
@@ -1029,7 +1064,7 @@ cannot be lowered can only be exercised by building a 16 MiB fixture.
 | `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | set above the file size to force the single-threaded path |
 | `CSV2_PARALLEL_MAX_BYTES` | 1 GiB | ceiling on what the in-flight chunks may hold. It governs the **output** fragments — one batch of them is kept so they can be written in chunk order, which is what makes parallel output byte-identical to single-threaded. The read side needs no ceiling: a worker reads its chunk 64 KiB at a time and never holds more. Lowering this holds fewer chunks in flight and the rest queue; `-debug` says so, with the numbers. **It is not a cap on the process's memory** — under an 8 MiB setting, peak RSS was still 58 MB, because the fixed working set is not part of what it governs |
 | `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | smaller values make a small file yield many chunks, so chunk boundaries are actually exercised |
-| `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `-md --pretty` refuses above this rather than being OOM-killed |
+| `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `-md --pretty` refuses above this rather than being OOM-killed. **It measures the material being aligned, not the input file** — `--pretty` has to hold the whole table to compute column widths. So a slice of an arbitrarily large file is always fine: `-mid 150000,150004 -t -md --pretty` on a 23 MB file holds 9 MB and succeeds, while `-r` over the same file refuses |
 | `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | upper bound on `-tail N` and `-B N`. Asking for more is **refused, not truncated** — a short answer that looks like a whole one is the failure this tool exists to avoid. The message names the request, the limit and the variable |
 
 **Parallelism applies to `-contains` and to nothing else**, and only when every

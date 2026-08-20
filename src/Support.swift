@@ -263,7 +263,43 @@ enum KeySource {
     static let domainLabel = "csv2-column-encryption-v1"
     static let iterations = 200_000
 
-    static func loadKeyMaterial(path: String?, assumeYes: Bool) throws -> (bytes: [UInt8], path: String) {
+    /// The floor on key material, in bytes, when a file's protection is being
+    /// CREATED.
+    ///
+    /// 16 is where brute force stops being a rounding error. It is not a
+    /// strength test -- a 16-byte English phrase is weak and passes -- it is a
+    /// floor under the case that has no defence at all.
+    /// 建立保護時，金鑰材料的位元組下限。16 是「窮舉不再是零頭」的那個點。它不是強度檢定
+    /// ——一句 16 bytes 的英文短語很弱，而且會通過——它是給「完全沒有防禦的那種情況」一個底。
+    static let minimumKeyBytes = 16
+
+    /// `forCreating` decides whether a weak key is refused, and the asymmetry
+    /// is the whole design.
+    ///
+    /// `-encrypt` and keyed `-hash` are producing a file that has to protect
+    /// something afterwards; that is the moment to insist. `-decrypt` is
+    /// reading a file that already exists, and applying the same floor there
+    /// would make a file made with a weak key permanently unreadable --
+    /// losing data for a security reason, which is the worse trade.
+    ///
+    /// What prompted it: a keyfile of ZERO bytes was refused and a keyfile of
+    /// ONE byte was accepted, silently, at rc=0. The whole column came back in
+    /// 98 tries. Someone had already decided a keyfile must have content; the
+    /// missing decision was how much. A blind-test subject put it exactly:
+    /// this tool's silence at 1 byte is indistinguishable from its silence at
+    /// 32.
+    ///
+    /// `forCreating` 決定「弱金鑰要不要被拒絕」，而那個不對稱正是整個設計。
+    ///
+    /// `-encrypt` 與帶金鑰的 `-hash` 是在產生一個「日後要靠它保護某些東西」的檔案，那是
+    /// 該堅持的時刻。`-decrypt` 面對的是「已經存在的檔案」，在那裡套用同一個下限，會讓一份
+    /// 用弱金鑰做出來的檔案再也讀不回來——**以安全為由造成資料無法取回，那是更糟的交換。**
+    ///
+    /// 起因：0 bytes 的金鑰檔會被拒絕，而 1 byte 的被靜默接受，rc=0。整欄在 98 次內被復原。
+    /// 有人早已決定「金鑰檔必須有內容」，缺的是「多少」。一位盲測受測者說得最準：這個工具
+    /// 在 1 byte 時的沉默，與它在 32 bytes 時的沉默無法區分。
+    static func loadKeyMaterial(path: String?, assumeYes: Bool,
+                                forCreating: Bool = false) throws -> (bytes: [UInt8], path: String) {
         let p = path ?? defaultPath
         guard FileManager.default.fileExists(atPath: p) else {
             if path == nil {
@@ -277,6 +313,12 @@ enum KeySource {
             throw fault("keyfile is empty or unreadable: \(p)", "金鑰檔為空或無法讀取：\(p)")
         }
         let bytes = [UInt8](d)
+
+        if forCreating && bytes.count < minimumKeyBytes {
+            throw fault(
+                "keyfile \(p) holds \(bytes.count) byte(s); csv2 will not create protection from fewer than \(minimumKeyBytes). A key this short is searched exhaustively in less time than this run took, and the file it produces looks encrypted. Make one with: head -c 32 /dev/urandom > key.bin. Reading a file that was already made with a short key is NOT refused -- only making a new one is",
+                "金鑰檔 \(p) 只有 \(bytes.count) 個位元組；csv2 不會用少於 \(minimumKeyBytes) 個位元組的金鑰去建立保護。這麼短的金鑰，窮舉所需的時間比這次執行還短，而它產生的檔案看起來是加密過的。請這樣產生一把：head -c 32 /dev/urandom > key.bin。讀取「已經用短金鑰做出來的檔案」不會被拒絕——被拒絕的只有「產生新的」")
+        }
 
         if path == nil {
             // Which key was used decides whether this file can ever be read

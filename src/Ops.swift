@@ -670,11 +670,36 @@ func applyTransform(_ t: CellTransform, to record: inout Record, header: Record)
                                               nonce: nonce, aad: [UInt8](names[n].utf8)) else {
                 // The AEAD tag is what SHA-256 could never give: a tampered
                 // cell FAILS instead of quietly decrypting to something wrong.
-                // AEAD 的認證標籤帶來 SHA-256 給不了的性質：被竄改的儲存格會
-                // 失敗，而不是安靜地還原出錯誤的內容。
+                //
+                // What it cannot give is WHICH thing was wrong. This message
+                // used to say "the cell was modified after it was encrypted",
+                // and a blind-test subject got it by editing the HEADER --
+                // rewriting the stored fingerprint to the one their wrong key
+                // derives, which defeats the O(1) pre-check and leaves the tag
+                // to do the work. The real cause there was a wrong key, and
+                // the message named a cell that nobody had touched.
+                //
+                // Three causes produce this identically and the tag cannot
+                // separate them, so all three are named. The record number is
+                // where the failure was DETECTED, which is worth saying
+                // plainly, because this project's error-location table
+                // promises that `record N` is where the fault is -- and for
+                // this one message that promise cannot be kept.
+                //
+                // AEAD 的認證標籤帶來 SHA-256 給不了的性質：被竄改的儲存格會失敗，而不是
+                // 安靜地還原出錯誤的內容。
+                //
+                // 它給不了的是「錯的是哪一個」。這則訊息原本寫「該儲存格在加密之後被修改過」，
+                // 而一位盲測受測者是靠改「標頭」得到它的——把存起來的指紋改寫成他那把錯金鑰
+                // 會導出的值，於是 O(1) 預檢被繞過，剩下標籤去做事。那裡真正的成因是「金鑰
+                // 不對」，而訊息指名了一個沒有人碰過的儲存格。
+                //
+                // 有三種成因會產生一模一樣的結果，而標籤分不出它們，因此三個都寫出來。
+                // 紀錄編號是「偵測到失敗的位置」，這一點值得明講，因為本專案那張「錯誤位置」
+                // 的表承諾 `record N` 就是出問題的地方——而這一則訊息守不住那個承諾。
                 throw fault(
-                    "record \(record.number), column \(names[n]): authentication failed; the cell was modified after it was encrypted",
-                    "第 \(record.number) 筆，欄位 \(names[n])：認證失敗；該儲存格在加密之後被修改過")
+                    "authentication failed at record \(record.number), column \(names[n]) -- that is where it was DETECTED, not necessarily where the fault is. Any of three produce this and the tag cannot tell them apart: the key is not the one this column was encrypted with, the cell was altered after encryption, or the column's header was altered. Check the header first if you have a key you believe in",
+                    "認證失敗，位置在第 \(record.number) 筆、欄位 \(names[n])——那是「偵測到」的地方，未必是出問題的地方。有三種情況會產生一模一樣的結果，而認證標籤分辨不出來：金鑰不是當初加密這一欄所用的那一把、儲存格在加密後被改動、或該欄的標頭被改動。若你確信手上的金鑰是對的，請先檢查標頭")
             }
             record.fields[c].set(plain)
         }
@@ -872,7 +897,8 @@ func buildTransform(_ o: Options, headers: [Record]) throws -> CellTransform {
         // 相等的值仍然相等——差別在於「沒有金鑰的人能不能建出一份雜湊字典把該欄
         // 讀回來」。
         if o.keyfile != nil || o.assumeYes {
-            let material = try KeySource.loadKeyMaterial(path: o.keyfile, assumeYes: o.assumeYes)
+            let material = try KeySource.loadKeyMaterial(path: o.keyfile, assumeYes: o.assumeYes,
+                                                         forCreating: true)
             let key = KeySource.derive(material: material.bytes, salt: [UInt8]("csv2-hash".utf8))
             let fp = KeySource.fingerprint(key)
             Logger.shared.info("hashing columns with a key from \(material.path) (fingerprint \(fp))")
@@ -890,7 +916,8 @@ func buildTransform(_ o: Options, headers: [Record]) throws -> CellTransform {
             throw fault("column \(baseName(headerName(header.fields[c]))) is already encrypted",
                         "欄位 \(baseName(headerName(header.fields[c]))) 已經加密過")
         }
-        let material = try KeySource.loadKeyMaterial(path: o.keyfile, assumeYes: o.assumeYes)
+        let material = try KeySource.loadKeyMaterial(path: o.keyfile, assumeYes: o.assumeYes,
+                                                     forCreating: true)
         let salt = cryptoRandomBytes(16)
         let key = KeySource.derive(material: material.bytes, salt: salt)
         let fp = KeySource.fingerprint(key)

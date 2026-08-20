@@ -2273,8 +2273,8 @@ the entry.
 ## AS. Windows 上 276 條失敗,而成因是一個環境變數
 
 ```
-經 multissh 執行： PASS 163   FAIL 276   SKIP 4
-同一台機器、普通 shell： PASS 454   FAIL 0   SKIP 1
+經 multissh 執行：  276 條失敗
+同一台機器、普通 shell：  0 條失敗
 ```
 
 **同一棵樹、同一個執行檔、同一個 commit。**
@@ -2305,7 +2305,7 @@ csv2: cannot open input file: /c/Users/lowei/proj/csv2/test/.test_csv2.gix09g/cr
 
 ## AT. 而套件一跑起來,Windows 就少了 11 筆稽核紀錄
 
-修好 AS 之後 Windows 是 442 PASS / **2 FAIL**,而那兩條是 T104a 與 T104c:
+修好 AS 之後,Windows 只剩 **2 條失敗**,而那兩條是 T104a 與 T104c:
 
 ```
 FAIL T104a 6 concurrent writers lose no entries (got '110', want '121')
@@ -2330,15 +2330,18 @@ CRT 描述子,讓其餘程式維持單一條路徑。
 **這次先驗才提交**:一個 14 行的探針先在 Windows 節點上編過並跑過,回傳 fd 3。上一次做同一
 件事時,我推出去的 commit 在那裡編不過(見 AK 的後記)。
 
-結果:**Windows 444 PASS / 0 FAIL / 4 SKIP**,而兩份 README 裡「Windows 較弱」那句話改成
+結果:**Windows 零失敗**,而兩份 README 裡「Windows 較弱」那句話改成
 「沒有任何平台還有窗口」。
 
-| 平台 | 結果 |
-|---|---|
-| macOS arm64 | 454 / 0 / 1 |
-| aarch64 Linux guest | 454 / 0 / 1 |
-| x86_64 WSL2 | 454 / 0 / 1 |
-| x86_64 Windows MSVC | 444 / 0 / 4 |
+| 平台 | 失敗 | 略過 |
+|---|---|---|
+| macOS arm64 | 0 | 1 |
+| aarch64 Linux guest | 0 | 1 |
+| x86_64 WSL2 | 0 | 1 |
+| x86_64 Windows MSVC | 0 | 4 |
+
+（此處刻意不寫通過的總數:那個數字每加一個案例就會變，而它一旦寫進文件就沒有東西會回頭
+更新它。T69 正是為此存在，而它在 2026-08-20 抓到的就是上面這幾行的舊版本。）
 
 ## 這兩條有一個共同點
 
@@ -2356,3 +2359,166 @@ the reverse -- a real defect that looked fine, because nothing had ever run
 T104 on Windows: the seek-then-write append left 110 of 121 entries. Both
 appear only when the suite is actually run. "The build succeeds" was true
 throughout and never answered the question.
+---
+
+# 第 42 回合(2026-08-20)—— 加密、`--filter`、`--pretty`、串流管線
+
+受測者交出 27,401 bytes,第 4 類是空的:「四項任務、約六十次呼叫,沒有找到任何一次
+『csv2 成功了而答案是錯的』。」而它自己加了一段限定:
+
+> 「我被預先注入的指令檔告知,最後五條已知缺陷在前天全部驗證為已修。**一個預期找不到東西
+> 的測試者,找東西的能力比較差。** 我這個『沒有壞掉的行為』的結論,份量應該打折。」
+
+它在第 1、3 類找到的東西不受這個影響。
+
+## AU. 一個位元組的金鑰檔被靜默接受,而空的會被拒絕(2026-08-20 修正,T109)
+
+```console
+$ : > empty.key
+$ csv2 -encrypt license -keyfile empty.key -i s.csv -o e0.csv -t
+csv2: keyfile is empty or unreadable: empty.key          rc=1   ← 好
+
+$ printf 'a' > tiny.key
+$ csv2 -encrypt license -keyfile tiny.key -i s.csv -o e1.csv -t
+rc=0                                                             ← 接受,無任何警告
+pkg,license:enc:a4d6aee9:jMBdnmEIHsfi91+39h3sJA==
+
+$ for i in 0..255; do try each single byte as the key; done
+recovered with byte 97: GPL-2.0                                  ← 98 次
+```
+
+**那個不對稱本身就是線索。** 有人已經決定「金鑰檔必須有內容」——只是沒有決定「多少」。
+於是 0 bytes 被拒絕,1 byte 通過,而兩者的安全性差別是可以在一秒內窮舉掉的。
+
+### 而 README 對此完全沒有說
+
+`-keyfile PATH` 與「預設是 multissh 的私鑰」就是全部了。**沒有大小、沒有格式、沒有怎麼產生
+一把、沒有最小值。** 整份文件裡唯一指向 `mssh-keygen` 的地方,埋在一則「解密失敗」的錯誤
+訊息裡。
+
+受測者的話最切中要害:
+
+> 「README 用一整個方框段落警告『不帶金鑰的 `-hash` 擋不住字典攻擊』,並開出 `-keyfile`
+> 這帖藥——**然後對它所開的那帖藥的強度隻字不提。** 它拒絕 0 bytes,接受 1 byte。」
+
+> 「唯一完全沒有量測工具的地方就是金鑰強度:沒有旗標、沒有警告、沒有記載的最小值,
+> **而這個工具在 1 byte 時的沉默,與它在 32 bytes 時的沉默無法區分。**」
+
+那句話正是本專案的判準:一個看起來成功、而實際上不是的結果。
+
+### 修法的分界線
+
+**建立保護時拒絕,讀取既有檔案時絕不拒絕。** `-encrypt` 與帶金鑰的 `-hash` 是在「產生一個
+日後要靠它保護的檔案」,那時可以要求;而 `-decrypt` 面對的是「已經存在的檔案」,若在那裡
+套用同一個門檻,就會讓一份用弱金鑰做出來的檔案再也讀不回來——**用一個安全性的理由造成
+資料無法取回,那是更糟的交換。**
+
+## AV. `:enc:` 指紋那一段,展示的是沒有任何指令會產生的輸出(2026-08-20 修正)
+
+README 把它寫成一段 console 操作:
+
+```console
+$ for i in 1 2 3; do csv2 -encrypt secret -keyfile k.bin -i s.csv -o e$i.csv -t; done
+secret:enc:d88cdbf1:…
+secret:enc:e16b394a:…
+secret:enc:869e54ce:…
+```
+
+**那個迴圈一個位元組都不印。** 顯示的三行是「檔案的標頭」,不是程式的輸出;要看到它們得
+自己去 `head -1` 每個檔案。
+
+而它牴觸同一份 README 三節之前的兩句話:「正常路徑上不輸出任何東西」與「本工具必須能放進
+管線」。
+
+**這與 AP 是同一個形狀,而 AP 才在昨天修過。** README 在 `-log` 那一節甚至為這件事道過歉
+(「本節的舊版本把『被遮蔽』的形式當成一次普通操作展示……於是讀者會去試一個不可能成功的
+指令」)。同樣的錯誤此刻還在文件的另一處,而且是兩個(加密迴圈與雜湊迴圈)。
+
+## AW. 「結束狀態沒有第三種情況」,而 141 就是第三種(2026-08-20 修正,T110d/e)
+
+README 的「Exit status」一節寫著:**「成功為 0,任何錯誤為非零,沒有第三種情況。」**
+
+```console
+$ gen 4.8M | csv2 -si --headers 1 -contains "pkg-" --filter -so | head -1
+pipestatus: 120 141 0
+stderr bytes: 0
+```
+
+**csv2 以 141 結束(128 + SIGPIPE),不印任何東西,不留下任何東西。** 那是正確的 Unix 行為
+——而且是俐落的:`| head -1` 是 0.04 秒,`| wc -c` 是 9.7 秒,它死在第一個被阻塞的寫入上,
+不會先把 400 MB 讀完。
+
+**行為是對的,那句描述結束狀態的話不是。** 一個把「非零」當成「csv2 失敗了」的呼叫端,
+會把一個完全正常的 `| head -1` 誤報成錯誤。而 README 有一節就叫「In a pipeline」,另一節
+叫「Exit status」,兩節都沒有提到「下游先離開」——那是管線工具最常見的非成功結局。
+
+## AX. `-md` 對儲存格內容的跳脫沒有記載(2026-08-20 修正,T110a–c)
+
+`|` 變成 `\|`、內嵌換行變成 `<br>`。兩者都沒有寫(有寫的那個 `<br>` 是另一回事:兩列標頭
+的接合)。
+
+這不只是缺一句話:**受測者的寬度檢查器因為以 `|` 切欄而得到錯誤答案,差一點就把一個正確
+的程式報成缺陷。** 它自己記下了這一段。
+
+## AY. `CSV2_PRETTY_MAX_BYTES` 的「16 MiB」是什麼的 16 MiB(2026-08-20 修正)
+
+表格寫的是「`-md --pretty` 超過此值即拒絕」。超過的是**輸入檔**,還是**要對齊的那批資料**?
+是後者:
+
+```console
+$ csv2 -mid 150000,150004 -t -md --pretty -i big.csv      # 23 MB 的檔案
+rc=0    peak_rss_bytes=9469952
+$ csv2 -r -t -md --pretty -i big.csv
+csv2: -md --pretty has to hold the whole table to align it, and this one is over 16777216 bytes …
+rc=1
+```
+
+**拒絕訊息本身是清楚的;讀者最先查閱的那張表不是。** 而真正有用的那個事實——「任意大的
+檔案,取一個切片來 `--pretty` 永遠沒問題」——文件裡哪裡都沒有。
+
+## AZ. 標頭被竄改,訊息卻指著某一筆紀錄(2026-08-20 修正)
+
+受測者繞過指紋預檢:把檔頭裡的指紋改成它那把錯金鑰會導出的值。
+
+```console
+$ csv2 -decrypt all -keyfile wrongkey.bin -i forged.csv -o cracked4.csv -t
+csv2: record 1, column license: authentication failed; the cell was modified after it was encrypted
+rc=1
+```
+
+**被改的是標頭列 0a,不是第 1 筆的任何儲存格。** AEAD 確實分不出是哪一個被動過——但這則
+訊息指著一個錯的地方,而 README 自己那張「錯誤位置」的表承諾:訊息裡的 `record N` 就是
+出問題的那一筆。
+
+Round 42's category 4 was empty, and the subject discounted its own verdict:
+being told the last five known defects were all verified fixed primes a tester
+to expect nothing, and a tester expecting nothing is worse at finding things.
+What it did find sits in categories 1 and 3, where that priming does not help.
+
+### AZ 的修法:不去斷言一件它分辨不出來的事
+
+新訊息:
+
+```
+csv2: authentication failed at record 1, column license -- that is where it was
+DETECTED, not necessarily where the fault is. Any of three produce this and the
+tag cannot tell them apart: the key is not the one this column was encrypted
+with, the cell was altered after encryption, or the column's header was altered.
+Check the header first if you have a key you believe in
+```
+
+**受測者觸發它的路徑,原因其實是第一種(金鑰不對),而舊訊息斷言的是第二種。** 它把檔頭的
+指紋改寫成自己那把錯金鑰會導出的值,於是 O(1) 預檢通過,剩下 AEAD 標籤去失敗——而標籤能說
+的只有「對不上」,說不出是哪一個對不上。
+
+舊訊息挑了三種可能之中的一種寫進去,而且挑錯了。
+
+### 而 T110 的 fixture 被同一個 zsh 陷阱弄壞了第二次
+
+`local` 用在函式之外,zsh 會拒絕。那個拒絕走 stderr,而重導只送 stdout 進檔案,於是 fixture
+是壞的、腳本照常往下跑:T110d 第一次失敗時是 rc=1 與 187 bytes 的 stderr,而那與 SIGPIPE
+毫無關係。
+
+**同一天稍早,T108 的 fixture 就是被同一個錯誤弄壞的**(見那一節)。第一次我修好它並寫下了
+成因;第二次我照樣又犯了。兩處現在都有註解說明為什麼那裡不能用 `local`——而「寫下來」顯然
+不足以擋住第二次,把理由放在出事的那一行旁邊或許可以。

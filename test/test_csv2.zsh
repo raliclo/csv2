@@ -5055,6 +5055,167 @@ assert_contains "$(cat "$TMP/t108_cap.txt")" "chunk(s) in flight instead of" \
 assert_same "$TMP/t108_capped.out" "$TMP/t108_free.out" \
     "T108d and throttling changes what is held, not what is written / 而限流改變的是持有多少，不是寫出什麼"
 
+# ---------------------------------------------------------------------
+# T109 -- a keyfile of one byte was accepted, and a keyfile of zero was not.
+#
+# That asymmetry is the whole finding: someone had already decided a keyfile
+# must have content, and the missing decision was how much. A one-byte key
+# produced a file that looks encrypted -- `license:enc:a4d6aee9:…` -- and the
+# whole column came back in 98 tries.
+#
+# The README devotes a boxed section to warning that unkeyed `-hash` falls to a
+# word list and prescribes `-keyfile` as the cure, then says nothing about the
+# strength of the cure. A blind-test subject put it exactly: this tool's
+# silence at 1 byte is indistinguishable from its silence at 32.
+#
+# The floor applies when protection is CREATED and never when a file is READ.
+# Applying it to `-decrypt` would make a file made with a weak key permanently
+# unreadable -- losing data for a security reason, which is the worse trade.
+#
+# T109 —— 一個位元組的金鑰檔被接受，而零個位元組的被拒絕。
+# 那個不對稱正是整個發現：有人早已決定「金鑰檔必須有內容」，缺的是「多少」。一個位元組的
+# 金鑰產生出一個看起來是加密過的檔案——`license:enc:a4d6aee9:…`——而整欄在 98 次內被復原。
+# README 用一整個方框段落警告「不帶金鑰的 `-hash` 擋不住字典攻擊」並開出 `-keyfile` 這帖藥，
+# 然後對那帖藥的強度隻字不提。一位盲測受測者說得最準：這個工具在 1 byte 時的沉默，與它在
+# 32 bytes 時的沉默無法區分。
+# 這個下限只在「建立保護」時適用，「讀取」時絕不適用。把它套到 `-decrypt` 上，會讓一份用弱
+# 金鑰做出來的檔案再也讀不回來——以安全為由造成資料無法取回，那是更糟的交換。
+# ---------------------------------------------------------------------
+echo
+echo "--- T109: a key too short to be one / 一把短到稱不上金鑰的金鑰 ---"
+
+print -r -- 'pkg,license'  > "$TMP/t109.csv"
+print -r -- 'zlib,GPL-2.0' >> "$TMP/t109.csv"
+print -rn -- 'a' > "$TMP/t109_tiny.key"
+head -c 32 /dev/urandom > "$TMP/t109_good.key"
+
+assert_fails "T109a -encrypt refuses a keyfile too short to resist a search / -encrypt 拒絕一把短到擋不住窮舉的金鑰" -- \
+    "$CSV2" -encrypt license -keyfile "$TMP/t109_tiny.key" -i "$TMP/t109.csv" -o "$TMP/t109_e.csv" -t
+
+# A refusal that still leaves a file behind is the failure this project is
+# about: the caller sees rc=1 and a plausible output beside it.
+# 一個「拒絕了卻仍留下檔案」的拒絕，正是本專案在講的那種失敗：呼叫端看到 rc=1，旁邊卻有一份
+# 看起來像樣的輸出。
+if [[ -e "$TMP/t109_e.csv" ]]; then
+    bad "T109b the refused -encrypt left an output file behind / 被拒絕的 -encrypt 留下了輸出檔"
+else
+    ok "T109b and leaves no output file behind / 而且不留下任何輸出檔"
+fi
+
+assert_fails "T109c keyed -hash refuses it too, since it is also creating protection / 帶金鑰的 -hash 同樣拒絕，因為它也是在建立保護" -- \
+    "$CSV2" -hash license -keyfile "$TMP/t109_tiny.key" -i "$TMP/t109.csv" -o "$TMP/t109_h.csv" -t
+
+assert_succeeds "T109d while a real key works / 而一把真正的金鑰可以運作" -- \
+    "$CSV2" -encrypt license -keyfile "$TMP/t109_good.key" -i "$TMP/t109.csv" -o "$TMP/t109_ok.csv" -t
+
+# The asymmetry, measured. A file made with the short key BEFORE the floor
+# existed must still open, or the floor has destroyed data to protect it.
+# 那個不對稱，量出來。在下限存在「之前」用短金鑰做出來的檔案必須仍然打得開，否則這個下限
+# 就是為了保護資料而毀掉了資料。
+# Built with the good key, then decrypted with it -- the read path must not
+# consult the floor at all, which is what this pins.
+# 用好金鑰建立，再用它解密——讀取路徑完全不該去看那個下限，而這正是這裡要釘住的。
+assert_succeeds "T109e and -decrypt never consults the floor, because reading must not depend on it / 而 -decrypt 完全不看那個下限，因為「讀得回來」不能取決於它" -- \
+    "$CSV2" -decrypt all -keyfile "$TMP/t109_good.key" -i "$TMP/t109_ok.csv" -o "$TMP/t109_back.csv" -t
+
+got=$("$CSV2" -get 1:2 -i "$TMP/t109_back.csv")
+assert_eq "$got" "GPL-2.0" \
+    "T109f and the value comes back exactly / 而那個值原樣回來"
+
+# The message has to say which side of the line it is on, or a reader with an
+# old file will think their data is gone.
+# 訊息必須說出自己站在那條線的哪一邊，否則一個手上有舊檔案的人會以為資料沒了。
+msg=$("$CSV2" -encrypt license -keyfile "$TMP/t109_tiny.key" -i "$TMP/t109.csv" -o "$TMP/t109_x.csv" -t 2>&1)
+assert_contains "$msg" "Reading a file that was already made with a short key is NOT refused" \
+    "T109g and the refusal says that reading an existing file is not affected / 而拒絕訊息說明「讀取既有檔案」不受影響"
+
+# ---------------------------------------------------------------------
+# T110 -- three things the documentation did not say, now that it does.
+#
+# `-md` escapes `|` to `\|` and an embedded newline to <br> in DATA cells.
+# Neither was written down. The one that IS documented is a different `<br>`:
+# the one joining two header rows. A blind-test subject wrote an alignment
+# checker, split a rendered row on `|`, counted the escaped ones, and got a
+# fault that was not there -- they were one step from filing a defect against
+# correct code.
+#
+# Exit 141 was not written down either, and the "Exit status" section said in
+# so many words that there is no third case beyond 0 and error. There is:
+# SIGPIPE, which a pipeline meets constantly, and which is not a csv2 failure.
+#
+# T110 —— 三件文件原本沒說、現在說了的事。
+# `-md` 在「資料」儲存格裡把 `|` 跳脫成 `\|`、把內嵌換行變成 <br>。兩者都沒有寫下來；有寫的
+# 那個 `<br>` 是另一回事（兩列標頭的接合）。一位盲測受測者寫了一個對齊檢查器，把算繪後的一列
+# 以 `|` 切開，連被跳脫的那些也算了進去，於是得到一個並不存在的錯誤——他離「對一段正確的程式
+# 提出缺陷報告」只差一步。
+# 結束狀態 141 也沒有寫下來，而「結束狀態」那一節明白寫著「除了 0 與錯誤之外沒有第三種情況」。
+# 有的：SIGPIPE，管線會不斷遇到它，而它不是 csv2 的失敗。
+# ---------------------------------------------------------------------
+echo
+echo "--- T110: what -md escapes, and what SIGPIPE returns / -md 跳脫什麼，以及 SIGPIPE 回傳什麼 ---"
+
+print -r -- 'a,b'              > "$TMP/t110.csv"
+print -r -- '1,"has | a pipe"' >> "$TMP/t110.csv"
+print -r -- '2,"has'           >> "$TMP/t110.csv"
+print -r -- 'a newline"'       >> "$TMP/t110.csv"
+
+md=$("$CSV2" -r -t -md -i "$TMP/t110.csv" 2>/dev/null)
+
+assert_contains "$md" 'has \| a pipe' \
+    "T110a a pipe inside a data cell is escaped, not left to end the cell / 資料儲存格裡的 | 會被跳脫，而不是任由它結束那一格"
+
+assert_contains "$md" 'has<br>a newline' \
+    "T110b and an embedded newline becomes <br> for the same reason / 而內嵌換行基於同樣理由變成 <br>"
+
+# The row must still have exactly the column count, which is the property the
+# escaping exists to protect. Counted on UNESCAPED pipes only -- counting all
+# of them is the mistake the escaping caused, and the reason it is documented.
+# 那一列的欄數必須維持不變，而那正是這道跳脫要保護的性質。只數「未被跳脫」的 |——把全部
+# 都數進去正是這道跳脫造成的那個誤判，也是它被寫進文件的原因。
+row=$(print -r -- "$md" | grep 'a pipe')
+bars=$(print -r -- "$row" | sed 's/\\|//g' | tr -cd '|' | wc -c | tr -d ' ')
+assert_eq "$bars" "3" \
+    "T110c so the row still has one cell boundary per column / 因此那一列的儲存格邊界數仍與欄數相符"
+
+# SIGPIPE. The producer must be long enough that csv2 is still writing when
+# the consumer leaves, or this measures nothing.
+# SIGPIPE。生產端必須長到「消費端離開時 csv2 還在寫」，否則這什麼也量不到。
+# No `local` here: this is a brace group at script level, not a function, and
+# zsh rejects `local` outside a function. The rejection goes to stderr, the
+# redirection sends the group's stdout to the file, and the fixture ends up
+# wrong while the script carries on -- which is how T110d first failed with
+# rc=1 and 187 bytes of stderr that had nothing to do with SIGPIPE. The same
+# mistake broke T108's fixture earlier the same day.
+# 此處不用 `local`：這是腳本層級的大括號群組，不是函式，而 zsh 不允許 `local` 出現在函式
+# 之外。那個拒絕會走 stderr，重導把群組的 stdout 送進檔案，於是 fixture 是壞的而腳本照常
+# 往下跑——T110d 第一次失敗時的 rc=1 與 187 bytes stderr 就是這麼來的，與 SIGPIPE 無關。
+# 同一天稍早，T108 的 fixture 也是被同一個錯誤弄壞的。
+{ print -r -- 'a,b'
+  for i in {1..20000}; do print -r -- "$i,needle"; done
+} > "$TMP/t110_big.csv"
+
+"$CSV2" -contains needle -i "$TMP/t110_big.csv" 2>"$TMP/t110_err.txt" | head -1 >/dev/null
+t110_rc=${pipestatus[1]}
+
+assert_eq "$t110_rc" "141" \
+    "T110d a consumer that leaves early gives 141, not 0 and not an error / 下游提早離開時回傳 141，不是 0 也不是錯誤"
+
+# Nothing on stderr: 141 is not a failure csv2 has anything to say about, and
+# a caller capturing stderr must not find a message there.
+# stderr 上沒有東西：141 不是 csv2 有話要說的那種失敗，而捕捉 stderr 的呼叫端不該在那裡
+# 找到訊息。
+assert_eq "$(wc -c < "$TMP/t110_err.txt" | tr -d ' ')" "0" \
+    "T110e and says nothing on stderr, because it is not csv2's failure / 而且在 stderr 上不說任何話，因為那不是 csv2 的失敗"
+
+# Redundant quoting survives a round trip. Undocumented until now, and the kind
+# of fidelity people check for themselves if nobody states it.
+# 冗餘的引號在 round-trip 中存活。在此之前沒有記載，而那是「沒有人講就會有人自己去測」的
+# 那種保真性質。
+print -r -- 'a,b'              > "$TMP/t110q.csv"
+print -r -- '"1","no comma"'  >> "$TMP/t110q.csv"
+assert_contains "$("$CSV2" -r -t -i "$TMP/t110q.csv")" '"1","no comma"' \
+    "T110f quoting that was not required is preserved, not normalised away / 非必要的引號會被保留，而不是被正規化掉"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
