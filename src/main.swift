@@ -632,8 +632,13 @@ func parseCellAddress(_ s: String, flag: String) throws -> (Int, String) {
     // 而 -update 與 -delete -cell 對著自家工具的輸出說「需要 r:c」：同一個性質，問哪個動詞就有
     // 哪一種說法，總共三種。
     if parts.count == 2, ["0", "0a", "0b"].contains(parts[0]), !parts[1].isEmpty {
-        throw usageError("\(flag): \(s) names a header cell (the locating report prints 0 on a .csv and 0a/0b on a .csv2); header cells are not addressable by any verb, -get included. Records are numbered from 1",
-                         "\(flag)：\(s) 指的是標頭儲存格（定位報告在 .csv 上印 0，在 .csv2 上印 0a／0b）；標頭儲存格不是任何動詞可以定址的，-get 也不行。紀錄從 1 開始編號")
+        // "any verb, -get included" named -get inside a -update failure, which
+        // reads as a bug in the message rather than a fact about the tool.
+        // The fact is the same without the example.
+        // 「任何動詞，-get 也不行」會在一則 -update 的失敗裡點名 -get，那讀起來像是訊息本身
+        // 出了錯，而不是關於這個工具的一項事實。拿掉那個例子，事實不變。
+        throw usageError("\(flag): \(s) names a header cell (the locating report prints 0 on a .csv and 0a/0b on a .csv2), and no verb can address one. Records are numbered from 1",
+                         "\(flag)：\(s) 指的是標頭儲存格（定位報告在 .csv 上印 0，在 .csv2 上印 0a／0b），而沒有任何動詞可以對它定址。紀錄從 1 開始編號")
     }
     // An empty column part gets its own reason. `-get 1:` answered "expected
     // r:c", which is a complaint about shape when the shape is right and one

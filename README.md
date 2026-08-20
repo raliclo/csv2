@@ -225,7 +225,11 @@ SELECTING / 選取
                         anything: see "Two numberings" below
   --physical            also print the physical line the record starts on, as
                         `record:field@Lline`; with --a1 the two combine into
-                        `13:6@L14 [F14]`.
+                        `13:6@L14 [F14]`. The two numbers are the same
+                        there only because no record in that file spans lines:
+                        with an embedded newline they part company, as in
+                        `2:2@L4 [B3]` -- physical line 4, spreadsheet row 3.
+                        Both are correct; they answer different questions.
                         Adds to the LOCATING REPORT, so it needs -contains
                         without --filter/-md/--json
   --a1                  also print spreadsheet A1 notation. Same restriction
@@ -1003,7 +1007,18 @@ nothing arrives until close. Asserted by T61.
 
 ### Exit status
 
-`0` on success, non-zero on any error. csv2 does not partially succeed.
+`0` on success, non-zero on any error. **With `-o` and `--in-place`, csv2 does
+not partially succeed**: the output is a temp file that is renamed only when
+everything worked, so a failed run leaves the destination untouched.
+
+**`-so` is the exception, and it is not a small one.** A stream cannot be taken
+back. An edit whose address turns out to be past the end is only discovered
+when the end is reached, and by then the records before it have already gone to
+stdout: measured, a failing `-update` on a 19.5 MB file wrote 198,349 valid
+records and then exited 1, where the same command on a 12 KB file wrote none,
+because everything still fitted in the buffer. So a `-so` run that exits
+non-zero may have produced output, and how much depends on the size of the
+file. If that matters, write to `-o` and move the file yourself.
 
 **There is one exit status that is neither, and a pipeline meets it constantly:
 141.** When the downstream consumer of `-so` goes away first — `| head -1`, a
@@ -1051,18 +1066,32 @@ in it will tell you this happened — the `-log` entries are each true of their
 own process and the trail as a whole is then wrong about the file. **If two
 writers can reach the same file, serialise them yourself.**
 
-**A reader, on the other hand, never sees a half-written file.** Output goes to
-a temp file and is renamed into place, and rename is atomic, so a concurrent
-reader gets either the whole old file or the whole new one and never a mixture
-— even while a writer is part-way through. That is a promise you can build on,
-not an implementation detail: it is why the temp-file-and-rename is there.
+**A reader never sees a half-written file — when the writer is csv2.** Output
+goes to a temp file and is renamed into place, and rename is atomic, so a
+concurrent reader gets either the whole old file or the whole new one and never
+a mixture, even while a writer is part-way through. That is a promise you can
+build on, not an implementation detail: it is why the temp-file-and-rename is
+there.
+
+**The promise belongs to the writer, not to csv2's reader**, and this document
+sends you to other writers — `iconv`, `tr`, a shell redirect. Measured against
+an ordinary `cat > file` racing a read, 30 trials produced 12 silent
+truncations and 18 loud errors, and no whole file at all. csv2 cannot detect
+the silent case: a file cut at a record boundary is a shorter file, not a
+malformed one, and **nothing csv2 prints can tell you a read was complete** —
+`records` reports what it reached, which is the number that would be wrong.
+If a file is being rewritten by something that is not csv2, rename into place
+yourself rather than writing over it.
 
 **The same holds for `--in-place`, where it matters more:** a failed in-place
 edit leaves the original **byte-for-byte unchanged**, and leaves no temp file
 beside it — including when the run is killed by `SIGINT`, `SIGTERM` or `SIGHUP`
 part-way through, which used to leave a hidden multi-megabyte file next to the
 target (T131e). `SIGKILL` and a power cut cannot be caught and will leave one;
-it is named `.<file>.csv2tmp.<pid>` and is safe to delete. This is the one guarantee with no fallback — with `-o` you still have
+it is named `.<file>.csv2tmp.<pid>` and is safe to delete. A consequence worth
+knowing: rename recreates the destination, so **deleting the file while an edit
+is running brings it back** — the `rm` lands on the old inode and the rename
+puts the new one where the name was. This is the one guarantee with no fallback — with `-o` you still have
 the input if the output is wrong, and with `--in-place` the input *is* the
 output. Asserted by T28c.
 
@@ -1454,7 +1483,15 @@ Each of these is argued in full in [plan/plan.md](./plan/plan.md).
   write, a partially overwritten file — and is not a signature. Anyone who can
   rewrite the offsets can rewrite eight more bytes. It also cannot help when the
   *data* file changes without changing size, mtime or its first and last bytes;
-  that is what the O(1) check has always been, a heuristic. For a proof, run
+  that is what the O(1) check has always been, a heuristic. **It is harder to
+  arrange by hand than it sounds, and two blind rounds concluded from that
+  that the check is stronger than this paragraph says. It is not.** The mtime
+  compared includes NANOSECONDS, so a `touch -r` that carries only whole
+  seconds moves it; the replacement has to be byte-for-byte the same length;
+  and the wrong record number comes from the chunked search, so the file has to
+  be big enough for that path to run. Get all three right and the indexed
+  answer is off by one where a scan is correct — reproduced, and pinned by T143
+  so that it stays reproducible for as long as this paragraph claims it. For a proof, run
   `--verify-index`, which is O(n) because it has to be. **What it proves is
   that the index's three claims are accurate — not what those claims say.** On
   a file where every other record spans lines it prints `index OK` just the
