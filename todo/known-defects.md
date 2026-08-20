@@ -3660,3 +3660,53 @@ CQ(第四個呼叫點)是同一個形狀,而這次只隔了十幾行。
 
 位元組是這裡唯一誠實的量度,而訊息把那個推論也說出來:「若引號很早就打開,那就是它之後的
 全部。」
+
+## DL. 一個會隨機失敗的測試,而失敗的理由與它所斷言的事無關
+
+T100c 斷言「解密的 log 不帶還原出來的明文」,做法是:
+
+```zsh
+printf 'pkg,secret\na,s1\nb,s2\n' > "$TMP/t100.csv"
+...
+if grep -q 's1' "$TMP/t100.log"; then bad ...
+```
+
+而 log 的第一行是**呼叫方式**,裡面含著完整路徑:
+
+```
+INFO  csv2 -decrypt all -keyfile /…/.test_csv2.Xs1abc/t100.key -i …
+```
+
+`mktemp -d .test_csv2.XXXXXX` 產生六個英數字元。**幾百次執行裡就會有一次含 `s1`**,於是
+那個案例為了一個與明文毫無關係的理由失敗。
+
+它在 2026-08-20 觸發了一次:那一次執行是 568 PASS / 1 FAIL,而緊接著的三次都是 569 / 0。
+
+**一份會亂叫的測試比沒有測試更糟**——它會侵蝕對整套測試的信任,而信任正是那 569 條斷言
+唯一的用途。明文現在是 `PLAINTEXT-CANARY-ONE`,一個不可能出現在別處的記號。
+
+掃過整份測試檔找同類:其餘「短字串」比對的都是**指令輸出**(報告位址、解密後的檔案內容、
+錯誤訊息),不是含有隨機路徑的檔案。只有這一個。
+
+## 而那次 commit 的訊息說了 569 PASS / 0 FAIL
+
+我在同一條指令裡跑測試並提交,訊息是事先寫好的。那次執行實際顯示 568 / 1。
+
+**訊息裡的數字沒有被那次執行證實,而它讀起來像是被證實了。** 這與 T69 守的是同一類東西
+(文件裡會漂移的數字),只是 T69 看不到 commit 訊息。
+
+沒有機械化的辦法可以擋這一條——commit 訊息不在任何測試的視野裡。能做的只有:**先看完
+測試結果,再寫那個數字。**
+
+A test that fails at random, for a reason unrelated to what it asserts. T100c
+greps the decrypt log for the plaintext `s1`, and the log's first line is the
+invocation, which carries the full path -- including a temp directory named by
+six random alphanumerics. One run in a few hundred contains `s1`. It fired
+once on 2026-08-20: that run was 568/1 and the next three were 569/0. A suite
+that cries wolf stops being read, and being read is the only thing 569
+assertions are for.
+
+And the commit message for that run claimed 569 PASS / 0 FAIL. The suite and
+the commit went out in one command, with the number written in advance. Nothing
+mechanical can catch that -- a commit message is outside every test's view --
+so the only remedy is to read the result before writing the number.

@@ -4301,7 +4301,17 @@ echo
 echo "--- T100: a successful decrypt says which key opened it / 成功的解密會說出是哪一把金鑰打開的 ---"
 
 head -c 32 /dev/urandom > "$TMP/t100.key"
-printf 'pkg,secret\na,s1\nb,s2\n' > "$TMP/t100.csv"
+# The plaintext is a token that cannot occur anywhere else. It used to be `s1`,
+# and the check `grep -q 's1'` matched the RANDOM TEMP DIRECTORY NAME in the
+# log's invocation line -- `mktemp -d .test_csv2.XXXXXX` produces six
+# alphanumerics, and one run in a few hundred contains `s1`. The case then
+# failed for a reason unrelated to what it asserts, which is worse than no
+# case: a suite that cries wolf stops being read.
+# 明文改用一個「不可能出現在別處」的記號。原本是 `s1`，而 `grep -q 's1'` 會比對到 log 呼叫行
+# 裡那個「隨機的暫存目錄名」——`mktemp -d .test_csv2.XXXXXX` 產生六個英數字元，幾百次裡就會
+# 有一次含 `s1`。那個案例於是為了「與它所斷言的事無關的理由」而失敗，而那比沒有這個案例更糟：
+# 一份會亂叫的測試，就不會再有人讀它。
+printf 'pkg,secret\na,PLAINTEXT-CANARY-ONE\nb,PLAINTEXT-CANARY-TWO\n' > "$TMP/t100.csv"
 "$CSV2" -encrypt secret -keyfile "$TMP/t100.key" -i "$TMP/t100.csv" -o "$TMP/t100_e.csv" -t 2>/dev/null
 
 rm -f "$TMP/t100.log"
@@ -4317,7 +4327,7 @@ assert_contains "$(cat "$TMP/t100.log")" "fingerprint" \
 # undo the redaction rule if it carried values.
 # 值**不得**出現在裡面。解密是唯一會把受保護欄位變回明文的操作，因此這一行是最有能力
 # 推翻遮蔽規則的一行——如果它帶著值的話。
-if grep -q 's1' "$TMP/t100.log"; then
+if grep -q 'PLAINTEXT-CANARY' "$TMP/t100.log"; then
     bad "T100c the decrypt log carries the plaintext it recovered / 解密的 log 帶著它還原出來的明文"
 else
     ok "T100c and none of the recovered plaintext / 而且不帶任何還原出來的明文"
