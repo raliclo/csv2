@@ -6298,6 +6298,138 @@ assert_contains "$t126" "record 2:" \
 assert_succeeds "T126b and an address that far into the file resolves / 而那個位址在檔案裡解得出來" -- \
     "$CSV2" -get 1:1 -i "$TMP/t126.csv2" --truncate-partial
 
+# ---------------------------------------------------------------------
+# T127 -- CRLF is ONE Swift Character, and the escapers switched on Characters.
+#
+#   csv2 -contains $'needle\r\n2026-01-01T00:00:00+00:00 INFO  forged' -log L
+#   L: two lines, the second entirely chosen by the input, timestamp included
+#
+# A bare LF was escaped correctly. `\r\n` matched neither `case "\n"` nor
+# `case "\r"`, because Swift's `Character` is a grapheme cluster and CRLF is
+# one of them. The forgery AI and AJ closed came back through it -- reachable
+# from a plain `-contains`, with no write access to anything.
+#
+# One defect, three guarantees: one log entry per line, one report line per
+# matching cell, and errors as exactly two lines on stderr. The report is the
+# one that stings: a single hit printed two lines, so `cut -f1` returns a
+# fragment of prose where an address belongs, in the interface this tool
+# recommends for scripts.
+#
+# The README warns about this exact property of Swift for `--pretty` --
+# "grapheme clusters, NOT a per-code-point lookup" -- a few hundred lines from
+# where the escaper was written.
+#
+# T127 —— CRLF 在 Swift 裡是「一個」Character，而兩個跳脫器都是以 Character 去 switch。
+# 單獨的 LF 被正確跳脫；`\r\n` 兩個 case 都不匹配，於是原樣通過。AI 與 AJ 關掉的偽造從它
+# 回來了——而且只需要一次普通的 `-contains`，完全不需要對任何東西有寫入權限。
+# 一個缺陷，三個保證：log 一筆一行、報告「每個命中的儲存格一行」、以及 stderr 恰好兩行。
+# 其中報告那一項最痛：一個命中印出兩行，於是 `cut -f1` 在該是位址的地方回傳一段散文碎片
+# ——就發生在這個工具推薦給腳本使用的那個介面上。
+# README 就在 `--pretty` 那一節警告過 Swift 的這個性質，相隔幾百行。
+# ---------------------------------------------------------------------
+echo
+echo "--- T127: a CRLF is not two characters / CRLF 不是兩個字元 ---"
+
+print -r -- 'a,b'  > "$TMP/t127.csv"
+print -r -- '1,x' >> "$TMP/t127.csv"
+
+rm -f "$TMP/t127.log"
+"$CSV2" -contains "$(printf 'needle\r\n2026-01-01T00:00:00+00:00 INFO  forged')" \
+    -i "$TMP/t127.csv" -log "$TMP/t127.log" >/dev/null 2>&1
+assert_eq "$(wc -l < "$TMP/t127.log" | tr -d ' ')" "1" \
+    "T127a a CRLF in an argument does not open a second log line / 引數裡的 CRLF 不會在 log 中開出第二行"
+
+# Escaped, not dropped: an audit trail that hides what was attempted is worse
+# than one that records it plainly.
+# 是跳脫，不是丟棄：一份把「有人試過什麼」藏起來的稽核軌跡，比一份原樣記下它的更糟。
+assert_contains "$(cat "$TMP/t127.log")" '\r\n2026-01-01' \
+    "T127b and the attempted text is kept, escaped / 而被嘗試的文字被保留下來，是跳脫"
+
+# The locating report: one matching cell, one line. This is the interface the
+# README tells scripts to use `cut -f1` on.
+# 定位報告：一個命中的儲存格，一行。那正是 README 叫腳本用 `cut -f1` 去讀的介面。
+printf 'a,b\n1,"has\r\nCRLF"\n' > "$TMP/t127b.csv"
+assert_eq "$("$CSV2" -contains has -i "$TMP/t127b.csv" 2>/dev/null | wc -l | tr -d ' ')" "1" \
+    "T127c a cell containing CRLF still prints as ONE report line / 含 CRLF 的儲存格仍然只印一行報告"
+
+# And a CR alone and an LF alone must keep working -- the fix must not have
+# traded one pair for the singles.
+# 而單獨的 CR 與單獨的 LF 必須繼續有效——這個修正不能拿「一對」去換掉「單個」。
+rm -f "$TMP/t127c.log"
+"$CSV2" -contains "$(printf 'a\rb')" -i "$TMP/t127.csv" -log "$TMP/t127c.log" >/dev/null 2>&1
+assert_eq "$(wc -l < "$TMP/t127c.log" | tr -d ' ')" "1" \
+    "T127d while a lone CR is still escaped / 而單獨的 CR 仍然被跳脫"
+rm -f "$TMP/t127d.log"
+"$CSV2" -contains "$(printf 'a\nb')" -i "$TMP/t127.csv" -log "$TMP/t127d.log" >/dev/null 2>&1
+assert_eq "$(wc -l < "$TMP/t127d.log" | tr -d ' ')" "1" \
+    "T127e and so is a lone LF / 單獨的 LF 也是"
+
+# ---------------------------------------------------------------------
+# T128 -- flags that were accepted and did something else.
+# T128 —— 被接受、卻做了別的事的旗標。
+# ---------------------------------------------------------------------
+echo
+echo "--- T128: accepted, and doing something else / 被接受，然後做了別的事 ---"
+
+print -r -- 'a,b'  > "$TMP/t128.csv"
+print -r -- '1,x' >> "$TMP/t128.csv"
+cp "$TMP/t128.csv" "$TMP/t128.bak"
+head -c 32 /dev/urandom > "$TMP/t128.key"
+
+# --build-index REPLACED the verb: the index was built and the edit was
+# dropped, at rc=0, silently under --in-place.
+# --build-index 是「取代」動詞：索引建了、編輯被丟掉，rc=0，在 --in-place 下完全靜默。
+assert_fails "T128a --build-index with an edit verb is refused / --build-index 與編輯動詞併用會被拒絕" -- \
+    "$CSV2" -update 1:2 'CHANGED' --build-index -i "$TMP/t128.csv" --in-place
+assert_same "$TMP/t128.csv" "$TMP/t128.bak" \
+    "T128b and neither the index nor the edit happened / 而索引與編輯都沒有發生"
+
+# -get writes no header, so a transform's salt has nowhere to live: the output
+# was ciphertext nothing could ever decrypt.
+# -get 不寫標頭，因此轉換的 salt 無處可放：輸出的是一段沒有任何東西還原得了的密文。
+assert_fails "T128c -get with -encrypt is refused, since the salt would have nowhere to go / -get 與 -encrypt 併用會被拒絕，因為 salt 沒有地方可放" -- \
+    "$CSV2" -get 1:2 -encrypt b -keyfile "$TMP/t128.key" -i "$TMP/t128.csv"
+
+assert_fails "T128d --include-headers without -contains is refused, as its siblings are / --include-headers 沒有 -contains 時被拒絕，一如它的同輩" -- \
+    "$CSV2" -r --include-headers -i "$TMP/t128.csv"
+
+# ---------------------------------------------------------------------
+# T129 -- --in-place, and what "this file" means.
+# T129 —— --in-place，以及「這個檔案」指的是什麼。
+# ---------------------------------------------------------------------
+echo
+echo "--- T129: in place, on the right file / 就地，而且是對的那個檔案 ---"
+
+print -r -- 'a,b'  > "$TMP/t129_target.csv"
+print -r -- '1,x' >> "$TMP/t129_target.csv"
+ln -sf "$TMP/t129_target.csv" "$TMP/t129_link.csv"
+
+assert_succeeds "T129a --in-place through a symlink succeeds / 透過 symlink 的 --in-place 會成功" -- \
+    "$CSV2" -update 1:2 'Z' -i "$TMP/t129_link.csv" --in-place
+
+# The link must survive, because replacing it means the next run edits a
+# different file than the last one did.
+# 那個連結必須存活，因為把它換掉，等於「下一次執行編輯的檔案」與「上一次的」不是同一個。
+if [[ -L "$TMP/t129_link.csv" ]]; then
+    ok "T129b and the symlink is still a symlink / 而那個 symlink 仍然是 symlink"
+else
+    bad "T129b the symlink was replaced by a regular file / 那個 symlink 被換成了一般檔案"
+fi
+
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t129_target.csv")" "Z" \
+    "T129c and the edit landed on the file it points at / 而那次編輯落在它所指向的檔案上"
+
+# Mode: a temp file is created with the umask's mode, so without carrying the
+# original's an edit silently widens who can read the file.
+# 模式：暫存檔以 umask 的模式建立，因此不把原檔的模式帶過去，一次編輯就會悄悄放寬
+# 「誰讀得到這個檔案」。
+print -r -- 'a,b'  > "$TMP/t129_mode.csv"
+print -r -- '1,x' >> "$TMP/t129_mode.csv"
+chmod 600 "$TMP/t129_mode.csv"
+"$CSV2" -update 1:2 'Z' -i "$TMP/t129_mode.csv" --in-place >/dev/null 2>&1
+assert_eq "$(stat -f '%Lp' "$TMP/t129_mode.csv" 2>/dev/null || stat -c '%a' "$TMP/t129_mode.csv")" "600" \
+    "T129d and an edit does not widen the file's permissions / 而一次編輯不會放寬這個檔案的權限"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

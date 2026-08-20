@@ -203,11 +203,32 @@ final class CSVEmitter: RecordEmitter {
 func lineEscape(_ s: String) -> String {
     var out = ""
     out.reserveCapacity(s.count)
-    for ch in s {
-        switch ch {
+    // Unicode SCALARS, not Characters. A Swift `Character` is a grapheme
+    // cluster and CRLF is ONE of them, so a `case "\n"` / `case "\r"` switch
+    // over Characters matches neither half of a `\r\n` pair and lets it
+    // through intact. A bare LF was escaped correctly; `\r\n` walked straight
+    // out, opening a second line in the log whose entire content -- timestamp
+    // included -- came from the input, reachable from a plain `-contains` with
+    // no write access to anything.
+    //
+    // The README warns about this exact property of the language for
+    // `--pretty`: "grapheme clusters with emoji presentation applied, NOT a
+    // per-code-point lookup". Same fact, few hundred lines away, and the
+    // escaper walked into it.
+    //
+    // 用 Unicode「純量」，不是 Character。Swift 的 `Character` 是 grapheme cluster，而 CRLF
+    // 就是其中「一個」，因此以 Character 去 switch 的 `case "\n"` / `case "\r"` 對一個
+    // `\r\n` 兩半都不匹配，讓它原樣通過。單獨的 LF 被正確跳脫；`\r\n` 直接走了出去，在
+    // log 裡開出第二行，而那一行的全部內容——連同時間戳——都來自輸入，且只需要一次普通的
+    // `-contains`，完全不需要對任何東西有寫入權限。
+    //
+    // README 就在 `--pretty` 那一節警告過這個語言性質：「grapheme cluster 加上 emoji
+    // presentation，不是逐 code point 查表」。同一件事，相隔幾百行，而跳脫器撞了上去。
+    for u in s.unicodeScalars {
+        switch u {
         case "\n": out += "\\n"
         case "\r": out += "\\r"
-        default: out.append(ch)
+        default: out.unicodeScalars.append(u)
         }
     }
     return out
@@ -216,13 +237,23 @@ func lineEscape(_ s: String) -> String {
 func reportEscape(_ s: String) -> String {
     var out = ""
     out.reserveCapacity(s.count)
-    for ch in s {
-        switch ch {
+    // Scalars, for the reason spelled out on lineEscape above: CRLF is a
+    // single Character and a Character switch lets it through. Here that broke
+    // "one line per matching cell" -- one hit printed two lines, so `cut -f1`
+    // returned a fragment of prose where an address belongs. That is the
+    // failure this function was written to prevent, in the interface this tool
+    // recommends for scripts.
+    // 用純量，理由與上面 lineEscape 的註解相同：CRLF 是單一個 Character，而以 Character
+    // 去 switch 會讓它通過。在這裡，那打破的是「每個命中的儲存格一行」——一個命中印出了
+    // 兩行，於是 `cut -f1` 在該是位址的地方回傳一段散文碎片。那正是這個函式當初被寫出來
+    // 所要防止的失敗，而且發生在這個工具推薦給腳本使用的那個介面上。
+    for u in s.unicodeScalars {
+        switch u {
         case "\\": out += "\\\\"
         case "\t": out += "\\t"
         case "\n": out += "\\n"
         case "\r": out += "\\r"
-        default: out.append(ch)
+        default: out.unicodeScalars.append(u)
         }
     }
     return out

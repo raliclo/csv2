@@ -3727,3 +3727,141 @@ on WSL and Windows and not on macOS, because the macOS run happened before the
 text was added -- and it surfaced something else: the guest payload does not
 include `todo/`, so T69 cannot see this file there at all. Three platforms
 green and one red, and the red ones were the ones that could see everything.
+---
+
+# 第 52 回合(2026-08-20)—— 刻意破壞再試著救回、保真宣稱的極端輸入、動詞兩兩併用
+
+受測者的總結值得原樣抄下:
+
+> 「資料路徑是真的優秀——26 個惡意值在 `--json`、`-get`、`.csv2` 跳脫與一次 308 區塊的平行
+> 搜尋之後,原樣存活;加解密逐位元往返。**壞掉的是那套「告訴你發生了什麼」的機制。**
+> 這個工具的整個論點是『靜默的半對輸出是敵人』。**而那份沉默,現在住在它的遙測裡。**」
+
+## DM. 跳脫器漏掉 CR-LF 這一對,而它是我這次 session 寫的(2026-08-20 修正,T127)
+
+```console
+$ csv2 -contains "$(printf 'needle\r\n2026-01-01T00:00:00+00:00 INFO  csv2 -delete everything')" \
+       -i f.csv -log L.log
+$ cat L.log
+2026-08-20T22:55:51.127+08:00 INFO  csv2 -contains needle^M
+2026-01-01T00:00:00+00:00 INFO  csv2 -delete everything -i f.csv -log L.log
+```
+
+**單獨的 `\n` 被正確跳脫(1 行);`\r\n` 直接漏過去(2 行)**,而第二行整行由輸入決定,
+連它的時間戳都是。
+
+AI／AJ 關掉的那個偽造,從 CRLF 回來了——**而且只需要一次 `-contains` 讀取,完全不需要對
+資料有寫入權限。**
+
+### 成因,以及它的諷刺
+
+```swift
+for ch in s {
+    switch ch {
+    case "\\n": ...
+    case "\\r": ...
+```
+
+**Swift 的 `Character` 是 grapheme cluster,而 CRLF 是「一個」。** 於是它兩個 case 都不匹配。
+
+而 README 自己就警告過這件事——在 `--pretty` 那一節:「那個寬度是 grapheme cluster 加上
+emoji presentation,**不是**逐 code point 查 UAX #11」。**同一個語言性質,同一份文件裡寫過,
+而我在寫跳脫器時撞了上去。**
+
+### 一個缺陷,三個保證
+
+| 管道 | 被打破的保證 |
+|---|---|
+| `-log` | 「一筆是一行」——而多出來的那一行是偽造的 |
+| 定位報告 | 「一個命中一行」——一個命中變成兩行,於是 `cut -f1` 拿到碎片 |
+| stderr | 「錯誤恰好兩行,英文在前中文在後」 |
+
+第二項最貼近本專案的招牌失敗:**它發生在這個工具自己推薦的腳本介面上。**
+
+`reportEscape` 與 `lineEscape` 是同一個形狀,所以兩者都有這個洞。
+
+Round 52. The diagnostic escaper misses a CR-LF pair, because Swift's
+`Character` is a grapheme cluster and CRLF is one of them -- so it matches
+neither the `\n` case nor the `\r` case. A bare LF escapes correctly; `\r\n`
+walks straight through. One defect, three broken guarantees, and a live
+audit-trail forgery reachable from a pure read with no write access. The README
+warns about exactly this language property, for `--pretty`, a few hundred lines
+away from where I wrote the escaper.
+
+## DN. `--build-index` 站在一個編輯動詞旁邊,索引做了,編輯沒做(2026-08-20 修正,T128a/b)
+
+```console
+$ csv2 -update 1:2 'CHANGED' --build-index -i b1.csv --in-place
+index built: 2 records, stride 256, 1 grid points
+rc=0
+$ csv2 -get 1:2 -i b1.csv
+x                                  ← 那個編輯從未發生
+```
+
+`--build-index` **取代**了動詞,而不是加在它旁邊。搭配 `--in-place` 時完全靜默:什麼都沒印,
+rc=0,而使用者以為自己改了一格。
+
+`--build-index --no-index` 會被當成矛盾拒絕。`--build-index` 與一個編輯動詞併用,同樣不可能
+兩件都做——而它沒有被拒絕。
+
+## DO. `-get` 搭配 `-encrypt`,吐出一段永遠解不開的密文(2026-08-20 修正,T128c)
+
+```console
+$ csv2 -get 1:2 -encrypt b -keyfile k.bin -i g.csv
+Vjse+Fx4A+B7W/i3CwVWnA7XeZI8SY5g5rDxWQQ=
+rc=0
+```
+
+**沒有 salt、沒有指紋、沒有標記。** 那段密文所依賴的 salt 只存在於「檔案標頭」裡,而 `-get`
+不寫檔案標頭——它印一格。於是輸出的是一段沒有任何東西能還原的位元組。
+
+`-get` 對 `--json`、`--pretty`、`-t`、`-rownum` 都有「被忽略的旗標會被拒絕」的守衛,訊息還
+寫得很好。`-encrypt` 不在那張清單上。
+
+## DP. `--in-place` 在 symlink 上,改的是別的東西(2026-08-20 修正,T129)
+
+```console
+$ ln -sf g.csv link.csv
+$ csv2 -update 1:2 'Z' -i link.csv --in-place
+rc=0
+$ test -L link.csv && echo symlink || echo "not a symlink"
+not a symlink                      ← 連結被換成了一般檔案
+$ csv2 -get 1:2 -i g.csv
+x                                  ← 而它本來指向的那個檔案，沒有被動過
+```
+
+**使用者要求就地編輯,而得到的是:連結不見了、目標沒變、rc=0。**
+
+同一族:一個 mode 444 的唯讀檔會被成功寫入(因為 rename 看的是目錄權限,不是檔案權限),
+**而且模式在過程中變成 644**。硬連結同樣會被斷開。
+
+這三件都是「暫存檔 + rename」的內在後果,而文件把 temp+rename 寫成一個**保證**
+(「讀取端永遠看不到寫到一半的檔案」),從來沒有寫它的代價。
+
+## DQ. `--include-headers` 沒有 `-contains` 時被靜默忽略(2026-08-20 修正,T128d)
+
+它的三個同輩(`--a1`、`--physical`、`--filter`)在同樣情況下都會拒絕。
+
+Round 52's remaining four are all "accepted, did something other than what was
+asked, rc=0": --build-index replaces an edit verb instead of joining it; -get
+with -encrypt emits ciphertext whose salt lives only in a file header that -get
+does not write; --in-place on a symlink replaces the link and leaves the target
+untouched, and on a read-only file succeeds while changing the mode; and
+--include-headers without -contains is ignored where all three of its siblings
+refuse.
+
+### DP 的修法分成兩半,而其中一半刻意沒有做
+
+**symlink**:`--in-place` 的輸出路徑改為解析過 symlink 的路徑。只解析「輸出」——輸入保留
+呼叫端打出來的那個路徑,好讓訊息指名的是他問的那個檔案,而不是一個他從未見過的。
+
+**模式**:rename 之前把原檔的權限位元套到暫存檔上。一個 0600 的檔案原本會被改寫成 0644
+——一個「工作就只是改一格」的操作,悄悄改變了誰讀得到它。
+
+**唯讀(0444)仍然會被改寫,而那是刻意的。** rename 需要的是「目錄」的權限,它從來不看那個
+檔案;要尊重檔案的唯讀位元,得在寫入前自己檢查,而那會讓 csv2 對「一個唯讀檔案在一個可寫
+目錄裡」這件事有意見——那是它不該有的意見。**還原模式擋住的是「悄悄放寬誰讀得到」,
+那才是會把資料交給別人的那一半。** 硬連結同樣仍會被斷開,理由相同。
+
+這三件都是 temp+rename 的內在後果,而文件把 temp+rename 寫成一個保證,從來沒有寫它的代價。
+現在寫了。

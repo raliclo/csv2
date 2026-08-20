@@ -515,6 +515,35 @@ enum Platform {
         #endif
     }
 
+    /// Copy a file's permission bits onto another file.
+    ///
+    /// The temp-file-and-rename that makes a write atomic for readers also
+    /// makes the result a NEW file, with the umask's mode rather than the
+    /// original's. A file at 0644 stayed 0644 only by coincidence; one at 0600
+    /// came back world-readable, and one at 0444 was rewritten at all, because
+    /// rename needs permission on the DIRECTORY and never looks at the file.
+    ///
+    /// Restoring the mode does not restore the read-only intent -- csv2 still
+    /// rewrites a 0444 file -- but it stops an edit from quietly widening who
+    /// can read it, which is the half that loses data to someone else.
+    ///
+    /// 把一個檔案的權限位元套到另一個檔案上。
+    ///
+    /// 讓寫入對讀者而言不可分割的那個「暫存檔 + rename」，同時也讓結果成為一個「新」檔案，
+    /// 帶的是 umask 的模式而不是原檔的。一個 0644 的檔案維持 0644 只是碰巧；一個 0600 的
+    /// 會變成全世界可讀，而一個 0444 的根本會被改寫——因為 rename 需要的是「目錄」的權限，
+    /// 它從來不看那個檔案。
+    ///
+    /// 還原模式並不能還原「唯讀」這個意圖——csv2 仍然會改寫一個 0444 的檔案——但它能阻止
+    /// 一次編輯悄悄放寬「誰讀得到它」，而那一半才是會把資料交給別人的那一半。
+    static func copyMode(from source: String, to destination: String) {
+        #if !canImport(ucrt)
+        var st = stat()
+        guard stat(source, &st) == 0 else { return }
+        _ = chmod(destination, st.st_mode & 0o7777)
+        #endif
+    }
+
     // -----------------------------------------------------------------
     // MARK: - Peak memory / 峰值記憶體
     // -----------------------------------------------------------------

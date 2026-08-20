@@ -633,6 +633,43 @@ func validate(_ o: inout Options) throws {
     // `--build-index --no-index` 會被當成互相矛盾而拒絕，`--verify-index --no-index` 不會：
     // 它讀了 `--no-index` 明令不讀的那個 sidecar，並回報 `index OK`。兩者必須有一個改變，
     // 而「拒絕」才是符合 --no-index 自己所宣稱的意思的那一個。
+    // `--build-index` REPLACES the verb rather than joining it, so given both
+    // the index was built and the edit was silently dropped -- rc=0, and with
+    // `--in-place` nothing printed at all, while the caller believed a cell had
+    // changed. `--build-index --no-index` was already refused as
+    // contradictory; this pair is equally impossible and was not.
+    // `--build-index` 是「取代」動詞而不是「加在旁邊」，因此兩者同時給出時，索引被建立了、
+    // 而編輯被靜默丟棄——rc=0，搭配 `--in-place` 時甚至什麼都不印，而呼叫端以為某一格改了。
+    // `--build-index --no-index` 早就被當成矛盾拒絕；這一對同樣不可能兩全，卻沒有。
+    if o.buildIndex && !o.edits.isEmpty {
+        throw usageError("--build-index and an edit verb cannot both run: --build-index replaces the operation rather than joining it, so the edit would be silently dropped",
+                         "--build-index 與編輯動詞不能同時執行：--build-index 是「取代」該操作而不是「加在旁邊」，因此那個編輯會被靜默丟棄")
+    }
+    if o.verifyIndex && !o.edits.isEmpty {
+        throw usageError("--verify-index and an edit verb cannot both run",
+                         "--verify-index 與編輯動詞不能同時執行")
+    }
+    // `-get` prints ONE cell. A transform's output depends on a marker in the
+    // file's header -- the salt for `:enc:`, the fingerprint for `:hmac:` --
+    // and `-get` writes no header. So `-get -encrypt` emitted ciphertext with
+    // no salt anywhere: bytes nothing can ever decrypt, at rc=0. `-get`
+    // already refuses --json, --pretty, -t and -rownum as ignored flags, with
+    // a good message; the transforms were not on that list.
+    // `-get` 印的是「一格」。轉換的輸出依賴檔案標頭裡的標記——`:enc:` 的 salt、`:hmac:` 的
+    // 指紋——而 `-get` 不寫標頭。於是 `-get -encrypt` 吐出的是「salt 不存在於任何地方」的
+    // 密文：一段沒有任何東西還原得了的位元組，rc=0。`-get` 早就會拒絕 --json、--pretty、
+    // -t、-rownum 這些「會被忽略的旗標」，訊息也寫得很好；只是轉換不在那張清單上。
+    if o.getCell != nil, o.encryptCols != nil || o.hashCols != nil || o.decryptCols != nil {
+        throw usageError("-get prints one cell and writes no header, so a transform's marker -- the salt for -encrypt, the fingerprint for -hash -- has nowhere to go; the output could never be read back",
+                         "-get 印的是一格、不寫標頭，因此轉換的標記——-encrypt 的 salt、-hash 的指紋——沒有地方可放；那個輸出永遠讀不回來")
+    }
+    // Its three siblings -- --a1, --physical, --filter -- all refuse without
+    // -contains. This one was ignored.
+    // 它的三個同輩——--a1、--physical、--filter——在沒有 -contains 時都會拒絕。只有這一個被忽略。
+    if o.includeHeaders && o.contains == nil {
+        throw usageError("--include-headers searches the header rows, so it needs -contains",
+                         "--include-headers 是「連標頭列一起搜尋」，因此它需要 -contains")
+    }
     if o.verifyIndex && o.noIndex {
         throw usageError("--verify-index and --no-index contradict each other: verifying means reading the sidecar",
                          "--verify-index 與 --no-index 互相矛盾：驗證就是要讀那個 sidecar")
@@ -825,7 +862,25 @@ func validate(_ o: inout Options) throws {
         guard let inp = o.input else {
             throw usageError("--in-place needs -i FILE", "--in-place 需要 -i FILE")
         }
-        if o.output == nil { o.output = inp }
+        // Resolved through symlinks, because `--in-place` means "edit this
+        // file" and a symlink is not the file. Writing to the link's own path
+        // made the temp-file-and-rename REPLACE the link with a regular file
+        // and leave the target byte-for-byte unchanged -- rc=0, the link gone,
+        // and the data the caller meant to edit untouched.
+        //
+        // Only the OUTPUT is resolved. The input keeps the path the caller
+        // typed, so messages name the file they asked about rather than one
+        // they have never seen.
+        //
+        // 解析 symlink，因為 `--in-place` 的意思是「編輯這個檔案」，而一個 symlink 不是那個
+        // 檔案。寫到連結自身的路徑上，會讓「暫存檔 + rename」把連結「換成」一個一般檔案，
+        // 而目標檔逐位元未變——rc=0、連結不見了、而呼叫端本來要改的資料沒有被動到。
+        //
+        // 只有「輸出」被解析。輸入保留呼叫端打出來的路徑，好讓訊息指名的是他問的那個檔案，
+        // 而不是一個他從未見過的。
+        if o.output == nil {
+            o.output = URL(fileURLWithPath: inp).resolvingSymlinksInPath().path
+        }
     }
     if o.encryptCols != nil || o.decryptCols != nil || o.hashCols != nil {
         // ALWAYS write the header, selection or not.

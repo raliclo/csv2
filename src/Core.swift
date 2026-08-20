@@ -1060,6 +1060,15 @@ final class ByteSink {
             // swift-corelibs-foundation 中是另一份實作：在 Linux 上它讓目的檔
             // 維持不變，於是 --in-place 什麼也沒做卻以 0 結束。這是由 T28b 在
             // guest 內執行時抓到的，macOS 上沒有任何東西會發現。
+            // The mode of the file being replaced, carried onto the temp file
+            // BEFORE the rename. A temp file is created fresh with the umask's
+            // mode, so without this an edit silently rewrote 0600 as 0644 --
+            // an operation whose whole job is to change one cell, quietly
+            // changing who can read the file.
+            // 被取代的那個檔案的模式，在 rename「之前」套到暫存檔上。暫存檔是新建的，帶的是
+            // umask 的模式，因此少了這一步，一次編輯會把 0600 靜默改寫成 0644——一個「工作
+            // 就只是改一格」的操作，悄悄地改變了誰讀得到這個檔案。
+            Platform.copyMode(from: final, to: tmp)
             if !Platform.replaceFile(tmp, final) {
                 let e = Platform.lastErrorText()
                 try? FileManager.default.removeItem(atPath: tmp)
