@@ -102,6 +102,35 @@ ok()   { print -r -- "PASS  $1"; pass=$((pass + 1)) }
 bad()  { print -r -- "FAIL  $1"; fail=$((fail + 1)) }
 skipt(){ print -r -- "SKIP  $1"; skip=$((skip + 1)) }
 
+# A test that calls something which does not exist must FAIL, not vanish.
+#
+# On 2026-08-21 two new cases were written against `assert_fails_with`, a
+# helper this file has never had. zsh printed "command not found" among 600
+# lines of output, the two cases produced no PASS and no FAIL, and the run
+# ended 0 FAIL. The count went UP, because the cases they replaced were gone
+# too. A suite that can lose a case silently is the same failure it exists to
+# catch, aimed at itself.
+#
+# 一個「呼叫了不存在的東西」的測試必須 FAIL，而不是消失。
+# 2026-08-21 有兩個新案例寫成了 `assert_fails_with`——這個檔案從來沒有過這個 helper。
+# zsh 在六百行輸出裡印了一行 command not found，那兩個案例既沒有 PASS 也沒有 FAIL，
+# 而整份測試以 0 FAIL 結束。數字甚至還變大了，因為它們取代掉的案例也一起不見了。
+# 一份會安靜弄丟案例的測試，就是它自己存在要抓的那種失敗，只是對準了自己。
+# zsh runs this handler in a SUBSHELL, so `fail=$((fail + 1))` inside it is
+# lost -- the FAIL line prints and the tally does not move, which is a guard
+# that looks like it works. The name goes to a file instead and is added back
+# at the summary.
+# zsh 是在「子 shell」裡執行這個處理常式的，因此在它裡面做 `fail=$((fail + 1))` 會遺失
+# ——FAIL 那一行印得出來，而計數不動，那是一個「看起來有效」的守衛。改為把名字寫進檔案，
+# 在結算時加回去。
+MISSING_LOG="${TMPDIR:-/tmp}/.csv2_missing_commands.$$"
+rm -f "$MISSING_LOG"
+command_not_found_handler() {
+    print -r -- "$1" >> "$MISSING_LOG"
+    print -r -- "FAIL  the suite called \"$1\", which does not exist -- the case that called it did not run / 測試呼叫了不存在的「$1」——呼叫它的那個案例沒有執行"
+    return 127
+}
+
 # assert_same FILE_A FILE_B DESC — byte-identical or fail
 # assert_same 檔A 檔B 說明 —— 逐位元相同才 PASS
 assert_same() {
@@ -6084,7 +6113,13 @@ for i in {1..300}; do print -r -- "$i,y$i"; done >> "$TMP/t120.csv"
 t120=$("$CSV2" --verify-index -i "$TMP/t120.csv" 2>&1)
 t120_zh=$(print -r -- "$t120" | sed -n '2p')
 
-assert_contains "$t120_zh" "過期：資料檔已經改變" \
+# The reason, not the old wording. It used to say 資料檔已經改變 -- "the data
+# file changed" -- which the stamp cannot know: copy another file's sidecar
+# into place and nothing about the data file has changed at all. What the check
+# establishes is that the two do not match.
+# 比對的是「理由」，不是舊的措辭。它原本說「資料檔已經改變」，而那個戳記並不知道這件事：
+# 把另一個檔案的 sidecar 複製過來，資料檔一個位元組也沒有變。那個檢查確立的是「兩者不相符」。
+assert_contains "$t120_zh" "過期：它不描述這個檔案" \
     "T120a the Chinese line carries the reason in Chinese / 中文那一行帶著中文的理由"
 
 # The English reason must not appear in the Chinese line at all. Checking for
@@ -6560,6 +6595,103 @@ else
 fi
 
 # ---------------------------------------------------------------------
+# T135 -- three situations, one sentence, and a reason the system had already
+# given us.
+#
+# Round 53: pointing -keyfile at a DIRECTORY reported "keyfile is empty or
+# unreadable", which describes neither; and an unreadable sidecar reported
+# "reason not recorded" when the reason was one strerror() call away. Both are
+# the same shape: a message that covers several cases by naming none of them.
+#
+# T135 —— 三種情況、一句話，以及一個系統早就給了我們的理由。
+# 第 53 回合：把 -keyfile 指到一個「目錄」時回報「金鑰檔為空或無法讀取」，而那兩者都不是它；
+# 一份讀不到的 sidecar 回報「沒有記錄到理由」，而那個理由離一次 strerror() 只有一步。
+# 兩者是同一個形狀：一句涵蓋好幾種情況、卻沒有指名其中任何一種的訊息。
+# ---------------------------------------------------------------------
+echo
+echo "--- T135: say which of them it is / T135：說出是哪一種 ---"
+
+print -r -- 'a,b'  > "$TMP/t135.csv"
+print -r -- '1,x' >> "$TMP/t135.csv"
+mkdir -p "$TMP/t135_dir"
+: > "$TMP/t135_empty"
+
+_t135_dir_out=$("$CSV2" -encrypt b -keyfile "$TMP/t135_dir" -i "$TMP/t135.csv" -o "$TMP/t135_out.csv" 2>&1)
+assert_contains "$_t135_dir_out" "keyfile is a directory" \
+    "T135a a directory given as -keyfile is named as one / 把目錄當成 -keyfile 時，訊息說它是目錄"
+
+_t135_empty_out=$("$CSV2" -encrypt b -keyfile "$TMP/t135_empty" -i "$TMP/t135.csv" -o "$TMP/t135_out.csv" 2>&1)
+assert_contains "$_t135_empty_out" "keyfile is empty" \
+    "T135b and an empty file is called empty, not empty-or-unreadable / 而空檔案就叫空檔案，不是「為空或無法讀取」"
+
+# An unreadable sidecar. Skipped where the test runs as root or where the
+# permission cannot be made to bite: chmod 000 does not stop root, and a file
+# csv2 can still read would make this pass for the wrong reason.
+# 一份讀不到的 sidecar。在「以 root 執行」或「權限咬不住」的地方跳過：chmod 000 擋不住 root，
+# 而一個 csv2 仍讀得到的檔案會讓這個案例因為錯誤的理由通過。
+"$CSV2" --build-index -i "$TMP/t135.csv" >/dev/null 2>&1
+chmod 000 "$TMP/t135.csv.index" 2>/dev/null
+if [[ -r "$TMP/t135.csv.index" ]]; then
+    skipt "T135c an unreadable sidecar reports why / 讀不到的 sidecar 會說出為什麼 (this user can read a mode-000 file / 此使用者讀得到 mode 000 的檔案)"
+else
+    _t135_out=$("$CSV2" --verify-index -i "$TMP/t135.csv" 2>&1)
+    if [[ $_t135_out == *"cannot be read"* && $_t135_out != *"reason not recorded"* ]]; then
+        ok "T135c an unreadable sidecar reports why / 讀不到的 sidecar 會說出為什麼"
+    else
+        bad "T135c $(print -r -- $_t135_out | head -1) / 訊息如上"
+    fi
+fi
+chmod 644 "$TMP/t135.csv.index" 2>/dev/null
+
+# ---------------------------------------------------------------------
+# T134 -- a sidecar that belongs to a different file.
+#
+# Round 53: "No mention that a FOREIGN sidecar is reported as 'stale: the data
+# file changed' when the data file did not change." The stamp compares size,
+# mtime and content hashes; it establishes that the two do not match and
+# cannot say which of them moved. Telling the reader their data file changed
+# sends them looking for an edit nobody made.
+#
+# T134 —— 一份屬於別的檔案的 sidecar。
+# 第 53 回合：「沒有任何地方提到，一份『外來的』sidecar 會被回報成『過期：資料檔已經改變』，
+# 而那個資料檔根本沒有變。」那個戳記比對的是大小、mtime 與內容雜湊；它確立的是「兩者不相符」，
+# 說不出是哪一邊動了。告訴讀者他的資料檔變了，會把他送去找一次沒有人做過的編輯。
+# ---------------------------------------------------------------------
+echo
+echo "--- T134: whose sidecar is this / T134：這份 sidecar 是誰的 ---"
+
+print -r -- 'a,b'   > "$TMP/t134_mine.csv"
+print -r -- '1,x'  >> "$TMP/t134_mine.csv"
+print -r -- 'a,b'   > "$TMP/t134_other.csv"
+print -r -- '9,z'  >> "$TMP/t134_other.csv"
+print -r -- '8,y'  >> "$TMP/t134_other.csv"
+"$CSV2" --build-index -i "$TMP/t134_mine.csv"  >/dev/null
+"$CSV2" --build-index -i "$TMP/t134_other.csv" >/dev/null
+cp "$TMP/t134_other.csv.index" "$TMP/t134_mine.csv.index"
+_t134_before=$(cksum < "$TMP/t134_mine.csv")
+
+_t134_out=$("$CSV2" --verify-index -i "$TMP/t134_mine.csv" 2>&1)
+if [[ $_t134_out != *"the data file changed"* && $_t134_out != *"資料檔已經改變"* ]]; then
+    ok "T134a a foreign sidecar is not reported as the data file having changed / 外來的 sidecar 不會被說成「資料檔改變了」"
+else
+    bad "T134a $(print -r -- $_t134_out | head -1) / 訊息如上"
+fi
+if [[ $_t134_out == *"belongs to another"* && $_t134_out == *"屬於另一個檔案"* ]]; then
+    ok "T134b and both languages offer the explanation that fits / 而兩種語言都給出了說得通的那個解釋"
+else
+    bad "T134b the message does not mention the other possibility / 訊息沒有提到另一種可能：$(print -r -- $_t134_out | head -1)"
+fi
+assert_eq "$(cksum < "$TMP/t134_mine.csv")" "$_t134_before" \
+    "T134c and the data file really was untouched / 而那個資料檔確實一個位元組也沒被動到"
+
+# The read still succeeds by scanning: an unusable sidecar is never an error on
+# the ordinary path, only for --verify-index, which is asked to prove it.
+# 讀取仍會以掃描的方式成功：一份不可用的 sidecar 在一般路徑上絕不是錯誤，只有被要求「證明它」
+# 的 --verify-index 才會以非零結束。
+assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t134_mine.csv")" "1" \
+    "T134d and the ordinary read is right anyway, by scanning / 而一般的讀取照樣是對的，靠掃描"
+
+# ---------------------------------------------------------------------
 # T133 -- what the writer does to a value it has to re-serialise.
 #
 # Round 53: "-update a whitespace-only cell with its own value rewrites
@@ -6904,6 +7036,13 @@ if [[ "$skip" == "$want_skip" ]]; then
 else
     bad "T69b expected $want_skip SKIP(s) on this platform, the suite produced $skip / 本平台預期 $want_skip 個 SKIP，測試產生了 $skip 個"
 fi
+
+# Anything the handler caught, added back here because it could not add itself.
+# 處理常式抓到的東西，在這裡加回去——它自己加不了。
+if [[ -s $MISSING_LOG ]]; then
+    fail=$((fail + $(wc -l < "$MISSING_LOG")))
+fi
+rm -f "$MISSING_LOG"
 
 echo
 echo "====================================================================="

@@ -275,7 +275,23 @@ final class CSVIndex {
         // 每次呼叫都清掉。留著上一次 load 的理由，會讓它被報在一個毫不相干的 sidecar 上，
         // 而那比什麼都不說更糟。
         lastDiscardReason = nil
-        guard let d = FileManager.default.contents(atPath: p) else { return nil }
+        // A sidecar that exists and cannot be READ was the last silent discard:
+        // it returned nil with no reason recorded, so --verify-index answered
+        // "reason not recorded" for a condition the system had just given us in
+        // one word. Absent is still silent, and correctly so -- having no
+        // sidecar is the ordinary case, not an event.
+        // 一份「存在但讀不到」的 sidecar，是最後一種安靜的丟棄：它回傳 nil 而沒有記下理由，
+        // 於是 --verify-index 對一個「系統剛剛用一個詞告訴我們」的狀況回答「沒有記錄到理由」。
+        // 「不存在」仍然是安靜的，而那是對的——沒有 sidecar 是常態，不是事件。
+        guard let d = FileManager.default.contents(atPath: p) else {
+            if FileManager.default.fileExists(atPath: p) {
+                let e = Platform.errorText(errno)
+                announceDiscard("index \(p): cannot be read (\(e)), ignoring and scanning", for: p,
+                                reason: "it exists but cannot be read: \(e)",
+                                reasonZh: "它存在但讀不到：\(e)")
+            }
+            return nil
+        }
         // A sidecar too short to hold a header used to be the one discard that
         // said nothing at all -- indistinguishable, from the outside, from
         // having no sidecar. Every other rejection below announces itself.
@@ -332,7 +348,15 @@ final class CSVIndex {
             // error, because the operation must succeed identically without it.
             // 過期而非損毀。以 INFO 記錄後忽略——絕不是錯誤，因為沒有它時操作
             // 必須以完全相同的方式成功。
-            announceDiscard("index \(p) is stale, ignoring and scanning", for: p, reason: "stale: the data file changed", reasonZh: "過期：資料檔已經改變")
+            // "does not describe this file", not "the data file changed". The
+            // stamp says the two do not match; it cannot say which of them
+            // moved. Copy another file's sidecar into place and the old wording
+            // reported a change to a file that had not been touched, sending
+            // the reader to look for an edit nobody made.
+            // 用「不描述這個檔案」而不是「資料檔已經改變」。那個戳記說的是「兩者不相符」，
+            // 它說不出是哪一邊動了。把另一個檔案的 sidecar 複製過來，舊的說法會去回報一個
+            // 「根本沒被碰過的檔案發生了變更」，把讀者送去找一次沒有人做過的編輯。
+            announceDiscard("index \(p) is stale, ignoring and scanning", for: p, reason: "stale: it does not describe this file -- size, timestamp or content stamp differs. Either the file changed, or this sidecar belongs to another one", reasonZh: "過期：它不描述這個檔案——大小、時間戳或內容戳記不符。可能是檔案變了，也可能這份 sidecar 屬於另一個檔案")
             return nil
         }
 

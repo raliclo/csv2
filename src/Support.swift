@@ -403,8 +403,26 @@ enum KeySource {
             }
             throw fault("keyfile not found: \(p)", "找不到金鑰檔：\(p)")
         }
-        guard let d = FileManager.default.contents(atPath: p), !d.isEmpty else {
-            throw fault("keyfile is empty or unreadable: \(p)", "金鑰檔為空或無法讀取：\(p)")
+        // Three different situations answered with one sentence, before this:
+        // a directory, an unreadable file and an empty file all reported
+        // "empty or unreadable". Pointing -keyfile at a DIRECTORY is an easy
+        // slip -- the key lives in one -- and being told it might be empty
+        // sends the reader to look inside a file that is not a file.
+        // 這裡原本用同一句話回答三種不同的情況：目錄、讀不到的檔案、空檔案，全都說「為空或
+        // 無法讀取」。把 -keyfile 指到一個「目錄」是很容易發生的失手——金鑰就住在某個目錄裡
+        // ——而被告知「它可能是空的」，會把讀者送去檢查一個根本不是檔案的東西的內容。
+        var isDir: ObjCBool = false
+        _ = FileManager.default.fileExists(atPath: p, isDirectory: &isDir)
+        if isDir.boolValue {
+            throw fault("keyfile is a directory: \(p); name the key file inside it",
+                        "金鑰檔是一個目錄：\(p)；請指名它裡面的那個金鑰檔")
+        }
+        guard let d = FileManager.default.contents(atPath: p) else {
+            let e = Platform.errorText(errno)
+            throw fault("cannot read keyfile \(p): \(e)", "無法讀取金鑰檔 \(p)：\(e)")
+        }
+        guard !d.isEmpty else {
+            throw fault("keyfile is empty: \(p)", "金鑰檔是空的：\(p)")
         }
         let bytes = [UInt8](d)
 
