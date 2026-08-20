@@ -7148,7 +7148,16 @@ fi
 if (( IS_WINDOWS )); then
     skipt "T145e -o into a directory that cannot take a new file / -o 指向一個放不下新檔案的目錄 (no /dev here / 這裡沒有 /dev)"
 else
-    _t145_dev=$("$CSV2" -r -t -i "$TMP/t145.csv" -o /dev/stdout 2>&1 >/dev/null)
+    # stdout to a regular FILE, which is the case round 55 hit and the one the
+    # earlier check could not catch: /dev/stdout then resolves to /dev/fd/1,
+    # which IS a regular file, so "not a regular file" let it through. With
+    # stdout on /dev/null the older check already fired, and a version of this
+    # case written that way passed against the build that had the defect.
+    # stdout 導向一個「一般檔案」，那正是第 55 回合撞到、而先前那道檢查抓不到的情況：
+    # /dev/stdout 此時解析成 /dev/fd/1，而它**是**一般檔案，於是「不是一般檔案」放行了它。
+    # 若把 stdout 導到 /dev/null，較早那道檢查本來就會發動——這個案例的那個寫法，對「還帶著
+    # 這個缺陷的建置」照樣通過。
+    _t145_dev=$("$CSV2" -r -t -i "$TMP/t145.csv" -o /dev/stdout 2>&1 > "$TMP/t145_capture.txt")
     if [[ $_t145_dev == *"/dev/stdout"* && $_t145_dev == *"-so"* && $_t145_dev != *"/dev/fd/1"* ]]; then
         ok "T145e it names the path as typed and points at -so / 它指名打出來的那個路徑，並指向 -so"
     else
