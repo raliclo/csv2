@@ -2771,3 +2771,160 @@ Three of the four are a rule that was thought through and applied to part of
 where it holds; the fourth is the same rule applied where it does not. None of
 them is an oversight about what the right behaviour is -- that was written down
 in every case, sometimes twice, sometimes in the message text itself.
+---
+
+# 第 44 回合(2026-08-20)—— 並行、就地修正、可讀的交付物、可重現性
+
+## 先記一條「沒有通過驗證」的回報
+
+受測者把 README 這句列為「文件寫錯」:
+
+> 「它也無法在『資料檔改變、而大小、mtime、前後段位元組都沒變』時提供幫助;那個 O(1) 檢查
+> 一直就是一個啟發式。」
+
+它說自己造了三次那樣的檔案,包含一次奈秒精確的 `os.utime` 還原,而**索引每次都被判為過期**,
+因此結論是「那句話低估了自己的安全性」。
+
+**我重現不出來。** 60,000 筆、約 2 MB 的檔案,改中段一個位元組,`os.utime(ns=…)` 還原:
+
+```console
+size same: True  mtime_ns same: True
+DEBUG parallel: trusting index z.csv.index, which declares no_embedded_newlines …
+```
+
+索引**被採信**。README 那句話成立。
+
+最可能的成因是它的檔案太小:戳記包含前後各 64 bytes 的雜湊,而在一個幾百位元組的檔案上,
+「中段」就落在那個範圍裡。
+
+**這一條記在這裡,是因為它值得記。** 受測者三次嘗試都失敗,並且明說「這讓我一直以為是自己的
+測試壞了,而不是那句話錯了」——那個誠實的敘述本身就是線索:一個一再失敗的重現,通常是重現
+的問題。而它把結論寫成「文件低估了安全性」,方向與這棵樹上多數缺陷相反,更值得停下來量。
+
+## CG. 「run with -debug to see why」——而讀者正在用 -debug(2026-08-20 修正,T112e/f)
+
+```console
+$ csv2 -contains y150 -i s.csv -debug
+INFO  index s.csv.index is stale, ignoring and scanning
+DEBUG single-threaded: .csv whose index s.csv.index was discarded as not describing this file
+      -- run with -debug to see why, and --build-index to replace it
+```
+
+**理由就印在它正上方那一行。** 而那則訊息叫人去做他正在做的事。
+
+**這是我今天寫的**(AN 的修法)。當時的推理是:理由在 INFO,而 INFO 只在 `-debug` 時才顯示,
+所以「去開 -debug」對「沒開 -debug 的人」是對的建議。**那個推理漏掉了「已經開了的人」——
+而那正是唯一看得到這則訊息的人。** 沒開 -debug 的人兩行都看不到。
+
+修法是把理由帶進訊息本身,而不是叫人去別的地方找。
+
+## CH. `--verify-index` 對「過期的索引」說的是「沒有索引」(2026-08-20 修正,T112a–d)
+
+```console
+$ csv2 --verify-index -i s.csv          # sidecar 存在，只是過期
+csv2: no usable index beside s.csv
+csv2：s.csv 旁沒有可用的索引
+```
+
+**sidecar 就在那裡。** 而這個工具在別的地方對「不存在」與「存在但不能用」是分得很清楚的
+——AN 那一條就是為了這個分別而修的,同一天。這裡把兩種狀態合成了一句話。
+
+## CI. `-md` 不輸出 meta 行,而文件指定的補救方法只在 meta 行裡(2026-08-20 修正,T112g–j)
+
+第 43 回合之後,README 寫下了「`-mid` 起點超過結尾會在 rc=0 下輸出空的」以及分辨方法:
+「請讀 `--json` 結尾那行 meta 的 `records`」。
+
+而受測者指出那個補救**接不上你真正要交出去的東西**:
+
+```console
+$ csv2 -mid 500,505 -t -md -i s.csv      # 檔案只有 299 筆
+|a|b|
+|---|---|
+                                          ← 一張看起來完整的空表格，rc=0
+```
+
+`-md` 不輸出 meta 行。**偵測的管道與呈現的管道不相通。**
+
+## CJ. README 的 `--json` 範例說 21 筆——而那是對的(2026-08-20 澄清,T113)
+
+```console
+$ csv2 -r --json -i TARGET_PACKAGES.csv | tail -1
+{"meta":{"records":22,"matched":0}}
+```
+
+README:`{"meta":{"records":21,"matched":3}}`。`matched:3` 仍然正確,筆數不是。
+
+一個「指名了某個 fixture」的範例裡的數字,而那個 fixture 會變。這與 T69 守的是同一類東西
+(文件裡會漂移的數字),只是 T69 守的是 PASS 數量。
+
+## CK. 兩個人同時編輯同一個檔案:最後寫的全贏(2026-08-20 記入文件,行為不變)
+
+受測者的量測:5 次試驗,5 次都是——兩個行程 rc=0、兩筆稽核紀錄都宣稱成功、一個編輯消失。
+
+而稽核軌跡因此會說出一件不成立的事:
+
+```
+update 200000:name: "name200000" -> "BOB"
+wrote 200000 records, 4 fields, atomic rename OK
+```
+
+**每一句對那個行程都是真的,而整份軌跡對那個檔案是假的。** BOB 不在檔案裡。
+
+這是 temp file + rename 的內在後果,不是實作錯誤——rename 是不可分割的,因此讀者永遠看到
+一個完整的檔案(受測者用 80 次重疊讀取驗證了這一點,0 次撕裂),但兩個寫入者之間沒有任何
+互斥。
+
+**兩份 README 對「資料檔的並行」一個字都沒有。** 對 `-log` 有(那是 AK 修的),對資料檔沒有。
+而讀者拿到的「讀取端永遠看到完整檔案」這個保證,目前只以實作註記的形式存在
+(「寫暫存檔再 rename」),沒有被寫成一個承諾。
+
+Round 44. One reported finding did not survive verification, and it is
+recorded because the direction is unusual: the subject concluded the README
+UNDERSTATES the O(1) stamp's safety, having failed three times to build a
+same-size same-mtime change that the stamp missed. It reproduces here on a
+2 MB file. Their file was most likely small enough that its middle fell inside
+the head/tail hashes. A reproduction that keeps failing is usually the
+reproduction.
+
+### CJ 也沒有通過驗證,而它揭出的是另一件事
+
+README 的範例對它所描述的那份 fixture 是**正確的**:
+
+```
+test/fixtures/TARGET_PACKAGES.csv   21 筆   ← README 說 21
+母專案的工作複本                     22 筆   ← 受測者手上是這一份
+```
+
+**兩份同名,而 README 兩份都沒指名。** 於是那些數字描述的是一個讀者辨認不出來的檔案,而
+「哪一份漂移了」也沒有任何東西在看。
+
+修法不是改那個數字,而是:把路徑寫全,並由 **T113** 每次執行都拿範例裡的 meta 行去對照那份
+fixture 實際的產出——連同「兩份 README 的數字必須一致」。
+
+**這一輪有兩條回報沒有通過驗證(O(1) 戳記、範例筆數),而兩條都在被查證時變成了別的東西:**
+第一條什麼都不是(重現方法有問題),第二條是一個真實但不同的缺陷(同名的兩份檔案)。
+
+### CI 的修法:警告走 stderr,因為那是每一種輸出形狀都載得動的地方
+
+`-md` 不可能有 meta 行——那會破壞表格。而「起點超過結尾」與「終點被截斷」是不同的兩件事:
+後者是刻意的、由 T14c 釘住,前者則是「呼叫端要的東西沒有任何一部分可能被回傳」。
+
+因此只有前者發出 WARN,而且走 stderr:每一種輸出形狀都載得動它,不污染任何管線,而 WARN 是
+預設門檻所以不必特地要求。結束狀態仍然是 0——那次執行做了它被告知的事。
+
+### CK 沒有改行為,而那是刻意的
+
+加鎖會把「一個純粹的資料工具」變成「一個需要處理鎖檔、陳舊鎖、以及鎖在網路檔案系統上不可靠」
+的工具。而真正該說出來的是兩件事,一件是危險、一件是保證,兩件文件都沒寫:
+
+- **危險**:兩個寫入者,最後完成的全贏,靜默,3/3。
+- **保證**:讀取端永遠看到完整的檔案,因為 rename 是不可分割的。受測者用 80 次重疊讀取
+  量到 0 次撕裂。
+
+**那個保證原本只以實作註記的形式存在**(「寫暫存檔再 rename」)。沒有人能拿一個「沒有被告知
+是承諾」的機制去建構東西。兩者現在都寫進了兩份 README。
+
+Two of round 44's reports did not survive verification, and both turned into
+something else under it: the O(1) stamp claim was nothing (the reproduction was
+at fault), and the stale example number was a real but different defect -- two
+files with the same name, and the README naming neither.

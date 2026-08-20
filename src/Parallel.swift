@@ -205,8 +205,16 @@ func parallelDeclineReason(_ o: Options, format: Format) -> String? {
     // 檔案旁邊說「沒有索引」，是那種會讓人懷疑自己眼睛的說法。
     let sidecar = CSVIndex.path(for: path)
     if FileManager.default.fileExists(atPath: sidecar) {
-        return ".csv whose index \(sidecar) was discarded as not describing this file"
-            + " -- run with -debug to see why, and --build-index to replace it"
+        // The reason goes IN the message. It used to say "run with -debug to
+        // see why", which is advice for someone who is not running with
+        // -debug -- and this line is only visible to someone who is. The
+        // reader was told to do the thing they were already doing, while the
+        // answer sat one line above at INFO.
+        // 理由寫「進」訊息裡。原本寫的是「用 -debug 看原因」，那是給「沒有在用 -debug 的人」
+        // 的建議——而這一行只有正在用 -debug 的人看得到。讀者被叫去做他已經在做的事，
+        // 而答案就在上一行的 INFO 裡。
+        let why = CSVIndex.lastDiscardReason ?? "reason not recorded"
+        return ".csv whose index \(sidecar) was discarded (\(why)); --build-index replaces it"
     }
     return ".csv with no index proving one record per line; build one with --build-index"
 }

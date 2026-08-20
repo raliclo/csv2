@@ -228,7 +228,29 @@ final class CSVIndex {
     /// 重複只是雜訊；沉默才是這一帶一再產生的那種缺陷。
     private static var announced = Set<String>()
 
-    private static func announceDiscard(_ message: @autoclosure () -> String, for sidecar: String) {
+    /// Why the last `load` discarded a sidecar, in a few words, for a caller
+    /// that has to say something about it.
+    ///
+    /// Without this, two messages could only point elsewhere. The parallel
+    /// decline said "run with -debug to see why" -- to a reader who was
+    /// already running with -debug, since that is the only way to see the
+    /// message at all -- and `--verify-index` said "no usable index beside X"
+    /// with the sidecar sitting right there, conflating "absent" with "present
+    /// and unusable". Both were written on 2026-08-20, hours apart, and both
+    /// had the reason available one call away.
+    ///
+    /// 上一次 `load` 為什麼丟棄某個 sidecar，用幾個字說明，給「必須對此說點什麼」的呼叫端。
+    ///
+    /// 沒有它，兩則訊息都只能把讀者指到別處去。平行路徑的拒絕說「用 -debug 看原因」——而
+    /// 那是說給一個「已經在用 -debug」的讀者聽的，因為那是唯一看得到這則訊息的方式；
+    /// 而 `--verify-index` 說「旁邊沒有可用的索引」，當時 sidecar 就在那裡，把「不存在」與
+    /// 「存在但不能用」合成了一句話。兩者都寫於 2026-08-20，相隔數小時，而兩者要的理由
+    /// 都只差一次呼叫。
+    private(set) static var lastDiscardReason: String?
+
+    private static func announceDiscard(_ message: @autoclosure () -> String, for sidecar: String,
+                                        reason: String) {
+        lastDiscardReason = reason
         guard !announced.contains(sidecar) else { return }
         announced.insert(sidecar)
         Logger.shared.info(message())
@@ -236,6 +258,12 @@ final class CSVIndex {
 
     static func load(dataPath: String) -> CSVIndex? {
         let p = path(for: dataPath)
+        // Cleared per call. A reason left over from an earlier load would be
+        // reported against a sidecar it has nothing to do with, which is a
+        // worse failure than saying nothing.
+        // 每次呼叫都清掉。留著上一次 load 的理由，會讓它被報在一個毫不相干的 sidecar 上，
+        // 而那比什麼都不說更糟。
+        lastDiscardReason = nil
         guard let d = FileManager.default.contents(atPath: p) else { return nil }
         // A sidecar too short to hold a header used to be the one discard that
         // said nothing at all -- indistinguishable, from the outside, from
@@ -243,18 +271,16 @@ final class CSVIndex {
         // 一個短到裝不下檔頭的 sidecar，原本是唯一一種「什麼都不說」的丟棄——從外面看，
         // 與「根本沒有 sidecar」無法區分。下面每一種拒絕都會說出自己。
         guard d.count >= INDEX_HEADER_SIZE else {
-            announceDiscard(
-                "index \(p): shorter than an index header (\(d.count) bytes), ignoring and scanning",
-                for: p)
+            announceDiscard("index \(p): shorter than an index header (\(d.count) bytes), ignoring and scanning", for: p, reason: "too short to hold a header")
             return nil
         }
         let b = [UInt8](d)
         guard Array(b.prefix(8)) == INDEX_MAGIC else {
-            announceDiscard("index \(p): bad magic, ignoring and scanning", for: p)
+            announceDiscard("index \(p): bad magic, ignoring and scanning", for: p, reason: "not an index file (bad magic)")
             return nil
         }
         guard getU32(b, 8) == INDEX_VERSION else {
-            announceDiscard("index \(p): version mismatch, ignoring and scanning", for: p)
+            announceDiscard("index \(p): version mismatch, ignoring and scanning", for: p, reason: "written by a different INDEX_VERSION")
             return nil
         }
         let flags = getU32(b, 12)
@@ -284,7 +310,7 @@ final class CSVIndex {
         // 是正確的，因為它不使用索引。那正是本設計所稱「比沒有索引糟得多」的情況，
         // 而它出自那個唯一沒有被檢查的東西。
         guard getU64(b, INDEX_SUM_OFFSET) == indexChecksum(b) else {
-            announceDiscard("index \(p): checksum mismatch, ignoring and scanning", for: p)
+            announceDiscard("index \(p): checksum mismatch, ignoring and scanning", for: p, reason: "its own checksum does not match (damaged)")
             return nil
         }
 
@@ -295,7 +321,7 @@ final class CSVIndex {
             // error, because the operation must succeed identically without it.
             // 過期而非損毀。以 INFO 記錄後忽略——絕不是錯誤，因為沒有它時操作
             // 必須以完全相同的方式成功。
-            announceDiscard("index \(p) is stale, ignoring and scanning", for: p)
+            announceDiscard("index \(p) is stale, ignoring and scanning", for: p, reason: "stale: the data file changed")
             return nil
         }
 
@@ -304,7 +330,7 @@ final class CSVIndex {
         guard have >= want else {
             // Truncated. Same treatment: discard, scan. Not an error.
             // 被截斷。同樣處理：丟棄、掃描。不是錯誤。
-            announceDiscard("index \(p) is truncated (\(have) of \(want) entries), ignoring and scanning", for: p)
+            announceDiscard("index \(p) is truncated (\(have) of \(want) entries), ignoring and scanning", for: p, reason: "truncated: fewer grid entries than its record count needs")
             return nil
         }
         var offsets = [UInt64]()

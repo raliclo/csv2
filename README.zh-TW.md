@@ -653,12 +653,16 @@ $ csv2 -contains zstd -C 1 --json -i pkgs.csv
 那是 `match` 這個鍵的職責。由 T63 斷言。
 
 ```console
-$ csv2 -contains busybox --json -i TARGET_PACKAGES.csv
+$ csv2 -contains busybox --json -i test/fixtures/TARGET_PACKAGES.csv
 {"meta":{"format":"csv","headers":1,"fields":7}}
 {"record":1,"field":1,"header_en":"pkg_name","value":"busybox","line":2}
 {"record":1,"field":4,"header_en":"source","value":"fork raliclo/busybox …"}
 {"meta":{"records":21,"matched":3}}
 ```
+
+此處把路徑寫全，因為那些數字取決於它。母專案自己保有一份該檔案的工作複本，而它已經往前走了
+——撰寫本文時是 22 筆——因此拿這個範例去跑那一份的讀者會得到不同的數字，而且無從知道範例
+指的是哪一份。由 T113 斷言：這一段裡的筆數，每一次執行都會與 fixture 比對。
 
 JSON Lines。**第一行**是 metadata，帶出 csv2「認為」自己正在讀的格式，讓呼叫端可以
 斷言 `headers` 是否符合預期，而不是默默接受一個猜錯的解析。**最後一行**帶總數：它們
@@ -730,6 +734,17 @@ busybox,1.37.0,"fork raliclo/busybox, branch develop",GPL-2.0
 **一個什麼都沒找到的搜尋，以 `0` 結束。** `-contains` 回報的是它找到了什麼；沒找到不是錯誤。
 因此 `if csv2 -contains X -i f.csv` 不是「存在性」的判斷——兩種情況它都成功。要問那個問題，
 請讀 `--json` 結尾那行 meta 的 `matched`。
+
+**兩個行程同時編輯同一個檔案：最後完成的那個全贏，而且是靜默的。** 兩邊都以 0 結束、兩邊都
+寫下一筆「自己成功了」的稽核紀錄，而其中一個編輯不在檔案裡。在一個 2,000 筆的檔案上，以兩個
+並行的 `-update --in-place` 實測，3 次有 3 次如此。csv2 不加鎖，而它裡面沒有任何東西會告訴你
+這件事發生了——`-log` 的每一筆對「它自己那個行程」都是真的，而整份軌跡對「那個檔案」是錯的。
+**如果有兩個寫入者可能碰到同一個檔案，請自己把它們排成序列。**
+
+**而讀取端，永遠不會看到一個寫到一半的檔案。** 輸出寫的是暫存檔，再 rename 到位，而 rename
+是不可分割的，因此並行的讀取者拿到的要嘛是完整的舊檔、要嘛是完整的新檔，絕不會是兩者的混合
+——即使寫入者正做到一半。那是一個可以拿來建構東西的承諾，不是實作細節：暫存檔加 rename 存在
+的理由就是它。
 
 **`--in-place` 同樣成立，而且在那裡更要緊：** 失敗的就地編輯會讓原檔**逐位元原封不動**，
 旁邊也不會留下暫存檔。這是唯一沒有退路的一條保證——用 `-o` 時輸出錯了你手上還有輸入，

@@ -4913,11 +4913,26 @@ t107_build short; short_out=$(t107_debug)
 assert_contains "$none_out" "no index proving one record per line" \
     "T107a with no sidecar the message says there is none / 沒有 sidecar 時，訊息說的是沒有"
 
-assert_contains "$stale_out" "t107.csv.index was discarded as not describing this file" \
-    "T107b with a stale sidecar it names the sidecar instead of denying it exists / sidecar 過期時，訊息指名它，而不是否認它存在"
+# The reason is IN the message now, so these assert the reason and not only
+# the naming. The message used to end "run with -debug to see why" -- advice
+# for a reader who is not running with -debug, on a line only visible to one
+# who is.
+# 理由現在寫「在」訊息裡，因此這兩條斷言的是「理由」，不只是「有沒有指名」。那則訊息原本
+# 以「用 -debug 看原因」結尾——那是給「沒有在用 -debug 的人」的建議，卻印在一行只有「正在
+# 用 -debug 的人」才看得到的訊息上。
+assert_contains "$stale_out" "t107.csv.index was discarded (stale" \
+    "T107b with a stale sidecar it names the sidecar AND why / sidecar 過期時，訊息指名它，並說出為什麼"
 
-assert_contains "$short_out" "t107.csv.index was discarded as not describing this file" \
-    "T107c and a sidecar too short to hold a header is the same kind of answer / 短到裝不下檔頭的 sidecar 得到同一類答案"
+assert_contains "$short_out" "t107.csv.index was discarded (too short" \
+    "T107c and a sidecar too short to hold a header says that, not the same sentence / 短到裝不下檔頭的 sidecar 說的是那件事，而不是同一句話"
+
+# The two reasons must differ, or naming them is decoration.
+# 兩個理由必須不同，否則「指名理由」只是裝飾。
+if [[ "${stale_out#*discarded}" != "${short_out#*discarded}" ]]; then
+    ok "T107f and the two reasons are different sentences / 而那兩個理由是不同的句子"
+else
+    bad "T107f the two discards give the same reason / 兩種丟棄給出同一個理由"
+fi
 
 # The reason must be there, and exactly once. A duplicate reads as two
 # sidecars; a silence is the defect this area keeps producing.
@@ -5354,6 +5369,156 @@ got=$("$CSV2" -get 1:2 -i "$TMP/t111_ok.csv2")
 want=$'line one\nline two'
 assert_eq "$got" "$want" \
     "T111m and a value written the way it says round-trips as a real newline / 而依它所說寫出的值，會還原成一個真正的換行"
+
+# ---------------------------------------------------------------------
+# T112 -- two messages that pointed elsewhere instead of answering.
+#
+# (a) `--verify-index` said "no usable index beside X" with the sidecar sitting
+#     right there. This tool separates "absent" from "present and unusable"
+#     everywhere else -- the parallel decline was fixed for exactly that
+#     distinction hours earlier the same day -- and the one verb whose entire
+#     job is to report on a sidecar collapsed the two.
+#
+# (b) The parallel decline ended "run with -debug to see why". That is advice
+#     for a reader who is NOT running with -debug, printed on a line only a
+#     reader who IS can see. The answer was one line above, at INFO. The reason
+#     is in the message now.
+#
+# (c) A `-mid` window that begins past the end returns nothing at rc=0, which
+#     is indistinguishable from a window that exists and is empty. The
+#     documented way to tell them apart is `records` on the trailing `--json`
+#     meta line -- and `-md`, the shape you actually hand to a person, has no
+#     meta line at all: it renders a complete-looking empty table. The
+#     detection channel and the presentation channel did not compose.
+#
+# T112 —— 兩則「把讀者指到別處，而不是回答他」的訊息。
+# (a) `--verify-index` 在 sidecar 就躺在那裡時說「旁邊沒有可用的索引」。這個工具在其他每一處
+#     都把「不存在」與「存在但不能用」分開——平行路徑的拒絕就是為了這個分別而在同一天稍早
+#     修過的——而唯一一個「整份工作就是回報某個 sidecar」的動詞，把兩者合成了一句。
+# (b) 平行路徑的拒絕以「用 -debug 看原因」結尾。那是給「沒有在用 -debug 的人」的建議，卻印在
+#     一行只有「正在用 -debug 的人」看得到的訊息上。答案就在上一行的 INFO 裡。
+# (c) 起點在結尾之後的 `-mid` 視窗會在 rc=0 下什麼都不回傳，與「存在且為空的視窗」無法區分。
+#     文件指定的分辨方法是 `--json` 結尾 meta 的 `records`——而 `-md`，也就是你真正交給人的
+#     那個形狀，根本沒有 meta 行：它算繪出一張看起來完整的空表格。
+# ---------------------------------------------------------------------
+echo
+echo "--- T112: messages that answer instead of redirecting / 會回答而不是轉介的訊息 ---"
+
+print -r -- 'a,b' > "$TMP/t112.csv"
+for i in {1..300}; do print -r -- "$i,x$i"; done >> "$TMP/t112.csv"
+
+# No sidecar at all.
+# 完全沒有 sidecar。
+rm -f "$TMP/t112.csv.index"
+absent=$("$CSV2" --verify-index -i "$TMP/t112.csv" 2>&1)
+assert_contains "$absent" "no index beside" \
+    "T112a with no sidecar --verify-index says there is none / 沒有 sidecar 時，--verify-index 說的是沒有"
+
+# Present, and stale.
+# 存在，而且過期。
+"$CSV2" --build-index -i "$TMP/t112.csv" >/dev/null 2>&1
+print -r -- 'a,b' > "$TMP/t112.csv"
+for i in {1..300}; do print -r -- "$i,y$i"; done >> "$TMP/t112.csv"
+stale=$("$CSV2" --verify-index -i "$TMP/t112.csv" 2>&1)
+assert_contains "$stale" "exists but cannot be used" \
+    "T112b with a stale sidecar it says the sidecar exists and cannot be used / sidecar 過期時，它說那個 sidecar 存在但不能用"
+assert_contains "$stale" "stale" \
+    "T112c and names which of its claims failed / 並指出是它的哪一項宣稱不成立"
+
+# The two must not be the same sentence, or separating them was decoration.
+# 兩者不能是同一句話，否則「把它們分開」只是裝飾。
+if [[ "$absent" != "$stale" ]]; then
+    ok "T112d and the two states do not read alike / 而那兩種狀態讀起來不一樣"
+else
+    bad "T112d absent and unusable still give the same message / 「不存在」與「不能用」仍然給出同一則訊息"
+fi
+
+# (b) The decline must carry its reason, not a pointer to where the reason is.
+# (b) 拒絕訊息必須帶著它的理由，而不是指向理由在哪裡。
+dec=$(CSV2_PARALLEL_MIN_BYTES=100 "$CSV2" -contains y150 -i "$TMP/t112.csv" -debug 2>&1 >/dev/null)
+assert_contains "$dec" "discarded (stale" \
+    "T112e the parallel decline carries the reason itself / 平行路徑的拒絕自己帶著理由"
+if [[ "$dec" == *"run with -debug"* ]]; then
+    bad "T112f the message still tells a -debug reader to run with -debug / 那則訊息仍在叫一個正在用 -debug 的讀者去用 -debug"
+else
+    ok "T112f and no longer tells a -debug reader to run with -debug / 而且不再叫一個正在用 -debug 的讀者去用 -debug"
+fi
+
+# (c) A window past the end says so, on stderr, where every output shape can
+# carry it -- including -md, which has no meta line to put it in.
+# (c) 起點在結尾之後的視窗會說出來，走 stderr，那裡每一種輸出形狀都載得動它——包括 -md，
+# 它沒有 meta 行可以放。
+md_err=$("$CSV2" -mid 500,505 -t -md -i "$TMP/t112.csv" 2>&1 >/dev/null)
+assert_contains "$md_err" "starts after the last record" \
+    "T112g a -mid window past the end says so even under -md / 起點超過結尾的 -mid 視窗，即使在 -md 下也會說出來"
+
+assert_succeeds "T112h and it stays a success, because the run did what it was told / 而它仍然是成功，因為那次執行做了它被告知的事" -- \
+    "$CSV2" -mid 500,505 -t -md -i "$TMP/t112.csv"
+
+# A window that exists must stay silent, or the warning is noise.
+# 一個確實存在的視窗必須保持安靜，否則那個警告只是雜訊。
+quiet=$("$CSV2" -mid 5,6 -i "$TMP/t112.csv" 2>&1 >/dev/null)
+assert_eq "${#quiet}" "0" \
+    "T112i while a window that exists says nothing / 而一個確實存在的視窗什麼都不說"
+
+# Clamping the END is deliberate and asserted by T14c; it must not warn.
+# 截斷「終點」是刻意的，由 T14c 釘住；它不能發出警告。
+quiet2=$("$CSV2" -mid 299,999 -i "$TMP/t112.csv" 2>&1 >/dev/null)
+assert_eq "${#quiet2}" "0" \
+    "T112j and a clamped END stays silent, as it was designed to / 而被截斷的「終點」保持安靜，一如它的設計"
+
+# ---------------------------------------------------------------------
+# T113 -- the numbers in the README's worked example, checked against the file
+# it names.
+#
+# A blind-test subject reported the `--json` example as stale: it shows
+# `records:21` and the TARGET_PACKAGES.csv they had held 22. Both were right.
+# The example describes `test/fixtures/TARGET_PACKAGES.csv`, which has 21; the
+# parent project keeps its own working copy of the same filename and it has
+# moved on. The README named neither, so there was no way to tell which one it
+# meant -- and no way to notice when the one it did mean changes.
+#
+# The path is spelled out now, and this pins the numbers. It is the same class
+# of drift T69 guards for PASS counts: a number in prose that describes
+# something which moves, with nothing re-checking it.
+#
+# T113 —— README 範例裡的數字，對照它所指名的那個檔案來檢查。
+# 一位盲測受測者把那段 `--json` 範例回報為過期：它寫 `records:21`，而他手上的
+# TARGET_PACKAGES.csv 有 22 筆。兩邊都沒錯。那個範例描述的是 `test/fixtures/` 底下那一份
+# （21 筆）；母專案自己保有一份同名的工作複本，而它已經往前走了。README 兩份都沒指名，
+# 因此無從判斷它指的是哪一份——也無從在它所指的那一份改變時察覺。
+# 現在路徑寫全了，而這個案例把數字釘住。它與 T69 守的是同一類漂移：散文裡一個描述「會變動
+# 的東西」的數字，而沒有任何東西回頭複查它。
+# ---------------------------------------------------------------------
+echo
+echo "--- T113: the worked example's numbers / 範例裡的那些數字 ---"
+
+t113_meta=$("$CSV2" -contains busybox --json -i "$PKG" 2>/dev/null | tail -1)
+# Anchored on the busybox block, not on the first meta line in the file --
+# there is more than one worked example and the first belongs to a different
+# one. The first attempt at this case compared against that other example and
+# failed, which is the case doing its job on itself.
+# 錨定在 busybox 那一段，而不是檔案裡的第一行 meta——範例不只一個，而第一個屬於另一段。
+# 本案例的第一版比對到了那另一段而失敗，那正是這個案例對它自己起了作用。
+t113_readme=$(grep -A6 'csv2 -contains busybox --json' "$ROOT/README.md" \
+    | grep -o '{"meta":{"records":[0-9]*,"matched":[0-9]*}}' | head -1)
+
+assert_eq "$t113_meta" "$t113_readme" \
+    "T113a the README's meta line matches what the fixture it names produces / README 的 meta 行與它所指名的 fixture 實際產出相符"
+
+# Both READMEs have to carry the same numbers, or one of them is wrong for a
+# reader who only has that one.
+# 兩份 README 必須帶著相同的數字，否則其中一份對「只有那一份」的讀者是錯的。
+t113_zh=$(grep -A6 'csv2 -contains busybox --json' "$ROOT/README.zh-TW.md" \
+    | grep -o '{"meta":{"records":[0-9]*,"matched":[0-9]*}}' | head -1)
+assert_eq "$t113_zh" "$t113_readme" \
+    "T113b and the two READMEs agree with each other / 而兩份 README 彼此一致"
+
+# The path has to be in the example, or the numbers describe a file the reader
+# cannot identify.
+# 路徑必須寫在範例裡，否則那些數字描述的是一個讀者辨認不出來的檔案。
+assert_contains "$(grep -A1 'csv2 -contains busybox --json' "$ROOT/README.md" | head -1)" "test/fixtures/" \
+    "T113c and the example names which copy it is reading / 而範例指名了它讀的是哪一份複本"
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"

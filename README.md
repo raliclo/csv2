@@ -778,12 +778,18 @@ matched, not which of the objects above it they were. That is what `match` is
 for. Asserted by T63.
 
 ```console
-$ csv2 -contains busybox --json -i TARGET_PACKAGES.csv
+$ csv2 -contains busybox --json -i test/fixtures/TARGET_PACKAGES.csv
 {"meta":{"format":"csv","headers":1,"fields":7}}
 {"record":1,"field":1,"header_en":"pkg_name","value":"busybox","line":2}
 {"record":1,"field":4,"header_en":"source","value":"fork raliclo/busybox …"}
 {"meta":{"records":21,"matched":3}}
 ```
+
+The path is spelled out because the counts depend on it. The parent project
+keeps its own working copy of that file and it has moved on — 22 records at the
+time of writing — so a reader who runs this against that copy gets a different
+number and has no way to know which of the two the example meant. Asserted by
+T113: the count in this block is checked against the fixture on every run.
 
 JSON Lines. The **first** line is metadata describing the format csv2 believes
 it is reading, so a caller can assert `headers` is what it expected instead of
@@ -875,6 +881,20 @@ from the trailing `--json` meta line.
 
 A run that fails writes nothing to `-o`, because output goes to a temp file
 that is renamed only after everything else worked.
+
+**Two processes editing one file: the last one to finish wins, silently.**
+Both exit 0, both write an audit entry saying they succeeded, and one of the
+two edits is not in the file. Measured 3 times out of 3 on a 2,000-record file
+with two concurrent `-update --in-place` runs. csv2 takes no lock, and nothing
+in it will tell you this happened — the `-log` entries are each true of their
+own process and the trail as a whole is then wrong about the file. **If two
+writers can reach the same file, serialise them yourself.**
+
+**A reader, on the other hand, never sees a half-written file.** Output goes to
+a temp file and is renamed into place, and rename is atomic, so a concurrent
+reader gets either the whole old file or the whole new one and never a mixture
+— even while a writer is part-way through. That is a promise you can build on,
+not an implementation detail: it is why the temp-file-and-rename is there.
 
 **The same holds for `--in-place`, where it matters more:** a failed in-place
 edit leaves the original **byte-for-byte unchanged**, and leaves no temp file

@@ -242,7 +242,24 @@ func runVerifyIndex(_ o: Options) throws {
     let plan = try openInput(o)
     defer { plan.source.close() }
     guard let idx = CSVIndex.load(dataPath: path) else {
-        throw fault("no usable index beside \(path)", "\(path) 旁沒有可用的索引")
+        // "No usable index" was said with the sidecar sitting right there.
+        // This tool separates "absent" from "present and unusable" everywhere
+        // else -- the parallel decline was fixed for exactly that distinction
+        // earlier the same day -- and --verify-index, whose whole job is to
+        // report on a sidecar, collapsed the two.
+        // 原本在 sidecar 就躺在那裡時說「沒有可用的索引」。這個工具在其他每一處都把
+        // 「不存在」與「存在但不能用」分開——平行路徑的拒絕就是為了這個分別而在同一天
+        // 稍早修過的——而 --verify-index 這個「整份工作就是回報某個 sidecar」的動作，
+        // 卻把兩者合成了一句。
+        let sidecar = CSVIndex.path(for: path)
+        if FileManager.default.fileExists(atPath: sidecar) {
+            let why = CSVIndex.lastDiscardReason ?? "reason not recorded"
+            throw fault(
+                "index \(sidecar) exists but cannot be used: \(why). It was not compared against the data; --build-index replaces it",
+                "索引 \(sidecar) 存在但無法使用：\(why)。它並未與資料比對過；--build-index 可以重建它")
+        }
+        throw fault("no index beside \(path); --build-index creates one",
+                    "\(path) 旁沒有索引；--build-index 可以建立一個")
     }
     var headers: [Record] = []
     var n = 0
@@ -651,6 +668,39 @@ func runSelect(_ o: Options) throws {
     // 索引只在其餘一切都成功之後才寫，且絕不允許它把一個已完成的操作變成失敗。
     if let b = builder, let path = o.input, let idx = b.finish(dataPath: path) {
         idx.save(dataPath: path)
+    }
+
+    // A window that begins past the end of the file produces no rows and
+    // exits 0, which is indistinguishable from a window that exists and is
+    // empty. Clamping the END is deliberate and asserted (T14c); this is the
+    // other edge, where nothing the caller asked for could ever have been
+    // returned.
+    //
+    // The documented way to tell the two apart is `records` on the trailing
+    // `--json` meta line -- and that channel does not exist in the shape you
+    // actually hand to a person. `-md` renders a complete-looking empty table:
+    //
+    //     $ csv2 -mid 500,505 -t -md -i s.csv      # the file has 299 records
+    //     |a|b|
+    //     |---|---|
+    //
+    // So the warning goes to stderr, where every output shape can carry it and
+    // no pipeline is polluted by it. WARN is the default threshold, so it is
+    // seen without asking. It is not an error: the run did what it was told
+    // and the exit status stays 0.
+    //
+    // 一個「起點在檔案結尾之後」的視窗不會產生任何列，並以 0 結束——那與「一個確實存在、
+    // 而且是空的視窗」無法區分。截斷「終點」是刻意的、也有測試釘住（T14c）；這裡是另一端，
+    // 呼叫端所要求的東西沒有任何一部分可能被回傳。
+    //
+    // 文件指定的分辨方法是 `--json` 結尾那行 meta 的 `records`——而那個管道在「你真正交出去
+    // 的形狀」裡並不存在：`-md` 會算繪出一張看起來完整的空表格。
+    //
+    // 因此警告走 stderr，那裡每一種輸出形狀都載得動它，也不會污染任何管線。WARN 是預設門檻，
+    // 所以不必特地要求就看得到。它不是錯誤：這次執行做了它被告知的事，結束狀態仍然是 0。
+    if let (a, _) = o.mid, seen > 0, a > seen {
+        Logger.shared.warn(
+            "-mid \(a) starts after the last record (\(seen)), so nothing was selected; this is not an error and the exit status is 0")
     }
 
     Logger.shared.debug("format=\(plan.format.rawValue) fields=\(expectedFields) records=\(seen)")
