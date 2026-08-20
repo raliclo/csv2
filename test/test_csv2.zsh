@@ -6750,6 +6750,108 @@ assert_eq "$(wc -l < "$TMP/t138.err" | tr -d ' ')" "2" \
     "T138c while an open stderr still gets the two lines / 而開著的 stderr 仍然收到那兩行"
 
 # ---------------------------------------------------------------------
+# T139 -- combinations nobody enumerated.
+#
+# Every other case here was written because someone thought of it. This one
+# generates edit chains at random over degenerate files and checks the four
+# properties that must hold whatever the combination is:
+#
+#   - the exit status is 0 or 1, never a crash;
+#   - a refusal is never silent;
+#   - after any accepted edit the file is still one csv2 can read, or is
+#     refused loudly -- never garbage read back as data;
+#   - no temp file is left beside it.
+#
+# The seed is fixed and printed, and a failure prints the exact argv, because
+# a fuzz case nobody can reproduce is worse than none. zsh's RANDOM sequence is
+# not guaranteed identical across builds, which is fine: any sequence is a
+# valid test of properties that must hold for all of them.
+#
+# This case checks PROPERTIES rather than reproducing a known defect, so it can
+# pass without proving anything. Each of the four checks was inverted in a copy
+# of this file on 2026-08-21 and each one reported, naming the argv and the
+# seed file -- that is what says the harness can speak, and it is the part a
+# fuzz case usually lacks.
+# 這個案例檢查的是「性質」，不是重現某個已知缺陷，因此它可能在什麼也沒證明的情況下通過。
+# 2026-08-21 曾把那四項檢查各自反轉、各跑一份副本，四項都發了聲並指出 argv 與種子檔——
+# 那才是「這個框架說得出話」的證據，而那正是 fuzz 案例通常缺少的部分。
+#
+# T139 —— 沒有人列舉過的組合。
+# 這裡其他每一個案例，都是因為有人想到了才存在。這一個在退化的檔案上隨機產生「連續編輯」，
+# 並檢查四項「無論組合是什麼都必須成立」的性質：結束狀態只能是 0 或 1；拒絕不得沉默；
+# 任何被接受的編輯之後，檔案仍然是 csv2 讀得回來的（或被大聲拒絕），而不是被當成資料讀進去
+# 的垃圾；旁邊不留下暫存檔。
+# 種子固定且會印出，失敗時印出完整的 argv——一個沒有人能重現的 fuzz 案例，比沒有更糟。
+# ---------------------------------------------------------------------
+echo
+echo "--- T139: random edit chains over degenerate files / T139：退化檔案上的隨機連續編輯 ---"
+
+RANDOM=20260821
+echo "[Info] T139 seed: 20260821"
+
+t139_seed_file() {   # name -> writes $TMP/t139_<name>.csv
+    case $1 in
+        plain)      printf 'a,b,c\n1,x,p\n2,y,q\n' ;;
+        headeronly) printf 'a,b,c\n' ;;
+        nonewline)  printf 'a,b,c\n1,x,p' ;;
+        quoted)     printf 'a,b,c\n1,"x,y","he said ""hi"""\n' ;;
+        embedded)   printf 'a,b,c\n1,"line1\nline2",p\n' ;;
+        unicode)    printf 'a,b,c\n1,caf\xc3\xa9\xf0\x9f\x9a\x80,p\n' ;;
+        spaces)     printf 'a,b,c\n1,"   ",p\n' ;;
+    esac
+}
+
+t139_bad=0
+t139_runs=0
+for _name in plain headeronly nonewline quoted embedded unicode spaces; do
+    for _trial in 1 2 3; do
+        _f="$TMP/t139_${_name}_${_trial}.csv"
+        t139_seed_file $_name > "$_f"
+        for _step in 1 2 3; do
+            case $((RANDOM % 7)) in
+                0) _args=(-update 1:2 "V$RANDOM") ;;
+                1) _args=(-insert $((RANDOM % 3 + 1)) 'n1,n2,n3') ;;
+                2) _args=(-append 'z1,z2,z3') ;;
+                3) _args=(-delete $((RANDOM % 3 + 1))) ;;
+                4) _args=(-delete -cell 1:1) ;;
+                5) _args=(-delete -col $((RANDOM % 3 + 1))) ;;
+                6) _args=(-hash a) ;;
+            esac
+            _err=$("$CSV2" $_args -i "$_f" --in-place 2>&1 >/dev/null)
+            _rc=$?
+            t139_runs=$((t139_runs + 1))
+            if (( _rc != 0 && _rc != 1 )); then
+                bad "T139 exit $_rc from: $_args on $_name / 由上述組合產生的結束狀態"
+                t139_bad=1; break
+            fi
+            if (( _rc == 1 )) && [[ -z ${_err//[[:space:]]/} ]]; then
+                bad "T139 a silent refusal from: $_args on $_name / 沉默的拒絕"
+                t139_bad=1; break
+            fi
+            _rerr=$("$CSV2" -r -t -i "$_f" 2>&1 >/dev/null)
+            _rrc=$?
+            if (( _rrc != 0 && _rrc != 1 )); then
+                bad "T139 unreadable after: $_args on $_name (exit $_rrc) / 編輯後讀不回來"
+                t139_bad=1; break
+            fi
+            if (( _rrc == 1 )) && [[ -z ${_rerr//[[:space:]]/} ]]; then
+                bad "T139 the read refused silently after: $_args on $_name / 編輯後的讀取沉默地拒絕了"
+                t139_bad=1; break
+            fi
+        done
+        _leftovers=$(print -r -- "$TMP"/.t139_${_name}_${_trial}.csv.csv2tmp.*(N))
+        if [[ -n $_leftovers ]]; then
+            bad "T139 temp file left: $_leftovers / 留下了暫存檔"
+            t139_bad=1
+        fi
+        rm -f "$_f" "$_f.index"
+    done
+done
+if (( t139_bad == 0 )); then
+    ok "T139 $t139_runs random edits: no crash, no silent refusal, nothing left behind, and every file still readable / $t139_runs 次隨機編輯：沒有當機、沒有沉默的拒絕、沒有殘留，而每個檔案都仍然讀得回來"
+fi
+
+# ---------------------------------------------------------------------
 # T136 -- claims the README makes that nothing had checked.
 #
 # Round 53 found each of these by reading the README and then measuring:
