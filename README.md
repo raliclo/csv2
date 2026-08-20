@@ -296,7 +296,13 @@ EDITING / 編輯
   -delete a[,b]         delete record a, or records a through b
   -delete -cell r:c     clear one cell (the field count never changes)
   -delete -col N|NAME   remove that column from every record AND from both
-                        header rows -- the one deletion that keeps alignment
+                        header rows -- the one deletion that keeps alignment.
+                        ONE column, not a list: `-delete -col a,b` names a
+                        column called `a,b`, which is also how a name
+                        containing a comma is reached at all. A NUMBER is
+                        resolved against the file as it is now, so running
+                        `-delete -col 1` twice removes two different columns --
+                        the second run's `1` is what used to be `2`
   -update r:c VAL       update one cell
   --truncate-partial    when READING, drop a record left unfinished at EOF by
                         an unclosed quote, instead of failing. A trailing
