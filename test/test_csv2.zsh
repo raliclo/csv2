@@ -7020,6 +7020,14 @@ else
         # The stamp rejected the file, so this platform's touch -r did not
         # carry the nanoseconds and the hazard cannot be staged here.
         # 戳記否決了這個檔案，表示這個平台的 touch -r 沒有帶上奈秒，無法在此佈置這個情境。
+        # Recorded for T69b. It cannot probe this itself: deciding whether
+        # touch -r carried the nanoseconds needs to READ them, and the guest
+        # has no stat at all -- which is the same platform that skips here.
+        # The case that made the skip is the only thing that knows.
+        # 記錄下來給 T69b。它自己探測不到：要判斷 touch -r 有沒有帶上奈秒就得「讀」到奈秒，
+        # 而 guest 根本沒有 stat——而那正是會在這裡跳過的同一個平台。知道這件事的，只有
+        # 「造成這次跳過」的那個案例本身。
+        T143_SKIPPED=1
         skipt "T143 an index the O(1) stamp still accepts / 一份 O(1) 戳記仍然接受的索引 (touch -r did not carry the nanoseconds here / 此平台的 touch -r 沒有帶上奈秒)"
     elif [[ $_t143_indexed != $_t143_scanned ]]; then
         ok "T143a the documented hazard is still reachable: indexed says $_t143_indexed, a scan says $_t143_scanned / 有文件記載的那個風險仍然可達：索引說 $_t143_indexed，掃描說 $_t143_scanned"
@@ -7718,6 +7726,15 @@ else
     chmod 000 "$TMP/t69_probe_unreadable" 2>/dev/null
     [[ -r "$TMP/t69_probe_unreadable" ]] && (( want_skip += 1 ))   # T135c
     chmod 644 "$TMP/t69_probe_unreadable" 2>/dev/null
+    # T143, which skips where `touch -r` does not carry nanoseconds. Taken from
+    # the flag that case sets rather than re-derived: reading a timestamp to
+    # that precision needs stat, and the platform that skips is the one without
+    # it. If T143 ever stops RUNNING, this variable stays unset, want_skip
+    # drops, and the count mismatches -- which is what this check is for.
+    # T143：在 `touch -r` 不帶奈秒的平台上會跳過。這裡取的是那個案例設下的旗標，而不是重新
+    # 推導：要讀到那個精度的時間戳需要 stat，而會跳過的那個平台正好沒有它。若 T143 哪天
+    # 「不再執行」，這個變數就不會被設定、want_skip 會變小、數量對不上——那正是這個檢查的用途。
+    (( ${T143_SKIPPED:-0} )) && (( want_skip += 1 ))
 fi
 if [[ "$skip" == "$want_skip" ]]; then
     ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
