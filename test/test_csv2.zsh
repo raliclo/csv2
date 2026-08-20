@@ -7157,6 +7157,7 @@ fi
 # -o 指向一個放不下暫存檔的目錄。第 55 回合撞到的是 /dev；訊息必須指名「打出來的那個路徑」
 # 與出路。
 if (( IS_WINDOWS )); then
+    T145E_SKIPPED=1
     skipt "T145e -o into a directory that cannot take a new file / -o 指向一個放不下新檔案的目錄 (no /dev here / 這裡沒有 /dev)"
 else
     # stdout to a regular FILE, which is the case round 55 hit and the one the
