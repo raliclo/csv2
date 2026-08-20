@@ -4875,6 +4875,153 @@ assert_eq "$(print -r -- "$stale_out" | grep -c 'is stale, ignoring and scanning
 assert_contains "$short_out" "shorter than an index header" \
     "T107e and a sidecar too short to read says so, where it used to say nothing / 而短到讀不了的 sidecar 會說出來，那裡原本什麼都不說"
 
+# ---------------------------------------------------------------------
+# T108 -- the parallel path's memory, which nothing had ever measured.
+#
+# T9a/b/c pin the streaming path at a flat RSS and are correct. They say
+# nothing about the parallel path, and neither did anything else, so this held
+# for as long as the parallel path has existed: peak RSS came to about one
+# byte per byte of input. 615 MB in, 608 MB resident -- while the
+# single-threaded path over the same file stayed at 9.5 MB.
+#
+# The cause was `planChunks`, which walks the WHOLE file to learn each chunk's
+# first record number, reading it in 1 MiB `Data` objects with no autorelease
+# pool. On Darwin those survive until the process exits. It is the third site
+# of the identical defect: ByteSource.next carries the same comment, and the
+# parallel worker's read loop needed the same fix the same day.
+#
+# What identified it was forcing exactly one chunk in flight at a time. Peak
+# RSS moved by half a percent -- 637 MB against 640 MB. Nothing that scales
+# with work IN FLIGHT can behave like that, which ruled out the workers and
+# left the one loop that touches every byte outside a pool.
+#
+# T108 —— 平行路徑的記憶體，那是從來沒有人量過的東西。
+# T9a／T9b／T9c 把串流路徑釘在一個平坦的 RSS 上，而它們是對的。它們對平行路徑什麼也沒說，
+# 而別的東西也沒有，於是這件事在平行路徑存在的整段時間裡都成立：峰值 RSS 大約是「輸入每一個
+# 位元組對應一個位元組」。讀進 615 MB、常駐 608 MB——而同一個檔案在單執行緒路徑上是 9.5 MB。
+# 成因是 `planChunks`：它為了讓每個區塊知道自己第一筆的編號而走過「整個檔案」，以 1 MiB 的
+# `Data` 讀取，而且沒有 autorelease pool。在 Darwin 上那些會活到行程結束。這是同一個缺陷的
+# 第三個發生地：`ByteSource.next` 帶著同一段註解，而平行工作者的讀取迴圈在同一天需要同樣的修正。
+# 識別出它的，是「強制同時只有一個區塊在飛」那次量測：峰值 RSS 只動了百分之零點五（637 MB
+# 對 640 MB）。任何隨「同時在飛的工作量」而變的東西都不可能是這種行為。
+# ---------------------------------------------------------------------
+echo
+echo "--- T108: the parallel path's memory does not track the file / 平行路徑的記憶體不跟著檔案走 ---"
+
+# `.csv2` is used because the format itself guarantees one record per line, so
+# the parallel path is eligible with no index to build.
+# 使用 `.csv2`，因為這個格式本身保證一筆一行，於是不必建立索引，平行路徑就已符合資格。
+# Written by one loop per file rather than by concatenating a block. The first
+# version built a block and appended `tail -n +3` of it repeatedly, and the
+# result did not parse -- csv2 refused it at record 1 with a field-count error,
+# so the runs exited 1 and printed no metrics line at all. The readings were
+# then EMPTY, empty became 0 in the arithmetic, and 0 sailed under the bound:
+# the case reported "costs 0B" and passed, against a build with the defect
+# fully present. Hence the emptiness check below, and this simpler fixture.
+# 每個檔案各用一個迴圈寫出，而不是把一個區塊重複串接。第一版先造一個區塊、再反覆附加它的
+# `tail -n +3`，而那個結果剖析不了——csv2 在第 1 筆就以欄數錯誤拒絕它，於是那兩次執行以 1
+# 結束、完全沒有印出 metrics 行。讀數因此是「空的」，空的在算術裡變成 0，而 0 輕鬆通過了
+# 下面那個界限：這個案例回報「只多花 0B」並且通過了——而當時的建置帶著完整的缺陷。
+# 下面那道「是否為空」的檢查，以及這個比較單純的 fixture，都是因此而來。
+t108_make() {   # $1 = output, $2 = how many data records
+    local i
+    {
+        print -r -- 'id,note'
+        print -r -- 'text,text'
+        for i in {1..$2}; do print -r -- "$i,padding padding padding padding padding padding"
+        done
+    } > "$1"
+}
+# 10 MB against 40 MB, not 1 MB against 10 MB. Below roughly 10 MB the number
+# being measured is still the working set ramping up -- ten workers, their
+# buffers, the allocator's first arenas -- and that ramp is steeper than the
+# retention being tested for, so the case failed on a build that was correct.
+# Both sizes here sit above the ramp, where what changes with the input is the
+# input.
+# 用 10 MB 對 40 MB，而不是 1 MB 對 10 MB。大約 10 MB 以下，量到的還是「工作集正在爬升」
+# ——十個工作者、它們的緩衝區、配置器最初的 arena——而那個爬升比這裡要測的「保留」還陡，
+# 於是這個案例在一個正確的建置上失敗了。這裡的兩個尺寸都在爬升段之上，那裡隨輸入而變的
+# 就是輸入本身。
+t108_make "$TMP/t108_small.csv2" 200000
+t108_make "$TMP/t108_big.csv2"   800000
+
+t108_run() {   # $1 = file, $2 = stderr sink
+    CSV2_PARALLEL_MIN_BYTES=100000 CSV2_PARALLEL_CHUNK_BYTES=262144 \
+        "$CSV2" -contains 'no such needle here' -i "$1" -debug >/dev/null 2>"$2"
+}
+t108_run "$TMP/t108_small.csv2" "$TMP/t108_s.txt"
+t108_run "$TMP/t108_big.csv2"   "$TMP/t108_b.txt"
+
+t108_sz_s=$(wc -c < "$TMP/t108_small.csv2" | tr -d ' ')
+t108_sz_b=$(wc -c < "$TMP/t108_big.csv2" | tr -d ' ')
+t108_r_s=$(rss_of "$TMP/t108_s.txt")
+t108_r_b=$(rss_of "$TMP/t108_b.txt")
+
+# Both runs must actually have taken the parallel path, or this compares two
+# single-threaded runs and proves nothing -- the T72 trap.
+# 兩次執行都必須真的走了平行路徑，否則這是在比較兩次單執行緒執行、什麼也證明不了——
+# 那正是 T72 記下的陷阱。
+if grep -q 'parallel:' "$TMP/t108_s.txt" && grep -q 'parallel:' "$TMP/t108_b.txt"; then
+    ok "T108a both runs took the parallel path, so the comparison is between two of them / 兩次執行都走了平行路徑，因此比較的是兩次平行執行"
+else
+    bad "T108a a run did not take the parallel path; this comparison would prove nothing / 有一次執行沒有走平行路徑，這個比較什麼也證明不了"
+fi
+
+# The floor cancels between two parallel runs, so what is left is what the
+# extra bytes cost. Retaining the input would put the whole difference here.
+# 兩次平行執行之間，地板互相抵銷，剩下的就是「多出來的位元組要花多少」。若輸入被留住，
+# 整個差額都會出現在這裡。
+# An empty reading arithmetically becomes 0, and 0 passes the bound below --
+# a test computing a plausible answer out of missing data, which is the exact
+# failure this project exists to prevent. It happened here on the first
+# attempt, so it is checked rather than assumed.
+# 讀不到值時，算術上會變成 0，而 0 會通過下面那個界限——一個「用缺失的資料算出看似合理的
+# 答案」的測試，正是本專案存在要防的那種失敗。本案例第一次寫出來時就發生了，因此這裡是
+# 檢查而不是假設。
+if [[ -z "$t108_r_s" || -z "$t108_r_b" ]]; then
+    bad "T108b could not read peak_rss_bytes (s=$(wc -c < "$TMP/t108_s.txt" 2>/dev/null)B b=$(wc -c < "$TMP/t108_b.txt" 2>/dev/null)B) [$(tr '\n' '|' < "$TMP/t108_s.txt" 2>/dev/null)] / 無法讀出 peak_rss_bytes"
+    t108_r_s=0; t108_r_b=1
+fi
+t108_diff=$(( t108_r_b - t108_r_s ))
+t108_grew=$(( t108_sz_b - t108_sz_s ))
+# Half the added input. Measured either side of the fix on this exact pair:
+# retaining the input costs +39.9 MB for +28.2 MB of file, not retaining it
+# costs +7.1 MB. Half separates those with room on both sides, and a tighter
+# bound would be measuring the working set again.
+# 界限取「多出來的輸入的一半」。在這一組尺寸上、修正前後各量過一次：留住輸入時，檔案多
+# 28.2 MB 要付出 +39.9 MB；不留住時是 +7.1 MB。一半能把兩者分開且兩側都有餘裕，而更緊的
+# 界限只會又量到工作集。
+t108_bound=$(( t108_grew / 2 ))
+if (( t108_diff < t108_bound )); then
+    ok "T108b a ${t108_grew}B larger file costs ${t108_diff}B, not the file (bound ${t108_bound}B) / 大 ${t108_grew}B 的檔案只多花 ${t108_diff}B，而不是整個檔案"
+else
+    bad "T108b memory tracks the file: +${t108_grew}B of input cost +${t108_diff}B of RSS (bound ${t108_bound}B) / 記憶體跟著檔案走：輸入多 ${t108_grew}B，RSS 多 ${t108_diff}B"
+fi
+
+# The cap governs the OUTPUT held while chunks are in flight, which is the one
+# part of this path concurrency really drives. A search matching every record
+# is what makes it visible; a search matching nothing holds nothing.
+# 上限管的是「區塊在飛時被持有的輸出」，那是這條路徑上唯一真的由並行度驅動的部分。
+# 要讓它看得見，需要一個命中每一筆的搜尋；一個什麼都不命中的搜尋不持有任何東西。
+CSV2_PARALLEL_MIN_BYTES=100000 CSV2_PARALLEL_CHUNK_BYTES=262144 CSV2_PARALLEL_MAX_BYTES=65536 \
+    "$CSV2" -contains padding -i "$TMP/t108_big.csv2" -debug \
+    > "$TMP/t108_capped.out" 2> "$TMP/t108_cap.txt"
+CSV2_PARALLEL_MIN_BYTES=100000 CSV2_PARALLEL_CHUNK_BYTES=262144 \
+    "$CSV2" -contains padding -i "$TMP/t108_big.csv2" \
+    > "$TMP/t108_free.out" 2>/dev/null
+
+assert_contains "$(cat "$TMP/t108_cap.txt")" "chunk(s) in flight instead of" \
+    "T108c a tight CSV2_PARALLEL_MAX_BYTES says it is holding fewer chunks / 收緊 CSV2_PARALLEL_MAX_BYTES 時，它會說自己少持有了幾個區塊"
+
+# Throttling changes how much is in flight and must change NOTHING else. The
+# fragments are written in chunk order either way, which is what makes the
+# parallel output byte-identical to the single-threaded output in the first
+# place.
+# 限流改變的是「同時在飛的量」，其他什麼都不能變。兩種情況下片段都依區塊順序寫出，
+# 而那正是平行輸出一開始能與單執行緒逐位元相同的原因。
+assert_same "$TMP/t108_capped.out" "$TMP/t108_free.out" \
+    "T108d and throttling changes what is held, not what is written / 而限流改變的是持有多少，不是寫出什麼"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

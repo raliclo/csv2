@@ -68,6 +68,38 @@ func parallelMinBytes() -> Int {
     return 16 * 1024 * 1024
 }
 
+/// The ceiling on what the in-flight chunks may hold, in bytes.
+///
+/// Only the OUTPUT fragments are governed by it. The input side is bounded
+/// already: a worker reads its chunk 64 KiB at a time and never holds more.
+/// The output side is not bounded by anything the file can tell you in
+/// advance -- a search that matches every record produces a report as large as
+/// the data -- and one batch of it is held so the fragments can be written in
+/// chunk order, which is what makes the parallel output byte-identical to the
+/// single-threaded output.
+///
+/// Measured on a 615 MB file whose every record matched: peak RSS 52 MB with
+/// one chunk in flight, 63 MB with two, 102 MB with five, 160 MB with ten. It
+/// is the one part of this path that concurrency really does drive, so it is
+/// the one part a cap can control.
+///
+/// 「同時在飛的區塊」可以持有的位元組上限。
+///
+/// 它只管「輸出」那一側。輸入側本來就有界：一個工作者以 64 KiB 為單位讀自己的區塊，
+/// 從不多持有。輸出側則沒有任何「事先從檔案看得出來」的界限——一個命中每一筆的搜尋，
+/// 產生的報告會和資料一樣大——而一整批的輸出必須被持有，才能依區塊順序寫出，
+/// 那正是平行輸出能與單執行緒逐位元相同的原因。
+///
+/// 在一個「每一筆都命中」的 615 MB 檔案上實測：同時 1 個區塊時峰值 RSS 52 MB、
+/// 2 個 63 MB、5 個 102 MB、10 個 160 MB。這是這條路徑上唯一真的由並行度驅動的部分，
+/// 因此也是唯一一個「設上限」管得到的部分。
+func parallelMaxBytes() -> Int {
+    if let v = ProcessInfo.processInfo.environment["CSV2_PARALLEL_MAX_BYTES"], let n = Int(v), n > 0 {
+        return n
+    }
+    return 1 << 30
+}
+
 func workerCount() -> Int {
     // Fixed to the machine, with no flag: `-n` is taken by the record-number
     // column. Same choice swift_tar makes.
@@ -235,13 +267,46 @@ private func planChunks(path: String, from headEnd: UInt64, size: UInt64) throws
     for i in spans.indices {
         h.seek(toFileOffset: spans[i].start)
         var remaining = Int(spans[i].end - spans[i].start)
+        // The pool is the point, not the read. This loop walks the WHOLE file
+        // -- it is how each chunk learns its first record number -- and on
+        // Darwin every `Data` returned here survived until the process exited,
+        // so peak RSS came to about one byte per byte of input. 615 MB in,
+        // 608 MB resident, while the single-threaded path over the same file
+        // stayed at 9.5 MB.
+        //
+        // The measurement that found it: forcing the batch size down to 1, so
+        // that exactly one chunk is in flight at a time, changed peak RSS by
+        // half a percent (637 MB against 640 MB). Nothing that scales with
+        // work IN FLIGHT can behave like that, which ruled out the workers and
+        // left the one loop that touches every byte outside a pool.
+        //
+        // Third occurrence of the same defect: ByteSource.next carries the
+        // same comment, and the parallel worker's read loop needed the same
+        // fix an hour earlier. See Platform.drainingPool.
+        //
+        // 重點是那個 pool，不是那次讀取。這個迴圈會走過「整個檔案」——每個區塊就是靠它
+        // 知道自己第一筆的編號——而在 Darwin 上，這裡回傳的每一個 `Data` 都活到行程結束，
+        // 於是峰值 RSS 大約是「輸入每一個位元組對應一個位元組」。讀進 615 MB，常駐 608 MB，
+        // 而同一個檔案在單執行緒路徑上是 9.5 MB。
+        //
+        // 找到它的那次量測：把批次大小強制降到 1，也就是同時只有一個區塊在飛，峰值 RSS 只
+        // 變動了百分之零點五（637 MB 對 640 MB）。任何隨「同時在飛的工作量」而變的東西都
+        // 不可能是這種行為——這排除了工作者，只剩下那個「在 pool 之外走過每一個位元組」的
+        // 迴圈。
+        //
+        // 這是同一個缺陷的第三次出現：`ByteSource.next` 帶著同一段註解，而平行工作者的讀取
+        // 迴圈在一小時前才需要同樣的修正。見 Platform.drainingPool。
         var count = 0
         while remaining > 0 {
-            let want = min(remaining, 1 << 20)
-            let d = h.readData(ofLength: want)
-            if d.isEmpty { break }
-            for b in d where b == BYTE_LF { count += 1 }
-            remaining -= d.count
+            let n = Platform.drainingPool { () -> Int in
+                let want = min(remaining, 1 << 20)
+                let d = h.readData(ofLength: want)
+                if d.isEmpty { return 0 }
+                for b in d where b == BYTE_LF { count += 1 }
+                return d.count
+            }
+            if n == 0 { break }
+            remaining -= n
         }
         spans[i].firstRecord = running
         spans[i].records = count
@@ -349,7 +414,18 @@ func runParallelSearch(_ o: Options) throws {
         }
     }
 
-    let batch = workerCount()
+    // How many chunks may be in flight at once, decided per batch rather than
+    // fixed, because what has to be held is the OUTPUT and no one can know its
+    // size before running the search. The first batch is estimated from the
+    // chunk size -- a report is rarely larger than the data it describes --
+    // and every batch after it uses what the previous batch actually held.
+    //
+    // 一次可以有多少區塊在飛，是「每一批各自決定」而非固定的，因為必須被持有的是「輸出」，
+    // 而沒有人能在搜尋跑完之前知道它有多大。第一批以區塊大小估算——報告很少大於它所描述的
+    // 資料——之後每一批都用「上一批實際持有了多少」來決定。
+    let cap = parallelMaxBytes()
+    var perChunk = PARALLEL_CHUNK_BYTES
+    var throttled = false
     var totalRecords = 0
     var matched = 0
     var firstError: Error?
@@ -357,6 +433,20 @@ func runParallelSearch(_ o: Options) throws {
 
     var i = 0
     while i < spans.count {
+        let batch = max(1, min(workerCount(), cap / max(perChunk, 1)))
+        if batch < workerCount() && !throttled {
+            throttled = true
+            // Said once, and said with the numbers, because a run that is
+            // slower than the machine could be has to be explainable. The
+            // alternative -- silently using fewer workers -- is the shape of
+            // defect this project keeps finding.
+            // 只說一次，而且帶著數字，因為一次「比機器能力慢」的執行必須是可以被解釋的。
+            // 另一種做法——安靜地少用幾個工作者——正是本專案一再找到的那種缺陷形狀。
+            Logger.shared.debug(
+                "parallel: holding \(batch) chunk(s) in flight instead of \(workerCount()); "
+                + "the last batch held about \(perChunk) bytes per chunk and "
+                + "CSV2_PARALLEL_MAX_BYTES is \(cap)")
+        }
         let hi = min(i + batch, spans.count)
         var fragments = [[UInt8]](repeating: [], count: hi - i)
         var counts = [Int](repeating: 0, count: hi - i)
@@ -407,11 +497,14 @@ func runParallelSearch(_ o: Options) throws {
 
                 var remaining = Int(span.end - span.start)
                 while remaining > 0 {
-                    let d = h.readData(ofLength: min(remaining, 1 << 16))
-                    if d.isEmpty { break }
-                    remaining -= d.count
-                    try parser.feed([UInt8](d))
-                    if parser.stopped { break }
+                    let more = try Platform.drainingPool { () -> Bool in
+                        let d = h.readData(ofLength: min(remaining, 1 << 16))
+                        if d.isEmpty { return false }
+                        remaining -= d.count
+                        try parser.feed([UInt8](d))
+                        return !parser.stopped
+                    }
+                    if !more { break }
                 }
                 if !parser.stopped { try parser.finish() }
                 if let e = localError { throw e }
@@ -432,6 +525,13 @@ func runParallelSearch(_ o: Options) throws {
         // Written in chunk order, which is what makes the output identical to
         // the single-threaded run.
         // 按區塊順序寫出，這正是輸出能與單執行緒完全相同的原因。
+        // What this batch actually held, which decides the next one. Measured
+        // before the fragments are written and released, because afterwards
+        // there is nothing left to measure.
+        // 這一批實際持有了多少，決定下一批的大小。在片段被寫出並釋放「之前」量，
+        // 因為之後就沒有東西可以量了。
+        perChunk = max(1, fragments.reduce(0) { $0 + $1.count } / max(hi - i, 1))
+
         for k in 0..<(hi - i) {
             outSink.write(fragments[k])
             matched += counts[k]

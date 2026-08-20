@@ -73,11 +73,11 @@ enum Platform {
     /// 在 pool 排空時才會被釋放——迴圈裡一個都沒有，於是它們累積了整趟執行，peak RSS 正比於
     /// 讀進來的位元組數。Linux 的 Foundation 沒有 pool、以 ARC 管理 `Data`，因此這個洩漏
     /// 是 macOS 專屬的，而那個「直接執行」的分支是正確答案，不是一個待填的空殼。
-    static func drainingPool<T>(_ body: () -> T) -> T {
+    static func drainingPool<T>(_ body: () throws -> T) rethrows -> T {
         #if canImport(Darwin)
-        return autoreleasepool(invoking: body)
+        return try autoreleasepool(invoking: body)
         #else
-        return body()
+        return try body()
         #endif
     }
 

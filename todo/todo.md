@@ -263,7 +263,7 @@ opt-in flag.
 真正把它關閉的做法，是從 Unicode 字元資料庫「產生」這些區間而非手選——那是本專案目前
 沒有、也不該為了一個選擇加入的旗標而引入的建置期依賴。
 
-## 平行搜尋的記憶體沒有上界(2026-08-20,第 41 回合量到)
+## ~~平行搜尋的記憶體沒有上界~~(2026-08-20 修正,見 known-defects 的 AR)
 
 | 檔案大小 | 單執行緒峰值 RSS | 平行峰值 RSS |
 |---|---|---|
@@ -291,3 +291,10 @@ with it. It does not track CSV2_PARALLEL_CHUNK_BYTES, so shrinking chunks does
 not help. The README now states this (AO); whether to change the code is open.
 Whatever is decided, the missing test should be added -- T9a/b/c cover the
 streaming path only, and nothing has ever measured the parallel path's memory.
+
+
+**上面那一節已經解決,保留是因為它的推論錯了而那個錯誤值得留著。** 它假設記憶體由
+「同時在飛的區塊」持有,並據此判斷「調小 chunk 救不了」。真正的成因是 `planChunks`
+少了一個 autorelease pool——同一個缺陷的第三個發生地。拆穿那個假設只花了一次量測:
+把批次強制降到 1,峰值 RSS 只變動百分之零點五。修正後 615 MB 的檔案從 608 MB 降到 23 MB。
+測試 T108 已補上,那也是這一節當初點名缺少的東西。

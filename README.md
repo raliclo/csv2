@@ -264,12 +264,11 @@ INDEX / 索引
 
 DIAGNOSTICS / 診斷
   -debug                diagnostics to stderr, including a metrics: line on
-                        every path. Measure with it rather than guessing: the
-                        single-threaded path's peak RSS is bounded and does not
-                        grow with the input, the PARALLEL path's is roughly
-                        TWICE THE FILE and grows with it -- 60 MB on a 25 MB
-                        file, 102 MB on a 52 MB one, against 9 MB either way
-                        single-threaded. See the parallelism section
+                        every path. Measure with it rather than guessing:
+                        23 MB of peak RSS on a 615 MB file in parallel, 9.5 MB
+                        single-threaded over the same file. Until 2026-08-20
+                        the parallel figure was 608 MB -- one byte resident per
+                        byte of input. See the parallelism section
   -debug=trace          one level lower: every record's selection decision,
                         including the ones NOT emitted and why, and the point
                         at which the read stops -- so a record with no line is
@@ -1027,6 +1026,7 @@ cannot be lowered can only be exercised by building a 16 MiB fixture.
 |---|---|---|
 | `CSV2_INDEX_MIN_BYTES` | 16 MiB | below this, no index is read or written |
 | `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | set above the file size to force the single-threaded path |
+| `CSV2_PARALLEL_MAX_BYTES` | 1 GiB | ceiling on what the in-flight chunks may hold. It governs the **output** fragments — one batch of them is kept so they can be written in chunk order, which is what makes parallel output byte-identical to single-threaded. The read side needs no ceiling: a worker reads its chunk 64 KiB at a time and never holds more. Lowering this holds fewer chunks in flight and the rest queue; `-debug` says so, with the numbers. **It is not a cap on the process's memory** — under an 8 MiB setting, peak RSS was still 58 MB, because the fixed working set is not part of what it governs |
 | `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | smaller values make a small file yield many chunks, so chunk boundaries are actually exercised |
 | `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `-md --pretty` refuses above this rather than being OOM-killed |
 | `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | upper bound on `-tail N` and `-B N`. Asking for more is **refused, not truncated** — a short answer that looks like a whole one is the failure this tool exists to avoid. The message names the request, the limit and the variable |
