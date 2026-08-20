@@ -1173,7 +1173,7 @@ else
 fi
 assert_succeeds "T46b --verify-index still passes after the append / 追加後 --verify-index 仍通過" -- \
     "$CSV2" --verify-index -i "$TMP/ix.csv2"
-unset CSV2_INDEX_MIN_BYTES
+unset CSV2_INDEX_MIN_BYTES CSV2_PARALLEL_MIN_BYTES CSV2_PARALLEL_CHUNK_BYTES
 
 echo
 echo "--- Addressing, width and diagnostics / 定位、寬度與診斷 ---"
@@ -1579,7 +1579,7 @@ else
 fi
 assert_fails "T51e --build-index with --no-index is refused / --build-index 與 --no-index 併用被拒" -- \
     "$CSV2" --build-index --no-index -i "$TMP/bi.csv2"
-unset CSV2_INDEX_MIN_BYTES
+unset CSV2_INDEX_MIN_BYTES CSV2_PARALLEL_MIN_BYTES CSV2_PARALLEL_CHUNK_BYTES
 
 # ---------------------------------------------------------------------
 # T57 -- deleting a whole column. Open question 5, decided yes on 2026-08-18.
@@ -2099,7 +2099,7 @@ assert_succeeds "T62h and a SECOND write replaces it, so the index is not left s
 assert_eq "$(wc -c < "$TMP/t62_rw.txt" | tr -d ' ')" "0" \
     "T62i and replacing an index says nothing on stderr either / 替換索引時 stderr 同樣不說話"
 
-unset CSV2_INDEX_MIN_BYTES
+unset CSV2_INDEX_MIN_BYTES CSV2_PARALLEL_MIN_BYTES CSV2_PARALLEL_CHUNK_BYTES
 
 # ---------------------------------------------------------------------
 # T63 -- with context on, --json says which record matched.
@@ -2476,7 +2476,7 @@ assert_eq "$("$CSV2" -mid 1,1 -i "$TMP/t68.csv" 2>/dev/null)" "$want1" \
     "T68h corruption in the header is caught too, not only in the offsets / 檔頭的損毀同樣會被攔下，不只偏移量"
 
 rm -f "$TMP/t68.csv.index"
-unset CSV2_INDEX_MIN_BYTES
+unset CSV2_INDEX_MIN_BYTES CSV2_PARALLEL_MIN_BYTES CSV2_PARALLEL_CHUNK_BYTES
 
 # ---------------------------------------------------------------------
 # T69 -- no document quotes a test count.
@@ -2648,7 +2648,7 @@ assert_eq "$("$CSV2" -get 12:1 -i "$TMP/t70_ix.csv" 2>/dev/null)" \
     "$("$CSV2" --no-index -get 12:1 -i "$TMP/t70_ix.csv" 2>/dev/null)" \
     "T70p -get agrees with itself whether or not an index is used / 用不用索引，-get 都給出相同答案"
 rm -f "$TMP/t70_ix.csv.index"
-unset CSV2_INDEX_MIN_BYTES
+unset CSV2_INDEX_MIN_BYTES CSV2_PARALLEL_MIN_BYTES CSV2_PARALLEL_CHUNK_BYTES
 
 # A record containing a newline makes record number and line number diverge.
 # Addressing is by RECORD, so record 2 here is the one after the two-line one.
@@ -6933,6 +6933,97 @@ fi
 # 在同一種選擇之內的確定性，是雜湊之所以有用的性質，兩種形式都必須保有它。
 assert_eq "$("$CSV2" -get 1:license -i "$TMP/t142_yes.csv")" "$("$CSV2" -get 2:license -i "$TMP/t142_yes.csv")" \
     "T142e while equal values still hash equal within one choice / 而在同一種選擇之內，相等的值仍然雜湊出相等的結果"
+
+# ---------------------------------------------------------------------
+# T143 -- the documented limit of the O(1) stamp, pinned as a limit.
+#
+# Round 54 tried eight times to defeat the stamp, failed every time, and
+# concluded the README's description of it was wrong -- that the check is
+# stronger than "size, mtime, first and last bytes". It is not. Reproduced by
+# hand the same day: an equal-length substitution that adds an embedded
+# newline, with mtime restored to the nanosecond, gives
+#
+#   indexed  : 900001:2      <- wrong
+#   --no-index: 900000:2     <- right
+#   --verify-index: index MISMATCH: ... record 450001 spans lines
+#
+# That is the hazard the README describes, and a documentation change claiming
+# safety here would have been the worst kind of edit this project can make. So
+# the limitation gets a test of its own: it must stay reproducible, because the
+# day it stops being reproducible is the day the description has to change.
+#
+# CSV2_INDEX_MIN_BYTES lowers the threshold so this needs a small file rather
+# than the 28 MB one used by hand. `touch -r` carries the nanoseconds; where it
+# does not, the case skips rather than passing for the wrong reason.
+#
+# T143 —— 把 O(1) 戳記「有文件記載的極限」當成一條極限釘住。
+# 第 54 回合試了八次都沒能騙過那個戳記，於是推論 README 對它的描述有誤。並非如此：同一天
+# 以手動方式重現——一次等長、且把 mtime 還原到奈秒的替換，會讓索引路徑回報 900001:2、
+# --no-index 回報 900000:2，而 --verify-index 抓得到。那正是 README 描述的那個風險，而
+# 「改文件去宣稱這裡是安全的」會是這個專案做得出來最糟的一種編輯。因此這條極限自己有了
+# 一個測試：它必須保持可重現——它哪一天不再可重現，就是那段描述該改的那一天。
+# ---------------------------------------------------------------------
+echo
+echo "--- T143: the stamp's documented blind spot / T143：戳記在文件中載明的盲點 ---"
+
+# 200 records of 30 bytes; the threshold comes down to meet it.
+# 200 筆、每筆 30 位元組；門檻降下來遷就它。
+{
+    print -r -- 'id,val'
+    for i in {1..200}; do printf '%06d,v%06d-pad-pad-pad
+' $i $i; done
+} > "$TMP/t143.csv"
+
+# Both thresholds: the wrong RECORD NUMBER comes from the chunked search, which
+# is what consumes the index's no_embedded_newlines claim. Lowering only the
+# index threshold left the parallel path out and the hazard did not appear --
+# a test that would have "proved" the danger was gone.
+# 兩個門檻都要降：錯誤的「紀錄編號」來自分塊搜尋，而那正是消費索引 no_embedded_newlines
+# 宣稱的地方。只降索引門檻會把平行路徑排除在外，於是那個風險不會出現——那會變成一個
+# 「證明危險已經消失」的測試。
+export CSV2_INDEX_MIN_BYTES=1024
+export CSV2_PARALLEL_MIN_BYTES=1024
+export CSV2_PARALLEL_CHUNK_BYTES=2048
+"$CSV2" --build-index -i "$TMP/t143.csv" >/dev/null
+cp -p "$TMP/t143.csv" "$TMP/t143.ref"
+
+# An equal-length replacement that puts a newline inside a quoted field.
+# 一個等長的替換，把一個換行放進引號欄位裡。
+_t143_old='000100,v000100-pad-pad-pad'
+_t143_new=$'000100,"a
+c-pad-pad-padxy"'
+if (( ${#_t143_old} != ${#_t143_new} )); then
+    bad "T143 the replacement is not the same length (${#_t143_old} vs ${#_t143_new}) / 替換字串長度不同"
+else
+    # Byte-for-byte replacement without changing the size: read, substitute the
+    # one line, write back.
+    # 逐位元組替換而不改變大小：讀入、替換那一行、寫回。
+    _t143_tmp="$TMP/t143.rewrite"
+    : > "$_t143_tmp"
+    while IFS= read -r _line; do
+        if [[ $_line == $_t143_old ]]; then print -r -- "$_t143_new"; else print -r -- "$_line"; fi
+    done < "$TMP/t143.csv" > "$_t143_tmp"
+    mv "$_t143_tmp" "$TMP/t143.csv"
+    touch -r "$TMP/t143.ref" "$TMP/t143.csv"
+
+    _t143_indexed=$("$CSV2" -contains 'v000200' -i "$TMP/t143.csv" | cut -f1)
+    _t143_scanned=$("$CSV2" -contains 'v000200' --no-index -i "$TMP/t143.csv" | cut -f1)
+    _t143_verify=$("$CSV2" --verify-index -i "$TMP/t143.csv" 2>&1)
+
+    if [[ $_t143_verify == *"cannot be used"* ]]; then
+        # The stamp rejected the file, so this platform's touch -r did not
+        # carry the nanoseconds and the hazard cannot be staged here.
+        # 戳記否決了這個檔案，表示這個平台的 touch -r 沒有帶上奈秒，無法在此佈置這個情境。
+        skipt "T143 an index the O(1) stamp still accepts / 一份 O(1) 戳記仍然接受的索引 (touch -r did not carry the nanoseconds here / 此平台的 touch -r 沒有帶上奈秒)"
+    elif [[ $_t143_indexed != $_t143_scanned ]]; then
+        ok "T143a the documented hazard is still reachable: indexed says $_t143_indexed, a scan says $_t143_scanned / 有文件記載的那個風險仍然可達：索引說 $_t143_indexed，掃描說 $_t143_scanned"
+        assert_contains "$_t143_verify" "MISMATCH" \
+            "T143b while --verify-index still catches it / 而 --verify-index 仍然抓得到"
+    else
+        bad "T143a the hazard did not reproduce (both said $_t143_indexed); if that is now impossible, the README's description of the O(1) check must change / 那個風險沒有重現（兩邊都是 $_t143_indexed）；若它確實已不可能發生，README 對 O(1) 檢查的描述就必須修改"
+    fi
+fi
+unset CSV2_INDEX_MIN_BYTES CSV2_PARALLEL_MIN_BYTES CSV2_PARALLEL_CHUNK_BYTES
 
 # ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
