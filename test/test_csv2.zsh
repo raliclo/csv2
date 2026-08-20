@@ -6620,9 +6620,17 @@ _t135_dir_out=$("$CSV2" -encrypt b -keyfile "$TMP/t135_dir" -i "$TMP/t135.csv" -
 assert_contains "$_t135_dir_out" "keyfile is a directory" \
     "T135a a directory given as -keyfile is named as one / 把目錄當成 -keyfile 時，訊息說它是目錄"
 
+# The old message was "keyfile is empty or unreadable", which CONTAINS "keyfile
+# is empty" -- so a contains-check alone passed against the very wording this
+# case exists to rule out. It has to require the hedge to be gone.
+# 舊訊息是「keyfile is empty or unreadable」，而它「包含」「keyfile is empty」——因此單靠
+# contains 檢查，會對著這個案例要排除的那句措辭本身通過。它必須要求那個含糊的部分不在。
 _t135_empty_out=$("$CSV2" -encrypt b -keyfile "$TMP/t135_empty" -i "$TMP/t135.csv" -o "$TMP/t135_out.csv" 2>&1)
-assert_contains "$_t135_empty_out" "keyfile is empty" \
-    "T135b and an empty file is called empty, not empty-or-unreadable / 而空檔案就叫空檔案，不是「為空或無法讀取」"
+if [[ $_t135_empty_out == *"keyfile is empty"* && $_t135_empty_out != *"or unreadable"* ]]; then
+    ok "T135b and an empty file is called empty, not empty-or-unreadable / 而空檔案就叫空檔案，不是「為空或無法讀取」"
+else
+    bad "T135b $(print -r -- $_t135_empty_out | head -1) / 訊息如上"
+fi
 
 # An unreadable sidecar. Skipped where the test runs as root or where the
 # permission cannot be made to bite: chmod 000 does not stop root, and a file
