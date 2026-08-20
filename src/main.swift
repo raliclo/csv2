@@ -946,6 +946,31 @@ func validate(_ o: inout Options) throws {
     // 跟著連結走、寫進目標的，而呼叫端完全有理由那樣預期。DP 為 --in-place 定下了這件事，
     // 而這裡是同一句話同樣成立的地方。
     if !o.inPlace, let out = o.output {
+        // Before resolving, because this message has to name the path the
+        // caller typed. `-o` writes a temp file beside the destination and
+        // renames it, which needs a directory entry that can be replaced --
+        // a device, a FIFO or a directory cannot. The README has documented
+        // this refusal ("Use -so") since before it existed: what actually
+        // happened was "cannot create temporary file beside /dev/fd/1", a
+        // failure that names neither the cause nor the way out, and a path the
+        // caller never typed.
+        // 在解析之前做，因為這則訊息必須指名「呼叫端打出來的那個路徑」。`-o` 是在目的地旁邊
+        // 寫暫存檔再 rename，那需要一個「可以被取代的目錄項目」——裝置、FIFO 或目錄都不是。
+        // README 從這條拒絕存在之前就寫著它（「請改用 -so」）：實際會發生的是「無法在
+        // /dev/fd/1 旁建立暫存檔」，那既沒說原因、也沒說出路，而且指的是一個呼叫端從來沒有
+        // 打過的路徑。
+        var st = stat()
+        if stat(out, &st) == 0 && (st.st_mode & S_IFMT) != S_IFREG {
+            let kind = (st.st_mode & S_IFMT) == S_IFDIR ? "a directory"
+                     : (st.st_mode & S_IFMT) == S_IFIFO ? "a FIFO"
+                     : "not a regular file"
+            let kindZh = (st.st_mode & S_IFMT) == S_IFDIR ? "一個目錄"
+                       : (st.st_mode & S_IFMT) == S_IFIFO ? "一個 FIFO"
+                       : "不是一般檔案"
+            throw usageError(
+                "-o \(out) is \(kind); -o writes a temp file beside the destination and renames it, which needs a regular file. Use -so to write to a stream",
+                "-o \(out) 是\(kindZh)；-o 會在目的地旁邊寫暫存檔再 rename，那需要一個一般檔案。要寫到串流請用 -so")
+        }
         o.output = resolved(out)
     }
     if o.encryptCols != nil || o.decryptCols != nil || o.hashCols != nil {
@@ -1116,6 +1141,30 @@ func baseName(_ name: String) -> String {
 /// 都是 1-based；0-based 會讓人把結果貼進 `cut` 時差一格。
 func resolveColumn(_ token: String, header: Record) throws -> Int {
     if let n = Int(token) {
+        // A number that is ALSO a column name is a guess waiting to happen.
+        // The file `2,1` has a column named "2" at position 1 and one named
+        // "1" at position 2; `-hash 2` took position 2 and hashed the column
+        // called "1", at rc=0 with nothing on stderr. The caller asked for a
+        // name they can see in the header and got a different column.
+        //
+        // Refused for the same reason two columns with one name are refused,
+        // decided on 2026-08-18: picking one for you would be a guess. The way
+        // out is the same shape as that one -- say which you mean.
+        // 一個「同時也是欄名」的數字，是一次等著發生的猜測。檔案 `2,1` 的第 1 欄名叫 "2"、
+        // 第 2 欄名叫 "1"；`-hash 2` 取的是位置 2，於是雜湊了名為 "1" 的那一欄，rc=0、
+        // stderr 空白。呼叫端要的是他在標頭裡看得到的那個名字，拿到的是另一欄。
+        // 拒絕的理由與「兩個欄位同名」那一條相同（2026-08-18 定案）：替你挑一個等於猜測。
+        var named: [Int] = []
+        for (i, f) in header.fields.enumerated() where baseName(headerName(f)) == token {
+            named.append(i)
+        }
+        if !named.isEmpty {
+            let where_ = named.map { "position \($0 + 1)" }.joined(separator: ", ")
+            let whereZh = named.map { "第 \($0 + 1) 欄" }.joined(separator: "、")
+            throw fault(
+                "\"\(token)\" is both a column NUMBER and the NAME of a column (\(where_)); which one is meant cannot be decided without guessing. Rename the column, or address it by a number that is not also a name",
+                "「\(token)」同時是一個欄「號」與某個欄位的「名字」（\(whereZh)）；不猜就無法決定你指的是哪一個。請改名，或改用一個不同時是名字的欄號")
+        }
         guard n >= 1 && n <= header.count else {
             throw fault("column \(n) is out of range; the file has \(header.count) columns",
                       "第 \(n) 欄超出範圍；本檔案有 \(header.count) 欄")
@@ -1206,6 +1255,23 @@ func strippedLocation(_ token: String) -> String? {
 }
 
 func resolveColumnList(_ spec: String, header: Record) throws -> [Int] {
+    // An empty COLS is a refusal, not "protect nothing". `-hash ""` used to
+    // exit 0 having done nothing at all: output byte-identical to the input, no
+    // marker in the header, nothing on stderr -- while a WRONG column name was
+    // refused by name. A script whose $COLS came out empty wrote an
+    // unprotected file and every check this README offers reported success.
+    // The tool's first requirement is that anything it cannot do must fail
+    // loudly rather than quietly emit a half-correct file, and an empty
+    // selection is the smallest possible version of exactly that.
+    // 空的 COLS 是一次拒絕，不是「保護零個欄位」。`-hash ""` 原本會以 0 結束、什麼也沒做：
+    // 輸出與輸入逐位元相同、標頭沒有標記、stderr 空白——而一個「錯的」欄名卻會被指名拒絕。
+    // 一支 $COLS 算成空字串的腳本，寫出來的是一個未受保護的檔案，而 README 提供的每一種
+    // 檢查都會回報成功。這支工具的第一條要求就是「做不到的事要大聲失敗，而不是安靜地產出
+    // 一個半對的檔案」，而一個空的選取，正是那件事最小的版本。
+    if spec.split(separator: ",").allSatisfy({ $0.trimmingCharacters(in: .whitespaces).isEmpty }) {
+        throw fault("no columns named: the column list is empty. Naming no columns cannot be distinguished from a variable that came out empty, so it is refused rather than treated as \"none\"",
+                    "沒有指名任何欄位：欄位清單是空的。「一個欄位都不指」與「某個變數算成了空字串」無法區分，因此拒絕，而不是當成「零個」")
+    }
     if spec == "all" {
         return header.fields.enumerated().compactMap { (i, f) in
             EncMarker.parse(headerName(f)) != nil ? i : nil

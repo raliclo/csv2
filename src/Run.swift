@@ -722,9 +722,25 @@ func runSelect(_ o: Options) throws {
     //
     // 因此警告走 stderr，那裡每一種輸出形狀都載得動它，也不會污染任何管線。WARN 是預設門檻，
     // 所以不必特地要求就看得到。它不是錯誤：這次執行做了它被告知的事，結束狀態仍然是 0。
-    if let (a, _) = o.mid, seen > 0, a > seen {
-        Logger.shared.warn(
-            "-mid \(a) starts after the last record (\(seen)), so nothing was selected; this is not an error and the exit status is 0")
+    // `seen > 0` used to be part of this condition, which excluded the one file
+    // where EVERY window is past the end: a header row and no records. There
+    // the caller got empty output, exit 0, silent stderr and `"records":0` --
+    // and the second channel the README nominates for this question, the
+    // --json meta line, says the same thing whether the window was past the end
+    // or the file was empty. The strongest case for the warning was the case it
+    // did not cover.
+    // 這個條件原本還有 `seen > 0`，而那正好排除了「每一個視窗都在結尾之後」的那個檔案：
+    // 有標頭、沒有紀錄。在那裡，呼叫端拿到的是空輸出、rc=0、stderr 沉默，以及 `"records":0`
+    // ——而 README 指定用來分辨這件事的第二個管道（--json 的 meta 行），無論是「視窗在結尾
+    // 之後」還是「檔案本來就空」都說同一句話。最該發出這個警告的情況，正是它沒有涵蓋的那個。
+    if let (a, _) = o.mid, a > seen {
+        if seen == 0 {
+            Logger.shared.warn(
+                "-mid \(a) starts after the last record: this file has no data records at all, so no window could have selected anything; this is not an error and the exit status is 0")
+        } else {
+            Logger.shared.warn(
+                "-mid \(a) starts after the last record (\(seen)), so nothing was selected; this is not an error and the exit status is 0")
+        }
     }
 
     Logger.shared.debug("format=\(plan.format.rawValue) fields=\(expectedFields) records=\(seen)")

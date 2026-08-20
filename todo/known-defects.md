@@ -4346,3 +4346,77 @@ rc=134
 
 修法與 DV 相同:那幾處改走 `writeAll(fd: 2, …)`——EPIPE 仍然死於 SIGPIPE(那是對的),
 其餘 errno 就當它寫不出去,繼續以「原本要用的那個結束狀態」結束。
+
+---
+
+## EG. `-hash ''` 與 `-encrypt ''`:rc=0、什麼也沒做、沒有任何東西說話(2026-08-21 修正,T140a/b)
+
+第 54 回合最嚴重的一項。
+
+```
+$ printf 'name,license\napp,MIT\n' > a.csv
+$ csv2 -hash '' -i a.csv -o out.csv ; echo rc=$?
+rc=0
+$ cmp out.csv a.csv && echo identical
+identical                      ← 輸出與輸入逐位元相同
+$ head -1 out.csv
+name,license                   ← 標頭沒有任何 :hash 標記
+```
+
+`,` 與 `,,` 也一樣。**一個「錯的」欄名會被指名拒絕,一個「空的」欄名則被當成「保護零個欄位」
+而接受。** 一支腳本的 `$COLS` 變數若碰巧算成空字串,寫出來的就是一個未受保護的檔案,而
+README 提供的每一種檢查都會回報成功。
+
+這直接違反本工具寫在最前面的那條要求——「anything else must fail loudly rather than
+silently emit a half-correct file」——以及「csv2 does not partially succeed」。
+
+## EH. 欄名是數字時,被靜默地當成欄號(2026-08-21 修正,T140e)
+
+```
+$ printf '2,1\nX,Y\n' > n.csv          # 兩欄，名字分別是 "2" 與 "1"
+$ csv2 -hash 2 -i n.csv -o nh.csv ; echo rc=$?
+rc=0
+$ head -1 nh.csv
+2,1:hash                                ← 被標記的是「位置 2」，也就是名為 1 的那一欄
+```
+
+README 說 COLS 是「欄名、1-based 欄號,或兩者混用」,卻沒有說哪一個優先。答案是「位置永遠
+優先」,而且不說話。使用者要求保護名為 `2` 的那一欄,拿到的是另一欄被保護、rc=0、stderr
+空白。
+
+**這與 2026-08-18 已經定案的那條規則是同一件事的另一半:** 同名欄位會被拒絕,理由是
+「替你挑一個等於猜測」。一個既是合法欄號、又精確命中某個欄名的 token,也是同一種猜測。
+
+---
+
+## EI. 每一個視窗都在結尾之後的那個檔案,正是 WARN 沒有涵蓋的(2026-08-21 修正,T141a/b)
+
+```
+$ printf 'a,b,c\n' > hdr.csv        # 有標頭，沒有紀錄
+$ csv2 -mid 1,3 -t -i hdr.csv ; echo rc=$?
+a,b,c
+rc=0                                  ← stderr 一個字也沒有
+$ printf 'a,b,c\n1,x,p\n' > one.csv
+$ csv2 -mid 5,7 -t -i one.csv
+csv2: … WARN  -mid 5 starts after the last record (1) …   ← 這裡才有
+```
+
+條件裡有一個 `seen > 0`。而 README 指定用來分辨這件事的第二個管道——`--json` 結尾的
+`"records":0`——在「視窗在結尾之後」與「檔案本來就空」兩種情況下說的是同一句話。
+**最該發出這個警告的情況,正是它沒有涵蓋的那個。**
+
+## EJ. README 承諾了一條「程式裡不存在」的拒絕(2026-08-21 修正,T141d/e)
+
+拒絕表寫著:「`-o /dev/stdout` → …Use `-so`」。實際上:
+
+```
+$ csv2 -r -t -i one.csv -o /dev/stdout
+csv2: cannot create temporary file beside /dev/fd/1: No such file or directory
+```
+
+既沒說原因、也沒說出路,而且指的是一個呼叫端從來沒有打過的路徑(`/dev/fd/1` 是 shell
+展開的結果)。原始碼裡搜不到任何與 `/dev/stdout` 有關的處理——**那條拒絕從來沒有被實作,
+只是被寫進了文件。**
+
+現在會在「目的地存在且不是一般檔案」時拒絕(目錄、FIFO、裝置),並在解析 symlink **之前**
+做,好讓訊息指名呼叫端打出來的那個路徑。

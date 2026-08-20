@@ -6750,6 +6750,141 @@ assert_eq "$(wc -l < "$TMP/t138.err" | tr -d ' ')" "2" \
     "T138c while an open stderr still gets the two lines / 而開著的 stderr 仍然收到那兩行"
 
 # ---------------------------------------------------------------------
+# T140 -- a column list that names nothing, and a name that is a number.
+#
+# Round 54, its two worst findings. `-hash ""` exited 0 having done nothing:
+# output byte-identical, no marker, nothing on stderr -- while a WRONG name was
+# refused by name. And on a file whose columns are named `2` and `1`,
+# `-hash 2` protected position 2, the column called `1`, silently.
+#
+# Both are the same failure the duplicate-name refusal was written against on
+# 2026-08-18: the tool picked something for the caller and said nothing.
+#
+# T140 —— 一份「什麼也沒指名」的欄位清單，以及一個「名字是數字」的欄位。
+# 第 54 回合最嚴重的兩項。`-hash ""` 以 0 結束、什麼也沒做——輸出逐位元相同、沒有標記、
+# stderr 空白——而一個「錯的」名字卻會被指名拒絕。而在欄名為 `2` 與 `1` 的檔案上，
+# `-hash 2` 保護的是位置 2，也就是名為 `1` 的那一欄，不說一句話。
+# ---------------------------------------------------------------------
+echo
+echo "--- T140: naming nothing, and naming a number / T140：什麼也沒指名，以及指名一個數字 ---"
+
+print -r -- 'name,license'  > "$TMP/t140.csv"
+print -r -- 'app,MIT'      >> "$TMP/t140.csv"
+cp "$TMP/t140.csv" "$TMP/t140.keep"
+
+for _spec in '' ',' ',,'; do
+    _out=$("$CSV2" -hash "$_spec" -i "$TMP/t140.csv" -o "$TMP/t140_out.csv" 2>&1)
+    _rc=$?
+    if (( _rc == 1 )) && [[ $_out == *"the column list is empty"* ]]; then
+        ok "T140a -hash with a column list of \"$_spec\" is refused / -hash 的欄位清單為「$_spec」時會被拒絕"
+    else
+        bad "T140a -hash \"$_spec\" exited $_rc: $(print -r -- $_out | head -1) / 結果如上"
+    fi
+done
+
+_out=$("$CSV2" -encrypt '' -i "$TMP/t140.csv" -o "$TMP/t140_out.csv" 2>&1)
+assert_contains "$_out" "the column list is empty" \
+    "T140b and -encrypt likewise, since the loss there is permanent / -encrypt 同樣如此，而它那邊的損失是永久的"
+
+assert_succeeds "T140c while a real column name still works / 而真正的欄名照常運作" -- \
+    "$CSV2" -hash name -i "$TMP/t140.csv" -o "$TMP/t140_out.csv"
+assert_contains "$("$CSV2" -r -t -i "$TMP/t140_out.csv" | head -1)" "name:hash" \
+    "T140d and leaves the marker that says so / 並留下說明這件事的標記"
+
+# The number/name collision.
+# 數字與名字的碰撞。
+print -r -- '2,1'  > "$TMP/t140n.csv"
+print -r -- 'X,Y' >> "$TMP/t140n.csv"
+# -get takes no -o (it writes one value, not a file), so it is run without one.
+# -get 不收 -o（它寫的是一個值，不是一個檔案），因此不帶 -o 執行。
+for _verb in "-hash 2" "-delete -col 2"; do
+    _out=$("$CSV2" ${=_verb} -i "$TMP/t140n.csv" -o "$TMP/t140n_out.csv" 2>&1)
+    _rc=$?
+    if (( _rc == 1 )) && [[ $_out == *"both a column NUMBER and the NAME"* ]]; then
+        ok "T140e $_verb is refused as ambiguous / $_verb 因歧義而被拒絕"
+    else
+        bad "T140e $_verb exited $_rc: $(print -r -- $_out | head -1) / 結果如上"
+    fi
+done
+
+_out=$("$CSV2" -get 1:2 -i "$TMP/t140n.csv" 2>&1)
+_rc=$?
+if (( _rc == 1 )) && [[ $_out == *"both a column NUMBER and the NAME"* ]]; then
+    ok "T140e -get 1:2 is refused as ambiguous / -get 1:2 因歧義而被拒絕"
+else
+    bad "T140e -get 1:2 exited $_rc: $(print -r -- $_out | head -1) / 結果如上"
+fi
+
+# And a number that is NOT also a name still addresses a column.
+# 而一個「不同時是名字」的數字，仍然可以定址一個欄位。
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t140.csv")" "MIT" \
+    "T140f a plain column number still works where no name collides / 沒有名字相撞時，單純的欄號照常可用"
+
+# ---------------------------------------------------------------------
+# T141 -- the window that could never have selected anything, and an -o that
+# cannot be renamed onto.
+#
+# Round 54: the -mid past-the-end WARN did not fire on a file with a header and
+# no records -- the one file where EVERY window is past the end. The condition
+# carried `seen > 0`. And the refusals table promised `-o /dev/stdout` would be
+# answered with "Use -so"; what came back was "cannot create temporary file
+# beside /dev/fd/1", which names neither the cause nor the way out, and a path
+# the caller never typed.
+#
+# T141 —— 一個「不可能選到任何東西」的視窗，以及一個「rename 不上去」的 -o。
+# ---------------------------------------------------------------------
+echo
+echo "--- T141: warning where every window is past the end / T141：每一個視窗都在結尾之後時的警告 ---"
+
+print -r -- 'a,b,c' > "$TMP/t141_hdr.csv"
+_t141_err=$("$CSV2" -mid 1,3 -t -i "$TMP/t141_hdr.csv" 2>&1 >/dev/null)
+assert_eq "$?" "0" \
+    "T141a a window past the end of an empty file is not an error / 空檔案上「結尾之後」的視窗不是錯誤"
+assert_contains "$_t141_err" "no data records at all" \
+    "T141b but it warns, which it did not when the file had no records / 但它會警告——而在「檔案沒有紀錄」時它先前不會"
+
+# Still no warning when the window is real, or the WARN would mean nothing.
+# 視窗真的存在時仍然不警告，否則這個 WARN 就沒有意義了。
+print -r -- 'a,b,c'  > "$TMP/t141_one.csv"
+print -r -- '1,x,p' >> "$TMP/t141_one.csv"
+_t141_ok=$("$CSV2" -mid 1,1 -t -i "$TMP/t141_one.csv" 2>&1 >/dev/null)
+if [[ -z ${_t141_ok//[[:space:]]/} ]]; then
+    ok "T141c a window that selects something says nothing / 選得到東西的視窗不說話"
+else
+    bad "T141c unexpected output: $_t141_ok / 非預期的輸出"
+fi
+
+# -o onto something that cannot be renamed onto.
+# -o 指向一個「rename 不上去」的東西。
+mkdir -p "$TMP/t141_dir"
+_t141_d=$("$CSV2" -r -t -i "$TMP/t141_one.csv" -o "$TMP/t141_dir" 2>&1)
+if [[ $_t141_d == *"is a directory"* && $_t141_d == *"-so"* ]]; then
+    ok "T141d -o onto a directory names the cause and the way out / -o 指向目錄時，訊息說出原因與出路"
+else
+    bad "T141d $(print -r -- $_t141_d | head -1) / 訊息如上"
+fi
+
+if (( IS_WINDOWS )); then
+    skipt "T141e -o onto a FIFO is refused with the same sentence / -o 指向 FIFO 時以同一句話拒絕 (a POSIX FIFO is not visible to a native Windows binary, as for T61a / MSYS 的 FIFO 對原生 Windows 程式不存在，同 T61a)"
+else
+    rm -f "$TMP/t141_fifo"
+    mkfifo "$TMP/t141_fifo"
+    _t141_f=$("$CSV2" -r -t -i "$TMP/t141_one.csv" -o "$TMP/t141_fifo" 2>&1)
+    if [[ $_t141_f == *"FIFO"* && $_t141_f == *"-so"* ]]; then
+        ok "T141e -o onto a FIFO is refused with the same sentence / -o 指向 FIFO 時以同一句話拒絕"
+    else
+        bad "T141e $(print -r -- $_t141_f | head -1) / 訊息如上"
+    fi
+    rm -f "$TMP/t141_fifo"
+fi
+
+# A destination that does not exist yet is the ordinary case and must not be
+# caught by any of this.
+# 一個「還不存在」的目的地是常態，不能被上面任何一條擋住。
+assert_succeeds "T141f -o to a path that does not exist yet still works / -o 指向一個尚不存在的路徑仍然可用" -- \
+    "$CSV2" -r -t -i "$TMP/t141_one.csv" -o "$TMP/t141_new.csv"
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one
