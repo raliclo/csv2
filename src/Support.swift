@@ -193,10 +193,35 @@ final class Logger {
     /// 變成 `\\n`：一個再也還原不回去的值，而它來自兩個各自都正確的修正。40 字元的截斷
     /// 從來擋不住那個偽造，它只是把偽造的那一行剪短——這正是「解除上限」必須等「跳脫」先做
     /// 的原因：否則偽造會從被剪斷變成完整。
+    /// A `"` inside the value is doubled, because `"` is what delimits the
+    /// value. Without that, `-update` with `INNOCENT" -> "ALSO INNOCENT` wrote
+    /// `update 1:note: "third record" -> "INNOCENT" -> "ALSO INNOCENT"` -- one
+    /// line, one entry, correct data on disk, and no parser can recover which
+    /// half is old and which is new. Whole-line forgery was already blocked;
+    /// this is forgery of an entry's CONTENT, inside an otherwise legitimate
+    /// entry.
+    ///
+    /// Doubling rather than backslashing, for two reasons. It is the
+    /// convention `.csv2` and RFC 4180 already use, so a reader who knows the
+    /// format needs nothing new. And it carries no backslash, so the
+    /// whole-line escape in `log` leaves it untouched -- a `\"` would have had
+    /// its backslash doubled on the way out, which is the two-layer escaping
+    /// that made the first attempt at this wrong.
+    ///
+    /// 值裡的 `"` 會被寫成兩個，因為 `"` 正是用來界定這個值的字元。沒有這一步，
+    /// 對 `INNOCENT" -> "ALSO INNOCENT` 做 `-update` 會寫出
+    /// `update 1:note: "third record" -> "INNOCENT" -> "ALSO INNOCENT"`——一行、一筆、
+    /// 磁碟上的資料也正確，而沒有任何剖析器分得出哪一半是舊值、哪一半是新值。整行的偽造
+    /// 早已擋掉；這是在一筆本身合法的紀錄「內部」偽造它的內容。
+    ///
+    /// 用「加倍」而非「反斜線」，有兩個理由：那是 `.csv2` 與 RFC 4180 已經在用的慣例，
+    /// 看得懂這個格式的人不必再學一套；而且它不含反斜線，因此 `log` 裡那道整行跳脫完全
+    /// 不會碰它——若寫成 `\"`，它的反斜線會在輸出時被加倍，那正是這件事第一次做錯時的
+    /// 那種兩層跳脫。
     func redact(column: String, value: [UInt8]) -> String {
-        redactedColumns.contains(column)
-            ? "<redacted>"
-            : "\"\(echoValue(value, limit: nil))\""
+        if redactedColumns.contains(column) { return "<redacted>" }
+        let v = echoValue(value, limit: nil).replacingOccurrences(of: "\"", with: "\"\"")
+        return "\"\(v)\""
     }
 
     /// Whether a value about to be logged is large enough that the person

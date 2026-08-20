@@ -1853,3 +1853,243 @@ committed and pushed: `_open` is marked unavailable in Swift for Windows, so
 the flag is unreachable. The lesson is the order, not the flag -- local tests,
 guest tests, commit and push all passed, and together they never answered
 whether the code builds on the one platform that cannot be checked from here.
+---
+
+# 第 41 回合(2026-08-20)—— 用 `claude -p` 跑完的那一次
+
+前三次嘗試分別死於工具權限、`--allowedTools` 的變參吃掉 prompt、以及執行被中止。第四次
+以「prompt 走 stdin、`--allowedTools` 單一逗號清單」跑完,交出 26,865 bytes 的報告。
+
+它自己開頭就指出一件我沒想到的事:**「缺陷表已移除」這個說明本身就是汙染。** 那段話告訴
+它「csv2 曾有恰好五條已知缺陷、全部已於 2026-08-19 修正、放在 todo/known-defects.md、
+而且先前兩個受測 agent 因為這一頁而作廢」——於是它帶著「這是一個狀態良好的工具」的預期
+開始測試。汙染的形式從「看到答案」變成「看到答案的形狀」。
+
+## AL. `--a1` 印的是實體行號,而那正是它與 `--physical` 唯一有差別之處(2026-08-20 修正)
+
+```console
+$ cat -n nl.csv
+     1  a,b
+     2  r1,"A
+     3  B
+     4  C
+     5  D
+     6  E"
+     7  r2,"P
+     8  Q
+     9  R"
+    10  r3,FINDME
+
+$ csv2 -contains FINDME --a1 --physical -i nl.csv
+3:2@L10 [B10]	b	FINDME
+```
+
+`FINDME` 在第 3 筆資料,而 `.csv` 有一列標頭,所以試算表裡它在**第 4 列**——用 Python 的
+`csv` 模組獨立解析確認過:引號內的換行留在儲存格內,整份檔案只有 4 列。
+
+**csv2 說第 10 列。** 那是 `@L10`,一模一樣。rc=0,沒有任何標記。
+
+### 而程式碼裡有一段論證,它對了一半
+
+```swift
+// The A1 row is the PHYSICAL line, because that is what a spreadsheet
+// calls a row. Using the record number made csv2 print [A1] for a cell
+// that any spreadsheet would call A3, and [E0] for a header.
+```
+
+「用紀錄號會印出 [A1] 與 [E0]」——**這是對的**。但那不代表正解是實體行號,正解是
+**紀錄號加上標頭列數**。一筆一行時兩者相等,於是 README 的每一個範例、repo 裡的每一份
+fixture 都同意,而它們全都無法分辨這兩種讀法。
+
+### 它為什麼躲過了所有東西
+
+| 為什麼沒被抓到 | |
+|---|---|
+| `.csv2` 不可能暴露它 | 該格式禁止裸換行(以反斜線跳脫),紀錄號 + 標頭列數恆等於行號 |
+| `TARGET_PACKAGES.csv` 不可能暴露它 | 它沒有引號內換行 |
+| T103 守的是**欄名** | `AA`／`AZ`／`BA`／`ZZ`／`AAA` 每一個邊界都對——**列號沒有任何東西守著** |
+| README 的規則是散文 | 「`A2` 與 `A3` 才是你實際會點下去的那一格」——一個錯誤的實作滿足了給出的每一個範例 |
+
+**`--a1` 唯一比 `--physical` 多提供一點東西的場合,就是含引號內換行的檔案;而那正好是它
+錯的場合。** 在其他所有檔案上,它是 `--physical` 換一種寫法。
+
+受測者的原話值得留著:
+
+> 「我會把差了六列的座標交給同事,rc=0,而且背後還有一次乾淨的驗證。我之所以抓到,只是
+> 因為任務要求『驗證那些座標真的落在你指的儲存格上』,而我造了一個對抗性的檔案——那是
+> 文件從未建議過要造的。」
+
+> 「這個工具在**另一條程式路徑**上是知道的:
+> `DEBUG single-threaded: .csv whose index records a record spanning lines; a record number is
+> not a line number here`。**那句話就是這份缺陷報告。**」
+
+`--a1` prints the physical line, and that is the only case where it differs
+from `--physical` at all. A record spanning lines still occupies ONE spreadsheet
+row, so data record 3 of a one-header `.csv` is row 4; csv2 says row 10. The
+code carries an argument for this, and the argument is half right: the record
+number alone would indeed print [A1] and [E0], but the answer is record plus
+header rows, not the physical line. With one record per line the two are equal,
+which is why every example in the README and every fixture in the repo agrees
+with both readings. T103 pins the column letters; nothing pinned the row.
+---
+
+## AM. 值裡的一個引號,就能改寫稽核紀錄的「內容」(2026-08-20 修正)
+
+整行的偽造已經擋掉了(AI／AJ),但**欄位層級的偽造沒有**:
+
+```console
+$ csv2 -update 1:2 'INNOCENT" -> "ALSO INNOCENT' -i q.csv --in-place -log q.log   # rc=0
+$ grep update q.log
+INFO  update 1:note: "third record" -> "INNOCENT" -> "ALSO INNOCENT"
+
+$ csv2 -get 1:2 -i q.csv
+INNOCENT" -> "ALSO INNOCENT
+```
+
+一行、一筆、資料本身正確。但用 `"(.*)" -> "(.*)"` 去讀那一行,拿到的是
+old = `third record" -> "INNOCENT`、new = `ALSO INNOCENT`;用非貪婪則得到
+old = `third record`、new = `INNOCENT`。**兩個都錯**,而真相是 old = `third record`、
+new = `INNOCENT" -> "ALSO INNOCENT`。
+
+`"` 不在跳脫集合裡,而它正是值的定界符。
+
+**而 README 從未寫過這一行的文法。** 受測者的話:「文件指定了跳脫集合(`\n \t \r \\`),
+卻從來沒說要怎麼剖析一行,因此每一個使用者都得用猜的——而那個猜測會被儲存格內容利用。」
+
+### 為什麼「加進整行的跳脫」行不通
+
+AJ 把跳脫集中在「建構整行」那一點,而那正是它的長處:涵蓋每一則現在與日後的訊息。
+但整行跳脫**無法區分「定界用的引號」與「資料裡的引號」**——兩者都在同一個字串裡,跳脫
+時已經分不出來了。把 `"` 加進那個集合,只會讓定界符也變成 `\"`,一樣有歧義。
+
+**解法是沿用這個格式自己的慣例**:值裡的 `"` 寫成 `""`,一如 RFC 4180 與 `.csv2` 本身。
+它不含反斜線,因此整行跳脫完全不會碰它;剖析方式是任何看得懂 CSV 的人都已經會的那一種。
+`reportEscape` 的註解早就寫過這個理由:「沿用既有慣例而非發明新的,讓看得懂檔案格式的人
+不必再學一套。」那句話當時只套用在報告上。
+
+## AN. 三個不同的拒絕理由,印出同一句話,而那句話是假的(2026-08-20 修正)
+
+```console
+### A: 根本沒有 sidecar
+DEBUG single-threaded: .csv with no index proving one record per line; build one with --build-index
+### B: sidecar 存在但過期
+INFO  index dm.csv.index is stale, ignoring and scanning
+DEBUG single-threaded: .csv with no index proving one record per line; build one with --build-index
+INFO  index dm.csv.index is stale, ignoring and scanning
+### C: sidecar 存在但損毀
+DEBUG single-threaded: .csv with no index proving one record per line; build one with --build-index
+```
+
+三件事:
+
+1. **B 與 C 的訊息說「沒有索引」,而 sidecar 就躺在資料旁邊。** 它還叫人去
+   `--build-index`——而受測者剛剛才做過。它自己的話:「這在幾分鐘之內主動誤導了我。」
+2. **C 完全沒有提到那個損毀的 sidecar。** 一個被丟棄的索引,連一個字都沒有。
+3. **B 的 INFO 印了兩次。** `CSVIndex.load` 一次執行被呼叫不只一次——與 AH 修正時
+   遇到的是同一個形狀,只是這次在 stale 那條路徑上。
+
+### 而我今天自己寫進 README 的那句話,因此是假的
+
+修 AH 時我寫下:
+
+> 「Every path that *declines* an index named it and said why; the one path that
+> *trusts* one said nothing at all.」
+
+後半是真的(那是 AH 修好的)。**前半不是。** 我描述的是我希望的對稱,不是我量到的對稱——
+而我當時只量了「採信」那一條。
+
+**這是本專案的老毛病又一次:加了一段文字,卻沒有去作廢它所使之為假的東西。**
+與 README 狀態表對 `install.zsh` 那次(AF)是同一個模式。
+
+## AO. 平行路徑沒有上界,而 README 說的是另一回事(2026-08-20 文件修正;程式面待決)
+
+README 說:「`-debug` … 每一條路徑都有一行 metrics——平行那一條的 RSS **約為單執行緒的
+兩倍**。」
+
+實測(同一個查詢,兩邊都斷言了路徑):
+
+| 檔案大小 | 單執行緒 RSS | 平行 RSS | 平行 ÷ 檔案 |
+|---|---|---|---|
+| 25,888,899 | 9,207,808 | 60,456,960 | **2.34×** |
+| 51,888,899 | 9,207,808 | 102,023,168 | **1.97×** |
+
+**單執行緒對兩種大小都是 9.2 MB——有界,一如文件所述。平行是檔案的兩倍,隨輸入線性成長。**
+
+所以那句話錯的不只是倍數:**它把一個「無界」說成了一個「有界的倍數」。** 25 MB 的檔上
+它是 6.6 倍,52 MB 的檔上是 11 倍,而 1 GiB 的檔會是約 2 GiB。
+
+而且它與 `CSV2_PARALLEL_CHUNK_BYTES` 無關——chunk 從 256 KiB 調到 16 MiB,RSS 都在
+50–60 MB 之間。所以那不是「工作者各持一塊」的模型,調小 chunk 救不了它。
+
+這與 T9a／T9b／T9c 所守住的那個保證(「RSS 不隨輸入成長」)方向相反。那三條測的是
+`-si`／`-so` 串流路徑,而它們是對的;**沒有任何東西測過平行路徑的記憶體**。
+
+## AP. README 的 `<redacted>` 範例,被同一份 README 的拒絕表擋住(2026-08-20 修正)
+
+第 609 行把這段展示成一次可以運作的操作:
+
+```console
+$ csv2 -update 1:secret "new value" -i pkgs.csv -o out.csv -log app.log
+$ grep update app.log
+INFO  update 1:secret: <redacted> -> <redacted>
+```
+
+受測者對 `:hash`、`:hmac:`、`:enc:` 欄位各試了 `-update`、`-delete -cell`,以及
+`-encrypt`／`-decrypt` 本身,全部 rc=1——被第 852 行那張拒絕表擋住。
+`grep -l redacted *.log` 掃過它產生的每一個 log:**一個都沒有**。
+
+**同一份 README 的兩節互相矛盾,而拒絕表贏了。** 那個 `<redacted>` 分支目前無法從
+任何記錄在案的路徑抵達。
+
+## AQ. `--verify-index` 的成功訊息,在兩種相反的情況下逐字相同(2026-08-20 文件修正)
+
+```console
+$ csv2 --verify-index -i nl2.csv        # 這個檔案每隔一筆就跨行
+index OK: 3 records, stride 256, 1 grid points
+rc=0
+```
+
+README 說 `--verify-index` 證明的三件事之一是「是否有紀錄跨行」。它證明的是**索引對這件事
+的宣稱是準確的**,而不是那個宣稱的內容是什麼——而「宣稱為真」與「宣稱為假」印出的是
+同一行。
+
+受測者拿它當守衛,然後自己標記為「**我以為成功了,但其實是錯的**」。真正回答那個問題的
+是搜尋時的 debug 行(`.csv whose index records a record spanning lines`),它明確且正確。
+
+---
+
+## 第 41 回合的修正,以及其中三件值得單獨記住的事
+
+| | 修法 | 測試 |
+|---|---|---|
+| AL | `--a1` 的列號改為「紀錄號 + 標頭列數」 | T105 |
+| AM | 記入 log 的值裡,`"` 加倍(RFC 4180 慣例) | T106 |
+| AN | 三種拒絕分開;丟棄的理由依 sidecar 去重,每次執行說一次 | T107 |
+| AO | 文件改寫:平行的 RSS **無上界**,約為檔案的兩倍 | 程式面待決,見 todo |
+| AP | 換成實際會發生的「拒絕」;遮蔽保留為最後防線並註明無可達路徑 | T40／T73 既有 |
+| AQ | 寫明它證明的是「宣稱準確」而非「宣稱的內容」 | — |
+
+### 一、修正 AL 之後,整個測試套件一條都沒有變
+
+那不是「沒有副作用」,那是**量測結果**:repo 裡每一份 fixture 都是一筆一行,而在那個世界裡
+「紀錄號 + 標頭列數」與「物理行號」恆等。450 條斷言裡,**沒有一條**分辨得出這兩種讀法。
+T103 守著欄名的每一個邊界,而列號一個都沒有。
+
+**一個功能可以有一半被完整地測著,另一半完全沒有,而總數看起來很健康。**
+
+### 二、AN 的第一版修法,把「重複」換成了「沉默」
+
+`load` 一次執行被呼叫兩次,於是「ignoring and scanning」印兩次。我先讓純查詢那一次靜音——
+而在一個「拒絕平行路徑」的搜尋裡,查詢是**唯一**的一次呼叫,於是理由變成完全不印,而我同時
+寫的拒絕訊息卻說「用 -debug 看原因」。
+
+**重複只是雜訊;沉默才是這一帶一再產生的那種缺陷。** 正解是在 `load` 內部依 sidecar 去重
+——那是唯一同時看得到兩次呼叫的地方。
+
+### 三、AN 裡有一句假話是我自己在同一天寫下的
+
+修 AH 時我寫進 README:「Every path that *declines* an index named it and said why.」
+後半(採信的那條什麼都不說)是我量過的;前半我沒有量,我描述的是我希望的對稱。
+
+**這棵樹上重複出現的那個模式,這次由我親自示範了一遍:加了一段文字,卻沒有去作廢它所使之
+為假的東西。** 而抓到它的是一個只讀 README 的受測者。

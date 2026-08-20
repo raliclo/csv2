@@ -264,9 +264,12 @@ INDEX / 索引
 
 DIAGNOSTICS / 診斷
   -debug                diagnostics to stderr, including a metrics: line on
-                        every path -- the parallel one costs about twice the
-                        RSS of the single-threaded one, and that is measurable
-                        from inside rather than only with /usr/bin/time
+                        every path. Measure with it rather than guessing: the
+                        single-threaded path's peak RSS is bounded and does not
+                        grow with the input, the PARALLEL path's is roughly
+                        TWICE THE FILE and grows with it -- 60 MB on a 25 MB
+                        file, 102 MB on a 52 MB one, against 9 MB either way
+                        single-threaded. See the parallelism section
   -debug=trace          one level lower: every record's selection decision,
                         including the ones NOT emitted and why, and the point
                         at which the read stops -- so a record with no line is
@@ -567,6 +570,17 @@ messages nobody has written yet. Asserted by T102, including that it happens
 exactly once: two fixes each correct on its own escaped the invocation twice
 and turned a newline into a literal `\\n` that no longer round-trips.
 
+**The grammar, so a script can read it.** One entry is one line:
+`TIMESTAMP LEVEL MESSAGE`, single-space separated, the level padded to five
+characters. In an `update` entry the old and new values are each wrapped in
+`"`, and a `"` inside a value is **doubled**, exactly as `.csv2` and RFC 4180
+do it — so `INNOCENT" -> "ALSO INNOCENT` is written
+`"INNOCENT"" -> ""ALSO INNOCENT"` and a reader who knows the format needs
+nothing new. Without that doubling a value could rewrite which half of the
+entry was old and which was new, inside an otherwise legitimate line, and no
+regex could recover the truth. Asserted by T106. Unescape the line first
+(`\n`, `\t`, `\r`, `\\`), then read the quoted fields.
+
 **"In full" has no upper bound, and above 1 MiB it says so.** A value larger
 than that is still written whole, with a `WARN` naming its size: a cap would
 be an audit trail that drops data, which is the thing this line exists to
@@ -603,15 +617,31 @@ current run is the one encrypting or hashing it. So editing a cell in an
 already-protected column redacts, even though that run performs no transform of
 its own:
 
+In practice you will not see a redacted update, because the edit does not get
+that far — an edit aimed at a column the file declares transformed is refused
+outright:
+
 ```console
 $ csv2 -update 1:secret "new value" -i pkgs.csv -o out.csv -log app.log
+csv2: -update 1:secret targets a column this file declares transformed; a raw
+value written there would sit in a hashed column looking like a hash, and
+nothing can detect it …
+$ echo $?
+1
 $ grep update app.log
-INFO  update 1:secret: <redacted> -> <redacted>
+INFO  csv2 -update 1:secret <value> -i pkgs.csv -o out.csv -log app.log
 ```
 
+The refusal is the stronger guard: it stops the write instead of hiding it, and
+it is what the refusals table below describes. **Redaction remains as a
+backstop** — if any future path ever logs a value from a protected column it
+will be `<redacted>` — but no documented route reaches it today. An earlier
+version of this section showed the redacted form as an ordinary session; it was
+still here after the refusal was added, which is how a reader ends up trying a
+command that cannot work. Asserted by T40 and T73.
+
 **The log is a file on disk with normal permissions.** Redaction keeps secrets
-out of it; it is not a reason to put the log somewhere careless. Asserted by
-T40 and T73.
+out of it; it is not a reason to put the log somewhere careless.
 
 ### Two numberings, and where they disagree
 
@@ -1047,8 +1077,8 @@ DEBUG parallel: 6 chunks, 10 workers, chunk 4194304 bytes
 ```
 
 Until 2026-08-20 this line did not exist, and the asymmetry ran the wrong way.
-Every path that *declines* an index named it and said why; the one path that
-*trusts* one said nothing at all. By the O(1) stamp's own limits — described
+The one path that *trusts* an index said nothing at all, while the paths that
+decline one do explain themselves. By the O(1) stamp's own limits — described
 below — a trusted index can be stale, so that was the only branch capable of
 being silently wrong, and it was the only one leaving no trace. An operator
 reading `-debug` could see why a sidecar had been rejected, never that one had
@@ -1088,7 +1118,12 @@ Each of these is argued in full in [plan/plan.md](./plan/plan.md).
   rewrite the offsets can rewrite eight more bytes. It also cannot help when the
   *data* file changes without changing size, mtime or its first and last bytes;
   that is what the O(1) check has always been, a heuristic. For a proof, run
-  `--verify-index`, which is O(n) because it has to be. **What it proves** is
+  `--verify-index`, which is O(n) because it has to be. **What it proves is
+  that the index's three claims are accurate — not what those claims say.** On
+  a file where every other record spans lines it prints `index OK` just the
+  same, because the index correctly records that. It is not a way to ask "does
+  this file have embedded newlines"; the search's `-debug` line answers that
+  one, explicitly. **What it proves** is
   all three of the index's claims: the grid offsets, the record count, and
   whether any record spans lines. The third was added on 2026-08-19, and it is
   the one that mattered — it is the claim the parallel path consumes when it

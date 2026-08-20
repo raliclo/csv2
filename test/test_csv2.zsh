@@ -4643,6 +4643,238 @@ assert_eq "$(head -1 "$TMP/t104.log")" "PRIOR" \
 assert_eq "$(grep -vc '^PRIOR$' "$TMP/t104.log" | tr -d ' ')" "$(( t104_want - 1 ))" \
     "T104c and every surviving line is a real entry, since loss never looked like damage / 而每一行都是真正的紀錄——遺失從來不長得像損壞"
 
+# ---------------------------------------------------------------------
+# T105 -- the A1 ROW, which nothing held.
+#
+# `--a1` printed the physical line. The code carried an argument for it, and
+# the argument was half right: the record number ALONE would print [A1] for a
+# cell any spreadsheet calls A3, and [E0] for a header, and A1 notation has no
+# row 0. Both true. The answer to it is to add the header rows, not to switch
+# to the line.
+#
+# With one record per line the two are equal -- and every example in the
+# README, plus every fixture in this repo, is one record per line. So both
+# readings agreed everywhere anyone looked, and the whole existing suite went
+# on passing after the fix, unchanged. That is the measurement: nothing here
+# was holding the row.
+#
+# They differ exactly once: a record spanning lines still occupies ONE
+# spreadsheet row, because the quoted newline stays inside the cell. And that
+# case is the only one where `--a1` offers anything `--physical` does not.
+# The feature was wrong precisely where it was necessary.
+#
+# T105 —— 沒有任何東西守著的那個 A1「列號」。
+# `--a1` 印的是物理行號。程式碼裡有一段為它辯護的論證，而那個論證對了一半：光用紀錄號，
+# 確實會讓一個任何試算表都叫作 A3 的儲存格印成 [A1]、讓標頭印成 [E0]，而 A1 記法沒有第 0 列。
+# 兩者都對。但對它們的解法是「加上標頭列數」，不是「改用行號」。
+# 一筆一行時兩者相等——而 README 的每一個範例、本 repo 的每一份 fixture，全都是一筆一行。
+# 於是兩種讀法在所有人看過的地方都一致，而修正之後整個既有測試套件一條都沒有變。那正是
+# 這裡的量測結果：**沒有任何東西守著那個列號**。
+# 它們只在一種情況下不同：跨行的紀錄在試算表裡仍然只佔一列，因為引號內的換行留在儲存格內。
+# 而那個情況正是 `--a1` 唯一比 `--physical` 多給出一點東西的場合——這個功能，錯在它唯一
+# 有必要存在的地方。
+# ---------------------------------------------------------------------
+echo
+echo "--- T105: the A1 row is a spreadsheet row, not a line / A1 的列號是試算表的列，不是行 ---"
+
+# Records 1 and 2 span several lines each; the needle is in record 3. A
+# spreadsheet importing this keeps each quoted newline inside its cell and
+# shows four rows, so the needle is on row 4 while sitting on line 10.
+# 第 1、2 筆各佔數行，needle 在第 3 筆。試算表匯入時會把每個引號內換行留在儲存格內，
+# 於是只顯示四列——needle 在第 4 列，而它位在第 10 行。
+{ print -r -- 'a,b'
+  print -r -- 'r1,"A'; print -r -- 'B'; print -r -- 'C'; print -r -- 'D'; print -r -- 'E"'
+  print -r -- 'r2,"P'; print -r -- 'Q'; print -r -- 'R"'
+  print -r -- 'r3,FINDME'
+} > "$TMP/t105.csv"
+
+got=$("$CSV2" -contains FINDME --a1 --physical -i "$TMP/t105.csv" 2>/dev/null | awk '{print $1, $2}')
+assert_eq "$got" "3:2@L10 [B4]" \
+    "T105a a record spanning lines is still ONE spreadsheet row / 跨行的紀錄在試算表裡仍然只佔一列"
+
+# Stated separately because the point is that they are different things. When
+# --a1 was the line, this assertion would have been the same assertion twice.
+# 分開斷言，因為重點正是「它們是兩個不同的東西」。當 --a1 還是行號時，這一條會與上一條
+# 變成同一個斷言寫兩次。
+a1row=$("$CSV2" -contains FINDME --a1 -i "$TMP/t105.csv" 2>/dev/null | sed 's/.*\[[A-Z]*\([0-9]*\)\].*/\1/')
+phys=$("$CSV2" -contains FINDME --physical -i "$TMP/t105.csv" 2>/dev/null | sed 's/^[0-9]*:[0-9]*@L\([0-9]*\).*/\1/')
+if [[ "$a1row" != "$phys" ]]; then
+    ok "T105b and --a1 no longer restates --physical (row $a1row vs line $phys) / 而 --a1 不再是 --physical 的另一種寫法（列 $a1row 對 行 $phys）"
+else
+    bad "T105b --a1 row $a1row equals the physical line $phys on a file with embedded newlines / 在含內嵌換行的檔案上，--a1 的列 $a1row 等於物理行 $phys"
+fi
+
+# A header is row 1, never row 0: A1 notation has no row 0, and that half of
+# the original argument was always right.
+# 標頭是第 1 列，絕不是第 0 列：A1 記法沒有第 0 列，而原本那段論證的這一半一直都是對的。
+hdr=$("$CSV2" -contains 'a' --a1 --include-headers -i "$TMP/t105.csv" 2>/dev/null | awk 'NR==1{print $1, $2}')
+assert_eq "$hdr" "0:1 [A1]" \
+    "T105c the header row is row 1, not row 0 / 標頭列是第 1 列，不是第 0 列"
+
+# Two header rows push the first data record to row 3, which is the rule the
+# README states and the one that must keep holding.
+# 兩列標頭把第一筆資料推到第 3 列，那是 README 陳述的規則，也是必須繼續成立的那一條。
+print -r -- 'a,b'        > "$TMP/t105.csv2"
+print -r -- 'text,text' >> "$TMP/t105.csv2"
+print -r -- 'r1,FINDME' >> "$TMP/t105.csv2"
+got2=$("$CSV2" -contains FINDME --a1 --physical -i "$TMP/t105.csv2" 2>/dev/null | awk '{print $1, $2}')
+assert_eq "$got2" "1:2@L3 [B3]" \
+    "T105d two header rows put data record 1 on row 3 / 兩列標頭讓第 1 筆資料落在第 3 列"
+
+# And where every fixture in this repo lives -- one record per line -- the two
+# still coincide, so the README's examples remain true.
+# 而在本 repo 每一份 fixture 所在的那個世界——一筆一行——兩者仍然重合，因此 README 的
+# 範例依然為真。
+print -r -- 'a,b'        > "$TMP/t105b.csv"
+print -r -- 'r1,x'      >> "$TMP/t105b.csv"
+print -r -- 'r2,FINDME' >> "$TMP/t105b.csv"
+got3=$("$CSV2" -contains FINDME --a1 --physical -i "$TMP/t105b.csv" 2>/dev/null | awk '{print $1, $2}')
+assert_eq "$got3" "2:2@L3 [B3]" \
+    "T105e with one record per line the row and the line still agree / 一筆一行時，列號與行號仍然一致"
+
+# ---------------------------------------------------------------------
+# T106 -- forgery inside an entry, which escaping a whole line cannot stop.
+#
+# Whole-line escaping (T102) guarantees one entry per line. It cannot
+# distinguish the quotes that DELIMIT a value from quotes that are IN one --
+# by the time the line is escaped they are the same characters. So a value of
+# `INNOCENT" -> "ALSO INNOCENT` produced
+#
+#     update 1:note: "third record" -> "INNOCENT" -> "ALSO INNOCENT"
+#
+# one line, one entry, correct data on disk, and no parser can say which half
+# is old and which is new. Greedy gives old=`third record" -> "INNOCENT`;
+# non-greedy gives new=`INNOCENT`; the truth is neither.
+#
+# Doubled rather than backslashed: it is the convention `.csv2` and RFC 4180
+# already use, so a reader who knows the format needs nothing new -- and it
+# carries no backslash, so the whole-line escape leaves it alone. A `\"` would
+# have had its backslash doubled on the way out, which is the two-layer
+# escaping that made the first attempt wrong.
+#
+# T106 —— 一筆紀錄「內部」的偽造，而整行跳脫擋不住它。
+# 整行跳脫（T102）保證一筆一行。它無法區分「界定值的引號」與「值裡面的引號」——跳脫發生時
+# 兩者已經是同樣的字元了。於是值 `INNOCENT" -> "ALSO INNOCENT` 產生一行合法的紀錄，磁碟上
+# 的資料也正確，卻沒有任何剖析器說得出哪一半是舊值、哪一半是新值：貪婪比對得到
+# old=`third record" -> "INNOCENT`，非貪婪得到 new=`INNOCENT`，而真相兩者皆非。
+# 用「加倍」而非反斜線：那是 `.csv2` 與 RFC 4180 已在使用的慣例，看得懂格式的人不必再學
+# 一套；而且它不含反斜線，整行跳脫不會碰它。寫成 `\"` 的話，反斜線會在輸出時被加倍，
+# 那正是這件事第一次做錯時的兩層跳脫。
+# ---------------------------------------------------------------------
+echo
+echo "--- T106: a quote in a value cannot rewrite the entry / 值裡的引號無法改寫那筆紀錄 ---"
+
+print -r -- 'a,note'          > "$TMP/t106.csv"
+print -r -- '1,third record' >> "$TMP/t106.csv"
+rm -f "$TMP/t106.log"
+
+"$CSV2" -update '1:2' 'INNOCENT" -> "ALSO INNOCENT' \
+    -i "$TMP/t106.csv" --in-place -log "$TMP/t106.log" >/dev/null 2>&1
+
+line=$(grep 'update 1:note' "$TMP/t106.log")
+assert_contains "$line" '"INNOCENT"" -> ""ALSO INNOCENT"' \
+    "T106a a quote inside a logged value is doubled, as CSV does it / 記入 log 的值裡的引號會加倍，一如 CSV 的做法"
+
+# The WHOLE message, asserted exactly, because "contains" cannot show that the
+# two values are correctly delimited FROM EACH OTHER -- and that is the entire
+# defect. Note that a regex is deliberately not used to recover the values
+# here: a greedy or non-greedy `"(.*)" -> "(.*)"` is precisely the parser this
+# case exists to protect, and writing one in the test would only demonstrate
+# the ambiguity again rather than measure the encoding.
+# 斷言「整句」訊息且要求精確相符，因為「包含」證明不了那兩個值彼此之間界定正確——而那正是
+# 這個缺陷的全部。此處刻意不用正規表示式去還原：貪婪或非貪婪的 `"(.*)" -> "(.*)"` 正是本
+# 案例要保護的那種剖析器，在測試裡寫一個只會再示範一次那個歧義，而不是量到編碼本身。
+msg=${line#* INFO  }
+assert_eq "$msg" 'update 1:note: "third record" -> "INNOCENT"" -> ""ALSO INNOCENT"' \
+    "T106b and the old and new values stay delimited from each other / 而新舊兩個值彼此之間的界線仍然成立"
+
+# A value with no quote must be untouched -- the fix has to cost nothing in
+# the ordinary case, which is every case anyone will actually read.
+# 不含引號的值必須完全不受影響——這個修正在普通情況下不能有任何代價，而普通情況正是
+# 所有人真正會去讀的那些。
+print -r -- 'a,note'   > "$TMP/t106b.csv"
+print -r -- '1,plain' >> "$TMP/t106b.csv"
+rm -f "$TMP/t106b.log"
+"$CSV2" -update '1:2' 'still plain' -i "$TMP/t106b.csv" --in-place -log "$TMP/t106b.log" >/dev/null 2>&1
+assert_contains "$(grep 'update 1:note' "$TMP/t106b.log")" '"plain" -> "still plain"' \
+    "T106c while a value with no quote is written exactly as before / 而不含引號的值，寫出來與原本完全相同"
+
+# ---------------------------------------------------------------------
+# T107 -- three ways to decline an index, one message, and the message was
+# false.
+#
+# No sidecar, a stale sidecar and a sidecar too short to hold a header all
+# ended at the same line: ".csv with no index proving one record per line;
+# build one with --build-index". It asserted there was no index while
+# `x.csv.index` sat beside the data, and it prescribed the thing the reader
+# had just done. A blind-test subject lost several minutes to it.
+#
+# Worse, the reason was not printed at all in the case that most needed it.
+# `load` is called twice per run -- once as a pure eligibility query, once
+# where the index is read -- so its "ignoring and scanning" lines printed
+# twice. Silencing the query was tried and was worse: on a search that
+# declines the parallel path the query is the ONLY call, so the reason
+# vanished. It is deduplicated inside load instead, once per sidecar per run.
+#
+# T107 —— 拒絕索引的三種情況，同一句訊息，而那句訊息是假的。
+# 「沒有 sidecar」、「sidecar 過期」、「sidecar 短到裝不下檔頭」全都走到同一行：
+# 「.csv with no index proving one record per line; build one with --build-index」。
+# 它在 `x.csv.index` 就躺在資料旁邊時宣稱「沒有索引」，並開出對方剛剛做過的那帖藥。
+# 一位盲測受測者為此損失了好幾分鐘。
+# 更糟的是，最需要那個理由的情況下它根本不印。`load` 一次執行被呼叫兩次——一次純資格查詢、
+# 一次真的要讀——因此那些「ignoring and scanning」印了兩次。把查詢靜音試過了，而那更糟：
+# 在一個拒絕平行路徑的搜尋裡，查詢是唯一的一次呼叫，於是理由整個消失。改為在 load 內部
+# 依 sidecar 去重，每次執行只說一次。
+# ---------------------------------------------------------------------
+echo
+echo "--- T107: three ways to decline an index are three messages / 拒絕索引的三種情況是三句訊息 ---"
+
+t107_build() {   # $1 = which case
+    print -r -- 'a,b' > "$TMP/t107.csv"
+    local i
+    for i in {1..200}; do print -r -- "$i,x$i"; done >> "$TMP/t107.csv"
+    rm -f "$TMP/t107.csv.index"
+    case "$1" in
+        stale)
+            "$CSV2" --build-index -i "$TMP/t107.csv" >/dev/null 2>&1
+            print -r -- 'a,b' > "$TMP/t107.csv"
+            for i in {1..200}; do print -r -- "$i,y$i"; done >> "$TMP/t107.csv"
+            ;;
+        short)
+            "$CSV2" --build-index -i "$TMP/t107.csv" >/dev/null 2>&1
+            print -rn -- 'GARBAGE' > "$TMP/t107.csv.index"
+            ;;
+    esac
+}
+
+t107_debug() {
+    CSV2_PARALLEL_MIN_BYTES=100 "$CSV2" -contains 150 -i "$TMP/t107.csv" -debug \
+        >/dev/null 2> "$TMP/t107.err"
+    cat "$TMP/t107.err"
+}
+
+t107_build none;  none_out=$(t107_debug)
+t107_build stale; stale_out=$(t107_debug)
+t107_build short; short_out=$(t107_debug)
+
+assert_contains "$none_out" "no index proving one record per line" \
+    "T107a with no sidecar the message says there is none / 沒有 sidecar 時，訊息說的是沒有"
+
+assert_contains "$stale_out" "t107.csv.index was discarded as not describing this file" \
+    "T107b with a stale sidecar it names the sidecar instead of denying it exists / sidecar 過期時，訊息指名它，而不是否認它存在"
+
+assert_contains "$short_out" "t107.csv.index was discarded as not describing this file" \
+    "T107c and a sidecar too short to hold a header is the same kind of answer / 短到裝不下檔頭的 sidecar 得到同一類答案"
+
+# The reason must be there, and exactly once. A duplicate reads as two
+# sidecars; a silence is the defect this area keeps producing.
+# 理由必須在，而且恰好一次。重複讀起來像兩個 sidecar；沉默則是這一帶一再產生的那種缺陷。
+assert_eq "$(print -r -- "$stale_out" | grep -c 'is stale, ignoring and scanning')" "1" \
+    "T107d the stale reason is given exactly once, not once per eligibility check / 過期的理由恰好給一次，而非每次資格檢查各一次"
+
+assert_contains "$short_out" "shorter than an index header" \
+    "T107e and a sidecar too short to read says so, where it used to say nothing / 而短到讀不了的 sidecar 會說出來，那裡原本什麼都不說"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

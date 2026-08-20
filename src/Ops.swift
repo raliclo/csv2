@@ -274,14 +274,43 @@ final class ReportEmitter: RecordEmitter {
             }
             var addr = "\(label):\(idx + 1)"
             if ctx.physical { addr += "@L\(r.line)" }
-            // The A1 row is the PHYSICAL line, because that is what a
-            // spreadsheet calls a row. Using the record number made csv2 print
-            // [A1] for a cell that any spreadsheet would call A3, and [E0] for a
-            // header -- and A1 notation has no row 0.
-            // A1 的列號取「物理行號」，因為試算表所稱的列就是那個。用紀錄號會讓
-            // csv2 對一個任何試算表都會叫作 A3 的儲存格印出 [A1]，並對標頭印出
-            // [E0]——而 A1 記法沒有第 0 列。
-            if ctx.a1 { addr += " [\(a1Column(idx))\(r.line)]" }
+            // The A1 row is the record number plus the header rows above it,
+            // which is the row a spreadsheet puts the record on.
+            //
+            // This used to be the PHYSICAL line, defended by an argument that
+            // was half right: the record number ALONE would print [A1] for a
+            // cell any spreadsheet calls A3, and [E0] for a header, and A1
+            // notation has no row 0. Both true -- but the answer to that is to
+            // add the header rows, not to switch to the line. With one record
+            // per line the two are equal, so every example in the README and
+            // every fixture in this repo agreed with both readings and could
+            // not tell them apart.
+            //
+            // They differ exactly once: a record spanning lines still occupies
+            // ONE spreadsheet row, because the quoted newline stays inside the
+            // cell. Record 3 of a one-header `.csv` whose earlier records span
+            // six lines is row 4; the physical line is 10. csv2 printed [B10],
+            // at rc=0, with nothing marking it. And that case is the only one
+            // where `--a1` offers anything `--physical` does not -- everywhere
+            // else it was `--physical` in another notation.
+            //
+            // A1 的列號取「紀錄號 + 其上方的標頭列數」，那才是試算表放這筆紀錄的那一列。
+            //
+            // 原本取的是「物理行號」，並附有一段對了一半的論證：光用紀錄號，確實會讓一個
+            // 任何試算表都叫作 A3 的儲存格印成 [A1]、讓標頭印成 [E0]，而 A1 記法沒有第 0 列。
+            // 兩者都對——但對它們的解法是「加上標頭列數」，不是「改用行號」。一筆一行時兩者
+            // 相等，於是 README 的每一個範例與本 repo 的每一份 fixture 都同時符合兩種讀法，
+            // 分辨不出差別。
+            //
+            // 它們只在一種情況下不同：跨行的紀錄在試算表裡仍然只佔「一列」，因為引號內的換行
+            // 留在儲存格內。一個一列標頭的 `.csv`，若前面幾筆各佔六行，第 3 筆是第 4 列，而
+            // 物理行號是 10。csv2 印的是 [B10]，rc=0，沒有任何標記。而那個情況正是 `--a1`
+            // 唯一比 `--physical` 多給出一點東西的場合——在其他每一處，它只是換一種寫法的
+            // `--physical`。
+            if ctx.a1 {
+                let a1Row = r.headerRow.map { $0 + 1 } ?? (r.number + ctx.headers.count)
+                addr += " [\(a1Column(idx))\(a1Row)]"
+            }
             // Both fields are escaped: a header name can contain a TAB just as
             // a value can, and one bad name would shift every column.
             // 兩個欄位都要跳脫：欄名與值一樣可能含 TAB，而一個壞掉的欄名會讓

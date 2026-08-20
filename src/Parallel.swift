@@ -133,13 +133,15 @@ func parallelDeclineReason(_ o: Options, format: Format) -> String? {
     // 抓到它的原因：那個旗標的作用除了紀錄號之外看不見。它同時也讓那條寫在文件裡的逃生口
     // 逃不掉：因為懷疑 sidecar 而伸手去拿 --no-index 的人，拿到的還是 sidecar 的答案。
     if o.noIndex { return "--no-index, and a .csv needs an index to prove one record per line" }
+    // No logging HERE: this is a pure query, asked more than once per run, so
+    // anything it prints prints twice. What load itself says about discarding a
+    // sidecar is deduplicated inside load, once per sidecar per run, which is
+    // the only place that can see both calls. The trust line lives at the
+    // single point of use in runParallelSearch.
+    // 此處不記錄：這是純查詢，一次執行會被問不只一次，它印的任何東西都會印兩次。而 load
+    // 自己對「丟棄某個 sidecar」所說的話，在 load 內部依 sidecar 去重、每次執行只說一次
+    // ——那是唯一看得到兩次呼叫的地方。那行「採信」放在 runParallelSearch 裡唯一的使用點。
     if let idx = CSVIndex.load(dataPath: path) {
-        // Kept free of logging on purpose: this is a pure query and it is
-        // asked more than once per run. The trust line belongs at the single
-        // point of use in runParallelSearch, or it prints twice and reads as
-        // two sidecars having been consulted.
-        // 刻意不在此記錄：這是純查詢，一次執行會被問不只一次。那行「採信」屬於
-        // runParallelSearch 裡唯一的使用點，否則會印兩次，讀起來像查了兩個 sidecar。
         if idx.noEmbeddedNewlines { return nil }
         // Distinguished from "no index" because the remedy is not the same.
         // Telling someone to run --build-index here sends them to rebuild an
@@ -150,6 +152,29 @@ func parallelDeclineReason(_ o: Options, format: Format) -> String? {
         // 會得到完全相同結論的索引：這個檔案確實有一筆紀錄跨行，而單執行緒不是退而求其次，
         // 它就是正確答案。
         return ".csv whose index records a record spanning lines; a record number is not a line number here"
+    }
+    // Three different situations used to end here with one message, and the
+    // message asserted there was no index while a sidecar sat beside the data.
+    // It then told the reader to --build-index, which is what they had just
+    // done. A blind-test subject lost several minutes to it and said so.
+    //
+    // The three are separated now because the remedy differs: build one,
+    // rebuild the one that is there, or nothing (the file genuinely spans
+    // lines -- handled above). Naming the sidecar matters more than the
+    // wording: "no index" beside a file called `x.csv.index` is the kind of
+    // statement that makes someone doubt what they can see.
+    //
+    // 原本三種不同的情況都走到這裡、印出同一句話，而那句話宣稱「沒有索引」——當時 sidecar
+    // 就躺在資料旁邊。它接著叫人去 --build-index，而那正是對方剛剛做過的事。一位盲測受測者
+    // 為此損失了好幾分鐘，並且寫了下來。
+    //
+    // 現在三者分開，因為解法不同：建立一個、重建已經在那裡的那一個、或什麼都不必做（檔案
+    // 真的跨行——在上面處理）。指名那個 sidecar 比措辭更要緊：在一個叫做 `x.csv.index` 的
+    // 檔案旁邊說「沒有索引」，是那種會讓人懷疑自己眼睛的說法。
+    let sidecar = CSVIndex.path(for: path)
+    if FileManager.default.fileExists(atPath: sidecar) {
+        return ".csv whose index \(sidecar) was discarded as not describing this file"
+            + " -- run with -debug to see why, and --build-index to replace it"
     }
     return ".csv with no index proving one record per line; build one with --build-index"
 }

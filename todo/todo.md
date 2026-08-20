@@ -262,3 +262,32 @@ opt-in flag.
 
 真正把它關閉的做法，是從 Unicode 字元資料庫「產生」這些區間而非手選——那是本專案目前
 沒有、也不該為了一個選擇加入的旗標而引入的建置期依賴。
+
+## 平行搜尋的記憶體沒有上界(2026-08-20,第 41 回合量到)
+
+| 檔案大小 | 單執行緒峰值 RSS | 平行峰值 RSS |
+|---|---|---|
+| 25,888,899 | 9,207,808 | 60,456,960 |
+| 51,888,899 | 9,207,808 | 102,023,168 |
+
+**單執行緒對兩種大小都是 9.2 MB;平行約為檔案的兩倍,隨輸入線性成長。** 而它與
+`CSV2_PARALLEL_CHUNK_BYTES` 無關——chunk 從 256 KiB 調到 16 MiB,RSS 都落在 50–60 MB,
+所以「調小 chunk」救不了它。
+
+README 已改為如實陳述(AO)。**尚未決定的是要不要改程式。**
+
+要點:
+
+- T9a／T9b／T9c 守的是 `-si`／`-so` 串流路徑的「RSS 不隨輸入成長」,而它們是對的。
+  **沒有任何測試量過平行路徑的記憶體。** 無論最後怎麼決定,那個測試都該補上——否則
+  下一次有人動平行路徑時,同樣沒有東西會說話。
+- 1 GiB 的檔案在平行路徑上會是約 2 GiB。那可能超過使用者願意付的代價,而目前唯一的
+  逃生口是 `CSV2_PARALLEL_MIN_BYTES` 調高到把平行整個關掉。
+- 若要改:先弄清楚那兩倍是誰持有的。它不隨 chunk 變,所以不是「每個工作者各持一塊」。
+
+Parallel search memory is unbounded: single-threaded peak RSS is 9 MB for both
+a 25 MB and a 52 MB file, while parallel is roughly twice the file and grows
+with it. It does not track CSV2_PARALLEL_CHUNK_BYTES, so shrinking chunks does
+not help. The README now states this (AO); whether to change the code is open.
+Whatever is decided, the missing test should be added -- T9a/b/c cover the
+streaming path only, and nothing has ever measured the parallel path's memory.

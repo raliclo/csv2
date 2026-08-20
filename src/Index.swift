@@ -208,18 +208,53 @@ final class CSVIndex {
     /// 所有檢查都是 O(1)，而結果是啟發式而非證明：`rsync -t`、`cp -p`、`tar -p`
     /// 都會保留 mtime，因此可以構造出「大小與 mtime 相同、內容不同」的檔案。
     /// 前後 64 bytes 的雜湊擋掉絕大多數。需要確定的人用 --verify-index，那是 O(n)。
+    /// Why a sidecar was discarded is said ONCE per run, per sidecar.
+    ///
+    /// `load` is called twice in a run -- once as a pure eligibility query and
+    /// once where the index is actually read -- so every "ignoring and
+    /// scanning" line below printed twice, reading as two sidecars having been
+    /// consulted. Silencing the query instead was tried first and was worse:
+    /// on a search that declines the parallel path the query is the ONLY call,
+    /// so the reason stopped being printed at all, and the decline message
+    /// says "run with -debug to see why". A duplicate is noise; a silence is
+    /// the defect this whole area keeps producing.
+    ///
+    /// 一個 sidecar 為什麼被丟棄，一次執行只說一次。
+    ///
+    /// `load` 在一次執行中被呼叫兩次——一次是純粹的資格查詢，一次是真的要讀索引的地方——
+    /// 因此下面每一句「ignoring and scanning」都印了兩次，讀起來像查了兩個 sidecar。
+    /// 先試過的做法是把查詢那一次靜音，而那更糟：在一個「拒絕平行路徑」的搜尋裡，查詢是
+    /// 唯一的一次呼叫，於是那個理由變成完全不印——而拒絕訊息卻寫著「用 -debug 看原因」。
+    /// 重複只是雜訊；沉默才是這一帶一再產生的那種缺陷。
+    private static var announced = Set<String>()
+
+    private static func announceDiscard(_ message: @autoclosure () -> String, for sidecar: String) {
+        guard !announced.contains(sidecar) else { return }
+        announced.insert(sidecar)
+        Logger.shared.info(message())
+    }
+
     static func load(dataPath: String) -> CSVIndex? {
         let p = path(for: dataPath)
-        guard let d = FileManager.default.contents(atPath: p), d.count >= INDEX_HEADER_SIZE else {
+        guard let d = FileManager.default.contents(atPath: p) else { return nil }
+        // A sidecar too short to hold a header used to be the one discard that
+        // said nothing at all -- indistinguishable, from the outside, from
+        // having no sidecar. Every other rejection below announces itself.
+        // 一個短到裝不下檔頭的 sidecar，原本是唯一一種「什麼都不說」的丟棄——從外面看，
+        // 與「根本沒有 sidecar」無法區分。下面每一種拒絕都會說出自己。
+        guard d.count >= INDEX_HEADER_SIZE else {
+            announceDiscard(
+                "index \(p): shorter than an index header (\(d.count) bytes), ignoring and scanning",
+                for: p)
             return nil
         }
         let b = [UInt8](d)
         guard Array(b.prefix(8)) == INDEX_MAGIC else {
-            Logger.shared.info("index \(p): bad magic, ignoring and scanning")
+            announceDiscard("index \(p): bad magic, ignoring and scanning", for: p)
             return nil
         }
         guard getU32(b, 8) == INDEX_VERSION else {
-            Logger.shared.info("index \(p): version mismatch, ignoring and scanning")
+            announceDiscard("index \(p): version mismatch, ignoring and scanning", for: p)
             return nil
         }
         let flags = getU32(b, 12)
@@ -249,7 +284,7 @@ final class CSVIndex {
         // 是正確的，因為它不使用索引。那正是本設計所稱「比沒有索引糟得多」的情況，
         // 而它出自那個唯一沒有被檢查的東西。
         guard getU64(b, INDEX_SUM_OFFSET) == indexChecksum(b) else {
-            Logger.shared.info("index \(p): checksum mismatch, ignoring and scanning")
+            announceDiscard("index \(p): checksum mismatch, ignoring and scanning", for: p)
             return nil
         }
 
@@ -260,7 +295,7 @@ final class CSVIndex {
             // error, because the operation must succeed identically without it.
             // 過期而非損毀。以 INFO 記錄後忽略——絕不是錯誤，因為沒有它時操作
             // 必須以完全相同的方式成功。
-            Logger.shared.info("index \(p) is stale, ignoring and scanning")
+            announceDiscard("index \(p) is stale, ignoring and scanning", for: p)
             return nil
         }
 
@@ -269,7 +304,7 @@ final class CSVIndex {
         guard have >= want else {
             // Truncated. Same treatment: discard, scan. Not an error.
             // 被截斷。同樣處理：丟棄、掃描。不是錯誤。
-            Logger.shared.info("index \(p) is truncated (\(have) of \(want) entries), ignoring and scanning")
+            announceDiscard("index \(p) is truncated (\(have) of \(want) entries), ignoring and scanning", for: p)
             return nil
         }
         var offsets = [UInt64]()
