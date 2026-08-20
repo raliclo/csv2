@@ -535,9 +535,10 @@ concurrent writer cannot land on another's offset and overwrite it. That is
 worth stating because it was not always true — the file was opened for writing
 and seeked to the end once, which is the same thing with one process and not
 with two. Eight processes logging 25 operations each left 98 entries of 200,
-none of them malformed and every run exiting 0. Asserted by T104. On Windows
-the C runtime seeks before each write rather than appending atomically, so the
-window is very small but not zero; POSIX has no window.
+none of them malformed and every run exiting 0. Asserted by T104, which runs on
+Windows too — and failed there when this was first written, leaving 110 of 120
+entries. The Windows path now uses `FILE_APPEND_DATA`, the OS-level atomic
+append, rather than the C runtime's seek-then-write. No platform has a window.
 
 It is an audit trail,
 so it records what changed — which means it has to be explicit about what it

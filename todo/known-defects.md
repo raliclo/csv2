@@ -2262,3 +2262,97 @@ underneath it is fixed. When fixing a defect, look at the heading of the
 section it lives in: a heading is a claim about the whole section, and it is
 easier to forget than the entry, because whoever does the fixing is looking at
 the entry.
+---
+
+# 四平台矩陣第一次真的同時全綠(2026-08-20),而補齊它時找到兩條
+
+在被問到「還有什麼要做的」之後,我去補一個我知道自己沒做的東西:記憶體那批修改動過
+`Platform.swift` 與 `Parallel.swift`,而 Windows 與 WSL 從那之後**只驗過「編得過」,
+沒有跑過測試套件**。
+
+## AS. Windows 上 276 條失敗,而成因是一個環境變數
+
+```
+經 multissh 執行： PASS 163   FAIL 276   SKIP 4
+同一台機器、普通 shell： PASS 454   FAIL 0   SKIP 1
+```
+
+**同一棵樹、同一個執行檔、同一個 commit。**
+
+失敗訊息長這樣:
+
+```
+csv2: cannot open input file: /c/Users/lowei/proj/csv2/test/.test_csv2.gix09g/cronly.csv
+```
+
+這份測試交給 csv2 的是由 `${0:A:h}` 組出的絕對路徑,而在 Windows 上那是 POSIX 形狀的。
+**原生 Windows 程式打不開那種路徑。** 讓它一直能運作的,是 MSYS2 在把引數交給原生行程時
+改寫成 `C:/...`——這份測試從第一次在那裡執行起就依賴這件事(T58a／T58b 的存在正是因為那個
+改寫會出現在 csv2 自己的錯誤訊息裡),但**沒有任何地方說出來,也沒有任何東西確保它是開著的**。
+
+`MSYS2_ARG_CONV_EXCL=*` 會把改寫整個關掉,而它被設在 multissh session 的環境裡。
+
+### 那個差一點
+
+對 276 條失敗的第一個判讀是「記憶體那批修改弄壞了 Windows」。**而建置是通過的**,所以下一步
+會是去 bisect csv2——一條完全走錯的路。
+
+排除它的是三次手動量測:相對路徑(可以)、反斜線原生路徑(可以)、以及這份測試使用的 POSIX
+路徑(不行)。**第三次指出了成因,而前兩次證明程式本身沒事。**
+
+**修法**:測試自己 `unset MSYS2_ARG_CONV_EXCL`,把這個決定的範圍限制在它自己與它啟動的
+行程內,並移除一個沒有人宣告過的、對呼叫者環境的依賴。
+
+## AT. 而套件一跑起來,Windows 就少了 11 筆稽核紀錄
+
+修好 AS 之後 Windows 是 442 PASS / **2 FAIL**,而那兩條是 T104a 與 T104c:
+
+```
+FAIL T104a 6 concurrent writers lose no entries (got '110', want '121')
+```
+
+**121 筆只剩 110 筆,整筆整筆地少,沒有一筆是壞的。** 與 AK 那個 POSIX 缺陷是同一種靜默
+遺失,只是小一些。
+
+成因是我自己在同一天寫下的:`_open` 在 Swift for Windows 上不可用,於是我改成「每次寫入前
+先 seek」,重現 CRT 對 `_O_APPEND` 的做法,並**如實寫進兩份 README**:「窗口極小但不為零」。
+
+我當時否決 `FILE_APPEND_DATA` 的理由是:「那個保證從這裡也無法比『每次寫入前 seek』驗證得
+更徹底。一個說清楚的限制,勝過一個未經驗證的宣稱。」
+
+**那個理由在 T104 開始於 Windows 上執行的那一刻就失效了。** 現在有量測了,而有了量測,
+那個更強的做法就變成可以驗證的——於是它從「不該做」變成「該做」。
+
+**修法**:`CreateFileW` 搭配 `FILE_APPEND_DATA`(且不帶 `FILE_WRITE_DATA`),那是 Windows
+真正的不可分割追加——由作業系統移到檔尾並寫入,合為一次操作。經 `_open_osfhandle` 交給一個
+CRT 描述子,讓其餘程式維持單一條路徑。
+
+**這次先驗才提交**:一個 14 行的探針先在 Windows 節點上編過並跑過,回傳 fd 3。上一次做同一
+件事時,我推出去的 commit 在那裡編不過(見 AK 的後記)。
+
+結果:**Windows 444 PASS / 0 FAIL / 4 SKIP**,而兩份 README 裡「Windows 較弱」那句話改成
+「沒有任何平台還有窗口」。
+
+| 平台 | 結果 |
+|---|---|
+| macOS arm64 | 454 / 0 / 1 |
+| aarch64 Linux guest | 454 / 0 / 1 |
+| x86_64 WSL2 | 454 / 0 / 1 |
+| x86_64 Windows MSVC | 444 / 0 / 4 |
+
+## 這兩條有一個共同點
+
+**AS 讓一個好的程式看起來壞掉了;AT 讓一個壞掉的地方看起來是好的**——因為在我補上這次
+執行之前,Windows 上根本沒有東西在跑 T104。
+
+而兩者都只有在「真的去跑那個套件」時才會出現。「建置通過」在兩種情況下都成立,而它一次
+也沒有回答過那個真正的問題。
+
+Two findings while filling a gap in the four-platform matrix. AS made a correct
+program look badly broken: 276 failures over multissh, zero from an ordinary
+shell on the same machine, because MSYS2_ARG_CONV_EXCL=* disables the argument
+rewriting the suite has silently depended on since it first ran there. AT was
+the reverse -- a real defect that looked fine, because nothing had ever run
+T104 on Windows: the seek-then-write append left 110 of 121 entries. Both
+appear only when the suite is actually run. "The build succeeds" was true
+throughout and never answered the question.
