@@ -7,7 +7,7 @@ Guidance for coding agents working in this repository.
 
 ```zsh
 ./compile_csv2.zsh      # builds release/csv2 with swiftc / 以 swiftc 建置 release/csv2
-./test/test_csv2.zsh    # 0 FAIL; the one SKIP is T47 / 0 失敗；唯一的 SKIP 是 T47
+./test/test_csv2.zsh    # 0 FAIL; on macOS the one SKIP is T47 / 0 失敗；macOS 上唯一的 SKIP 是 T47
 
 # the Linux half, driven from the parent project (boots a guest VM)
 # Linux 那一半，由母專案驅動（會啟動 guest VM）

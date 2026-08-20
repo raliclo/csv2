@@ -12,8 +12,10 @@ and the macOS host it is built from.
 
 ```zsh
 ./compile_csv2.zsh       # build release/csv2
-./test/test_csv2.zsh    # 0 FAIL. The one SKIP is T47, which compares two
-                        # platforms and so runs from the parent project.
+./test/test_csv2.zsh    # 0 FAIL. On macOS the one SKIP is T47, which
+                        # compares two platforms and so runs from the parent
+                        # project. Other platforms skip more, each with its
+                        # reason printed; the suite checks the count itself.
 ```
 
 | Works | Does not yet |

@@ -6539,7 +6539,24 @@ skipt "T47 macOS and aarch64 Linux produce byte-identical output / mac 與 Linux
 # （T98a–T98g，合為一行 skip）。
 # 檢查「數量」而不是列出名字是刻意的：名字清單會在「某個案例安靜地不再執行」時照樣通過，
 # 而那與一個過期的數字是同一種失敗。只要有任何一個沒被計入的東西被略過，數量就會變。
-if (( IS_WINDOWS )); then want_skip=4; else want_skip=1; fi
+# One more axis than the platform: whether this system can read a file's mode
+# at all. The aarch64 guest has no `stat` and no zsh/stat, so T129e -- which
+# checks the ls fallback against stat -- has nothing to compare against and
+# skips there and only there. The probe below asks the same question file_mode
+# asks; that is an environment fact, not the suite's own bookkeeping, so it
+# does not make the count self-fulfilling.
+# 比「平台」多一個軸：這個系統到底讀不讀得到一個檔案的模式。aarch64 guest 上沒有 `stat`、
+# 也沒有 zsh/stat，因此 T129e——它拿後備去對 `stat`——在那裡沒有對象可比，只在那裡 SKIP。
+# 下面這個探測問的是 file_mode 問的同一件事；那是環境的事實，不是測試自己的帳，所以不會
+# 讓這個數字變成自我實現。
+want_skip=1                                   # T47, on every platform / 每個平台都有
+if (( IS_WINDOWS )); then
+    (( want_skip += 4 ))                      # T61a, T61c, T98a-g, T129a-d
+else
+    _t69_probe=$(stat -c '%a' "$TMP" 2>/dev/null)
+    [[ $_t69_probe == <-> ]] || _t69_probe=$(stat -f '%Lp' "$TMP" 2>/dev/null)
+    [[ $_t69_probe == <-> ]] || (( want_skip += 1 ))   # T129e
+fi
 if [[ "$skip" == "$want_skip" ]]; then
     ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
 else

@@ -18,7 +18,7 @@ Claude Code 專屬的部分。
 | `compare/*.csv2` | Comparisons against SQLite and PostgreSQL; also the first real fixtures. / 與 SQLite、PostgreSQL 的比較，亦為第一批真實測試素材 |
 
 ```zsh
-./compile_csv2.zsh && ./test/test_csv2.zsh    # 0 FAIL；唯一的 SKIP 是 T47
+./compile_csv2.zsh && ./test/test_csv2.zsh    # 0 FAIL；macOS 上唯一的 SKIP 是 T47
 ```
 
 **Tick a checkbox in the plan only once its test passes.** Code written but not

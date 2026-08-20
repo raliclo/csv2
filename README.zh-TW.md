@@ -12,8 +12,9 @@ English: [README.md](./README.md)
 
 ```zsh
 ./compile_csv2.zsh       # 建置 release/csv2
-./test/test_csv2.zsh    # 0 失敗。唯一的 SKIP 是 T47——它比對的是兩個平台，
-                        # 因此由母專案執行。
+./test/test_csv2.zsh    # 0 失敗。在 macOS 上唯一的 SKIP 是 T47——它比對的是兩個
+                        # 平台，因此由母專案執行。其他平台會多幾個，每一個都會印出
+                        # 理由；那個數量由測試自己檢查。
 ```
 
 | 可用 | 尚未做 |
