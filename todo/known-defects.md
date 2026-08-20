@@ -3907,3 +3907,47 @@ Linux 是「檔案系統狀態」。GNU 那個會先把一整段檔案系統資�
 T129a–d 在 Windows 上改為 SKIP 並寫明理由:MSYS2 的 `ln -s` 在未設 winsymlinks 時是複製,
 沒有連結可保留;它回報的模式位元是覆在 ACL 之上、形似 POSIX 的虛構。`copyMode` 在那裡
 本來就被編譯掉。
+
+---
+
+## DS. Windows 的驗證有四次是對著另一個目錄做的(2026-08-20 修正於 multissh 端)
+
+不是 csv2 的缺陷,是**把 csv2 送上 Windows 的那條路**的缺陷;記在這裡,因為它讓
+「Windows 已驗證」這句話連續四回合為假。
+
+`helper/upgrade_nodes_csv2.zsh` 每次都回報:
+
+```
+windows:
+  是 checkout，將 pull
+  commit: 7607bb9
+  build: ok
+  install: ok
+  verified: C:/Users/lowei/AppData/Local/csv2/csv2.exe IS the build just made
+```
+
+而節點始終落後四個 commit。**每一行都是真的,只是講的不是同一個目錄。**
+
+那個 session 設了 `MSYS2_ARG_CONV_EXCL=*`,它把「MSYS2 在參數交給原生程式前改寫路徑」
+整個關掉。於是:
+
+```
+cd /c/Users/lowei/proj/csv2       shell 內建，看到的是真本
+git -C /c/Users/lowei/proj/csv2   原生程式，看到的是 C:\c\Users\lowei\proj\csv2
+```
+
+而第二個路徑底下**真的有一棵樹**——更早某次同樣未轉換的 `git clone` 在那裡建立的,
+之後每一次 pull 都把它更新到最新。狀態判斷問的是 `git -C`,得到「是 checkout」;
+pull 推進的是幻影;`cd $dir` 之後建置的是真本、而它是舊的;最後那道身分檢查拿這份舊
+建置去比 shell 會執行的那個檔案,**相符**——因為兩者都是舊的。
+
+這是本專案自己的測試在 2026-08-19 已經撞過一次的同一個變數:`MSYS2_ARG_CONV_EXCL=*`
+讓 276 個 Windows 測試以「cannot open input file」失敗,`test_csv2.zsh` 因此在
+Windows 上會先 unset 它。**同一個變數、同一個原因、同一台機器,而修正只落在其中一邊。**
+那是本專案最常犯的那一類:一條想清楚了、卻只套用到它成立之處的一部分。
+
+修法:遠端區塊開頭 unset 該變數、狀態判斷與 pull 都改走 `cd`、pull 印出
+`before -> after`,好讓「什麼也沒做」不能再假裝成一次升級。
+
+順帶:那段遠端指令在一個雙引號字串裡,**註解裡的反引號一樣會開啟命令替換**——
+`git -C <posix path>` 於是被當成重導向來解析,`parse error near '>'`。
