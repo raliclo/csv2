@@ -162,7 +162,14 @@ SELECTING / 選取
   -A N  -B N  -C N      context in RECORDS, as in grep; blocks separated by --
   -head N               first N records          (records, not lines)
   -tail N               last N records
-  -mid a,b              records a through b, inclusive; `a,` and `,b` are open
+  -mid a,b              records a through b, inclusive; `a,` and `,b` are
+                        open. A range that overruns the end is CLAMPED, not
+                        refused, and a start past the end gives empty output
+                        at rc=0 -- indistinguishable from a window that exists
+                        and is empty. To tell them apart, read `records` from
+                        the trailing --json meta line: it is the count actually
+                        read, so `records < a` means the window was never
+                        reached. -head and -tail clamp the same way
   -t                    include the header rows (off by default). It applies
                         to SELECTIONS only -- an edit rewrites the whole file
                         and always writes the headers, with or without -t
@@ -846,8 +853,28 @@ prints nothing, leaves nothing behind, and does not drain the input first: on a
 400 MB stream, `| head -1` returns in 0.04 s where `| wc -c` takes 9.7 s. That
 is correct Unix behaviour and not a csv2 error, so **a caller that treats every
 non-zero status as "csv2 failed" will misreport a perfectly ordinary
-`| head`.** Check for 141 explicitly if your script cares. A run that fails writes nothing to `-o`, because output
-goes to a temp file that is renamed only after everything else worked.
+`| head`.** Check for 141 explicitly if your script cares — but note that 141
+is a property of the OUTPUT SIZE, not of the command: the same pipeline gives 0
+on a small file, because everything fit in the 64 KiB buffer and was written
+before the reader left, and 141 on a large one.
+
+**Every refusal exits `1`, and there is nothing else to tell them apart by.**
+Measured across 28 distinct refusals: exit status `1` every time, exactly two
+stderr lines every time, nothing on stdout, no error code, no category token,
+no stable grammar. `-debug` adds nothing on a refused run — the `metrics:` line
+belongs to a run that did work, so a refusal prints none. A script that must
+react differently to different refusals has to match on English prose, and
+there is no supported way around that today. This is stated rather than
+implied because a reader who assumes otherwise writes the matching anyway and
+finds out later.
+
+**A search that matches nothing exits `0`.** `-contains` reports what it found;
+finding nothing is not an error. So `if csv2 -contains X -i f.csv` is not a
+test for presence — it succeeds either way. To ask the question, read `matched`
+from the trailing `--json` meta line.
+
+A run that fails writes nothing to `-o`, because output goes to a temp file
+that is renamed only after everything else worked.
 
 **The same holds for `--in-place`, where it matters more:** a failed in-place
 edit leaves the original **byte-for-byte unchanged**, and leaves no temp file
@@ -959,9 +986,15 @@ input-relative numbers are 2, 3 and 4.
 
 Two consequences worth stating because they are easy to trip over:
 
-- **Range is checked against the input too.** `-insert 6` on a five-record file
-  is refused in a batch, and legal as the third of three separate runs, because
-  by then the file really does have six places to put it.
+- **Range is checked against the input too, and the legal range is `1..N`.**
+  `-insert` puts a row *before* record N, so on a five-record file the last
+  legal position is 5 and `-insert 6` is refused — in a batch and on its own.
+  **`-insert` cannot address the end of a file; that is what `-append` is
+  for.** An earlier version of this bullet said `-insert 6` becomes legal as
+  the third of three separate runs "because by then the file really does have
+  six places to put it". The prediction holds — by then the file has seven
+  records, so 6 is interior — but the reasoning does not: a five-record file
+  has five insert positions, not six.
 - **Two inserts at the same N keep the order you wrote them**, and `-insert`
   composes with `-append` in one run.
 

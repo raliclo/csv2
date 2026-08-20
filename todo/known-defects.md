@@ -2627,7 +2627,7 @@ asked whether the API existed and not what it did to the bytes.
 > 「這是這個工具自己的招牌失敗,在 README 說已經修好的那條快路徑上重新出現:一次被回報為
 > 成功的寫入,產生了一個剛好少掉那一筆寫入的檔案。」
 
-## BB. `-append --in-place` 跳過「最後一筆是否完整」的檢查
+## BB. `-append --in-place` 跳過「最後一筆是否完整」的檢查(2026-08-20 修正,T111a–f)
 
 README 講了兩次,而且是當成**已修的缺陷**在講:
 
@@ -2664,7 +2664,7 @@ rc=0                          ← r3 不見了。那一筆是幾秒前以 rc=0 �
 **既有的守衛檢查的是「檔案結尾有沒有換行」,而不是「最後一筆完不完整」。** 一個檔案可以
 以換行結尾,同時停在一個沒有關閉的引號裡——而那正是這裡的情況。
 
-## CD. `-append` 與 `--truncate-partial` 併用沒有被拒絕
+## CD. `-append` 與 `--truncate-partial` 併用沒有被拒絕(2026-08-20 修正,T91n/o)
 
 文件在兩個地方說它被拒絕:旗標條目(「**與 `-append` 併用時被拒絕**,後者只會增加位元組」)
 與拒絕表。
@@ -2677,7 +2677,7 @@ rc=0        {"meta":{"records":3,…}}        ← 追加確實發生了
 `-o` 與 `--in-place` 兩種目的地都沒有拒絕。與 BB 合起來,得到的正是 README 預測「所以才要
 拒絕」的那個檔案:「那個檔案會同時保留它,並在其後多出一筆完整的紀錄」。
 
-## CE. 同一次執行裡,`-update` 到一筆正被 `-delete` 刪掉的紀錄,會被靜默丟棄
+## CE. 同一次執行裡,`-update` 到一筆正被 `-delete` 刪掉的紀錄,會被靜默丟棄(2026-08-20 修正,T111g–k)
 
 ```console
 $ csv2 -delete 1,1 -update 1:2 'GHOST' -i g.csv --in-place
@@ -2698,7 +2698,7 @@ rc=1
 **「那個編輯不會有任何效果,而且仍然會被回報為完成。」** 那句話描述的正是它在紀錄軸上
 實際做的事。一條規則被想清楚、寫下來、實作在一個軸上,而另一個軸沒有。
 
-## CF. 教你怎麼跳脫的那則訊息,自己被跳脫了——而這是我今天造成的
+## CF. 教你怎麼跳脫的那則訊息,自己被跳脫了——而這是我今天造成的(2026-08-20 修正,T111l/m)
 
 ```
 README 說:   undefined escape sequence \q; .csv2 defines only \n, \r and \\
@@ -2732,3 +2732,42 @@ discarded by the documented repair. CF is mine, from this morning: centralising
 the escaping fixed two defects and created a third, because a single choke
 point cannot tell an author's prose from an interpolated value, and those two
 need opposite treatment.
+
+### CD:一個真的測試,斷言了一個真的拒絕,而它從未走到常見的那個情況
+
+T91i／T91j 從存在以來一直通過,它們斷言的是「`--truncate-partial` 與 `-append` 併用會被
+拒絕」。而那個拒絕當時只寫在「驗證失敗」的 catch 裡——**它成立的條件,正好就是 T91i／T91j
+fixture 的條件:最後一筆不完整。**
+
+健康的檔案上,同樣的組合以 rc=0 被接受,而兩份 README 在兩個地方都說它被拒絕。
+
+**測試是真的、斷言是真的、通過也是真的。它從未走到的那個情況,才是常見的那個。**
+現在 T91n／T91o 用一個健康的檔案。
+
+### CF 的修法:讓那個關卡只做它分辨得出來的事
+
+`lineEscape` 只跳脫「會結束一行的東西」——換行與 CR。它守住的性質是「一筆一行、無法靠開出
+第二行來偽造」,而那個性質不需要知道哪些位元組是資料。
+
+完整的跳脫回到「值」進入訊息的那一點:`redact`(值)與 `sanitizedCommandLine`(引數)。
+那裡知道自己拿到的是資料。
+
+於是三件事同時成立:散文原樣印出、值仍然無歧義、AI 與 AJ 關掉的偽造仍然關著。而**不會被
+跳脫兩次**,因為關卡不再碰反斜線。
+
+### 這四條合起來的形狀
+
+| | 規則存在嗎 | 套到哪裡 | 沒套到哪裡 |
+|---|---|---|---|
+| BB | 是,README 說了兩次 | `-o` | `--in-place`(快路徑唯一服務的目的地) |
+| CD | 是,文件說了兩處 | 驗證失敗時 | 檔案健康時 |
+| CE | 是,訊息一字不差 | 欄 | 紀錄 |
+| CF | 是,而且是我今天才建立的 | 值(正確) | 散文(不該套) |
+
+**四條裡有三條是「一條想清楚的規則,只被套到它適用範圍的一部分」,而第四條是「被套到了不
+適用的地方」。** 沒有一條是「沒有人想到這件事」。
+
+Three of the four are a rule that was thought through and applied to part of
+where it holds; the fourth is the same rule applied where it does not. None of
+them is an oversight about what the right behaviour is -- that was written down
+in every case, sometimes twice, sometimes in the message text itself.
