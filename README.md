@@ -407,6 +407,23 @@ csv2 -update "$addr" "$val" -i f.csv2 --in-place             # round-trips
 
 Asserted by T96.
 
+**An address is only as current as the file it came from, and there is one way
+it can be wrong without anything saying so.** If a `.index` sidecar sits beside
+the file and the file has since been changed in a way the O(1) stamp cannot
+see — same size, same mtime, same first and last bytes — the search trusts it
+and can report a record number that is off. The three commands above then all
+exit 0, and the edit lands on a neighbouring record. Two ways to make that
+impossible, both cheap:
+
+```sh
+csv2 --verify-index -i f.csv2          # O(n): prove the sidecar first, exit 1 if not
+csv2 -contains "old" --no-index -i f.csv2   # or do not use one at all
+```
+
+`--no-index` is the flag for "refuse to trust a sidecar"; it is listed under
+the index flags and named here because this recipe is where it matters. See
+**The index sidecar** below for what the stamp can and cannot notice.
+
 Matching is **case-sensitive** and there is no flag to change that. **The way
 to fold case is `--json` and one pass of your own**, not a sweep of spellings:
 enumerating `mbedtls`/`mbedTLS`/`MbedTLS`/… is 2^n runs, which is 128 at seven

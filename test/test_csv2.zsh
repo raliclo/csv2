@@ -6595,6 +6595,88 @@ else
 fi
 
 # ---------------------------------------------------------------------
+# T137 -- a flag whose Chinese entry lost half its English one.
+#
+# Round 53: "the Chinese -t entry omits the English entry's 'It applies to
+# SELECTIONS only -- an edit ... always writes the headers'. Covered later, but
+# the flag table diverges between languages."
+#
+# T117 could not see it: that entry cites no case number, and case numbers are
+# all T117 compares. This is the same drift one level down -- not a section
+# missing, a sentence missing.
+#
+# The measure is the byte length of each flag's description, compared between
+# the two files under LC_ALL=C so every platform's awk counts the same thing.
+# Chinese says the same thing in fewer characters and more bytes, so the ratio
+# sits near 1: measured across 38 flags today the minimum is 0.81 and the
+# median 1.06, while the -t entry as found would have been 0.25. The threshold
+# is 0.5, which is below anything real and far above the failure.
+#
+# T137 —— 一個「中文條目掉了英文條目一半內容」的旗標。
+# 第 53 回合發現：中文的 -t 條目少了英文那句「它只作用於選取——一次編輯一定會寫出標頭列」。
+# T117 看不到它：那個條目沒有引用案例編號，而 T117 比對的就只有案例編號。這是同一種漂移
+# 往下一層——不是少了一節，是少了一句。
+# 量的是每個旗標說明的「位元組長度」在兩份檔案間的比值，並在 LC_ALL=C 下計算，好讓每個平台的
+# awk 數的是同一種東西。中文用較少的字、較多的位元組講同一件事，因此比值接近 1：今天實測
+# 38 個旗標，最低 0.81、中位數 1.06，而當時的 -t 條目會是 0.25。門檻取 0.5，低於任何真實
+# 值，也遠高於那次失敗。
+# ---------------------------------------------------------------------
+echo
+echo "--- T137: the flag tables say the same amount / T137：兩份旗標表說的份量相同 ---"
+
+# Totals per flag NAME, not per entry: `-delete` has three entries (a[,b],
+# -cell, -col) in both files, and pairing them one by one would compare the
+# first English entry against the first Chinese one by position and report a
+# difference that is only the ordering. Summing is enough for what this checks
+# -- whether a language is carrying materially less text for a flag.
+# 以「旗標名稱」加總，而不是逐條目比對：`-delete` 在兩份檔案裡都有三個條目（a[,b]、
+# -cell、-col），逐條目配對會用位置去對，然後回報一個「只是順序不同」的差異。對這個
+# 檢查要問的事情——某一種語言在某個旗標上是不是承載了明顯較少的文字——加總就夠了。
+t137_extract() {
+    LC_ALL=C awk '
+        function flush() { if (cur != "") { total[cur] += len; cur = "" } }
+        /^  -{1,2}[A-Za-z0-9]/ {
+            flush()
+            cur = $1
+            rest = substr($0, length($1) + 3)
+            gsub(/^ +| +$/, "", rest)
+            len = length(rest)
+            next
+        }
+        /^ {20,}[^ ]/ && cur != "" {
+            line = $0
+            gsub(/^ +| +$/, "", line)
+            len += length(line)
+            next
+        }
+        /^[[:space:]]*$/ { flush() }
+        END { flush(); for (f in total) print f "\t" total[f] }
+    ' "$1" | sort
+}
+
+t137_en_file="$TMP/t137_en.txt"
+t137_zh_file="$TMP/t137_zh.txt"
+t137_extract "$ROOT/README.md"       > "$t137_en_file"
+t137_extract "$ROOT/README.zh-TW.md" > "$t137_zh_file"
+
+t137_thin=""
+t137_seen=0
+while IFS=$'\t' read -r flag enlen; do
+    zhlen=$(LC_ALL=C awk -F'\t' -v f="$flag" '$1 == f { print $2; exit }' "$t137_zh_file")
+    [[ -z $zhlen || $enlen -eq 0 ]] && continue
+    t137_seen=$((t137_seen + 1))
+    (( zhlen * 100 < enlen * 50 )) && t137_thin="$t137_thin $flag(${zhlen}/${enlen})"
+done < "$t137_en_file"
+
+if (( t137_seen < 20 )); then
+    bad "T137a only $t137_seen flags were compared; the extractor stopped matching the flag tables / 只比對到 $t137_seen 個旗標；抽取器與旗標表已對不上"
+elif [[ -z ${t137_thin// /} ]]; then
+    ok "T137a no flag's Chinese entry is under half its English one, across $t137_seen flags / $t137_seen 個旗標中，沒有任何一個的中文條目短於英文的一半"
+else
+    bad "T137a thin Chinese entries:${t137_thin} / 中文條目過短：${t137_thin}"
+fi
+
+# ---------------------------------------------------------------------
 # T136 -- claims the README makes that nothing had checked.
 #
 # Round 53 found each of these by reading the README and then measuring:
