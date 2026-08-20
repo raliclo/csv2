@@ -584,7 +584,9 @@ data row becomes a header.
 $ csv2 -r -i export.csv
 csv2: this file begins with a UTF-16LE byte-order mark; csv2 reads bytes and
 does not convert encodings, so it would parse as records that mean nothing.
-Convert it first with: iconv -f UTF-16LE -t UTF-8 file > file.utf8
+Convert it first with: iconv -f UTF-16LE -t UTF-8 file > converted.csv -- the
+new name has to keep a .csv or .csv2 suffix, because the suffix is what
+declares the format
 ```
 
 **CR line endings get the same treatment** — the pre-OS X Mac convention, which

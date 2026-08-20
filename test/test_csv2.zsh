@@ -7176,6 +7176,56 @@ else
 fi
 
 # ---------------------------------------------------------------------
+# T146 -- a conversion recipe has to produce a file this tool will open.
+#
+# Round 55: "the iconv/tr recipes produce .utf8/.lf filenames that csv2's own
+# suffix rule then rejects; neither recipe mentions renaming to .csv". Advice
+# that ends in a file the tool refuses is not advice, and the round had to work
+# the rename out for itself.
+#
+# T146 —— 一條轉換建議，必須產出一個「這個工具打得開」的檔案。
+# ---------------------------------------------------------------------
+echo
+echo "--- T146: following the conversion advice / T146：照著轉換建議去做 ---"
+
+# The CR recipe, run as given.
+# CR 那條建議，照著它給的樣子執行。
+printf 'a,b\r1,x\r2,y\r' > "$TMP/t146_cr.csv"
+_t146_cr=$("$CSV2" -r -t -i "$TMP/t146_cr.csv" 2>&1 >/dev/null | head -1)
+assert_contains "$_t146_cr" "converted.csv" \
+    "T146a the CR refusal names a destination csv2 can open / CR 的拒絕指出一個 csv2 打得開的目的地"
+if [[ $_t146_cr == *".csv or .csv2 suffix"* ]]; then
+    ok "T146b and says why the suffix matters / 並說明為什麼副檔名要緊"
+else
+    bad "T146b $_t146_cr / 訊息如上"
+fi
+
+tr '\r' '\n' < "$TMP/t146_cr.csv" > "$TMP/t146_converted.csv"
+assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t146_converted.csv")" "1" \
+    "T146c and the file it tells you to make is one csv2 reads / 而它叫你產生的那個檔案，csv2 讀得了"
+
+# The UTF-16 recipe. iconv is not everywhere -- the guest has no such applet --
+# so the recipe's TEXT is checked always and the conversion only where the tool
+# it names exists.
+# UTF-16 那條建議。iconv 不是到處都有——guest 沒有這個 applet——因此「建議的文字」一律檢查，
+# 而那次轉換只在「它指名的工具存在」的地方做。
+printf '\xff\xfea\x00,\x00b\x00\n\x001\x00,\x00x\x00\n\x00' > "$TMP/t146_u16.csv"
+_t146_u=$("$CSV2" -r -t -i "$TMP/t146_u16.csv" 2>&1 >/dev/null | head -1)
+assert_contains "$_t146_u" "converted.csv" \
+    "T146d the UTF-16 refusal names one too / UTF-16 的拒絕同樣指出一個"
+
+if (( $+commands[iconv] )); then
+    if iconv -f UTF-16LE -t UTF-8 "$TMP/t146_u16.csv" > "$TMP/t146_u8.csv" 2>/dev/null; then
+        assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t146_u8.csv")" "1" \
+            "T146e and following it produces a file csv2 reads / 而照著它做，產生的檔案 csv2 讀得了"
+    else
+        skipt "T146e following the UTF-16 recipe / 照著 UTF-16 那條建議做 (iconv here cannot do UTF-16LE / 此處的 iconv 做不了 UTF-16LE)"
+    fi
+else
+    skipt "T146e following the UTF-16 recipe / 照著 UTF-16 那條建議做 (no iconv on this platform / 此平台沒有 iconv)"
+fi
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one

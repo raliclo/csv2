@@ -478,8 +478,18 @@ final class RecordParser {
                 if (b0 == 0xFF && b1 == 0xFE) || (b0 == 0xFE && b1 == 0xFF) {
                     let which = b0 == 0xFF ? "UTF-16LE" : "UTF-16BE"
                     throw fault(
-                        "this file begins with a \(which) byte-order mark; csv2 reads bytes and does not convert encodings, so it would parse as records that mean nothing. Convert it first with: iconv -f \(which) -t UTF-8 file > file.utf8",
-                        "本檔案以 \(which) 的位元組順序記號開頭；csv2 讀的是位元組、不做編碼轉換，因此它會被解析成一堆沒有意義的紀錄。請先轉換：iconv -f \(which) -t UTF-8 file > file.utf8")
+                        // `> file.utf8` was the recipe, and csv2 then refuses
+                        // the result: the suffix declares the format, and
+                        // `.utf8` declares nothing. A round followed both this
+                        // and the CR recipe and had to work out the rename for
+                        // itself. Advice that produces a file this tool will
+                        // not open is not advice.
+                        // 原本的建議是 `> file.utf8`，而 csv2 接著會拒絕那個結果：宣告格式的
+                        // 是副檔名，而 `.utf8` 什麼也沒宣告。有一個回合照著這條與 CR 那條做，
+                        // 最後得自己想出「要改回 .csv」。一條會產生「本工具打不開的檔案」的
+                        // 建議，不是建議。
+                        "this file begins with a \(which) byte-order mark; csv2 reads bytes and does not convert encodings, so it would parse as records that mean nothing. Convert it first with: iconv -f \(which) -t UTF-8 file > converted.csv -- the new name has to keep a .csv or .csv2 suffix, because the suffix is what declares the format",
+                        "本檔案以 \(which) 的位元組順序記號開頭；csv2 讀的是位元組、不做編碼轉換，因此它會被解析成一堆沒有意義的紀錄。請先轉換：iconv -f \(which) -t UTF-8 file > converted.csv——新檔名必須保留 .csv 或 .csv2 副檔名，因為宣告格式的正是副檔名")
                 }
             }
             if Array(bomPending.prefix(3)) == BOM {
@@ -725,8 +735,8 @@ final class RecordParser {
         // 一個裸 CR 不能觸發它。
         if crAsDataCount > lfCount {
             throw fault(
-                "this file uses CR line endings (the pre-OS X Mac convention), which CSV does not support; convert it first with: tr '\\r' '\\n' < file > file.lf",
-                "本檔案使用 CR 行尾（OS X 之前的 Mac 慣例），非 CSV 所支援；請先轉換：tr '\\r' '\\n' < file > file.lf")
+                "this file uses CR line endings (the pre-OS X Mac convention), which CSV does not support; convert it first with: tr '\\r' '\\n' < file > converted.csv -- the new name has to keep a .csv or .csv2 suffix, because the suffix is what declares the format",
+                "本檔案使用 CR 行尾（OS X 之前的 Mac 慣例），非 CSV 所支援；請先轉換：tr '\\r' '\\n' < file > converted.csv——新檔名必須保留 .csv 或 .csv2 副檔名，因為宣告格式的正是副檔名")
         }
         let pending = recordDirty || !fields.isEmpty || !rawBuf.isEmpty || !valBuf.isEmpty
         guard pending else { return }

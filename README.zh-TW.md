@@ -487,7 +487,9 @@ dimension,csv2,sqlite,advantage,basis,note
 $ csv2 -r -i export.csv
 csv2: this file begins with a UTF-16LE byte-order mark; csv2 reads bytes and
 does not convert encodings, so it would parse as records that mean nothing.
-Convert it first with: iconv -f UTF-16LE -t UTF-8 file > file.utf8
+Convert it first with: iconv -f UTF-16LE -t UTF-8 file > converted.csv -- the
+new name has to keep a .csv or .csv2 suffix, because the suffix is what
+declares the format
 ```
 
 **CR 行尾得到同樣的處理**——那是 OS X 之前的 Mac 慣例，CSV 不支援它。判斷方式是「裸 CR 的
