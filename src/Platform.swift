@@ -343,20 +343,40 @@ enum Platform {
     /// 的理由。
     static func openForAppend(path: String) -> FileHandle? {
         #if canImport(ucrt)
-        // Swift on Windows marks `_open` unavailable, so the flag is not
-        // reachable and the property has to be produced another way -- see
-        // appendWrite, which seeks before every write. Found by building on the
-        // Windows node: this file compiles on two platforms out of three, and
-        // the third is the one that cannot be checked from here.
-        // Swift for Windows 把 `_open` 標為不可用，因此那個旗標拿不到，這個性質只能換個
-        // 方式產生——見 appendWrite，它在每一次寫入前先 seek。這是在 Windows 節點上建置時
-        // 發現的：這個檔案在三個平台中的兩個編得過，而編不過的那一個正是從這裡檢查不到的。
-        if !FileManager.default.fileExists(atPath: path) {
-            FileManager.default.createFile(atPath: path, contents: nil)
+        // FILE_APPEND_DATA without FILE_WRITE_DATA is Windows' real atomic
+        // append: the OS moves to the end and writes as one operation, so two
+        // processes cannot land on the same offset. Reached through
+        // CreateFileW because Swift for Windows marks `_open` unavailable, and
+        // handed to a CRT descriptor so the rest of this file stays one code
+        // path.
+        //
+        // The weaker version -- open for writing and seek before every write,
+        // which is what the CRT does for _O_APPEND -- was here first, and it
+        // was not enough: six processes writing 120 entries to one log left
+        // 110. Whole entries, none torn. That is the same silent loss as the
+        // POSIX defect this replaced, just smaller.
+        //
+        // FILE_APPEND_DATA（且不帶 FILE_WRITE_DATA）是 Windows 上真正的不可分割追加：
+        // 由作業系統移到檔尾並寫入，合為一次操作，因此兩個行程不可能落在同一個位移上。
+        // 以 CreateFileW 取得，因為 Swift for Windows 把 `_open` 標為不可用；再交給一個
+        // CRT 描述子，讓這個檔案其餘部分維持單一條程式路徑。
+        //
+        // 較弱的那個版本——以寫入開啟、每次寫入前 seek，也就是 CRT 對 _O_APPEND 的做法——
+        // 原本在這裡，而它不夠：六個行程寫 120 筆到同一個 log，只剩 110 筆。整筆整筆地少，
+        // 沒有一筆是壞的。那與它所取代的那個 POSIX 缺陷是同一種靜默遺失，只是小一些。
+        let handle: HANDLE = path.withCString(encodedAs: UTF16.self) { wpath in
+            CreateFileW(wpath,
+                        DWORD(FILE_APPEND_DATA),
+                        DWORD(FILE_SHARE_READ | FILE_SHARE_WRITE),
+                        nil,
+                        DWORD(OPEN_ALWAYS),
+                        DWORD(FILE_ATTRIBUTE_NORMAL),
+                        nil)
         }
-        guard let h = FileHandle(forWritingAtPath: path) else { return nil }
-        h.seekToEndOfFile()
-        return h
+        guard handle != INVALID_HANDLE_VALUE else { return nil }
+        let fd = _open_osfhandle(intptr_t(bitPattern: handle), _O_APPEND)
+        guard fd >= 0 else { CloseHandle(handle); return nil }
+        return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         #else
         let fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
         guard fd >= 0 else { return nil }
@@ -364,27 +384,26 @@ enum Platform {
         #endif
     }
 
-    /// Write to a handle from `openForAppend`, keeping the append property on
-    /// every platform.
+    /// Write to a handle from `openForAppend`. The append property is held by
+    /// the operating system on every platform now, so this is a plain write.
     ///
-    /// On POSIX the kernel already holds it and this is a plain write. On
-    /// Windows, where `O_APPEND` is out of reach, the seek is done here, before
-    /// each write, instead of once at open. That is the same thing the C
-    /// runtime does for `_O_APPEND`: it shrinks the window between deciding
-    /// where the end is and writing there, from "the whole life of the handle"
-    /// down to a few instructions. It does not close it. The docs say so
-    /// rather than claiming a guarantee this cannot deliver.
-    /// 寫入由 `openForAppend` 取得的 handle，並在每個平台上維持「追加」這個性質。
+    /// It was not always. This used to seek to the end before each write on
+    /// Windows, reproducing what the C runtime does for `_O_APPEND`, because
+    /// `_open` is unavailable there and O_APPEND looked out of reach. That
+    /// shrinks the window between deciding where the end is and writing there;
+    /// it does not close it, and the difference was measurable: six processes
+    /// writing 120 entries to one log left 110, whole entries, none torn. The
+    /// function survives as one line because the call sites should not have to
+    /// know which platform they are on.
+    /// 寫入由 `openForAppend` 取得的 handle。「追加」這個性質現在在每個平台上都由作業系統
+    /// 持有，因此這裡就是一次單純的寫入。
     ///
-    /// 在 POSIX 上核心已經持有它，這裡就是一次單純的寫入。在 Windows 上，`O_APPEND` 拿不到，
-    /// 於是那個 seek 改在這裡做——在每一次寫入之前，而不是在開檔時做一次。那與 C runtime
-    /// 對 `_O_APPEND` 的做法相同：它把「判斷尾端在哪」與「寫到那裡」之間的窗口，從「這個
-    /// handle 的整個生命期」縮到幾個指令。它並沒有把窗口關上。文件如實說明，而不是宣稱一個
-    /// 這個做法給不出的保證。
+    /// 它並非一直如此。原本在 Windows 上會在每次寫入前 seek 到檔尾，重現 C runtime 對
+    /// `_O_APPEND` 的做法——因為那裡 `_open` 不可用，O_APPEND 看起來拿不到。那會縮小「判斷
+    /// 尾端在哪」與「寫到那裡」之間的窗口，但關不上它，而那個差別是量得到的：六個行程寫
+    /// 120 筆到同一個 log，只剩 110 筆，整筆整筆地少，沒有一筆是壞的。這個函式仍以一行的
+    /// 形式留著，因為呼叫端不該需要知道自己在哪個平台上。
     static func appendWrite(_ h: FileHandle, _ data: Data) {
-        #if canImport(ucrt)
-        h.seekToEndOfFile()
-        #endif
         h.write(data)
     }
 
