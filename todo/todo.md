@@ -308,3 +308,21 @@ streaming path only, and nothing has ever measured the parallel path's memory.
 少了一個 autorelease pool——同一個缺陷的第三個發生地。拆穿那個假設只花了一次量測:
 把批次強制降到 1,峰值 RSS 只變動百分之零點五。修正後 615 MB 的檔案從 608 MB 降到 23 MB。
 測試 T108 已補上,那也是這一節當初點名缺少的東西。
+
+## 4. 讓 `--physical` / `--a1` 的位址可以被接受,並且驗證它
+
+`--physical` 印 `1:1@L2`、`--a1` 印 `1:1 [A2]`。目前把它們餵回去會被拒絕,而訊息會指出
+那段結尾是裝飾(DX、T132d/e)。**拒絕是對的,但不是最好的答案。**
+
+更好的答案是接受它們,並且**驗證那段裝飾**:`@L2` 說「這筆在第 2 實體行」,若檔案在你搜尋
+之後變了,那個斷言就不成立,而那正是應該拒絕的時刻——一個帶著自我驗證的位址,比一個只能
+自己記得「當時是第幾行」的位址有用得多。
+
+需要的是「由紀錄號求出實體行號」這條路徑。索引 sidecar 已經記錄了紀錄邊界,但那是位元組
+位移而非行號,而含有內嵌換行的檔案兩者不相等——這正是 `csv2view` 也在等的那一項
+(見 README 的「Designed but not built」)。兩者可以一起做。
+
+Accept `--physical` / `--a1` addresses AND validate the decoration: `@L2` is a
+claim about where that record was, and refusing when it no longer holds is more
+useful than refusing the notation. Needs record-number-to-physical-line, which
+is the same thing csv2view is waiting for.

@@ -751,9 +751,11 @@ data from your file, and matching on it would let the output of a run change
 what that run finds. Asserted by T15.
 
 By default the header rows are **invisible to search**, even though their cells
-are text like any other. `--include-headers` includes them, addressed `0a` for
-the first header row and `0b` for the second — never plain `0`, so that a hit in
-the English title row and one in the Chinese title row are distinguishable:
+are text like any other. `--include-headers` includes them. On a `.csv2`, which has two
+header rows, they are addressed `0a` for the first and `0b` for the second, so
+that a hit in the English title row and one in the Chinese title row are
+distinguishable. On a `.csv` there is one header row and it is plain `0` — a
+script matching `^0[ab]:` will miss every header hit in a `.csv`:
 
 ```console
 $ csv2 -contains note --include-headers -i pkgs.csv2
@@ -763,6 +765,16 @@ $ csv2 -contains 備註 --include-headers -i pkgs.csv2
 $ csv2 -contains 備註 --include-headers --zh -i pkgs.csv2
 0b:3	備註	備註
 ```
+
+```console
+$ csv2 -contains name --include-headers -i pkgs.csv     # one header row
+0:1	name	name
+```
+
+None of these is addressable by a verb, in any spelling: `-get`, `-update` and
+`-delete -cell` all refuse `0:`, `0a:` and `0b:` with the same sentence, which
+says why rather than complaining about the shape of an address csv2 printed
+itself. Asserted by T132.
 
 The middle field is the column's name **in the language you asked for**, not the
 name from whichever header row matched. That is why the second line says `note`

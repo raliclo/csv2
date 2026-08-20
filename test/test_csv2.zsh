@@ -6560,6 +6560,92 @@ else
 fi
 
 # ---------------------------------------------------------------------
+# T132 -- an address the tool printed, handed back to the tool.
+#
+# The README promises the locating report's notation composes: "the same
+# notation -contains prints, so finding and editing compose". Three ways that
+# was not true:
+#   - a .csv header hit prints plain `0:1`, while the README said `0a`/`0b`
+#     and "never plain 0" -- a script filtering on ^0[ab]: missed every one;
+#   - -update and -delete -cell answered a header address with "expected r:c",
+#     which is a complaint about the shape of an address csv2 had just printed,
+#     while -get explained the reason. One property, three accounts;
+#   - --physical and --a1 print `1:1@L2` and `1:1 [A2]`, and feeding either
+#     back produced `no column named "1@L2"`, sending the reader after a column
+#     that was never the problem.
+#
+# T132 —— 工具印出來的位址，交還給工具。
+# README 承諾定位報告的寫法可以直接接下去，而它在三個地方不成立：`.csv` 的標頭命中印的是
+# 單純的 `0:1`（README 說「絕不會是單純的 0」）；-update 與 -delete -cell 用「需要 r:c」
+# 回答一個 csv2 剛剛自己印出來的位址，而 -get 講的是理由；--physical 與 --a1 印出的
+# `1:1@L2`、`1:1 [A2]` 餵回去會得到「沒有名為 1@L2 的欄位」。
+# ---------------------------------------------------------------------
+echo
+echo "--- T132: the tool accepts, or explains, what it printed / T132：工具印出來的東西，它要嘛收，要嘛講清楚 ---"
+
+print -r -- 'name,value'  > "$TMP/t132.csv"
+print -r -- 'foo,1'      >> "$TMP/t132.csv"
+
+assert_eq "$("$CSV2" -contains foo --include-headers -i "$TMP/t132.csv" | head -1 | cut -f1)" "1:1" \
+    "T132a a data hit is addressed r:c / 命中資料時的位址是 r:c"
+assert_eq "$("$CSV2" -contains name --include-headers -i "$TMP/t132.csv" | cut -f1)" "0:1" \
+    "T132b a .csv header hit is plain 0, as the README now says / .csv 的標頭命中就是單純的 0，一如 README 現在所寫"
+
+# Same sentence from all three verbs. Matching on the REASON, not on the whole
+# message: what matters is that none of them answers a well-formed address by
+# complaining about its shape.
+# 三個動詞說同一句話。比對的是「理由」而不是整句訊息：重點在於沒有任何一個會用「格式不對」
+# 去回答一個格式正確的位址。
+for _t132_addr in '0:1' '0a:1' '0b:1'; do
+    for _t132_verb in get update delete; do
+        case $_t132_verb in
+            get)    _t132_out=$("$CSV2" -get "$_t132_addr" -i "$TMP/t132.csv" 2>&1) ;;
+            update) _t132_out=$("$CSV2" -update "$_t132_addr" X -i "$TMP/t132.csv" --in-place 2>&1) ;;
+            delete) _t132_out=$("$CSV2" -delete -cell "$_t132_addr" -i "$TMP/t132.csv" --in-place 2>&1) ;;
+        esac
+        if [[ $_t132_out == *"names a header cell"* && $_t132_out != *"expected r:c"* ]]; then
+            ok "T132c -$_t132_verb $_t132_addr is refused with the reason / -$_t132_verb $_t132_addr 以理由被拒絕"
+        else
+            bad "T132c -$_t132_verb $_t132_addr: $(print -r -- $_t132_out | head -1) / 訊息如上"
+        fi
+    done
+done
+
+# A decorated address names the decoration, not a column that does not exist.
+# 帶裝飾的位址要指出那段裝飾，而不是指向一個不存在的欄位。
+_t132_phys=$("$CSV2" -contains foo --physical -i "$TMP/t132.csv" | cut -f1)
+_t132_out=$("$CSV2" -get "$_t132_phys" -i "$TMP/t132.csv" 2>&1)
+if [[ $_t132_out == *"--physical or --a1 prints"* ]]; then
+    ok "T132d a --physical address is diagnosed as one / --physical 的位址會被指認出來"
+else
+    bad "T132d $_t132_phys gave: $(print -r -- $_t132_out | head -1) / 訊息如上"
+fi
+
+_t132_a1=$("$CSV2" -contains foo --a1 -i "$TMP/t132.csv" | cut -f1)
+_t132_out=$("$CSV2" -get "$_t132_a1" -i "$TMP/t132.csv" 2>&1)
+if [[ $_t132_out == *"--physical or --a1 prints"* ]]; then
+    ok "T132e and so is an --a1 address / --a1 的位址同樣如此"
+else
+    bad "T132e $_t132_a1 gave: $(print -r -- $_t132_out | head -1) / 訊息如上"
+fi
+
+# And a column whose NAME ends that way is still a column. Deciding by
+# appearance alone would tell someone their own column name is a decoration.
+# 而一個「名字本來就長那樣」的欄位仍然是欄位。只看樣子就下判斷，等於告訴別人他自己的欄名
+# 是裝飾。
+print -r -- 'id [primary],b'  > "$TMP/t132b.csv"
+print -r -- '7,x'            >> "$TMP/t132b.csv"
+assert_eq "$("$CSV2" -get '1:id [primary]' -i "$TMP/t132b.csv")" "7" \
+    "T132f a column really named like a decoration still resolves / 名字本來就像裝飾的欄位仍然解析得到"
+
+_t132_out=$("$CSV2" -get '1:nope' -i "$TMP/t132.csv" 2>&1)
+if [[ $_t132_out == *"no column named"* ]]; then
+    ok "T132g and a genuinely missing column still says so / 而真的不存在的欄位仍然會這樣說"
+else
+    bad "T132g $(print -r -- $_t132_out | head -1) / 訊息如上"
+fi
+
+# ---------------------------------------------------------------------
 # T131 -- a write that fails for a reason other than a departed reader.
 #
 # Two failures used to be treated as one. `Platform.writeAll` called

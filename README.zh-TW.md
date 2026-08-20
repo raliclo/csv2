@@ -630,8 +630,9 @@ rownum 那一欄也**永遠不會被搜尋**：`-contains 4` 不會只因為某�
 找得到什麼。由 T15 斷言。
 
 標頭列預設**對搜尋是不可見的**，即使它們的儲存格和其他儲存格一樣是文字。
-`--include-headers` 會把它們納入，第一列標頭定址為 `0a`、第二列為 `0b`——絕不會是單純的
-`0`，如此一來「命中英文標題列」與「命中中文標題列」才能區分：
+`--include-headers` 會把它們納入。在有兩列標頭的 `.csv2` 上，第一列定址為 `0a`、第二列為
+`0b`，如此一來「命中英文標題列」與「命中中文標題列」才能區分。在 `.csv` 上只有一列標頭，
+它就是單純的 `0`——**用 `^0[ab]:` 去比對的腳本，會漏掉 `.csv` 的每一個標頭命中**：
 
 ```console
 $ csv2 -contains note --include-headers -i pkgs.csv2
@@ -641,6 +642,15 @@ $ csv2 -contains 備註 --include-headers -i pkgs.csv2
 $ csv2 -contains 備註 --include-headers --zh -i pkgs.csv2
 0b:3	備註	備註
 ```
+
+```console
+$ csv2 -contains name --include-headers -i pkgs.csv     # 只有一列標頭
+0:1	name	name
+```
+
+這些位址沒有任何一個是動詞可以作用的，不論怎麼拼：`-get`、`-update` 與 `-delete -cell`
+對 `0:`、`0a:`、`0b:` 都以同一句話拒絕，而那句話說的是「為什麼」，不是去挑剔一個 csv2
+自己印出來的位址的形狀。由 T132 斷言。
 
 中間那一欄是該欄位**在你所要求的語言下**的名稱，而不是「命中的那一列標頭」的名稱。這正是
 第二行寫著 `note` 而旁邊的值是中文的原因：命中的是 `0b` 那一列，但這份報告並沒有被要求用

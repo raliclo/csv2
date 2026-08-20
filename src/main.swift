@@ -442,18 +442,16 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "get":
             try once("-get")
             let addr = try need(arg)
-            // 0a / 0b are well-formed ADDRESSES -- the locating report emits
-            // them -- they are simply not addresses any verb can act on. Caught
-            // here, before parseCellAddress, so the message is about what the
-            // address means rather than about its shape.
-            // 0a／0b 是格式正確的「位址」——定位報告就會產生它們——它們只是不是任何動詞
-            // 能作用的位址。在 parseCellAddress 之前攔下，讓訊息談的是這個位址的意義，
-            // 而不是它的形狀。
-            if addr.hasPrefix("0a:") || addr.hasPrefix("0b:") || addr.hasPrefix("0:") {
-                throw usageError(
-                    "-get addresses data records from 1; \(addr) names a header cell, and header cells are not addressable by any verb -- -update cannot write one either",
-                    "-get 從第 1 筆資料開始定址；\(addr) 指的是標頭儲存格，而標頭儲存格不是任何動詞可以定址的——-update 同樣寫不了它")
-            }
+            // A header address is well-formed -- the locating report emits it --
+            // and is simply not one any verb can act on. parseCellAddress says
+            // so now, and says it identically for -get, -update and
+            // -delete -cell: this used to be explained here and nowhere else,
+            // so the same property had one account per verb and two of the
+            // three blamed the shape of an address the tool had printed itself.
+            // 標頭位址是格式正確的——定位報告就會產生它——它只是不是任何動詞能作用的位址。
+            // 現在由 parseCellAddress 統一說明，而且 -get、-update、-delete -cell 說的
+            // 是同一句：這段解釋過去只存在於這裡，於是同一個性質有三種說法，其中兩種
+            // 怪罪的是「工具自己印出來的位址」的形狀。
             o.getCell = try parseCellAddress(addr, flag: arg)
             o.cellModifier = false; o.colModifier = false
         case "update":
@@ -614,6 +612,20 @@ func parseDelete(_ spec: String, cell: Bool, col: Bool, argvTail: [String], inde
 /// 一個指令的輸出可以直接接到下一個。
 func parseCellAddress(_ s: String, flag: String) throws -> (Int, String) {
     let parts = s.split(separator: ":", maxSplits: 1).map(String.init)
+    // A header address gets the reason, not "expected r:c". The form IS r:c --
+    // the locating report printed it -- and answering a well-formed address
+    // with a complaint about its shape sends the reader to check their quoting.
+    // -get has explained this properly for a while; -update and -delete -cell
+    // said "expected r:c" about their own tool's output, so one property had
+    // three accounts depending on which verb you asked.
+    // 標頭位址要得到的是「理由」，不是「需要 r:c」。那個形式**就是** r:c——是定位報告印出來的
+    // ——而用「格式不對」去回答一個格式正確的位址，會把讀者送去檢查自己的引號。-get 早就講清楚了，
+    // 而 -update 與 -delete -cell 對著自家工具的輸出說「需要 r:c」：同一個性質，問哪個動詞就有
+    // 哪一種說法，總共三種。
+    if parts.count == 2, ["0", "0a", "0b"].contains(parts[0]), !parts[1].isEmpty {
+        throw usageError("\(flag): \(s) names a header cell (the locating report prints 0 on a .csv and 0a/0b on a .csv2); header cells are not addressable by any verb, -get included. Records are numbered from 1",
+                         "\(flag)：\(s) 指的是標頭儲存格（定位報告在 .csv 上印 0，在 .csv2 上印 0a／0b）；標頭儲存格不是任何動詞可以定址的，-get 也不行。紀錄從 1 開始編號")
+    }
     guard parts.count == 2, let r = Int(parts[0]), r >= 1, !parts[1].isEmpty else {
         throw usageError("\(flag): expected r:c, got \"\(s)\"",
                          "\(flag)：需要 r:c 格式，得到「\(s)」")
@@ -1146,9 +1158,51 @@ func resolveColumn(_ token: String, header: Record) throws -> Int {
             "\"\(token)\" names \(hits.count) columns (\(where_)); address it by number, because picking one for you would be a guess",
             "「\(token)」指向 \(hits.count) 個欄位（第 \(where_) 欄）；請改用欄號定址，因為替你挑一個等於猜測")
     }
+    // Before blaming the column: the caller may have pasted an address exactly
+    // as --physical or --a1 printed it. `1:1@L2` splits into record 1 and
+    // column "1@L2", and "no column named 1@L2" sends the reader looking for a
+    // column that was never the problem. The README promises the printed
+    // notation composes; under those two flags it does not, and the least this
+    // can do is say which part to drop.
+    //
+    // Checked by stripping and re-resolving, not by pattern alone: a column
+    // really can be called "id [primary]", and telling someone their own
+    // column name is a decoration would be the same wrong answer in reverse.
+    // 在怪罪欄位之前：呼叫端可能是把 --physical 或 --a1 印出來的位址原封不動貼了回來。
+    // `1:1@L2` 會切成第 1 筆與欄位「1@L2」，而「沒有名為 1@L2 的欄位」會把讀者送去找一個
+    // 從來就不是問題所在的欄位。README 承諾「印出來的寫法可以直接接下去」，在那兩個旗標下
+    // 它做不到，而這裡至少能說出「該拿掉哪一段」。
+    // 判斷方式是「拿掉之後再解析一次」，不是只看樣子：一個欄位真的可以叫做「id [primary]」，
+    // 而把別人的欄名說成裝飾，是同一個錯誤的反面。
+    if let bare = strippedLocation(token),
+       header.fields.contains(where: { baseName(headerName($0)) == bare }) ||
+       (Int(bare).map { $0 >= 1 && $0 <= header.count } ?? false) {
+        throw fault(
+            "\"\(token)\" is an address as --physical or --a1 prints it; the trailing location is not part of the address. Use \"\(bare)\" for the column, and note that only the plain r:c form composes",
+            "「\(token)」是 --physical 或 --a1 印出來的位址形式；結尾那段位置資訊不屬於位址本身。欄位請用「\(bare)」，並注意只有單純的 r:c 形式可以直接接下去")
+    }
     let names = header.fields.map { baseName(headerName($0)) }.joined(separator: ", ")
     throw fault("no column named \"\(token)\"; the columns are: \(names)",
               "沒有名為「\(token)」的欄位；本檔案的欄位是：\(names)")
+}
+
+/// `1@L2` -> `1`, `1 [A2]` -> `1`. Nil when there is nothing that looks like
+/// one of the two decorations the locating report can add.
+/// `1@L2` → `1`、`1 [A2]` → `1`。若結尾沒有那兩種定位報告可能加上的裝飾，回傳 nil。
+func strippedLocation(_ token: String) -> String? {
+    if let at = token.range(of: "@L", options: .backwards) {
+        let tail = token[at.upperBound...]
+        if !tail.isEmpty, tail.allSatisfy({ $0.isNumber }) {
+            return String(token[token.startIndex..<at.lowerBound])
+        }
+    }
+    if token.hasSuffix("]"), let br = token.range(of: " [", options: .backwards) {
+        let tail = token[br.upperBound..<token.index(before: token.endIndex)]
+        if !tail.isEmpty, tail.first!.isLetter, tail.dropFirst().allSatisfy({ $0.isNumber }) {
+            return String(token[token.startIndex..<br.lowerBound])
+        }
+    }
+    return nil
 }
 
 func resolveColumnList(_ spec: String, header: Record) throws -> [Int] {

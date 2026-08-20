@@ -4113,3 +4113,54 @@ SIGHUP 的處理常式能在不配置任何記憶體的情況下 `unlink` 它。
 **ENOSPC 本身沒有進測試,而那是刻意的**——重現它需要建立一個檔案系統,那不是這份測試該做的事。
 T131 用的是一個可攜的等價失敗(寫入一個已被 shell 關掉的描述子),而磁碟寫滿的重現步驟留在
 上面。SIGKILL 仍然會留下暫存檔,永遠都會;README 現在把這件事、連同那個檔名一起寫出來了。
+
+---
+
+## DX. 工具印出來的位址,它自己不收——而且怪錯了東西(2026-08-21 修正,T132)
+
+第 53 回合。README 承諾:「addresses are `record:field` — the same notation
+`-contains` prints, so finding and editing compose」。三處不成立:
+
+**1. `.csv` 的標頭命中是單純的 `0`,而 README 說「絕不會是單純的 `0`」。**
+
+```
+$ csv2 -contains name --include-headers -i a.csv
+0:1	name	name
+```
+
+那句話是在 `.csv2`(兩列標頭)的脈絡裡寫的,卻寫成了通則。一個用 `^0[ab]:` 過濾的腳本,
+會漏掉 `.csv` 的每一個標頭命中。
+
+**2. 同一個性質,三個動詞三種說法,其中兩種怪罪的是形狀。**
+
+```
+$ csv2 -get 0:1 -i a.csv
+csv2: -get addresses data records from 1; 0:1 names a header cell …   ← 講理由
+$ csv2 -update 0:1 X -i a.csv --in-place
+csv2: -update: expected r:c, got "0:1"                                ← 講形狀
+$ csv2 -delete -cell 0:1 -i a.csv --in-place
+csv2: -delete -cell: expected r:c, got "0:1"                          ← 講形狀
+```
+
+格式本來就是 `r:c`——那是定位報告印出來的。用「格式不對」回答一個格式正確的位址,會把
+讀者送去檢查自己的引號。
+
+**3. `--physical` 與 `--a1` 印出的位址,餵回去會指向一個不存在的欄位。**
+
+```
+$ csv2 -contains foo --physical -i a.csv
+1:1@L2	name	foo
+$ csv2 -get '1:1@L2' -i a.csv
+csv2: no column named "1@L2"; the columns are: name, value
+```
+
+`1:1@L2` 在第一個冒號切開,於是 `1@L2` 成了「欄名」。訊息把讀者送去找一個從來就不是問題
+所在的欄位。
+
+修法:標頭位址的解釋移進 `parseCellAddress`,三個動詞因此說同一句;而「欄位解析不到」時
+先試著拿掉結尾的 `@L<數字>` 或 ` [<字母><數字>]`,**只有在拿掉之後真的解析得到**才改口說
+那是裝飾——因為一個欄位真的可以叫做 `id [primary]`,把別人的欄名說成裝飾是同一個錯誤的反面。
+
+**沒有做的事:讓那兩種帶裝飾的位址「可以被接受」。** 那需要在編輯時驗證 `@L2` 是否仍然
+成立——而那其實是有價值的(檔案在你搜尋之後變了,就該拒絕)——但它要的是「由紀錄號求出實體
+行號」這條路徑,不是這一輪該加的東西。記在 todo。
