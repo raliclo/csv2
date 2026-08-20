@@ -4294,3 +4294,31 @@ FAIL  T121h KNOWN_FLAGS is missing: …
 
 順帶:T135c(讀不到的 sidecar)在 guest 上會 SKIP,因為那裡以 root 執行,而 root 讀得到
 mode 000 的檔案。T69b 的預期 SKIP 數已用「與 T135c 相同的探測方式」納入這一項。
+
+---
+
+## EE. Windows 上每一次 `-o` 與 `--in-place` 都無聲死去(2026-08-21 當日修正)
+
+DV 的修法把暫存檔改成「以描述子寫入」,而為了保留 `flushToDisk` 與 `close`,我讓
+`openForWrite` 同時回傳一個包住那個 CRT 描述子的 `FileHandle`。macOS 與 Linux 都通過,
+Windows 一跑就是 98 個失敗。
+
+隔離出來的樣子很乾淨:
+
+```
+1. 編輯輸出到 stdout   → 正常
+2. -r -t -i f -o out   → rc=127，stderr 一個字也沒有，檔案沒產生
+3. --build-index       → 正常（它不走這條 sink）
+```
+
+`-debug` 顯示它走完了參數解析與「不平行」的判斷,然後死在寫入。**在 Windows 上,一個
+`FileHandle` 自己帶著一個 HANDLE,而「別人交給它的描述子」不是同一個東西**;對這樣一個
+handle 呼叫 `synchronize()` 會讓行程當場消失——沒有訊息、沒有可讀的結束狀態。
+
+修法是把方向反過來:暫存檔在每個平台上都只用描述子——開啟、寫入、`syncFD`、`closeFD`
+——完全不建立 `FileHandle`。原本的 `flushToDisk(FileHandle)` 因此移除,它的歷史(2026-08-19
+第一次 Windows 編譯時發現 `FileHandle.fileDescriptor` 在 Windows 上不可用)併進了 `syncFD`
+的註解——**那段歷史正是它當初收 FileHandle 的理由,不能跟著函式一起消失。**
+
+值得記下的是它「被抓到的方式」:三個平台的測試,只有第三個會說話。macOS 與 Linux 都不介意,
+一如 2026-08-19 那次。

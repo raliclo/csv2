@@ -1015,14 +1015,18 @@ final class ByteSink {
         let base = (path as NSString).lastPathComponent
         let dirPart = dir.isEmpty ? "." : dir
         let tmp = "\(dirPart)/.\(base).csv2tmp.\(Platform.processID())"
-        guard let opened = Platform.openForWrite(path: tmp) else {
+        guard let fd = Platform.openForWrite(path: tmp) else {
             let e = Platform.errorText(errno)
             throw fault("cannot create temporary file beside \(path): \(e)",
                         "無法在 \(path) 旁建立暫存檔：\(e)")
         }
-        handle = opened.handle
+        // nullDevice, because this sink does not use a FileHandle at all --
+        // see Platform.openForWrite for what happened when it did.
+        // 用 nullDevice，因為這個 sink 根本不使用 FileHandle——它曾經使用過，後果見
+        // Platform.openForWrite 的說明。
+        handle = FileHandle.nullDevice
         pipeSafeFD = nil
-        writeFD = opened.fd
+        writeFD = fd
         Platform.rememberTemp(tmp)
         self.limit = limit
         tmpPath = tmp
@@ -1092,7 +1096,7 @@ final class ByteSink {
         let whatZh = tmpPath != nil ? (finalPath ?? "輸出檔")
                                     : (pipeSafeFD == 2 ? "標準錯誤" : "標準輸出")
         if let tmp = tmpPath {
-            try? handle.close()
+            if let fd = writeFD { Platform.closeFD(fd) }
             try? FileManager.default.removeItem(atPath: tmp)
             Platform.forgetTemp()
         }
@@ -1115,7 +1119,7 @@ final class ByteSink {
             // 先讓資料落地，再 rename；否則 rename 可能已經生效而內容還沒有——
             // 於是舊檔的位置上留下一個名字正確、內容是空的檔案。單靠 rename 保護的
             // 是並行讀者，不是當機。
-            if !Platform.flushToDisk(handle) {
+            if !Platform.syncFD(writeFD ?? -1) {
                 // A failed flush is not a reason to lose the write: report it
                 // and continue, because the alternative is discarding data the
                 // caller successfully produced.
@@ -1123,7 +1127,7 @@ final class ByteSink {
                 // 丟棄呼叫端已經成功產生的資料。
                 Logger.shared.warn("could not flush \(tmp) to disk before renaming; the write is atomic for readers but may not survive a crash")
             }
-            try? handle.close()
+            if let fd = writeFD { Platform.closeFD(fd) }
             // POSIX rename(2), not FileManager.replaceItemAt. rename is the
             // primitive the design actually calls for -- atomic within a
             // filesystem, so a reader either sees the whole old file or the
@@ -1167,7 +1171,7 @@ final class ByteSink {
     func abort() {
         closed = true
         if let tmp = tmpPath {
-            try? handle.close()
+            if let fd = writeFD { Platform.closeFD(fd) }
             try? FileManager.default.removeItem(atPath: tmp)
             Platform.forgetTemp()
         }

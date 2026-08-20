@@ -194,43 +194,6 @@ enum Platform {
     /// 寫入快取中；真正沖掉該快取的是 F_FULLFSYNC。用比較弱的那個、然後宣稱「已持久」，
     /// 正是本專案要避免的那種半真陳述。
     @discardableResult
-    /// Takes the FileHandle, not a descriptor, because `FileHandle
-    /// .fileDescriptor` IS UNAVAILABLE ON WINDOWS -- "Cannot perform
-    /// non-owning handle to fd conversion". The old signature took an Int32,
-    /// which forced the one call site to reach for that property and put a
-    /// platform difference in Core.swift, where this file's header says it
-    /// must not live. It compiled on two platforms for months because neither
-    /// of them minded; the third would not build at all. Found on the first
-    /// Windows compile, 2026-08-19, as the second of the two errors.
-    ///
-    /// Windows uses Foundation's `synchronize()`, which calls FlushFileBuffers
-    /// itself -- the same call the previous `_get_osfhandle` branch made, minus
-    /// a descriptor round trip that cannot be taken there.
-    ///
-    /// 收的是 FileHandle 而不是 descriptor，因為 **`FileHandle.fileDescriptor` 在 Windows
-    /// 上不可用**——「Cannot perform non-owning handle to fd conversion」。舊的簽章收 Int32，
-    /// 於是唯一的呼叫點必須去碰那個屬性，把一個平台差異放進了 Core.swift——而本檔案開頭
-    /// 說明了那種東西不該住在那裡。它在兩個平台上編了好幾個月，因為那兩個都不介意；
-    /// 第三個則根本建不起來。發現於 2026-08-19 第一次 Windows 編譯，是兩個錯誤中的第二個。
-    /// Windows 改用 Foundation 的 `synchronize()`，它內部呼叫的就是 FlushFileBuffers
-    /// ——與先前 `_get_osfhandle` 分支所做的是同一件事，只是少了一次「在那裡根本走不通」的
-    /// descriptor 往返。
-    static func flushToDisk(_ handle: FileHandle) -> Bool {
-        #if canImport(ucrt)
-        do { try handle.synchronize(); return true } catch { return false }
-        #elseif canImport(Darwin)
-        let fd = handle.fileDescriptor
-        if fcntl(fd, F_FULLFSYNC) == 0 { return true }
-        // Some filesystems do not implement F_FULLFSYNC and return ENOTSUP.
-        // fsync is then the strongest thing available, and saying so beats
-        // failing the write over it.
-        // 有些檔案系統未實作 F_FULLFSYNC，會回傳 ENOTSUP。此時 fsync 就是可用的
-        // 最強手段，退回它並說明，好過為此讓寫入失敗。
-        return fsync(fd) == 0
-        #else
-        return fsync(handle.fileDescriptor) == 0
-        #endif
-    }
 
     // -----------------------------------------------------------------
     // MARK: - Process and terminal / 行程與終端機
@@ -525,18 +488,22 @@ enum Platform {
         return failure
     }
 
-    /// Open a file for writing, truncating it, and hand back both a FileHandle
-    /// and the descriptor underneath it.
+    /// Open a file for writing, truncating it. A descriptor, and nothing else.
     ///
-    /// Both, because each platform withholds one of them: `FileHandle` is what
-    /// flushToDisk and close take, and `FileHandle.fileDescriptor` is
-    /// unavailable on Windows, so the descriptor has to be carried separately
-    /// rather than asked for later.
-    /// 以寫入開啟並截斷一個檔案，同時交回 FileHandle 與它底下的描述子。
-    /// 兩個都要，因為每個平台各扣住一個：flushToDisk 與 close 收的是 `FileHandle`，
-    /// 而 `FileHandle.fileDescriptor` 在 Windows 上不可用，因此描述子必須一路帶著，
-    /// 不能事後再要。
-    static func openForWrite(path: String) -> (handle: FileHandle, fd: Int32)? {
+    /// No FileHandle: wrapping a CRT descriptor in one and then calling
+    /// `synchronize()` killed csv2 on Windows with no message and no exit
+    /// status worth reading -- every `-o` and `--in-place` run, while `-so`
+    /// and reads were fine. FileHandle on Windows carries a HANDLE of its own
+    /// and a descriptor it was handed is not the same thing. The temp file is
+    /// opened, written, synced and closed through the descriptor on every
+    /// platform now, which is also one code path instead of two.
+    /// 以寫入開啟並截斷一個檔案。回傳一個描述子，沒有別的。
+    /// 不用 FileHandle：把一個 CRT 描述子包進 FileHandle、再呼叫 `synchronize()`，會讓
+    /// csv2 在 Windows 上無聲死去——每一次 `-o` 與 `--in-place` 都是，而 `-so` 與讀取
+    /// 都正常。Windows 上的 FileHandle 自己帶著一個 HANDLE，而「別人交給它的描述子」
+    /// 不是同一個東西。暫存檔現在在每個平台上都以描述子開啟、寫入、同步與關閉，
+    /// 這同時也把兩條程式路徑併成一條。
+    static func openForWrite(path: String) -> Int32? {
         #if canImport(ucrt)
         let h: HANDLE = path.withCString(encodedAs: UTF16.self) { wpath in
             CreateFileW(wpath,
@@ -550,11 +517,47 @@ enum Platform {
         guard h != INVALID_HANDLE_VALUE else { return nil }
         let fd = _open_osfhandle(intptr_t(bitPattern: h), _O_BINARY)
         guard fd >= 0 else { CloseHandle(h); return nil }
-        return (FileHandle(fileDescriptor: fd, closeOnDealloc: true), fd)
+        return fd
         #else
         let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
         guard fd >= 0 else { return nil }
-        return (FileHandle(fileDescriptor: fd, closeOnDealloc: true), fd)
+        return fd
+        #endif
+    }
+
+    /// Flush a descriptor's data to the medium, not just to the OS cache.
+    /// `_commit` is the CRT's fsync; F_FULLFSYNC is the only thing on Darwin
+    /// that reaches the platter rather than the drive's own cache.
+    ///
+    /// This replaced a version taking a FileHandle, which existed because
+    /// `FileHandle.fileDescriptor` is unavailable on Windows ("Cannot perform
+    /// non-owning handle to fd conversion") -- so the descriptor could not be
+    /// recovered from a handle and the difference had to live here rather than
+    /// in Core.swift. Found on the first Windows compile, 2026-08-19. The
+    /// answer now is the other direction: carry the descriptor and never make
+    /// a handle, which also avoids `synchronize()` on a handle wrapping a CRT
+    /// descriptor -- that combination killed every -o run on Windows silently.
+    /// 把一個描述子的資料送到儲存媒體，而不只是送進作業系統的快取。
+    /// `_commit` 是 CRT 的 fsync；在 Darwin 上，只有 F_FULLFSYNC 會真正抵達碟片，
+    /// 而不是停在磁碟自己的快取裡。
+    static func syncFD(_ fd: Int32) -> Bool {
+        #if canImport(ucrt)
+        return _commit(fd) == 0
+        #elseif canImport(Darwin)
+        if fcntl(fd, F_FULLFSYNC) == 0 { return true }
+        // Some filesystems do not implement F_FULLFSYNC and return ENOTSUP.
+        // 有些檔案系統未實作 F_FULLFSYNC，會回傳 ENOTSUP。
+        return fsync(fd) == 0
+        #else
+        return fsync(fd) == 0
+        #endif
+    }
+
+    static func closeFD(_ fd: Int32) {
+        #if canImport(ucrt)
+        _ = _close(fd)
+        #else
+        _ = close(fd)
         #endif
     }
 
