@@ -6560,6 +6560,58 @@ else
 fi
 
 # ---------------------------------------------------------------------
+# T133 -- what the writer does to a value it has to re-serialise.
+#
+# Round 53: "-update a whitespace-only cell with its own value rewrites
+# `"   "` as `   `; -rownum quotes differently from -r. Same value, different
+# bytes, spurious git diff -- in a tool whose closing argument is that git can
+# diff it."
+#
+# Both were real. The whitespace is data, and it is the kind that vanishes
+# silently in the next tool along; the -rownum difference had no reason at all
+# behind it -- preserveRaw was switched off wholesale when a column was added,
+# though it is decided per field.
+#
+# T133 —— 寫出端對一個「必須重新序列化」的值做了什麼。
+# 第 53 回合：「以原值 -update 一個只有空白的儲存格，`"   "` 會被寫成 `   `；`-rownum` 的
+# 引號規則與 `-r` 不同。同一個值、不同的位元組、憑空多出來的 git diff——而這支工具最後的
+# 論據正是『git 可以 diff 它』。」兩件都成立。
+# ---------------------------------------------------------------------
+echo
+echo "--- T133: the same value, the same bytes / T133：同一個值，同一組位元組 ---"
+
+printf 'a,b\n"   ",x\n' > "$TMP/t133.csv"
+cp "$TMP/t133.csv" "$TMP/t133.keep"
+"$CSV2" -update 1:1 '   ' -i "$TMP/t133.csv" --in-place
+if cmp -s "$TMP/t133.csv" "$TMP/t133.keep"; then
+    ok "T133a updating a cell with the value it already held changes no bytes / 以儲存格原本就有的值去更新它，不會改動任何位元組"
+else
+    bad "T133a the file changed: $(od -c "$TMP/t133.csv" | head -1) / 檔案變了，如上"
+fi
+
+printf 'a,b\n"   ",x\n' > "$TMP/t133b.csv"
+assert_eq "$("$CSV2" -r -i "$TMP/t133b.csv" | head -1)" '"   ",x' \
+    "T133b -r writes a quoted whitespace field as it arrived / -r 照原樣寫出一個加了引號的空白欄位"
+assert_eq "$("$CSV2" -r -rownum -i "$TMP/t133b.csv" | head -1)" '1,"   ",x' \
+    "T133c and -rownum agrees with it, one flag away / 而 -rownum 與它一致，只差一個旗標"
+
+# A value the caller supplies, not one that was already in the file.
+# 由呼叫端給的值，而不是檔案裡本來就有的。
+"$CSV2" -update 1:2 'y ' -i "$TMP/t133b.csv" --in-place
+assert_eq "$("$CSV2" -r -i "$TMP/t133b.csv" | head -1)" '"   ","y "' \
+    "T133d a supplied value ending in a space is quoted when written / 呼叫端給的、結尾帶空白的值，寫出時會加引號"
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t133b.csv")" 'y ' \
+    "T133e and reading it back gives the space / 而讀回來時那個空白還在"
+
+# Not quoted for its own sake: a value that needs nothing stays bare, or every
+# file csv2 touched would grow quotes it did not need.
+# 不是為了加而加：不需要引號的值維持原樣，否則每一個 csv2 碰過的檔案都會長出它不需要的引號。
+printf 'a,b\n1,x\n' > "$TMP/t133c.csv"
+"$CSV2" -update 1:2 'plain' -i "$TMP/t133c.csv" --in-place
+assert_eq "$("$CSV2" -r -i "$TMP/t133c.csv" | head -1)" '1,plain' \
+    "T133f a value needing no quotes does not get any / 不需要引號的值不會被加上引號"
+
+# ---------------------------------------------------------------------
 # T132 -- an address the tool printed, handed back to the tool.
 #
 # The README promises the locating report's notation composes: "the same

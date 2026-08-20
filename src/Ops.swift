@@ -127,7 +127,7 @@ final class CSVEmitter: RecordEmitter {
             var r = h
             if ctx.rownum { r.fields.insert(rownumHeaderFields(ctx, row: i), at: 0) }
             sink.write(FieldEncoder.encodeRecord(r, format: ctx.format,
-                                                 preserveRaw: ctx.preserveRaw && !ctx.rownum))
+                                                 preserveRaw: ctx.preserveRaw))
         }
     }
 
@@ -136,8 +136,16 @@ final class CSVEmitter: RecordEmitter {
         if ctx.rownum {
             rec.fields.insert(Field(value: [UInt8]("\(r.number)".utf8)), at: 0)
         }
+        // preserveRaw is per FIELD -- a field with no raw bytes falls back to
+        // its value -- so adding a rownum column does not stop the other
+        // columns being written as they arrived. Turning it off wholesale made
+        // `-r -rownum` quote differently from `-r` on the same file: `"   "`
+        // came out as `   `, one flag away, with no reason a reader could see.
+        // preserveRaw 是「逐欄位」的——沒有原樣位元組的欄位會退回它的值——因此多一個 rownum
+        // 欄，不會讓其他欄位失去「照原樣寫出」。整體關掉它的結果是 `-r -rownum` 與 `-r` 對
+        // 同一個檔案給出不同的引號：`"   "` 變成 `   `，只差一個旗標，而讀者看不出任何理由。
         sink.write(FieldEncoder.encodeRecord(rec, format: ctx.format,
-                                             preserveRaw: ctx.preserveRaw && !ctx.rownum))
+                                             preserveRaw: ctx.preserveRaw))
     }
 
     /// grep prints `--` between non-adjacent blocks and so do we. It is

@@ -4164,3 +4164,37 @@ csv2: no column named "1@L2"; the columns are: name, value
 **沒有做的事:讓那兩種帶裝飾的位址「可以被接受」。** 那需要在編輯時驗證 `@L2` 是否仍然
 成立——而那其實是有價值的(檔案在你搜尋之後變了,就該拒絕)——但它要的是「由紀錄號求出實體
 行號」這條路徑,不是這一輪該加的東西。記在 todo。
+
+---
+
+## DY. 同一個值,兩種位元組:寫出端在三個地方不一致(2026-08-21 修正,T133)
+
+第 53 回合:「M4. The writer is not byte-stable: `-update`ing a whitespace-only cell
+with its own value rewrites `"   "` as `   `; `-rownum` quotes differently from `-r`.
+Same value, different bytes, spurious git diff — in a tool whose closing argument is
+"git can diff it".」
+
+```
+$ printf 'a,b\n"   ",x\n' > ws.csv
+$ csv2 -update 1:1 '   ' -i ws.csv --in-place      # 用它原本就有的值
+$ od -c ws.csv
+0000000    a   ,   b  \n               ,   x  \n     ← 引號沒了
+$ csv2 -r -i ws2.csv        →  "   ",x
+$ csv2 -r -rownum -i ws2.csv →  1,   ,x             ← 只差一個旗標
+```
+
+兩件事,兩個原因:
+
+**引號規則**。任何修改都會丟掉 `Field.raw`(那是對的——原樣位元組已不再描述這個值),之後
+由 `FieldEncoder` 依「含逗號／引號／CR／LF 才加引號」重新序列化。前後空白不在那份清單裡,
+於是 `"   "` 被寫成 `   `。RFC 4180 確實不要求為此加引號,**但那些空白是資料,而且是那種
+會安靜消失的資料**——試算表與好幾種解析器會把未加引號欄位前後的空白去掉。規則已加入
+「開頭或結尾是空白或 tab」。
+
+**`-rownum`**。`preserveRaw: ctx.preserveRaw && !ctx.rownum`——加了一個欄位就把「照原樣
+寫出」整個關掉。而 `preserveRaw` 是逐欄位的,沒有原樣位元組的欄位本來就會退回它的值,所以
+那個 `&& !ctx.rownum` 沒有任何理由,只是保守。拿掉之後兩者一致。
+
+**仍然不成立的部分,已寫進 README**:一次編輯之後,沒被動到的欄位逐位元相同,被動到的那些
+帶的是 csv2 的引號規則,不是上一個寫入者當初的選擇。一個「每一欄都加引號」的檔案,在被編輯
+過的格子上不會維持那個樣子。那不是缺陷,是重新序列化的必然;但它先前沒有被寫下來。

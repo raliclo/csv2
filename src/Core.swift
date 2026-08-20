@@ -41,6 +41,8 @@ let BYTE_DQUOTE: UInt8 = 0x22
 let BYTE_LF: UInt8 = 0x0A
 let BYTE_CR: UInt8 = 0x0D
 let BYTE_BACKSLASH: UInt8 = 0x5C
+let BYTE_SPACE: UInt8 = 0x20
+let BYTE_TAB: UInt8 = 0x09
 let BOM: [UInt8] = [0xEF, 0xBB, 0xBF]
 
 // ---------------------------------------------------------------------
@@ -256,6 +258,23 @@ enum FieldEncoder {
         for b in v where b == BYTE_COMMA || b == BYTE_DQUOTE || b == BYTE_LF || b == BYTE_CR {
             needsQuote = true
             break
+        }
+        // Leading or trailing whitespace is quoted as well, though RFC 4180
+        // does not require it. It is data, and it is the kind of data that
+        // disappears silently: spreadsheets and several parsers strip it from
+        // an unquoted field. csv2 writing `"   "` back as `   ` produced a
+        // file whose value survives ITS OWN reader and not necessarily the
+        // next one's -- and it changed the bytes of a cell that had been
+        // updated with the value it already held, which shows up as a diff
+        // that says nothing happened twice.
+        // 前後的空白也會加引號，雖然 RFC 4180 並不要求。那是資料，而且是那種會安靜消失的
+        // 資料：試算表與好幾種解析器會把未加引號欄位前後的空白去掉。csv2 把 `"   "` 寫回成
+        // `   `，產生的檔案，其值撐得過「它自己的」讀取器，卻不一定撐得過下一個——而且它
+        // 改動了一個「以它原本就有的值去更新」的儲存格的位元組，那在 diff 上會是一句
+        // 「什麼也沒發生」說了兩次。
+        if !needsQuote, let first = v.first, let last = v.last,
+           first == BYTE_SPACE || first == BYTE_TAB || last == BYTE_SPACE || last == BYTE_TAB {
+            needsQuote = true
         }
         if !needsQuote { return v }
 

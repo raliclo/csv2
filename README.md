@@ -93,6 +93,20 @@ one file, decided per record rather than per file. Bytes inside quoted fields
 are never touched, so "LF only" describes the record separator and not every
 byte in the file.
 
+**A field csv2 reads and does not change is written back exactly as it arrived,
+quotes and all.** A field it *does* change is re-serialised, and then csv2's
+own rule applies: quote when the value contains a comma, a quote, CR or LF, or
+when it begins or ends with a space or tab. The whitespace case is not required
+by RFC 4180 and is there because that whitespace is data of the kind that
+vanishes silently — spreadsheets and several parsers strip it from an unquoted
+field. So `-update` on a cell holding `"   "` writes `"   "` back, and a value
+you supply ending in a space is quoted when it lands.
+
+What follows from that: after an edit, an untouched field is byte-identical,
+and an edited one carries csv2's quoting rather than whatever the previous
+writer chose. A file that quoted every field will not stay that way in the
+cells you edited. Asserted by T133.
+
 ## Two formats, declared by suffix
 
 | Suffix | Header rows |
