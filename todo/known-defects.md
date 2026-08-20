@@ -13,6 +13,22 @@
 一份全過的測試。而「修好了所以不必記」也不成立——**這個檔案存在的價值有一半是那些重現步驟**，
 它們是日後判斷「這個修正有沒有退化」的唯一依據。
 
+### 怎麼看一條的狀態 / How to read an entry's state
+
+2026-08-20 起,標題本身帶著狀態與斷言編號(例如「(2026-08-21 修正,T148)」)。更早的條目
+把狀態寫在內文裡,因為當時還沒有這個慣例——**不要從「標題沒有寫」推論它還沒修**。
+
+而任何一條的**現況**,權威在測試,不在這裡:一條記著斷言編號的條目,只要那個案例還在跑、
+還是綠的,它就仍然是修好的;這個檔案保存的是「當初怎麼重現的」,那是日後判斷退化的唯一依據。
+這個檔案不會回答「現在會不會發生」,它回答的是「當初是什麼、怎麼看見的」。
+
+From 2026-08-20 the title carries the state and the assertion numbers. Earlier
+entries carry it in the body, because the convention did not exist yet -- do not
+read a bare title as "not fixed". For whether something holds TODAY the
+authority is the suite, not this file: an entry naming an assertion is fixed for
+as long as that case runs and passes. What this file preserves is how it was
+reproduced, which is the only way to recognise a regression later.
+
 Every defect reported in a round is written here the moment it is reproduced by
 hand, BEFORE it is fixed. When it is fixed, update its status and name the
 assertions; do not delete it. Two program defects from rounds 36 and 37 were
