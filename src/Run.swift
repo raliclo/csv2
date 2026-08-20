@@ -696,6 +696,55 @@ func runEdit(_ o: Options) throws {
         }
     }
 
+    // The same clash, one axis over. `-delete -col X` combined with an edit
+    // aimed at column X is refused, with the reason stated exactly: "the edit
+    // would have no effect and would still be reported as done". `-delete a,b`
+    // combined with an edit aimed at a RECORD inside a..b did that very thing:
+    //
+    //     csv2 -delete 1,1 -update 1:2 GHOST -i g.csv --in-place
+    //     rc=0        and GHOST is nowhere, and nothing was said
+    //
+    // A rule was thought through, written down, and implemented on one axis.
+    // Nothing carried it to the other, and nothing noticed, because the two
+    // are in different parts of this function and only the column one had a
+    // reason to be written when it was.
+    //
+    // Addresses are input-relative, which is what makes this decidable here:
+    // `-delete 1,1` and `-update 1:2` are talking about the same record by
+    // definition, without needing to know what the file contains.
+    //
+    // 同一個衝突，換一個軸。`-delete -col X` 與「瞄準欄位 X 的編輯」併用會被拒絕，理由寫得
+    // 一字不差：「該編輯不會有任何效果，卻仍會被回報為已完成」。而 `-delete a,b` 與「瞄準
+    // a..b 之中某一筆的編輯」併用，做的正是那件事：rc=0，GHOST 不在任何地方，也沒有任何訊息。
+    //
+    // 一條規則被想清楚、寫下來，並實作在一個軸上。沒有任何東西把它帶到另一個軸，也沒有任何
+    // 東西發現——因為兩者位在這個函式的不同段落，而當時只有「欄」那一個有被寫出來的理由。
+    //
+    // 位址是相對於輸入的，這正是此處判斷得出來的原因：`-delete 1,1` 與 `-update 1:2` 依定義
+    // 就是在說同一筆紀錄，不需要知道檔案裡有什麼。
+    if !deletes.isEmpty {
+        func deleted(_ r: Int) -> (Int, Int)? {
+            for (a, b) in deletes where r >= a && r <= b { return (a, b) }
+            return nil
+        }
+        var clash: [String] = []
+        for (rn, ups) in updates {
+            if let (a, b) = deleted(rn) {
+                for (c, _) in ups { clash.append("-update \(rn):\(c) with -delete \(a),\(b)") }
+            }
+        }
+        for (rn, cols) in blanks {
+            if let (a, b) = deleted(rn) {
+                for c in cols { clash.append("-delete -cell \(rn):\(c) with -delete \(a),\(b)") }
+            }
+        }
+        if !clash.isEmpty {
+            throw fault(
+                "\(clash.sorted().joined(separator: ", ")): the edit targets a record that -delete is removing in the same run, so it would have no effect and would still be reported as done",
+                "\(clash.sorted().joined(separator: "、"))：該編輯瞄準的紀錄正被同一次執行的 -delete 移除，因此它不會有任何效果，卻仍會被回報為已完成")
+        }
+    }
+
     let sink = try makeSink(o)
     var aborted = true
     defer { if aborted { sink.abort() } }
@@ -1143,6 +1192,59 @@ func runAppendFast(_ o: Options) throws {
     defer { try? h.close() }
     let size = h.seekToEndOfFile()
 
+    // Validated on EVERY fast-path append, not only when the file lacks a
+    // trailing newline.
+    //
+    // The condition used to be `if the file does not end in a newline`, and
+    // the comment below it justified that: "a file that does not end in a
+    // newline is the only file whose last record can be half-written". That is
+    // false, and the counter-example is ordinary. A record ending inside an
+    // unclosed quote contains newlines like any other prose, so the file ends
+    // with `\n` and is still open:
+    //
+    //     id,name,note
+    //     r1,n1,"ok"
+    //     r2,n2,"unclosed<LF>          <- ends with a newline, record is open
+    //
+    // `-o` refused this correctly the whole time. `--in-place` -- which is the
+    // only destination the fast path serves -- wrote at rc=0, and the result
+    // could not be read back by csv2 at all. Worse, the appended record was
+    // then unrecoverable: the unclosed quote swallowed it, so the documented
+    // repair, --truncate-partial, discarded the very record that had just been
+    // written successfully.
+    //
+    // The cost is a scan the fast path was built to avoid. It is paid because
+    // the alternative is a write reported as successful that produces a file
+    // this tool refuses to read -- the exact failure csv2 exists to prevent,
+    // and the one the README already claims is checked "for -o and for
+    // --in-place alike".
+    //
+    // 每一次走快路徑的追加都會驗證，不再只在「檔案沒有結尾換行」時才驗。
+    //
+    // 原本的條件是「若檔案不以換行結尾」，而它下方的註解為此辯護：「未以換行結尾的檔案，
+    // 是唯一『最後一筆可能只寫了一半』的檔案」。那是假的，而反例非常普通：一筆停在未關閉
+    // 引號裡的紀錄，和任何散文一樣會含有換行，因此檔案以 `\n` 結尾，而那一筆仍然是開著的。
+    //
+    // `-o` 從頭到尾都正確地拒絕了它。而 `--in-place`——快路徑唯一服務的目的地——以 rc=0
+    // 寫了進去，結果 csv2 自己完全讀不回來。更糟的是那筆被追加的紀錄再也救不回來：未關閉的
+    // 引號把它吞了進去，於是文件指定的修復手段 --truncate-partial 丟掉的，正是幾秒前才被
+    // 「成功」寫入的那一筆。
+    //
+    // 代價是一次「快路徑當初就是為了避免它」的掃描。之所以付這個代價，是因為另一個選項是
+    // 「一次被回報為成功的寫入，產生一個這個工具自己拒絕讀取的檔案」——那正是 csv2 存在所要
+    // 防止的失敗，也正是 README 早已宣稱「`-o` 與 `--in-place` 一視同仁地檢查」的那一項。
+    if size > 0 {
+        do {
+            try validateBeforeAppend(path: path, format: fmt, headerRows: headerRows,
+                                     truncatePartial: false)
+        } catch let e as CSV2Error {
+            guard o.truncatePartial else { throw e }
+            throw fault(
+                "\(e.message) --truncate-partial cannot be honoured by -append: appending adds bytes and cannot remove the incomplete record, so the file would keep it and gain a complete record after it. Write a clean copy first (csv2 -r -t --truncate-partial -i \(path) -o CLEAN), then append to that.",
+                "\(e.messageZh) -append 無法接受 --truncate-partial：追加只會加上位元組、無法移除那筆不完整的紀錄，因此檔案會同時保留它、並在其後多出一筆完整的。請先寫出一份乾淨的複本（csv2 -r -t --truncate-partial -i \(path) -o CLEAN），再對那一份追加。")
+        }
+    }
+
     var prefix: [UInt8] = []
     if size > 0 {
         h.seek(toFileOffset: size - 1)
@@ -1163,30 +1265,8 @@ func runAppendFast(_ o: Options) throws {
             // last record can be half-written, and the fast path had no way to
             // know. Reported so the O(n) is visible rather than a mystery in
             // the timings.
-            // 每一種格式都會走到，因為理由與格式無關：未以換行結尾的檔案，是唯一
-            // 「最後一筆可能只寫了一半」的檔案，而快路徑原本無從得知。回報出來，讓那次
-            // O(n) 是看得見的，而不是計時數字裡的一個謎。
-            Logger.shared.debug("append: \(path) does not end with a newline, so the existing records are validated before writing")
-            do {
-                // Validated STRICTLY, never with --truncate-partial honoured.
-                // Honouring it here produced a new instance of the defect this
-                // check was added to fix: the parser dropped the incomplete
-                // record, validation passed, and the append went on -- leaving
-                // the incomplete record in the FILE with a complete one after
-                // it, at rc=0, unreadable on the next pass. Appending adds
-                // bytes; it has no way to remove any.
-                // 一律「嚴格」驗證，絕不在此接受 --truncate-partial。在這裡接受它會產生
-                // 一個「與這個檢查所要修的缺陷同類」的新案例：解析器丟掉了那筆不完整的紀錄、
-                // 驗證通過、追加照常進行——而那筆不完整的紀錄仍留在「檔案裡」，後面接著一筆
-                // 完整的，rc=0，下一次讀取就壞掉。追加只會加上位元組，它沒有辦法移除任何東西。
-                try validateBeforeAppend(path: path, format: fmt, headerRows: headerRows,
-                                         truncatePartial: false)
-            } catch let e as CSV2Error {
-                guard o.truncatePartial else { throw e }
-                throw fault(
-                    "\(e.message) --truncate-partial cannot be honoured by -append: appending adds bytes and cannot remove the incomplete record, so the file would keep it and gain a complete record after it. Write a clean copy first (csv2 -r -t --truncate-partial -i \(path) -o CLEAN), then append to that.",
-                    "\(e.messageZh) -append 無法接受 --truncate-partial：追加只會加上位元組、無法移除那筆不完整的紀錄，因此檔案會同時保留它、並在其後多出一筆完整的。請先寫出一份乾淨的複本（csv2 -r -t --truncate-partial -i \(path) -o CLEAN），再對那一份追加。")
-            }
+            // 每一種格式都會走到。回報出來，讓那個「補上一個換行」的決定是看得見的。
+            Logger.shared.debug("append: \(path) does not end with a newline, so a line feed is written before the new record")
             // .csv makes no such promise -- plenty of tools emit a file with
             // no trailing newline. Add one, or the new record gets glued onto
             // the tail of the last one and two records become one.

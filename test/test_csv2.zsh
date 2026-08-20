@@ -3594,8 +3594,28 @@ assert_fails "T91i --truncate-partial with -append is refused, not half-honoured
     "$CSV2" -append 'zstd,1.5.7,compression' --truncate-partial -i "$TMP/t91_quote.csv" --in-place
 assert_same "$TMP/t91_quote.csv" "$TMP/t91_quote.bak" \
     "T91j and it left the file alone rather than appending after the incomplete record / 而它沒有動那個檔案，不是在不完整的紀錄後面追加"
-assert_contains "$tp_msg" "cannot be honoured" \
+assert_contains "$tp_msg" "appending can only add bytes" \
     "T91k the message says why, and names the way through / 訊息說出理由，並指出走得通的那條路"
+assert_contains "$tp_msg" "csv2 -r -t --truncate-partial" \
+    "T91k2 and the way through is a command, not advice / 而那條路是一個指令，不是一句建議"
+
+# T91i/T91j above use a file whose last record is INCOMPLETE, and they passed
+# for as long as they have existed -- while the refusal they assert was
+# conditional on exactly that. On a healthy file the same combination was
+# accepted at rc=0, and both READMEs said in two places that it is refused.
+# The test was real, the assertion was real, and the case it never reached was
+# the common one.
+# 上面的 T91i／T91j 用的是「最後一筆不完整」的檔案，而它們從存在以來一直通過——同時，它們
+# 所斷言的那個拒絕，其成立條件正好就是「最後一筆不完整」。在一個健康的檔案上，同樣的組合
+# 會以 rc=0 被接受，而兩份 README 在兩個地方都說它被拒絕。測試是真的、斷言是真的，而它從未
+# 走到的那個情況，才是常見的那個。
+print -r -- 'pkg,version,purpose' > "$TMP/t91_ok.csv"
+print -r -- 'zlib,1.3.1,compression' >> "$TMP/t91_ok.csv"
+cp "$TMP/t91_ok.csv" "$TMP/t91_ok.bak"
+assert_fails "T91n and it is refused on a HEALTHY file too, which is where it was not / 在「健康的檔案」上同樣被拒絕——而那正是它原本沒有拒絕的地方" -- \
+    "$CSV2" -append 'zstd,1.5.7,compression' --truncate-partial -i "$TMP/t91_ok.csv" --in-place
+assert_same "$TMP/t91_ok.csv" "$TMP/t91_ok.bak" \
+    "T91o leaving that file alone as well / 那個檔案同樣沒有被動過"
 
 # The way through has to actually work, or the message is worse than silence.
 # 那條走得通的路必須真的走得通，否則那個訊息比沉默更糟。
@@ -4606,7 +4626,7 @@ a1_of() {   # field number -> the [..] address csv2 prints for it
 
 for pair in 26:'[Z2]' 27:'[AA2]' 52:'[AZ2]' 53:'[BA2]' 702:'[ZZ2]' 703:'[AAA2]'; do
     assert_eq "$(a1_of ${pair%%:*})" "${pair##*:}" \
-        "T103 field ${pair%%:*} is ${pair##*:} / 第 ${pair%%:*} 欄是 ${pair##*:}"
+        "T103/${pair%%:*} field ${pair%%:*} is ${pair##*:} / 第 ${pair%%:*} 欄是 ${pair##*:}"
 done
 
 # ---------------------------------------------------------------------
@@ -5215,6 +5235,125 @@ print -r -- 'a,b'              > "$TMP/t110q.csv"
 print -r -- '"1","no comma"'  >> "$TMP/t110q.csv"
 assert_contains "$("$CSV2" -r -t -i "$TMP/t110q.csv")" '"1","no comma"' \
     "T110f quoting that was not required is preserved, not normalised away / 非必要的引號會被保留，而不是被正規化掉"
+
+# ---------------------------------------------------------------------
+# T111 -- three rules that existed and were not applied where they also hold.
+#
+# (a) `-append` onto a file whose last record is incomplete is refused. The
+#     README says so twice and says it of BOTH destinations: "Checked for -o
+#     and for --in-place alike -- the fast path used to skip it". `-o` did
+#     check. `--in-place`, which is the only destination the fast path serves,
+#     did not, because the guard was behind `if the file does not end in a
+#     newline` and its comment argued that such a file "is the only file whose
+#     last record can be half-written". A record left open by an unclosed
+#     quote contains newlines like any prose, so the file ends with one and the
+#     record is still open.
+#
+#     What that produced: rc=0, a file csv2 then refuses to read, and the
+#     appended record swallowed by the unclosed quote -- so the documented
+#     repair, --truncate-partial, discards the record that had just been
+#     written "successfully".
+#
+# (b) `-delete -col X` plus an edit aimed at column X is refused, with the
+#     reason spelled out: "the edit would have no effect and would still be
+#     reported as done". `-delete a,b` plus an edit aimed at a RECORD in a..b
+#     did exactly that, silently, at rc=0. One axis had the rule; the other did
+#     not, and the two live in different parts of the same function.
+#
+# (c) The message that teaches `.csv2` escaping was itself escaped, so it
+#     printed `\\n` where `.csv2` defines `\n`. A reader following it wrote a
+#     literal backslash-n and got rc=0 with the wrong value. Caused the same
+#     morning by centralising message escaping -- correct for values, wrong for
+#     prose, and a single choke point cannot tell them apart.
+#
+# T111 —— 三條「已經存在、卻沒有被套到它同樣成立的地方」的規則。
+# (a) `-append` 到最後一筆不完整的檔案會被拒絕，README 說了兩次，而且說的是「兩種目的地
+#     一視同仁」。`-o` 確實檢查了；`--in-place`——快路徑唯一服務的目的地——沒有，因為那個
+#     守衛被放在「若檔案不以換行結尾」之下，而它的註解主張那種檔案「是唯一『最後一筆可能
+#     只寫了一半』的檔案」。一筆停在未關閉引號裡的紀錄，和任何散文一樣含有換行，因此檔案
+#     以換行結尾，而那一筆仍然開著。結果是 rc=0、csv2 自己讀不回來，而那筆剛被「成功」寫入
+#     的紀錄被未關閉的引號吞掉，文件指定的修復手段隨後把它丟棄。
+# (b) `-delete -col X` 與瞄準欄位 X 的編輯併用會被拒絕，理由寫得一字不差。而 `-delete a,b`
+#     與瞄準 a..b 之中某一筆的編輯併用，做的正是那件事，靜默，rc=0。
+# (c) 那則「教你 .csv2 怎麼跳脫」的訊息，自己被跳脫了。
+# ---------------------------------------------------------------------
+echo
+echo "--- T111: rules that stopped at one axis / 只走到一個軸就停住的規則 ---"
+
+# (a) The unclosed quote. The file ends with a newline -- that is the point.
+# (a) 未關閉的引號。檔案「以換行結尾」——那正是重點。
+{ print -r -- 'id,name,note'
+  print -r -- 'r1,n1,"ok"'
+  print -r -- 'r2,n2,"unclosed'
+} > "$TMP/t111_open.csv"
+cp "$TMP/t111_open.csv" "$TMP/t111_open.bak"
+
+assert_fails "T111a -append --in-place refuses a file whose last record is left open / -append --in-place 拒絕一個最後一筆仍開著的檔案" -- \
+    "$CSV2" -append 'r3,n3,x' -i "$TMP/t111_open.csv" --in-place
+assert_same "$TMP/t111_open.csv" "$TMP/t111_open.bak" \
+    "T111b and does not write into it / 而且沒有寫進去"
+
+# The short-record variant, which took the same path for the same reason.
+# 欄數不足的那個變體，基於同樣理由走了同樣的路。
+{ print -r -- 'id,name,note'
+  print -r -- 'r1,n1,a'
+  print -r -- 'r2,n2'
+} > "$TMP/t111_short.csv"
+cp "$TMP/t111_short.csv" "$TMP/t111_short.bak"
+assert_fails "T111c and refuses a short final record under --in-place too / --in-place 下同樣拒絕「最後一筆欄數不足」" -- \
+    "$CSV2" -append 'r3,n3,x' -i "$TMP/t111_short.csv" --in-place
+assert_same "$TMP/t111_short.csv" "$TMP/t111_short.bak" \
+    "T111d leaving that one alone as well / 那一份同樣沒有被動過"
+
+# And the fast path must still do its job on a healthy file, or the fix has
+# simply broken -append.
+# 而快路徑在健康的檔案上必須照常運作，否則這個修正只是把 -append 弄壞了。
+{ print -r -- 'id,name,note'; print -r -- 'r1,n1,a' } > "$TMP/t111_ok.csv"
+assert_succeeds "T111e while a healthy file still appends / 而健康的檔案照常追加得上" -- \
+    "$CSV2" -append 'r2,n2,b' -i "$TMP/t111_ok.csv" --in-place
+assert_eq "$("$CSV2" -get 2:1 -i "$TMP/t111_ok.csv")" "r2" \
+    "T111f and the appended record is there / 而那筆追加的紀錄在那裡"
+
+# (b) The record axis.
+# (b) 紀錄那個軸。
+{ print -r -- 'id,name,note'
+  print -r -- 'r1,n1,a'
+  print -r -- 'r2,n2,b'
+} > "$TMP/t111_del.csv"
+cp "$TMP/t111_del.csv" "$TMP/t111_del.bak"
+
+assert_fails "T111g -update on a record the same run deletes is refused, not dropped / 對「同一次執行正在刪除的紀錄」做 -update 會被拒絕，而不是被丟棄" -- \
+    "$CSV2" -delete 1,1 -update 1:2 'GHOST' -i "$TMP/t111_del.csv" --in-place
+assert_same "$TMP/t111_del.csv" "$TMP/t111_del.bak" \
+    "T111h and nothing was written / 而且什麼都沒有寫入"
+
+assert_fails "T111i -delete -cell inside a deleted range is refused the same way / 落在被刪除區間內的 -delete -cell 同樣被拒絕" -- \
+    "$CSV2" -delete 1,2 -delete -cell 2:3 -i "$TMP/t111_del.csv" --in-place
+
+# The guard must not swallow the ordinary case: an edit OUTSIDE the range is
+# exactly what a batch is for.
+# 這個守衛不能把普通情況一起吃掉：落在區間「之外」的編輯，正是批次要做的事。
+cp "$TMP/t111_del.bak" "$TMP/t111_del.csv"
+assert_succeeds "T111j while an edit outside the deleted range still runs / 而落在被刪除區間之外的編輯照常執行" -- \
+    "$CSV2" -delete 1,1 -update 2:2 'KEPT' -i "$TMP/t111_del.csv" --in-place
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t111_del.csv")" "KEPT" \
+    "T111k and landed where it was aimed / 而且落在它所瞄準的地方"
+
+# (c) The message that teaches escaping must print what it teaches.
+# (c) 教跳脫的那則訊息，必須印出它所教的東西。
+{ print -r -- 'k,v'; print -r -- 'K,V'; print -r -- 'a,"x\qy"' } > "$TMP/t111_esc.csv2"
+esc_msg=$("$CSV2" -r -i "$TMP/t111_esc.csv2" 2>&1 | head -1)
+assert_contains "$esc_msg" 'defines only \n, \r and \\' \
+    "T111l the escape message prints single backslashes, as .csv2 defines them / 跳脫訊息印出的是單一反斜線，一如 .csv2 的定義"
+
+# And following it has to produce what it promises, or the message is worse
+# than silence.
+# 而照著它做必須產生它所承諾的東西，否則那個訊息比沉默更糟。
+{ print -r -- 'k,v'; print -r -- 'K,V'; print -r -- 'a,"line one\nline two"' } > "$TMP/t111_ok.csv2"
+got=$("$CSV2" -get 1:2 -i "$TMP/t111_ok.csv2")
+want=$'line one\nline two'
+assert_eq "$got" "$want" \
+    "T111m and a value written the way it says round-trips as a real newline / 而依它所說寫出的值，會還原成一個真正的換行"
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"

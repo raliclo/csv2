@@ -436,6 +436,31 @@ func validate(_ o: inout Options) throws {
     if o.output != nil && o.useStdout {
         throw usageError("-o and -so are mutually exclusive", "-o 與 -so 互斥")
     }
+    // Documented as refused in two places -- the flag entry and the refusals
+    // table -- and refused in neither. It fired only when validation happened
+    // to fail, so a healthy file took the combination at rc=0 and an unhealthy
+    // one got a message about it; the flag's own entry says it plainly:
+    // "Refused with -append, which can only add bytes."
+    //
+    // The reason is worth stating where the refusal lives. --truncate-partial
+    // means "discard the incomplete final record". Appending cannot discard
+    // anything -- it can only add bytes after what is already there -- so the
+    // combination asks for two things that cannot both happen, and the file
+    // that comes out keeps the incomplete record AND gains a complete one
+    // after it.
+    //
+    // 文件在兩個地方說它被拒絕——旗標條目與拒絕表——而兩處都沒有真的拒絕。它只在「驗證剛好
+    // 失敗」時才觸發，於是一個健康的檔案會以 rc=0 接受這個組合，不健康的才會拿到訊息；
+    // 而旗標自己的條目寫得很清楚：「與 -append 併用時被拒絕，後者只會增加位元組」。
+    //
+    // 理由值得寫在「拒絕」發生的地方。--truncate-partial 的意思是「丟掉不完整的最後一筆」，
+    // 而追加沒有辦法丟掉任何東西——它只能在既有內容之後加上位元組——因此這個組合要求的兩件事
+    // 不可能同時成立，而產生出來的檔案會同時保留那筆不完整的、並在其後多出一筆完整的。
+    if o.truncatePartial, o.edits.contains(where: { if case .append = $0 { return true }; return false }) {
+        throw usageError(
+            "--truncate-partial is refused with -append: appending can only add bytes and cannot discard the incomplete record, so the file would keep it and gain a complete record after it. Write a clean copy first (csv2 -r -t --truncate-partial -i FILE -o CLEAN), then append to that",
+            "--truncate-partial 與 -append 併用會被拒絕：追加只能增加位元組，無法丟棄那筆不完整的紀錄，因此檔案會同時保留它、並在其後多出一筆完整的。請先寫出一份乾淨的複本（csv2 -r -t --truncate-partial -i FILE -o CLEAN），再對那一份追加")
+    }
     if o.input == nil && !o.useStdin {
         throw usageError("no input: give -i FILE or -si", "沒有輸入：請給 -i FILE 或 -si")
     }
@@ -1077,16 +1102,16 @@ func sanitizedCommandLine(_ argv: [String]) -> String {
     var i = 0
     while i < argv.count {
         let a = argv[i]
-        out.append(a)
+        out.append(reportEscape(a))
         switch normalizeFlag(a) {
         case "update":
             // keep the address, drop the value / 保留位址，去掉值
-            if i + 1 < argv.count { out.append(argv[i + 1]) }
+            if i + 1 < argv.count { out.append(reportEscape(argv[i + 1])) }
             if i + 2 < argv.count { out.append("<value>") }
             i += 3
             continue
         case "insert":
-            if i + 1 < argv.count { out.append(argv[i + 1]) }
+            if i + 1 < argv.count { out.append(reportEscape(argv[i + 1])) }
             if i + 2 < argv.count { out.append("<row>") }
             i += 3
             continue
@@ -1143,7 +1168,7 @@ func main() -> Int32 {
         // 英文在前中文在後。一則插入了含換行欄名的訊息會產生四行，而依「兩行」去讀的腳本
         // 會把被注入的那一行當成錯誤訊息的一部分。
         FileHandle.standardError.write(Data(
-            "csv2: \(reportEscape(e.message))\ncsv2：\(reportEscape(e.messageZh))\n".utf8))
+            "csv2: \(lineEscape(e.message))\ncsv2：\(lineEscape(e.messageZh))\n".utf8))
         // Recorded in the -log FILE, not echoed to stderr again. ERROR is above
         // the default WARN threshold, so routing it through Logger printed the
         // same failure a third time, with a timestamp, even when no -log was
@@ -1155,7 +1180,7 @@ func main() -> Int32 {
         Logger.shared.close()
         return 1
     } catch {
-        FileHandle.standardError.write(Data("csv2: \(reportEscape("\(error)"))\n".utf8))
+        FileHandle.standardError.write(Data("csv2: \(lineEscape("\(error)"))\n".utf8))
         Logger.shared.close()
         return 1
     }

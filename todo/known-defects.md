@@ -2618,3 +2618,117 @@ written to measure rather than to compare. Third time today a change that
 builds and passes here broke the one platform that cannot be checked from here,
 and the probe habit learned from the second one did not help, because the probe
 asked whether the API existed and not what it did to the bytes.
+---
+
+# 第 43 回合(2026-08-20)—— 編輯動詞、格式跨越、拒絕作為介面、邊界
+
+**這一輪的第 4 類有四條,而且每一條都是「rc=0 而結果是錯的」。** 受測者的話:
+
+> 「這是這個工具自己的招牌失敗,在 README 說已經修好的那條快路徑上重新出現:一次被回報為
+> 成功的寫入,產生了一個剛好少掉那一筆寫入的檔案。」
+
+## BB. `-append --in-place` 跳過「最後一筆是否完整」的檢查
+
+README 講了兩次,而且是當成**已修的缺陷**在講:
+
+> 「`-append` 到一個最後一筆不完整的檔案 | …**`-o` 與 `--in-place` 一視同仁地檢查——
+> 那條快路徑原本會跳過它,產生一個 csv2 隨後拒絕讀取的檔案**」
+
+實測:
+
+```console
+$ printf 'id,name,note\nr1,n1,"ok"\nr2,n2,"unclosed\n' > p1.csv
+
+$ csv2 -append 'r3,n3,x' -i p1.csv -o out.csv
+csv2: record 3: the input ends inside a quoted field -- the closing quote is missing …
+                                                              ← -o：拒絕 ✓
+
+$ csv2 -append 'r3,n3,x' -i p1.csv --in-place
+rc=0                                                          ← --in-place：照寫不誤 ✗
+
+$ csv2 -r -i p1.csv
+csv2: record 3: the input ends inside a quoted field …        ← 自己讀不回來
+```
+
+**而剛寫進去的那一筆,救不回來。** 因為那個引號從未關閉,`r3,n3,x` 現在位在第 2 筆的引號欄位
+「裡面」,而文件指定的修復手段會把它丟掉:
+
+```console
+$ csv2 -r --truncate-partial -i p1.csv
+r1,n1,"ok"
+rc=0                          ← r3 不見了。那一筆是幾秒前以 rc=0 寫進去的。
+```
+
+短的最後一筆(欄數不足)同樣如此:`-o` 拒絕、`--in-place` rc=0。
+
+**既有的守衛檢查的是「檔案結尾有沒有換行」,而不是「最後一筆完不完整」。** 一個檔案可以
+以換行結尾,同時停在一個沒有關閉的引號裡——而那正是這裡的情況。
+
+## CD. `-append` 與 `--truncate-partial` 併用沒有被拒絕
+
+文件在兩個地方說它被拒絕:旗標條目(「**與 `-append` 併用時被拒絕**,後者只會增加位元組」)
+與拒絕表。
+
+```console
+$ csv2 -append 'a,b,c' --truncate-partial -i k.csv -o k7.csv
+rc=0        {"meta":{"records":3,…}}        ← 追加確實發生了
+```
+
+`-o` 與 `--in-place` 兩種目的地都沒有拒絕。與 BB 合起來,得到的正是 README 預測「所以才要
+拒絕」的那個檔案:「那個檔案會同時保留它,並在其後多出一筆完整的紀錄」。
+
+## CE. 同一次執行裡,`-update` 到一筆正被 `-delete` 刪掉的紀錄,會被靜默丟棄
+
+```console
+$ csv2 -delete 1,1 -update 1:2 'GHOST' -i g.csv --in-place
+rc=0
+$ csv2 -r -i g.csv
+r2,n2,b                       ← GHOST 不在任何地方，也沒有任何訊息
+```
+
+**而同一個危險在「欄」這個軸上是被守住的**,訊息一字不差地說明了理由:
+
+```console
+$ csv2 -update 1:3 X -delete -col 3 -i f.csv -o dc3.csv
+csv2: -update 1:3 targets a column that -delete -col is removing;
+      the edit would have no effect and would still be reported as done
+rc=1
+```
+
+**「那個編輯不會有任何效果,而且仍然會被回報為完成。」** 那句話描述的正是它在紀錄軸上
+實際做的事。一條規則被想清楚、寫下來、實作在一個軸上,而另一個軸沒有。
+
+## CF. 教你怎麼跳脫的那則訊息,自己被跳脫了——而這是我今天造成的
+
+```
+README 說:   undefined escape sequence \q; .csv2 defines only \n, \r and \\
+實際印出:   undefined escape sequence \\q; .csv2 defines only \\n, \\r and \\\\
+```
+
+照著訊息寫的人:
+
+```console
+$ printf 'k,v\nK,V\na,"line one\\nline two"\n' > lit.csv2     # 依訊息寫兩個反斜線
+$ csv2 -get 1:2 -i lit.csv2 | od -c
+l i n e   o n e   \   n   l i n e   t w o                     ← rc=0，而值是錯的
+```
+
+**成因是 AJ 的修法。** 今天早些時候我把跳脫集中到「建構 log 行」那一點,理由是「那是唯一
+涵蓋得到日後每一則訊息的地方」——那個理由現在仍然成立,但那個做法**分不出「作者寫的散文」
+與「程式插進去的輸入」**。而它們需要的處理正好相反:輸入必須被跳脫,散文必須原樣印出。
+
+於是每一個 csv2 想教你的反斜線,在輸出的路上都被加倍了。
+
+**這是同一天之內,同一段程式的第三次修正**:AI(呼叫那一行沒跳脫)、AJ(訊息沒跳脫)、
+現在是 CF(訊息被過度跳脫)。前兩次是「規則沒套到所有地方」,第三次是「規則套到了不該套的
+地方」——而三次的根源相同:**沒有分清楚「哪些位元組是資料」。**
+
+Round 43's category 4 has four entries and every one is rc=0 with a wrong
+result. The worst reintroduces this tool's headline failure on the fast path
+the README says was fixed: `-append --in-place` onto a file whose last record
+is open skips the check, writes at rc=0, and the file it produces cannot be
+read back -- with the appended record swallowed by the unclosed quote and then
+discarded by the documented repair. CF is mine, from this morning: centralising
+the escaping fixed two defects and created a third, because a single choke
+point cannot tell an author's prose from an interpolated value, and those two
+need opposite treatment.

@@ -130,7 +130,7 @@ final class Logger {
         // 欄位——都可能在 log 中開出第二行，而那一行的全部內容連同時間戳都來自那個輸入。
         // 在「建行」這一點跳脫，涵蓋的是現在與日後的每一則訊息，而那正是關鍵差別：這個
         // 缺陷所到過的兩個呼叫點，都是「一條規則必須在每個地方各被記得一次」的例子。
-        let line = "\(Logger.timestamp()) \(level.label) \(reportEscape(message()))\n"
+        let line = "\(Logger.timestamp()) \(level.label) \(lineEscape(message()))\n"
         // The log FILE is an operation record: what was done, to what, with
         // what result. DEBUG and TRACE are for someone chasing a problem right
         // now -- high volume, thrown away when done -- and letting them into
@@ -162,7 +162,7 @@ final class Logger {
     /// 但再往 stderr 印一次只是重複。
     func logToFileOnly(_ level: LogLevel, _ message: String) {
         guard let h = logHandle else { return }
-        Platform.appendWrite(h, Data("\(Logger.timestamp()) \(level.label) \(reportEscape(message))\n".utf8))
+        Platform.appendWrite(h, Data("\(Logger.timestamp()) \(level.label) \(lineEscape(message))\n".utf8))
     }
 
     func debug(_ m: @autoclosure () -> String) { log(.debug, m()) }
@@ -220,7 +220,8 @@ final class Logger {
     /// 那種兩層跳脫。
     func redact(column: String, value: [UInt8]) -> String {
         if redactedColumns.contains(column) { return "<redacted>" }
-        let v = echoValue(value, limit: nil).replacingOccurrences(of: "\"", with: "\"\"")
+        let v = reportEscape(echoValue(value, limit: nil))
+            .replacingOccurrences(of: "\"", with: "\"\"")
         return "\"\(v)\""
     }
 

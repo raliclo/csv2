@@ -170,6 +170,49 @@ final class CSVEmitter: RecordEmitter {
 /// how to read the report.
 /// 以 `.csv2` 既有的反斜線慣例跳脫，另加 `\t`——因為 TAB 是這個格式自己的分隔符。
 /// 沿用既有慣例而非發明新的，讓看得懂檔案格式的人不必再學一套就能讀報告。
+/// Escapes ONLY what would end a line: a newline or a carriage return.
+///
+/// This is the whole-message escape, and it is deliberately narrower than
+/// `reportEscape`. One choke point protects line integrity -- an entry can
+/// never be forged by opening a second line, and no future message has to
+/// remember -- but a choke point cannot tell an author's PROSE from an
+/// interpolated VALUE, and those two need opposite treatment.
+///
+/// Escaping everything there was tried, on 2026-08-20, and it broke the
+/// messages that teach escaping:
+///
+///     README:  undefined escape sequence \q; .csv2 defines only \n, \r and \\
+///     printed: undefined escape sequence \\q; .csv2 defines only \\n, \\r and \\\\
+///
+/// A reader who followed the message wrote a literal backslash-n into a
+/// `.csv2` cell and got rc=0 with the wrong value. Backslashes in prose are
+/// the author's; backslashes in a value are data. So the value sites escape
+/// fully -- `redact` and the logged invocation -- and this handles only the
+/// two characters that can break the format.
+///
+/// 只跳脫「會結束一行」的東西：換行與歸位字元。
+///
+/// 這是「整則訊息」的跳脫，而它刻意比 `reportEscape` 窄。單一的關卡守住「一筆一行」——
+/// 一筆紀錄永遠無法靠開出第二行來偽造，而日後的訊息也不必記得任何事——但一個關卡分不出
+/// 「作者寫的散文」與「插進去的值」，而那兩者需要的處理正好相反。
+///
+/// 「全部都跳脫」試過了，是 2026-08-20，而它弄壞了那些「教你怎麼跳脫」的訊息：照著訊息寫的
+/// 人會把一個字面的反斜線 n 寫進 `.csv2` 儲存格，rc=0，而值是錯的。散文裡的反斜線屬於作者；
+/// 值裡面的反斜線是資料。因此「值」的那些地方做完整跳脫——`redact` 與記入 log 的呼叫——
+/// 而這裡只處理那兩個會破壞格式的字元。
+func lineEscape(_ s: String) -> String {
+    var out = ""
+    out.reserveCapacity(s.count)
+    for ch in s {
+        switch ch {
+        case "\n": out += "\\n"
+        case "\r": out += "\\r"
+        default: out.append(ch)
+        }
+    }
+    return out
+}
+
 func reportEscape(_ s: String) -> String {
     var out = ""
     out.reserveCapacity(s.count)
