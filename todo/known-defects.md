@@ -2928,3 +2928,119 @@ Two of round 44's reports did not survive verification, and both turned into
 something else under it: the O(1) stamp claim was nothing (the reproduction was
 at fault), and the stale example number was a real but different defect -- two
 files with the same name, and the README naming neither.
+---
+
+# 第 45 回合(2026-08-20)—— 外來的檔案、數字、自我診斷、交給新手
+
+受測者最後一段值得先抄下來:
+
+> 「四次我斷定某件事錯了,而錯的是我。……這個工具在被仔細檢視時,表現得比我的眼睛更可靠
+> ——而那正是任務 1 那三個『靜默誤讀』要緊的原因:它們是再怎麼小心都抓不到的那一種,
+> 因為 csv2 回報的是成功。」
+
+## CL. 一個負數的環境旗標,讓 csv2 靜默崩潰(2026-08-20 修正,T114)
+
+```console
+$ CSV2_PARALLEL_MIN_BYTES=-1 csv2 -contains 1 -i tiny.csv
+rc=133   stdout 0 bytes   stderr 0 bytes
+```
+
+**133 = 128 + 5,SIGTRAP。** 沒有訊息、沒有輸出、沒有任何東西可以讓呼叫端回報。
+
+那正是這個工具存在所要防止的那一類:一次失敗,而它看起來不像任何東西。README 說
+「成功為 0,任何錯誤為非零」以及「每一種拒絕都恰好兩行 stderr」——**兩句在這裡都不成立**。
+
+## CM. 而同一族的旗標,三種行為各不相同(2026-08-20 修正,T114)
+
+| 值 | 結果 |
+|---|---|
+| `CSV2_PARALLEL_MIN_BYTES=-1` | **SIGTRAP,靜默崩潰** |
+| `CSV2_MAX_BUFFER_RECORDS=-1` | 不崩潰,但訊息說「超過可緩衝的紀錄上限(-1)」 |
+| `CSV2_PARALLEL_MIN_BYTES=16MiB` | **靜默退回預設**,而 `-debug` 用那個變數的名字回報預設值 |
+
+第三種最難察覺:一個以為自己把門檻設成 16 MiB 的人,拿到的是 `under CSV2_PARALLEL_MIN_BYTES
+(16777216)`——那個數字剛好也是 16 MiB,於是那一行看起來像是確認,實際上是巧合。若他寫的是
+`8MiB`,那一行會顯示 16777216,而他仍然會以為那是他設的值。
+
+**「不要靜默修復格式錯誤的輸入」是這個專案寫在 CLAUDE.md 裡的規則,而環境變數是輸入。**
+
+## CN. 我今天加的那則 WARN,讓四處文件變成假的(2026-08-20 修正)
+
+第 44 回合我為 `-mid` 起點超過結尾加了一則 WARN(CI)。**而我沒有回頭去看它讓什麼變成假的:**
+
+| 文件 | 現在為假 |
+|---|---|
+| `-mid` 的旗標說明 | 「起點超過結尾時會在 rc=0 下輸出空的——與『存在且為空的視窗』**無法區分**」 |
+| 「正常路徑上不輸出任何東西」 | 現在會輸出一行 |
+| 「錯誤輸出到 stderr,**恰好兩行**」 | 那則 WARN 是一行,而且只有英文 |
+| `csv2view` 一節 | 仍把「`-mid` 起點超過結尾時給出錯誤而非空輸出」列為「尚未做到」 |
+
+**這是同一個模式的第四次,而這次的間隔是幾小時。** AF(README 狀態表)、AN(我寫的
+「每一條拒絕都會指名索引」)、AO(平行 RSS 的模型)、現在是 CN。
+
+每一次的形狀都一樣:**加了一段文字,而沒有去作廢它所使之為假的東西。**
+
+## CO. CR 行尾的偵測器,差一個位元組就不觸發(2026-08-20 修正,T115a–d)
+
+csv2 有一個 CR-only 檔案的偵測器,訊息品質很好(`convert it first with: tr '\r' '\n' < file > file.lf`)。
+
+而受測者構造出一個它抓不到的檔案:**以 CR 分隔、但最後有一個 LF**。結果是 0 筆紀錄、rc=0、
+`-contains` 找不到任何東西,而 `--verify-index` 說 `index OK`。
+
+**偵測器存在、訊息也寫好了,只是那個檔案剛好差一個位元組就不觸發。**
+
+## CP. UTF-16 的檔案被靜默誤讀(2026-08-20 修正,T115e–g)
+
+csv2 讀進一個 UTF-16 檔案、誤解它,然後把它的 BOM 寫進自己的輸出——**於是 csv2 產生了不是
+合法 UTF-8 的位元組**。
+
+那與這個工具對 round-trip 的立場相抵觸,而與文件怎麼說無關。
+
+## 還有一條沒有通過驗證:O(1) 戳記,第二次被回報
+
+受測者說那個戳記「比文件說的更強,因為它也用了 ctime」。
+
+**我用 `os.utime` 還原 mtime(不動 ctime)量過,索引仍然被採信。** 若 ctime 有被檢查,它就
+會被拒絕。這一條與第 44 回合那一條是同一個回報,而兩次都沒有通過驗證。
+
+**同一個宣稱連續兩輪被提出、兩輪都推翻不了 README,值得記在這裡**——下一輪若再出現,可以
+直接指到這一段,而不必再量一次。
+
+Round 45. A negative environment knob makes csv2 die of SIGTRAP with nothing on
+either stream -- a failure that looks like nothing at all, in a tool whose
+entire premise is that failures must be loud. The same family of knobs then
+behaves three different ways for bad values, one of which silently substitutes
+the default and reports it under the variable's own name.
+
+And the WARN added yesterday for CI falsified four places in the documentation,
+none of which I went back to look at. Fourth instance of that pattern, this
+time hours apart rather than days.
+
+### CP 的回報有一半沒有通過驗證,而剩下的那一半才是真的
+
+受測者說 csv2「把 UTF-16 的 BOM 寫進自己的輸出,於是產生了不是合法 UTF-8 的位元組」。
+
+**輸出是合法 UTF-8。** NUL 也是合法的 UTF-8 碼位,而那正是 UTF-16 在位元組層看起來的樣子。
+
+**但剩下的那一半是真的,而且更重要**:一個 UTF-16 檔案被靜默地當成 UTF-8 讀,rc=0,產出的
+紀錄毫無意義。那與「位元組原樣往返」的承諾並不衝突——它就是那個承諾的結果——而問題在於
+**沒有任何東西告訴拿著檔案的人,他讀到的不是他以為的東西**。
+
+修法沿用這個工具已經有的那個形狀:CR 偵測器。`FF FE` 與 `FE FF` 不可能出現在 UTF-8 檔案的
+開頭,因此看到它不是在猜;拒絕而不是轉換,理由與 CR 那條相同——**猜測編碼,正是一個工具
+最後靜默產生出「看似合理而錯誤」的東西的方式。**
+
+### CN:同一個模式的第四次,而這次間隔是幾小時
+
+| | 加了什麼 | 沒有回頭作廢什麼 |
+|---|---|---|
+| AF | README 描述 `install.zsh` 的行為 | 狀態表裡的「尚未」欄 |
+| AN | 「每一條拒絕索引的路徑都會指名它」 | 我沒有量過的那一半 |
+| AO | 平行 RSS 的數字 | 那個模型本身(當天被 AR 推翻) |
+| CN | `-mid` 的 WARN | 四處:`-mid` 說明、「正常路徑不輸出」、「錯誤恰好兩行」、`csv2view` 的待辦清單 |
+
+**四次的形狀完全相同:加了一段文字,而沒有去看它讓什麼變成假的。**
+
+而這一次多學到一件事:那則 WARN 是**一行、只有英文**,而那與這個工具裡每一則診斷一致——
+「兩行雙語」屬於「結束一次執行」的那則訊息。**我原本以為那是不一致,查了程式才知道那是慣例。**
+文件現在把那個分界寫出來了,而它原本從來沒有被寫下來過。

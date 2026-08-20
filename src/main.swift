@@ -1135,6 +1135,13 @@ func main() -> Int32 {
         var o = try parseArgs(Array(CommandLine.arguments.dropFirst()))
         if o.debug { Logger.shared.threshold = o.trace ? .trace : .debug }
         if let p = o.logPath { Logger.shared.openLog(path: p) }
+        // Before validate(&o), because a bad knob is not a usage error about
+        // the flags the caller typed -- it is the environment they are running
+        // in, and it should be named before anything else can go wrong
+        // because of it.
+        // 放在 validate(&o) 之前，因為壞掉的旗標不是「呼叫端打了什麼」的用法錯誤，
+        // 而是「他們身處的環境」，該在任何東西因它出錯之前先被指名。
+        try validateEnvironment()
         try validate(&o)
 
         Logger.shared.log(.info, "csv2 \(sanitizedCommandLine(Array(CommandLine.arguments.dropFirst())))")

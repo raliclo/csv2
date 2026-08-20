@@ -330,6 +330,17 @@ final class RecordParser {
 
     private(set) var sawLF = false
     private(set) var sawCRAsData = false
+    /// Counted, not just flagged. The CR-line-ending check used to ask "was
+    /// there NO LF at all", which a CR-separated file with a single trailing
+    /// LF answers with "there was one" -- so the detector, message and all,
+    /// stayed silent and the file read as ZERO records at rc=0. One byte
+    /// decided whether the user got a first-rate diagnosis or nothing.
+    /// 用數的，不只是用旗標。原本的 CR 行尾檢查問的是「有沒有『完全沒有』LF」，而一個
+    /// 「以 CR 分隔、結尾多一個 LF」的檔案會回答「有一個」——於是那個偵測器連同它寫得很好的
+    /// 訊息一起沉默，而該檔案以 rc=0 讀成「零筆紀錄」。一個位元組決定了使用者拿到的是
+    /// 一流的診斷，還是什麼都沒有。
+    private var lfCount = 0
+    private var crAsDataCount = 0
     private(set) var sawCRLF = false
     private(set) var strippedBOM = false
     private(set) var recordsEmitted = 0
@@ -416,6 +427,36 @@ final class RecordParser {
             if bomPending.count < BOM.count {
                 return // wait for more; a 1-byte file cannot carry a BOM anyway
             }
+            // A UTF-16 BOM cannot begin a UTF-8 file -- FF FE and FE FF are
+            // not valid UTF-8 -- so seeing one is not ambiguous. Left alone,
+            // csv2 reads the file byte-transparently, which is correct for a
+            // tool that promises bytes round-trip and useless to the person
+            // holding it: every second byte is NUL, the column names carry
+            // them, and the whole thing parses at rc=0 into records that mean
+            // nothing.
+            //
+            // Refused rather than converted, for the same reason the CR check
+            // above refuses: guessing an encoding is how a tool ends up
+            // silently producing something plausible and wrong. `iconv` knows
+            // how to do this and csv2 does not need to.
+            //
+            // UTF-16 的 BOM 不可能出現在 UTF-8 檔案的開頭——FF FE 與 FE FF 都不是合法的
+            // UTF-8——因此看到它並不含糊。放著不管的話，csv2 會以「位元組透明」的方式讀它，
+            // 那對一個承諾「位元組原樣往返」的工具是正確的，而對拿著這個檔案的人毫無用處：
+            // 每隔一個位元組就是 NUL、欄名裡帶著它們，而整份東西會在 rc=0 下解析成一堆
+            // 沒有意義的紀錄。
+            //
+            // 選擇拒絕而非轉換，理由與上面那個 CR 檢查相同：猜測編碼，正是一個工具最後
+            // 「靜默產生出看似合理而錯誤的東西」的方式。`iconv` 知道怎麼做，csv2 不需要會。
+            if bomPending.count >= 2 {
+                let b0 = bomPending[0], b1 = bomPending[1]
+                if (b0 == 0xFF && b1 == 0xFE) || (b0 == 0xFE && b1 == 0xFF) {
+                    let which = b0 == 0xFF ? "UTF-16LE" : "UTF-16BE"
+                    throw fault(
+                        "this file begins with a \(which) byte-order mark; csv2 reads bytes and does not convert encodings, so it would parse as records that mean nothing. Convert it first with: iconv -f \(which) -t UTF-8 file > file.utf8",
+                        "本檔案以 \(which) 的位元組順序記號開頭；csv2 讀的是位元組、不做編碼轉換，因此它會被解析成一堆沒有意義的紀錄。請先轉換：iconv -f \(which) -t UTF-8 file > file.utf8")
+                }
+            }
             if Array(bomPending.prefix(3)) == BOM {
                 // A UTF-8 BOM marks "this came from Windows"; Excel exports
                 // one. Left in place it becomes part of the first column
@@ -450,6 +491,7 @@ final class RecordParser {
                 // 該 CR 屬於分隔符。逐筆判斷而非整檔判斷，正是混合行尾的檔案
                 // 能被正確解析的原因——而混合是真的會發生的。
                 sawLF = true
+                lfCount += 1
                 sawCRLF = true
                 offset += 1
                 line += 1
@@ -460,6 +502,7 @@ final class RecordParser {
             // value that legitimately contains one.
             // 孤立的 CR 是資料。把它當分隔符會破壞任何合法含有它的值。
             sawCRAsData = true
+            crAsDataCount += 1
             try appendDataByte(BYTE_CR)
         }
 
@@ -473,6 +516,7 @@ final class RecordParser {
                 try endField()
             } else if b == BYTE_LF {
                 sawLF = true
+                lfCount += 1
                 line += 1
                 offset += 1
                 try endRecord()
@@ -636,6 +680,7 @@ final class RecordParser {
         if pendingCR {
             pendingCR = false
             sawCRAsData = true
+            crAsDataCount += 1
             try appendDataByte(BYTE_CR)
         }
         // A CR-only file (pre-OS X Mac) contains no LF at all, so the whole
@@ -646,7 +691,14 @@ final class RecordParser {
         // CR-only 檔案（OS X 之前的 Mac 慣例）完全沒有 LF，於是整份被解析成
         // 一筆有數百萬欄的紀錄，接著撞上欄數檢查——而那個訊息在講欄數，會把
         // 使用者引去一個完全無關的方向。診斷成本幾乎為零，少了它代價是一個下午。
-        if !sawLF && sawCRAsData {
+        // Bare CRs outnumbering LFs is what a CR-separated file looks like,
+        // with or without a stray LF at the end. A legitimate CSV can contain
+        // a bare CR inside a quoted field, so the test is strictly greater:
+        // one such CR in a one-record file must not trip it.
+        // 「裸 CR 的數量多於 LF」正是一個以 CR 分隔的檔案的樣子，不論結尾有沒有多一個 LF。
+        // 合法的 CSV 也可能在引號欄位裡含有裸 CR，因此這裡用「嚴格大於」：一筆紀錄裡的
+        // 一個裸 CR 不能觸發它。
+        if crAsDataCount > lfCount {
             throw fault(
                 "this file uses CR line endings (the pre-OS X Mac convention), which CSV does not support; convert it first with: tr '\\r' '\\n' < file > file.lf",
                 "本檔案使用 CR 行尾（OS X 之前的 Mac 慣例），非 CSV 所支援；請先轉換：tr '\\r' '\\n' < file > file.lf")

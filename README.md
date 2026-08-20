@@ -45,9 +45,10 @@ satisfy are reported as SKIP with the reason rather than quietly left out.
 **Designed but not built: `csv2view`, a native SwiftUI viewer.** Nothing below
 describes it, because none of it exists yet — the design lives in
 [plan/plan.md](./plan/plan.md) and names the three things csv2 has to gain
-first: a `-count` verb, an error instead of empty output when `-mid`'s START
-record is past the end, and line numbers in the index so a file with a quoted
-newline can still be seeked into. A measured 5.6 ms per 40-record window on a
+first: a `-count` verb and line numbers in the index so a file with a quoted
+newline can still be seeked into. (A third item, "an error instead of empty
+output when `-mid`'s START record is past the end", was on this list until
+2026-08-20 and is now a WARN naming both numbers — see `-mid` above.) A measured 5.6 ms per 40-record window on a
 19.5 MB file is why the viewer will call this binary rather than embed a copy
 of its parser. **Do not write a script against any of that; it is a plan, not
 an interface.**
@@ -165,11 +166,15 @@ SELECTING / 選取
   -mid a,b              records a through b, inclusive; `a,` and `,b` are
                         open. A range that overruns the end is CLAMPED, not
                         refused, and a start past the end gives empty output
-                        at rc=0 -- indistinguishable from a window that exists
-                        and is empty. To tell them apart, read `records` from
-                        the trailing --json meta line: it is the count actually
-                        read, so `records < a` means the window was never
-                        reached. -head and -tail clamp the same way
+                        at rc=0 -- but it says so: a single WARN line on
+                        stderr naming the start you asked for and the last
+                        record there is. Every output shape carries it,
+                        including -md, which has no meta line to put it in.
+                        `records` on the trailing --json meta line answers the
+                        same question for a caller that would rather parse
+                        than read stderr. -head and -tail clamp the same way,
+                        silently, because clamping an END is what was asked
+                        for
   -t                    include the header rows (off by default). It applies
                         to SELECTIONS only -- an edit rewrites the whole file
                         and always writes the headers, with or without -t
@@ -913,6 +918,14 @@ reading the pair took the injected line for part of the error. Asserted by T102.
 With `-log FILE` the same failure is also appended there with a timestamp;
 without it nothing else is printed. On the normal path csv2 prints nothing at all — it has
 to work inside a pipeline.
+
+**One thing does print without `-debug`, and it is deliberate**: a `WARN` line,
+when a run succeeded while doing something the caller almost certainly did not
+intend — a `-mid` window that begins past the end of the file, a value over
+1 MiB going into the log in full. WARN is the default threshold. Unlike an
+error it is **one line and English only**, which is what every diagnostic in
+this tool is; the two-line bilingual shape belongs to the message that ends a
+run. Exit status stays 0, because the run did what it was told.
 
 **How much of a location an error carries depends on how much there is.** Do not
 write a script that expects to find `record N, field M` in every message:

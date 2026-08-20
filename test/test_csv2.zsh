@@ -5520,6 +5520,158 @@ assert_eq "$t113_zh" "$t113_readme" \
 assert_contains "$(grep -A1 'csv2 -contains busybox --json' "$ROOT/README.md" | head -1)" "test/fixtures/" \
     "T113c and the example names which copy it is reading / 而範例指名了它讀的是哪一份複本"
 
+# ---------------------------------------------------------------------
+# T114 -- a numeric knob with a bad value, which used to fail three different
+# ways and once as nothing at all.
+#
+#   CSV2_PARALLEL_MIN_BYTES=-1     SIGTRAP, exit 133, zero bytes on stdout AND
+#                                  stderr. A failure that looks like nothing.
+#   CSV2_MAX_BUFFER_RECORDS=-1     accepted, then reported back as
+#                                  "exceeds the buffered-record limit (-1)"
+#   CSV2_PARALLEL_MIN_BYTES=16MiB  silently ignored, and -debug then printed
+#                                  the DEFAULT under the variable's own name
+#
+# The third is the one that hides. Someone setting 16MiB sees
+# `under CSV2_PARALLEL_MIN_BYTES (16777216)` and reads it as confirmation --
+# the number agrees by coincidence. Set 8MiB and that line still says
+# 16777216.
+#
+# "Do not silently repair malformed input" is this project's own rule, and an
+# environment variable is input.
+#
+# T114 —— 一個值壞掉的數值旗標，原本會以三種不同的方式失敗，其中一種是「什麼都不像」。
+# 負數會 SIGTRAP、以 133 結束，stdout 與 stderr 都是空的；另一個接受負數再把它回報成
+# 「超過上限 (-1)」；而無法解析的值被靜默忽略，`-debug` 接著用那個變數自己的名字印出預設值。
+# 第三種最會藏：設了 16MiB 的人看到 `under CSV2_PARALLEL_MIN_BYTES (16777216)`，會把它讀成
+# 確認——而那只是碰巧相等。設 8MiB，同一行仍然印 16777216。
+# 「不要靜默修復格式錯誤的輸入」是本專案自己的規則，而環境變數就是輸入。
+# ---------------------------------------------------------------------
+echo
+echo "--- T114: a knob with a bad value / 值壞掉的旗標 ---"
+
+print -r -- 'a,b' > "$TMP/t114.csv"
+print -r -- '1,x' >> "$TMP/t114.csv"
+
+t114_run() {   # $1 = VAR=VALUE ; sets t114_rc, t114_err
+    env "$1" "$CSV2" -contains 1 -i "$TMP/t114.csv" > "$TMP/t114.out" 2> "$TMP/t114.err"
+    t114_rc=$?
+    t114_err=$(cat "$TMP/t114.err")
+}
+
+t114_run CSV2_PARALLEL_MIN_BYTES=-1
+assert_eq "$t114_rc" "1" \
+    "T114a a negative threshold is refused, not a trap / 負數門檻被拒絕，而不是觸發 trap"
+assert_contains "$t114_err" "CSV2_PARALLEL_MIN_BYTES=-1" \
+    "T114b and the message quotes the variable and the value back / 而訊息把變數與值原樣引述回來"
+
+# The crash left NOTHING on either stream. A caller checking rc != 0 had no
+# message to report, which is the part that makes it worse than an error.
+# 那次崩潰在兩個串流上都什麼也沒留下。一個檢查 rc != 0 的呼叫端沒有任何訊息可以回報，
+# 而那正是它比「一個錯誤」更糟的地方。
+if (( ${#t114_err} > 0 )); then
+    ok "T114c and there is something on stderr to report / 而 stderr 上有東西可以回報"
+else
+    bad "T114c the failure left nothing on stderr / 那次失敗在 stderr 上什麼也沒留下"
+fi
+
+t114_run CSV2_MAX_BUFFER_RECORDS=-1
+assert_eq "$t114_rc" "1" \
+    "T114d and the same for the other knobs, rather than three behaviours / 其他旗標也一樣，而不是三種行為"
+
+t114_run CSV2_PARALLEL_MIN_BYTES=16MiB
+assert_eq "$t114_rc" "1" \
+    "T114e an unparseable value is refused, not silently replaced by the default / 無法解析的值被拒絕，而不是被靜默換成預設值"
+assert_contains "$t114_err" "is not a number" \
+    "T114f and says that is what happened / 並說出發生的是那件事"
+
+# A good value must still work, or the check has replaced one failure with
+# another.
+# 好的值必須照常運作，否則這個檢查只是把一種失敗換成另一種。
+t114_run CSV2_PARALLEL_MIN_BYTES=1000
+assert_eq "$t114_rc" "0" \
+    "T114g while a value that parses is accepted / 而一個解析得出來的值會被接受"
+
+# ---------------------------------------------------------------------
+# T115 -- two files from somewhere else, each of which read as success.
+#
+# (a) csv2 has a CR-line-ending detector with a first-rate message. It asked
+#     "was there NO LF at all", and a CR-separated file with a single trailing
+#     LF answers "there was one" -- so the detector stayed silent and the file
+#     read as ZERO records at rc=0, `-contains` found nothing, and
+#     `--verify-index` reported the index fine. One byte decided whether the
+#     user got the diagnosis or nothing.
+#
+# (b) A UTF-16 file was read byte-transparently: correct for a tool that
+#     promises bytes round-trip, useless to the person holding it. Every second
+#     byte is NUL, the column names carry them, and the whole thing parses at
+#     rc=0 into records that mean nothing. FF FE and FE FF cannot begin a UTF-8
+#     file, so seeing one is not a guess.
+#
+# Both are refused rather than repaired, for the same reason: guessing an
+# encoding or a line ending is how a tool ends up silently producing something
+# plausible and wrong.
+#
+# T115 —— 兩個來自別處的檔案，而它們都讀成了「成功」。
+# (a) csv2 有一個 CR 行尾偵測器，訊息寫得很好。它問的是「有沒有『完全沒有』LF」，而一個
+#     以 CR 分隔、結尾多一個 LF 的檔案回答「有一個」——於是偵測器沉默，該檔案以 rc=0 讀成
+#     零筆紀錄、`-contains` 什麼也找不到、`--verify-index` 說索引沒問題。一個位元組決定了
+#     使用者拿到的是那個診斷，還是什麼都沒有。
+# (b) 一個 UTF-16 檔案被以「位元組透明」的方式讀進來：對一個承諾位元組原樣往返的工具是正確
+#     的，對拿著它的人毫無用處。FF FE 與 FE FF 不可能出現在 UTF-8 檔案開頭，因此看到它不是
+#     在猜。
+# ---------------------------------------------------------------------
+echo
+echo "--- T115: files from somewhere else / 來自別處的檔案 ---"
+
+# (a) CR separators, with a trailing LF -- the byte that used to hide it.
+# (a) CR 分隔，結尾多一個 LF——就是那個原本讓它藏起來的位元組。
+# printf, not `print -r`: with -r zsh writes the two characters backslash-r
+# rather than a CR, and the fixture then tests nothing. The same trap broke
+# T111m earlier today.
+# 用 printf，不是 `print -r`：加了 -r，zsh 寫出的是「反斜線 r」兩個字元而不是一個 CR，
+# 於是這個 fixture 什麼也測不到。同一個陷阱今天稍早弄壞過 T111m。
+printf 'a,b\r1,x\r2,y\n' > "$TMP/t115_cr.csv"
+assert_fails "T115a a CR-separated file is diagnosed even with a trailing LF / 以 CR 分隔的檔案，即使結尾多一個 LF 也會被診斷出來" -- \
+    "$CSV2" -r -i "$TMP/t115_cr.csv"
+assert_contains "$("$CSV2" -r -i "$TMP/t115_cr.csv" 2>&1)" "tr '\\r' '\\n'" \
+    "T115b and the message still names the conversion / 而訊息仍然指出那個轉換指令"
+
+# CR-only, which always worked, must keep working.
+# 純 CR 的情況原本就有效，必須繼續有效。
+printf 'a,b\r1,x\r2,y' > "$TMP/t115_cronly.csv"
+assert_fails "T115c and a CR-only file is still diagnosed / 純 CR 的檔案仍然被診斷出來" -- \
+    "$CSV2" -r -i "$TMP/t115_cronly.csv"
+
+# A legitimate CSV with a bare CR inside a quoted field must NOT be diagnosed.
+# The test is strictly greater for exactly this.
+# 一個合法、而且引號欄位裡含有裸 CR 的 CSV「不能」被診斷成 CR 檔案。用「嚴格大於」正是為此。
+printf 'a,b\n1,"x\ry"\n2,z\n' > "$TMP/t115_quoted.csv"
+assert_succeeds "T115d while a bare CR inside a quoted field is left alone / 而引號欄位裡的裸 CR 不受影響" -- \
+    "$CSV2" -r -i "$TMP/t115_quoted.csv"
+
+# (b) UTF-16, both byte orders.
+# (b) UTF-16，兩種位元組順序。
+printf '\377\376n\0a\0m\0e\0\n\0' > "$TMP/t115_le.csv"
+assert_fails "T115e a UTF-16LE byte-order mark is refused, not read as bytes / UTF-16LE 的位元組順序記號被拒絕，而不是被當成位元組讀進來" -- \
+    "$CSV2" -r -i "$TMP/t115_le.csv"
+assert_contains "$("$CSV2" -r -i "$TMP/t115_le.csv" 2>&1)" "iconv -f UTF-16LE" \
+    "T115f and names the conversion that does work / 並指出那個真的可行的轉換"
+
+printf '\376\377\0n\0a\0m\0e\0\n' > "$TMP/t115_be.csv"
+assert_fails "T115g and the other byte order too / 另一種位元組順序同樣如此" -- \
+    "$CSV2" -r -i "$TMP/t115_be.csv"
+
+# The UTF-8 BOM must still be STRIPPED, not refused: that is a different file
+# and a different decision, and confusing the two would break every Excel
+# export this tool exists to read.
+# UTF-8 的 BOM 必須仍然被「剝除」而不是被拒絕：那是另一種檔案、另一個決定，把兩者混為一談
+# 會弄壞每一份這個工具存在所要讀的 Excel 匯出檔。
+printf '\357\273\277a,b\n1,x\n' > "$TMP/t115_bom.csv"
+assert_succeeds "T115h while a UTF-8 BOM is still stripped rather than refused / 而 UTF-8 的 BOM 仍然是被剝除，不是被拒絕" -- \
+    "$CSV2" -r -i "$TMP/t115_bom.csv"
+assert_contains "$("$CSV2" -contains 1 -i "$TMP/t115_bom.csv" 2>/dev/null)" "1:1" \
+    "T115i and the first column is still addressable / 而第一欄仍然定址得到"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

@@ -31,6 +31,80 @@ enum LogLevel: Int, Comparable {
 /// `-debug` 與 `-log` 刻意是兩個不同的東西。`-debug` 給「現在正在查一個問題」
 /// 的人看：量大、格式可變、用完即棄。`-log` 給「日後要回頭查這個檔案被誰改成
 /// 這樣」的人看：量小、格式穩定、要保存。寫進同一個地方會讓歷史被除錯輸出淹沒。
+/// Read a numeric environment knob, or refuse.
+///
+/// Every knob used to be read as `if let n = Int(v)`, sometimes with `n > 0`
+/// and sometimes without, and the three ways that went wrong were all
+/// different:
+///
+///   CSV2_PARALLEL_MIN_BYTES=-1     SIGTRAP, exit 133, nothing on either
+///                                  stream -- a failure that looks like
+///                                  nothing at all
+///   CSV2_MAX_BUFFER_RECORDS=-1     accepted, then reported back as
+///                                  "exceeds the buffered-record limit (-1)"
+///   CSV2_PARALLEL_MIN_BYTES=16MiB  silently ignored, and -debug then printed
+///                                  the DEFAULT under the variable's own name
+///
+/// The third is the one that hides. Someone who sets 16MiB sees
+/// `under CSV2_PARALLEL_MIN_BYTES (16777216)` and reads it as confirmation;
+/// the number agrees by coincidence. Set 8MiB and the same line still says
+/// 16777216.
+///
+/// "Do not silently repair malformed input" is this project's own rule, and an
+/// environment variable is input. A bad value is refused by name, with the
+/// value quoted back, before any work starts.
+///
+/// 讀取一個數值型的環境旋鈕，否則拒絕。
+///
+/// 原本每個旋鈕都是 `if let n = Int(v)`，有的加了 `n > 0`、有的沒有，而它們出錯的三種方式
+/// 各不相同：負數會 SIGTRAP、以 133 結束、兩個串流都空無一物；有的接受負數再把它回報成
+/// 「超過上限 (-1)」；而無法解析的值會被靜默忽略，`-debug` 接著用那個變數自己的名字印出
+/// 「預設值」。
+///
+/// 第三種最會藏。設了 16MiB 的人看到 `under CSV2_PARALLEL_MIN_BYTES (16777216)`，會把它讀成
+/// 確認——而那個數字只是碰巧相等。若他設的是 8MiB，同一行仍然印 16777216。
+///
+/// 「不要靜默修復格式錯誤的輸入」是本專案自己的規則，而環境變數就是輸入。壞的值會被指名
+/// 拒絕、把值原樣引述回去，而且發生在任何工作開始之前。
+func envInt(_ name: String, default def: Int, min lower: Int = 1) throws -> Int {
+    guard let raw = ProcessInfo.processInfo.environment[name], !raw.isEmpty else { return def }
+    guard let n = Int(raw) else {
+        throw fault(
+            "\(name)=\(raw) is not a number; csv2 will not fall back to the default silently, because -debug would then print that default under this variable's own name and read as confirmation",
+            "\(name)=\(raw) 不是數字；csv2 不會靜默退回預設值，因為那樣 -debug 會用這個變數自己的名字印出那個預設值，讀起來像是確認")
+    }
+    guard n >= lower else {
+        throw fault(
+            "\(name)=\(n) is below the minimum of \(lower)",
+            "\(name)=\(n) 低於最小值 \(lower)")
+    }
+    return n
+}
+
+/// Every numeric knob, checked once, before any work starts.
+///
+/// The readers themselves are non-throwing computed properties scattered
+/// across four files, and threading `throws` through all of them would put the
+/// check in four places that each have to remember it -- the shape of defect
+/// this tree keeps finding. One pass here means a bad value is refused before
+/// a single byte is read, and the readers below can go on assuming what they
+/// already assumed.
+///
+/// 每一個數值旗標，在任何工作開始之前檢查一次。
+///
+/// 那些讀取點本身是散在四個檔案裡、不會 throw 的計算屬性，而把 `throws` 穿過它們全部，
+/// 等於把這個檢查放進四個「各自都必須記得」的地方——那正是這棵樹一再找到的缺陷形狀。
+/// 在這裡走一遍，壞的值就會在讀進任何一個位元組之前被拒絕，而下面那些讀取點可以繼續
+/// 假設它們本來就在假設的事。
+func validateEnvironment() throws {
+    _ = try envInt("CSV2_PARALLEL_MIN_BYTES", default: 0, min: 0)
+    _ = try envInt("CSV2_PARALLEL_CHUNK_BYTES", default: 1, min: 1)
+    _ = try envInt("CSV2_PARALLEL_MAX_BYTES", default: 1, min: 1)
+    _ = try envInt("CSV2_PRETTY_MAX_BYTES", default: 1, min: 1)
+    _ = try envInt("CSV2_MAX_BUFFER_RECORDS", default: 1, min: 1)
+    _ = try envInt("CSV2_INDEX_MIN_BYTES", default: 0, min: 0)
+}
+
 final class Logger {
     static let shared = Logger()
 
