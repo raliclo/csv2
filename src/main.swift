@@ -985,6 +985,32 @@ func validate(_ o: inout Options) throws {
                 "-o \(out) is \(kind); -o writes a temp file beside the destination and renames it, which needs a regular file. Use -so to write to a stream",
                 "-o \(out) 是\(kindZh)；-o 會在目的地旁邊寫暫存檔再 rename，那需要一個一般檔案。要寫到串流請用 -so")
         }
+        // The directory has to accept a new file, because that is where the
+        // temp file goes. Checked before resolving so the message names what
+        // was typed: `-o /dev/stdout` with stdout redirected to a file
+        // resolves to /dev/fd/1, and the failure that used to come out of the
+        // sink named /dev/fd/1 -- a path the caller never wrote -- with "No
+        // such file or directory" as the cause, which was not the cause.
+        // 那個目錄必須容得下一個新檔案，因為暫存檔就寫在那裡。在解析之前檢查，好讓訊息
+        // 指名「打出來的那個路徑」：`-o /dev/stdout` 在 stdout 被導向檔案時會解析成
+        // /dev/fd/1，而原本由 sink 拋出的失敗指的就是 /dev/fd/1——一個呼叫端從未寫過的路徑
+        // ——並以「No such file or directory」作為原因，而那並不是原因。
+        let dir = (out as NSString).deletingLastPathComponent
+        let dirName = dir.isEmpty ? "." : dir
+        if !Platform.directoryAcceptsNewFiles(dir) {
+            // A missing directory and an unwritable one need different
+            // sentences: "use -so" is the answer to /dev, and nonsense in
+            // reply to a typo.
+            // 「目錄不存在」與「目錄不可寫」需要不同的句子：「請用 -so」是 /dev 的答案，
+            // 拿來回答一個打錯的路徑則毫無意義。
+            if Platform.fileKind(path: dirName) == nil {
+                throw usageError("-o \(out): the directory \(dirName) does not exist",
+                                 "-o \(out)：目錄 \(dirName) 不存在")
+            }
+            throw usageError(
+                "-o \(out): a new file cannot be created in \(dirName), and -o needs one there for the temp file it renames into place. Use -so to write to a stream",
+                "-o \(out)：在 \(dirName) 裡建不了新檔案，而 -o 需要在那裡放一個「稍後 rename 就位」的暫存檔。要寫到串流請用 -so")
+        }
         o.output = resolved(out)
     }
     if o.encryptCols != nil || o.decryptCols != nil || o.hashCols != nil {
@@ -1040,8 +1066,20 @@ func validate(_ o: inout Options) throws {
     if let h = o.headersOverride, let inp = o.input, let fmt = Format.from(path: inp) {
         if h != fmt.headerRows {
             throw usageError(
-                "\(inp) declares \(fmt.headerRows) header row(s) by its suffix, but --headers says \(h). The suffix declares the format; --headers is for input with no suffix to declare it. Rename the file or drop --headers.",
-                "\(inp) 的副檔名宣告了 \(fmt.headerRows) 列標頭，但 --headers 說 \(h) 列。副檔名宣告格式，--headers 是給「沒有副檔名可宣告」的輸入用的。請改檔名，或拿掉 --headers。")
+                // Two remedies were offered as equals and they are not.
+                // Dropping --headers reads the file as it is. RENAMING makes
+                // the suffix agree with --headers, and a `.csv2` renamed to
+                // `.csv` then has its second header row read as data record 1
+                // -- at rc=0, output that looks entirely plausible, and one
+                // record more than the file has. A blind round followed the
+                // rename because the message recommended it, and only caught
+                // it by diffing record counts afterwards.
+                // 兩條建議被並列成等價的，而它們不是。拿掉 --headers 是照檔案原本的樣子讀它；
+                // 「改檔名」是讓副檔名去遷就 --headers，而一個 `.csv2` 改名成 `.csv` 之後，
+                // 它的第二列標頭會被當成第 1 筆資料——rc=0、輸出看起來完全合理、而紀錄數比
+                // 檔案實際多一筆。一個盲測回合照著這條建議去改檔名，事後靠比對紀錄數才發現。
+                "\(inp) declares \(fmt.headerRows) header row(s) by its suffix, but --headers says \(h). The suffix declares the format; --headers is for input with no suffix to declare it. Drop --headers to read the file as it is. Renaming it instead makes the suffix agree with --headers, which is NOT the same thing: a header row then becomes data record 1, at rc=0, and nothing afterwards can tell it was one",
+                "\(inp) 的副檔名宣告了 \(fmt.headerRows) 列標頭，但 --headers 說 \(h) 列。副檔名宣告格式，--headers 是給「沒有副檔名可宣告」的輸入用的。請拿掉 --headers，照這個檔案原本的樣子讀它。改檔名是讓副檔名去遷就 --headers，那不是同一件事：一列標頭會因此變成第 1 筆資料，rc=0，而事後沒有任何東西看得出它曾經是標頭")
         }
     }
 

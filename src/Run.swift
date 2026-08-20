@@ -1179,9 +1179,21 @@ func runEdit(_ o: Options) throws {
     for k in updates.keys where k > total { bad.append("-update \(k):…") }
     for k in blanks.keys where k > total { bad.append("-delete -cell \(k):…") }
     if !bad.isEmpty {
+        // -insert past the end has a right answer and the message never named
+        // it. The README says -append is how you add at the end; someone
+        // holding this refusal has no reason to go looking for that sentence.
+        // Only added for -insert: -update and -delete past the end have no
+        // equivalent, and offering one would be advice to do something else.
+        // 「-insert 越過結尾」是有正解的，而這則訊息從來沒說出那個正解。README 寫著要加在
+        // 最後請用 -append；而拿著這則拒絕的人，沒有任何理由會去翻到那一句。只對 -insert 加，
+        // 因為 -update 與 -delete 越界沒有對應的正解，硬給一個等於是叫人去做別的事。
+        let hint = bad.contains { $0.hasPrefix("-insert") }
+            ? ". To add a record at the end, use -append" : ""
+        let hintZh = bad.contains { $0.hasPrefix("-insert") }
+            ? "。要在最後加一筆，請用 -append" : ""
         throw fault(
-            "\(bad.joined(separator: ", ")) is out of range; the file has \(total) records and csv2 does not create empty ones to fill the gap",
-            "\(bad.joined(separator: "、")) 超出範圍；本檔案有 \(total) 筆紀錄，csv2 不會補出空紀錄來填補")
+            "\(bad.joined(separator: ", ")) is out of range; the file has \(total) records and csv2 does not create empty ones to fill the gap\(hint)",
+            "\(bad.joined(separator: "、")) 超出範圍；本檔案有 \(total) 筆紀錄，csv2 不會補出空紀錄來填補\(hintZh)")
     }
 
     // Close the INPUT before the rename, not at function exit.

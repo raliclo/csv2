@@ -4520,3 +4520,45 @@ Windows 沒有 POSIX 意義下的 FIFO,那一支以 `#if` 排除。
 
 **又是四平台矩陣裡「只有第三個會說話」的那一類**,而這一次它連編都不編——那已經是最溫和的
 一種失敗了。
+
+---
+
+## EO. 一則拒絕給的建議,照著做會弄丟一筆紀錄(2026-08-21 修正,T145a/b)
+
+第 55 回合照著訊息去做,然後靠比對紀錄數才發現不對:
+
+```
+$ csv2 -r --headers 1 -i vs-sqlite.csv2
+csv2: … The suffix declares the format; --headers is for input with no suffix to declare it.
+Rename the file or drop --headers.
+$ cp vs-sqlite.csv2 renamed.csv          ← 照第一條建議
+$ csv2 -r --json -i vs-sqlite.csv2 | tail -1 → {"meta":{"records":22,…}}
+$ csv2 -r --json -i renamed.csv    | tail -1 → {"meta":{"records":23,…}}
+$ csv2 -get 1:1 -i renamed.csv               → 比較項目     ← 中文標題列，現在是資料
+```
+
+兩條建議被並列成等價的,而它們不是:**拿掉 `--headers` 是照檔案原本的樣子讀它;改檔名是
+讓副檔名去遷就 `--headers`**,於是 `.csv2` 的第二列標頭變成第 1 筆資料——rc=0、輸出看起來
+完全合理、而紀錄數比實際多一筆。
+
+README 在別處把這個風險寫得很清楚(「把只有一列標頭的 `.csv` 改名成 `.csv2`……沒有任何檢查
+抓得到」),**而那則訊息本身在推薦它,一句提醒也沒有**。
+
+## EP. `-insert` 越界時,訊息沒有說出那個正解(2026-08-21 修正,T145c/d)
+
+`-insert 99` 在 2 筆的檔案上被正確地拒絕,而 README 在別處說「要加在最後請用 `-append`」。
+拿著這則拒絕的人沒有理由會去翻到那一句。只對 `-insert` 加這個提示:`-update` 與 `-delete`
+越界沒有對應的正解,硬給一個等於是叫人去做別的事(T145d 釘住這一半)。
+
+## EQ. `-o /dev/stdout` 的失敗訊息,指的是一個呼叫端從未打過的路徑(2026-08-21 修正,T145e/f)
+
+stdout 被導向**一般檔案**時,`/dev/stdout` 解析成 `/dev/fd/1`,而那**是**一般檔案,於是
+EJ 那條「不是一般檔案就拒絕」的檢查放行,接著在 sink 裡失敗:
+
+```
+csv2: cannot create temporary file beside /dev/fd/1: No such file or directory
+```
+
+錯的原因(不是「不存在」,是「/dev 裡建不了新檔案」)、一個呼叫端從未打過的路徑、以及沒有
+出路。現在在解析之前先問「目的地的目錄容不容得下一個新檔案」,並把「目錄不存在」與「目錄
+不可寫」分成兩句——「請用 `-so`」是 `/dev` 的答案,拿來回答一個打錯的路徑則毫無意義。

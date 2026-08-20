@@ -123,8 +123,28 @@ disagreeing is refused:
 
 ```console
 $ csv2 -r --headers 1 -i vs-sqlite.csv2
-csv2: vs-sqlite.csv2 declares 2 header row(s) by its suffix, but --headers says 1. The suffix declares the format; --headers is for input with no suffix to declare it. Rename the file or drop --headers.
-csv2：vs-sqlite.csv2 的副檔名宣告了 2 列標頭，但 --headers 說 1 列。副檔名宣告格式，--headers 是給「沒有副檔名可宣告」的輸入用的。請改檔名，或拿掉 --headers。
+big.csv
+cap.txt
+d.csv
+e1.txt
+err.txt
+ok.csv
+out.txt
+renamed.csv
+s.csv
+vs-sqlite.csv2
+csv2: vs-sqlite.csv2 declares 2 header row(s) by its suffix, but --headers says 1. The suffix declares the format; --headers is for input with no suffix to declare it. Drop --headers to read the file as it is. Renaming it instead makes the suffix agree with --headers, which is NOT the same thing: a header row then becomes data record 1, at rc=0, and nothing afterwards can tell it was one
+big.csv
+cap.txt
+d.csv
+e1.txt
+err.txt
+ok.csv
+out.txt
+renamed.csv
+s.csv
+vs-sqlite.csv2
+csv2：vs-sqlite.csv2 的副檔名宣告了 2 列標頭，但 --headers 說 1 列。副檔名宣告格式，--headers 是給「沒有副檔名可宣告」的輸入用的。請拿掉 --headers，照這個檔案原本的樣子讀它。改檔名是讓副檔名去遷就 --headers，那不是同一件事：一列標頭會因此變成第 1 筆資料，rc=0，而事後沒有任何東西看得出它曾經是標頭
 $ echo $?
 1
 ```

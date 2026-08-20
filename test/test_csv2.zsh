@@ -7089,6 +7089,84 @@ assert_contains "$_t144_s" "expected r:c" \
     "T144e while a genuinely malformed address still gets the shape complaint / 而真正格式錯誤的位址仍然得到那句形狀的抱怨"
 
 # ---------------------------------------------------------------------
+# T145 -- advice that has to work when followed.
+#
+# Round 55 followed a refusal's own remedy and lost a record to it. The message
+# offered "Rename the file or drop --headers" as equals: dropping --headers
+# reads the file as it is, while renaming a .csv2 to .csv makes the second
+# header row into data record 1, at rc=0, with output that looks entirely
+# plausible. The round only caught it by diffing record counts afterwards.
+#
+# Two more from the same task: `-insert` past the end diagnosed correctly and
+# never mentioned -append, which the README names as the answer elsewhere; and
+# `-o /dev/stdout`, with stdout redirected to a FILE, failed from inside the
+# sink with "cannot create temporary file beside /dev/fd/1: No such file or
+# directory" -- a false cause, a path the caller never typed, no remedy.
+#
+# T145 —— 照著做就必須行得通的建議。
+# 第 55 回合照著一則拒絕自己給的補救方式去做，因而弄丟了一筆紀錄。
+# ---------------------------------------------------------------------
+echo
+echo "--- T145: following the message / T145：照著訊息去做 ---"
+
+_t145_msg=$("$CSV2" -r --headers 1 -i "$ROOT/compare/vs-sqlite.csv2" 2>&1 | head -1)
+if [[ $_t145_msg == *"Drop --headers"* && $_t145_msg == *"becomes data record 1"* ]]; then
+    ok "T145a the --headers mismatch names the lossless remedy and what the other one costs / --headers 不符時，訊息指出無損的那條路，以及另一條的代價"
+else
+    bad "T145a $_t145_msg / 訊息如上"
+fi
+
+# The hazard the message now warns about, measured: the rename really does turn
+# a header row into a record.
+# 訊息現在警告的那個風險，實測：改檔名確實會把一列標頭變成一筆紀錄。
+cp "$ROOT/compare/vs-sqlite.csv2" "$TMP/t145_renamed.csv"
+_t145_two=$("$CSV2" -r --json -i "$ROOT/compare/vs-sqlite.csv2" | tail -1)
+_t145_one=$("$CSV2" -r --json -i "$TMP/t145_renamed.csv" | tail -1)
+if [[ $_t145_two != $_t145_one ]]; then
+    ok "T145b and renaming really does change the record count / 而改檔名確實會改變紀錄數"
+else
+    bad "T145b both said $_t145_two, so the warning describes something that does not happen / 兩者都是 $_t145_two，那則警告描述的事情並未發生"
+fi
+
+print -r -- 'a,b'  > "$TMP/t145.csv"
+print -r -- '1,x' >> "$TMP/t145.csv"
+_t145_ins=$("$CSV2" -insert 99 'z,z' -i "$TMP/t145.csv" -o "$TMP/t145_out.csv" 2>&1)
+assert_contains "$_t145_ins" "use -append" \
+    "T145c -insert past the end names the verb that does what was wanted / -insert 越過結尾時，訊息指出真正做得到那件事的動詞"
+
+_t145_upd=$("$CSV2" -update 99:1 X -i "$TMP/t145.csv" -o "$TMP/t145_out.csv" 2>&1)
+if [[ $_t145_upd != *"-append"* ]]; then
+    ok "T145d while -update past the end does not, because there is no such answer for it / 而 -update 越界時不會，因為它沒有對應的正解"
+else
+    bad "T145d -update was offered -append, which does not do what -update does / -update 被建議了 -append，而那不是 -update 做的事"
+fi
+
+# -o into a directory that cannot hold a temp file. /dev is the case round 55
+# hit; the message must name the path as typed and the way out.
+# -o 指向一個放不下暫存檔的目錄。第 55 回合撞到的是 /dev；訊息必須指名「打出來的那個路徑」
+# 與出路。
+if (( IS_WINDOWS )); then
+    skipt "T145e -o into a directory that cannot take a new file / -o 指向一個放不下新檔案的目錄 (no /dev here / 這裡沒有 /dev)"
+else
+    _t145_dev=$("$CSV2" -r -t -i "$TMP/t145.csv" -o /dev/stdout 2>&1 >/dev/null)
+    if [[ $_t145_dev == *"/dev/stdout"* && $_t145_dev == *"-so"* && $_t145_dev != *"/dev/fd/1"* ]]; then
+        ok "T145e it names the path as typed and points at -so / 它指名打出來的那個路徑，並指向 -so"
+    else
+        bad "T145e $(print -r -- $_t145_dev | head -1) / 訊息如上"
+    fi
+fi
+
+# A directory that does not exist is a different sentence: "use -so" is the
+# answer to /dev and nonsense in reply to a typo.
+# 不存在的目錄是另一句話：「請用 -so」是 /dev 的答案，拿來回答一個打錯的路徑則毫無意義。
+_t145_typo=$("$CSV2" -r -t -i "$TMP/t145.csv" -o "$TMP/no_such_dir/x.csv" 2>&1)
+if [[ $_t145_typo == *"does not exist"* && $_t145_typo != *"-so"* ]]; then
+    ok "T145f while a missing directory is told it is missing / 而不存在的目錄會被告知它不存在"
+else
+    bad "T145f $(print -r -- $_t145_typo | head -1) / 訊息如上"
+fi
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one

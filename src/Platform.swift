@@ -634,6 +634,33 @@ enum Platform {
         return .other
     }
 
+    /// Can a new file be created in this directory? The question `-o` really
+    /// asks, since it writes a temp file there before renaming.
+    ///
+    /// `_access` on Windows, `access` elsewhere; W_OK is 2 in both. Asked here
+    /// so the refusal can name the path the caller typed, rather than failing
+    /// later with a path the shell produced -- `-o /dev/stdout` with stdout
+    /// redirected to a file resolves to /dev/fd/1, whose DIRECTORY is /dev,
+    /// and the old failure read "cannot create temporary file beside
+    /// /dev/fd/1: No such file or directory": a false cause, a path never
+    /// typed, and no way out.
+    /// 這個目錄裡建得了新檔案嗎？那才是 `-o` 真正要問的問題——它會先在那裡寫一個暫存檔，
+    /// 再 rename。
+    /// Windows 用 `_access`、其他平台用 `access`，W_OK 兩邊都是 2。在這裡問，是為了讓那條
+    /// 拒絕能指名「呼叫端打出來的路徑」，而不是稍後以一個 shell 產生的路徑失敗——
+    /// `-o /dev/stdout` 在 stdout 被導向檔案時會解析成 /dev/fd/1，它的「目錄」是 /dev，
+    /// 而舊的失敗訊息是「cannot create temporary file beside /dev/fd/1: No such file or
+    /// directory」：錯的原因、沒打過的路徑、沒有出路。
+    static func directoryAcceptsNewFiles(_ dir: String) -> Bool {
+        let d = dir.isEmpty ? "." : dir
+        guard fileKind(path: d) == .directory else { return false }
+        #if canImport(ucrt)
+        return _access(d, 2) == 0
+        #else
+        return access(d, W_OK) == 0
+        #endif
+    }
+
     /// The system's text for an errno, as a message can print it.
     /// 一個 errno 對應的系統文字，可直接印在訊息裡。
     static func errorText(_ code: Int32) -> String {
