@@ -978,14 +978,9 @@ func validate(_ o: inout Options) throws {
         // README 從這條拒絕存在之前就寫著它（「請改用 -so」）：實際會發生的是「無法在
         // /dev/fd/1 旁建立暫存檔」，那既沒說原因、也沒說出路，而且指的是一個呼叫端從來沒有
         // 打過的路徑。
-        var st = stat()
-        if stat(out, &st) == 0 && (st.st_mode & S_IFMT) != S_IFREG {
-            let kind = (st.st_mode & S_IFMT) == S_IFDIR ? "a directory"
-                     : (st.st_mode & S_IFMT) == S_IFIFO ? "a FIFO"
-                     : "not a regular file"
-            let kindZh = (st.st_mode & S_IFMT) == S_IFDIR ? "一個目錄"
-                       : (st.st_mode & S_IFMT) == S_IFIFO ? "一個 FIFO"
-                       : "不是一般檔案"
+        if let k = Platform.fileKind(path: out), k != .regular {
+            let kind = k == .directory ? "a directory" : k == .fifo ? "a FIFO" : "not a regular file"
+            let kindZh = k == .directory ? "一個目錄" : k == .fifo ? "一個 FIFO" : "不是一般檔案"
             throw usageError(
                 "-o \(out) is \(kind); -o writes a temp file beside the destination and renames it, which needs a regular file. Use -so to write to a stream",
                 "-o \(out) 是\(kindZh)；-o 會在目的地旁邊寫暫存檔再 rename，那需要一個一般檔案。要寫到串流請用 -so")

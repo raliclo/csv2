@@ -4499,3 +4499,24 @@ index MISMATCH: no_embedded_newlines: index says the file has none, but record 4
 而改掉它會讓 `-delete -col a,b` 從「刪掉名為 a,b 的那一欄」變成「刪掉 a 與 b 兩欄」——對
 擁有這種欄名的人是一次靜默的破壞性變更。現在的行為還讓它成為「唯一抵達得了含逗號欄名的
 編輯動詞」。兩份 README 都寫明了。
+
+---
+
+## EN. 一個平台差異被寫進了 `main.swift`,而那個檔案的開頭就說了不要(2026-08-21 當日修正)
+
+EJ 的修法在 `main.swift` 裡直接查 `st.st_mode & S_IFMT`。macOS 與 Linux 編得過;
+**Windows 根本建不起來**:
+
+```
+error: cannot convert value of type 'UInt16' to expected argument type 'Int32'
+```
+
+`st_mode` 在 Windows 上是 `UInt16`、在其他平台是 `Int32`,而 `S_IFMT`、`S_IFDIR` 的型別
+也跟著不同。
+
+`src/Platform.swift` 開頭寫著「平台差異住在這裡」,而我把一個平台差異放進了呼叫端。它現在是
+`Platform.fileKind(path:)`,回答的就只有 csv2 要問的那一個問題:「暫存檔 rename 得上去嗎?」
+Windows 沒有 POSIX 意義下的 FIFO,那一支以 `#if` 排除。
+
+**又是四平台矩陣裡「只有第三個會說話」的那一類**,而這一次它連編都不編——那已經是最溫和的
+一種失敗了。

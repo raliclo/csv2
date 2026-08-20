@@ -598,6 +598,34 @@ enum Platform {
         _ = writeAll(fd: 2, [UInt8](text.utf8))
     }
 
+    /// What kind of thing a path names, for the one question csv2 asks about
+    /// it: can a temp file be renamed onto this?
+    ///
+    /// Here rather than at the call site because `st_mode` is UInt16 on
+    /// Windows and Int32 elsewhere, and S_IFMT and friends differ in type with
+    /// it -- the check compiled on macOS and Linux and would not build at all
+    /// on Windows, which is the difference this file exists to absorb. Windows
+    /// has no FIFOs in the POSIX sense; `.other` covers whatever it does have.
+    /// 一個路徑指的是什麼東西——只為了 csv2 對它問的那一個問題：暫存檔 rename 得上去嗎？
+    /// 放在這裡而不是呼叫端，因為 `st_mode` 在 Windows 上是 UInt16、其他平台是 Int32，
+    /// 而 S_IFMT 之類的常數型別也跟著不同——那個檢查在 macOS 與 Linux 上編得過，在 Windows
+    /// 上根本建不起來，而那正是本檔案存在要吸收的差異。Windows 沒有 POSIX 意義下的 FIFO；
+    /// `.other` 涵蓋它實際會有的東西。
+    enum FileKind { case regular, directory, fifo, other }
+
+    static func fileKind(path: String) -> FileKind? {
+        var st = stat()
+        guard stat(path, &st) == 0 else { return nil }
+        let mode = UInt32(st.st_mode)
+        let fmt = mode & UInt32(S_IFMT)
+        if fmt == UInt32(S_IFREG) { return .regular }
+        if fmt == UInt32(S_IFDIR) { return .directory }
+        #if !canImport(ucrt)
+        if fmt == UInt32(S_IFIFO) { return .fifo }
+        #endif
+        return .other
+    }
+
     /// The system's text for an errno, as a message can print it.
     /// 一個 errno 對應的系統文字，可直接印在訊息裡。
     static func errorText(_ code: Int32) -> String {
