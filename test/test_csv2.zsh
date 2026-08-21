@@ -9657,7 +9657,22 @@ echo "--- T182: a hard link is not a spelling / T182：硬連結不是一種拼�
 
 printf 'a,b\n1,x\n' > "$TMP/t182.csv"
 rm -f "$TMP/t182_hard.csv"
-if ln "$TMP/t182.csv" "$TMP/t182_hard.csv" 2>/dev/null; then
+# Windows by NAME, and the reason is in the platform rather than in the test:
+# the CRT reports inode 0 for every file, so asking (dev, ino) there would say
+# every file is every other file. csv2 declines to ask, and MSYS2's `ln` still
+# produces something -- so the case would fail for a reason that is not a
+# defect. Writing it to accept either outcome would make a case that cannot
+# fail, which is the thing this suite exists not to do.
+# 以「平台名字」排除 Windows，而理由在平台身上、不在測試身上：那裡的 CRT 對每個檔案都回報
+# inode 0，因此在那裡去問 (dev, ino) 等於說「每個檔案都是彼此」。csv2 選擇不問，而 MSYS2 的
+# `ln` 仍然會生出東西——於是這個案例會因為一個「不是缺陷」的理由而失敗。把它寫成「兩種結果
+# 都接受」，會造出一個不可能失敗的案例，而那正是這套測試存在所要避免的事。
+if (( IS_WINDOWS )); then
+    skipt "T182a Windows reports inode 0 for every file, so identity cannot be asked / Windows 對每個檔案都回報 inode 0，因此問不出「身分」"
+    T182A_SKIPPED=1
+    skipt "T182b same reason / 同一個理由"
+    T182B_SKIPPED=1
+elif ln "$TMP/t182.csv" "$TMP/t182_hard.csv" 2>/dev/null; then
     assert_fails "T182a -i and -o as hard links to one inode is refused / -i 與 -o 是同一個 inode 的硬連結時被拒絕" -- \
         "$CSV2" -update 1:2 Z -i "$TMP/t182.csv" -o "$TMP/t182_hard.csv"
     assert_succeeds "T182b while an unrelated -o still works / 而一個無關的 -o 仍然可用" -- \

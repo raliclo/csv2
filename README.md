@@ -1571,7 +1571,7 @@ than matching the message against this table:
 | `-si` without `--headers 1` or `2` | stdin has no suffix, so the format is not declared; a default here would be a guess |
 | `-head` with `-tail` | no single reading of both is obviously right |
 | `-mid 7,3` | `a > b`; not swapped for you, because a range written backwards usually means the logic is backwards too |
-| `-i x -o x` without `--in-place`, however the two are spelled | that IS an in-place edit, and `--in-place` also keeps a symlink pointing where it did and leaves the permissions alone |
+| `-i x -o x` without `--in-place`, however the two are spelled — and however many NAMES the file has | that IS an in-place edit, and `--in-place` also keeps a symlink pointing where it did and leaves the permissions alone. Spelling covers `./x`, `../d/x`, an absolute path and a symlink; a hard link is not a spelling, so the file's (device, inode) is compared as well. **POSIX only**: the Windows CRT reports inode 0 for every file, where that comparison would say every file is every other one |
 | `-delete 12:6` | that is a cell address; add `-cell`, or give a record number |
 | `-delete -cell -col 3` | they are opposites: `-cell` blanks a field and keeps the column, `-col` removes the column |
 | `-delete -col` removing every column | a file with no columns is not a CSV file |
