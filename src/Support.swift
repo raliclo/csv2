@@ -527,6 +527,23 @@ enum JSONOut {
     /// actually requires are escaped.
     /// emoji 以原始 UTF-8 寫出：那是合法的 JSON，也比 `😀` 的代理對短。
     /// 只跳脫 JSON 真正要求的控制字元。
+    /// Whether these bytes can go into JSON without being changed.
+    ///
+    /// JSON is defined over text, so bytes that are not valid UTF-8 cannot be
+    /// carried at all -- `String(decoding:as:)` substitutes U+FFFD, which is
+    /// data loss that looks like success. The caller refuses instead, because
+    /// `--json` is the shape this README recommends when the value matters,
+    /// and the locating report already answers this case honestly with
+    /// `<non-UTF-8: 63 61 66 e9>`.
+    /// 這些位元組能不能原樣進到 JSON 裡。
+    /// JSON 是定義在「文字」上的，因此不是合法 UTF-8 的位元組根本載不進去——
+    /// `String(decoding:as:)` 會換成 U+FFFD，那是一種「看起來成功」的資料遺失。呼叫端因此
+    /// 改為拒絕，因為 `--json` 正是這份 README 在「值很重要」時推薦的那個形狀，而定位報告
+    /// 早就以 `<non-UTF-8: 63 61 66 e9>` 誠實地回答了這個情況。
+    static func canCarry(_ bytes: [UInt8]) -> Bool {
+        String(bytes: bytes, encoding: .utf8) != nil
+    }
+
     static func string(_ bytes: [UInt8], asciiOnly: Bool) -> String {
         let s = String(bytes: bytes, encoding: .utf8) ?? String(decoding: bytes, as: UTF8.self)
         var out = "\""

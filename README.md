@@ -1005,6 +1005,14 @@ change nothing here: `--json` always carries both names, because a consumer
 that wanted one of them can pick, and one that wanted the other cannot invent
 it.
 
+**A value that is not valid UTF-8 is refused, not substituted.** JSON is
+defined over text, so those bytes cannot be carried: the decoder would put
+U+FFFD where they are and the line would still be valid JSON — data loss that
+looks exactly like success, in the shape this document recommends when the
+value is what matters. `-get` hands back the bytes and the locating report
+names them as `<non-UTF-8: 63 61 66 e9>`; only `--json` was quiet about it.
+Asserted by T158.
+
 **The last line is absent when the stream is cut short** — a reader that left
 (exit 141), or a `-so` edit that failed after emitting records. There is no
 in-band marker for that: if the counts matter, check that the last line you

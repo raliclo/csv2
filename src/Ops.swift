@@ -428,6 +428,12 @@ final class ReportEmitter: RecordEmitter {
 final class JSONEmitter: RecordEmitter {
     private let sink: ByteSink
     private let reportMode: Bool
+    /// Set from the context on every emit, so `carry` can escape the way the
+    /// caller asked without taking the context as a parameter through a
+    /// throwing helper.
+    /// 每次 emit 都由 context 設定，讓 `carry` 能以呼叫端要求的方式跳脫，而不必把 context
+    /// 一路傳進一個會擲出錯誤的輔助函式。
+    private var jsonASCIIFlag = false
     init(sink: ByteSink, reportMode: Bool) { self.sink = sink; self.reportMode = reportMode }
 
     func begin(_ ctx: EmitContext) throws {
@@ -504,7 +510,28 @@ final class JSONEmitter: RecordEmitter {
         sink.write("{\"meta\":{\"format\":\"\(ctx.format.rawValue)\",\"headers\":\(ctx.headers.count),\"fields\":\(fields)\(prot)}}\n")
     }
 
+    /// Refused rather than substituted. JSON is text, so a byte sequence that
+    /// is not valid UTF-8 cannot be carried: Swift's decoder puts U+FFFD in
+    /// its place and the line stays valid JSON, which is data loss that looks
+    /// exactly like success -- in the shape this README recommends when the
+    /// value is the thing that matters. `-get` hands back the bytes and the
+    /// locating report says `<non-UTF-8: 63 61 66 e9>`; only --json was
+    /// quietly lying.
+    /// 拒絕，而不是替換。JSON 是文字，因此一段不是合法 UTF-8 的位元組載不進去：Swift 的
+    /// 解碼器會放一個 U+FFFD 進去，而那一行仍然是合法的 JSON——那是一種「看起來與成功完全
+    /// 相同」的資料遺失，而且發生在「值本身才是重點」時 README 推薦的那個形狀上。`-get`
+    /// 交還的是位元組、定位報告會寫 `<non-UTF-8: 63 61 66 e9>`；只有 --json 在安靜地說謊。
+    private func carry(_ bytes: [UInt8], record: Int, field: Int) throws -> String {
+        guard JSONOut.canCarry(bytes) else {
+            throw fault(
+                "record \(record), field \(field) is not valid UTF-8, and JSON is text: --json would put U+FFFD where those bytes are and the line would still look right. -get returns the bytes, and the locating report names them in hex",
+                "第 \(record) 筆第 \(field) 欄不是合法的 UTF-8，而 JSON 是文字：--json 會在那些位元組的位置放上 U+FFFD，而那一行看起來仍然沒問題。要位元組請用 -get，定位報告則會以十六進位指出它們")
+        }
+        return JSONOut.string(bytes, asciiOnly: jsonASCIIFlag)
+    }
+
     func emit(_ r: Record, matches: [Int], ctx: EmitContext) throws {
+        jsonASCIIFlag = ctx.jsonASCII
         if reportMode {
             for idx in matches {
                 var parts = ["\"record\":\(r.number)", "\"field\":\(idx + 1)"]
@@ -514,7 +541,7 @@ final class JSONEmitter: RecordEmitter {
                 if ctx.headers.count > 1, idx < ctx.headers[1].count {
                     parts.append("\"header_zh\":\(JSONOut.string(ctx.headers[1].fields[idx].value, asciiOnly: ctx.jsonASCII))")
                 }
-                parts.append("\"value\":\(JSONOut.string(r.fields[idx].value, asciiOnly: ctx.jsonASCII))")
+                parts.append("\"value\":\(try carry(r.fields[idx].value, record: r.number, field: idx + 1))")
                 parts.append("\"line\":\(r.line)")
                 sink.write("{" + parts.joined(separator: ",") + "}\n")
             }
@@ -534,7 +561,7 @@ final class JSONEmitter: RecordEmitter {
         var cells: [String] = []
         for (i, f) in r.fields.enumerated() {
             let key = ctx.headers.first.map { i < $0.count ? baseName(headerName($0.fields[i])) : "\(i + 1)" } ?? "\(i + 1)"
-            cells.append("\(JSONOut.string([UInt8](key.utf8), asciiOnly: ctx.jsonASCII)):\(JSONOut.string(f.value, asciiOnly: ctx.jsonASCII))")
+            cells.append("\(JSONOut.string([UInt8](key.utf8), asciiOnly: ctx.jsonASCII)):\(try carry(f.value, record: r.number, field: i + 1))")
         }
         parts.append("\"fields\":{" + cells.joined(separator: ",") + "}")
         sink.write("{" + parts.joined(separator: ",") + "}\n")

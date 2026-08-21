@@ -7908,6 +7908,48 @@ assert_same "$TMP/t157_ap_with.txt" "$TMP/t157_ap_without.txt" \
 unset CSV2_INDEX_MIN_BYTES
 
 # ---------------------------------------------------------------------
+# T158 -- the one output shape that was quietly lying.
+#
+# Round 59: "--json is lossy for invalid UTF-8 while -r and -get are not. No
+# flag, no WARN, no marker, no exit status distinguishes a faithful --json line
+# from a lossy one." Measured: a value of `caf\xe9` came out as "caf<U+FFFD>",
+# valid JSON, rc=0 -- in the shape this README recommends when the value is the
+# thing that matters, while the locating report answers the same case with
+# `<non-UTF-8: 63 61 66 e9>`.
+#
+# T158 —— 唯一一個在安靜說謊的輸出形狀。
+# ---------------------------------------------------------------------
+echo
+echo "--- T158: bytes JSON cannot carry / T158：JSON 載不動的位元組 ---"
+
+printf 'a,b\n1,caf\xe9\n' > "$TMP/t158.csv"
+
+_t158=$("$CSV2" -r -t --json -i "$TMP/t158.csv" 2>&1 >/dev/null)
+_t158_rc=$?
+if (( _t158_rc == 1 )) && [[ $_t158 == *"not valid UTF-8"* ]]; then
+    ok "T158a --json refuses a value it cannot carry, naming the record and field / --json 拒絕它載不動的值，並指出是哪一筆哪一欄"
+else
+    bad "T158a exited $_t158_rc: $(print -r -- $_t158 | head -1) / 結果如上"
+fi
+
+# The shapes that CAN carry it still do, unchanged -- refusing in one place is
+# only right because the other two answer honestly.
+# 載得動的那些形狀照舊——在一個地方拒絕之所以是對的，正因為另外兩個誠實地回答了。
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t158.csv" | od -A n -c | tr -s ' ')" \
+          "$(printf 'caf\xe9\n' | od -A n -c | tr -s ' ')" \
+    "T158b while -get still returns the bytes / 而 -get 仍然交還那些位元組"
+assert_contains "$("$CSV2" -contains caf -i "$TMP/t158.csv")" "<non-UTF-8: 63 61 66 e9>" \
+    "T158c and the report names them in hex / 而報告以十六進位指出它們"
+assert_succeeds "T158d and -r reads the file / 而 -r 讀得了這個檔案" -- \
+    "$CSV2" -r -t -i "$TMP/t158.csv"
+
+# Valid UTF-8 still goes through --json, including astral characters.
+# 合法的 UTF-8 照樣通過 --json，包含星光平面的字元。
+printf 'a,b\n1,caf\xc3\xa9\xf0\x9f\x9a\x80\n' > "$TMP/t158_ok.csv"
+assert_contains "$("$CSV2" -r -t --json -i "$TMP/t158_ok.csv" | sed -n 2p)" 'café🚀' \
+    "T158e while valid UTF-8 is carried as it always was / 而合法的 UTF-8 一如既往地被載著走"
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one
