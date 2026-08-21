@@ -7604,6 +7604,20 @@ _t152_kept=$("$CSV2" -get 1:2 -i "$TMP/t152.csv"; printf x); _t152_kept=${_t152_
 assert_eq "$(print -rn -- "$_t152_kept" | od -A n -c | tr -s ' ')" "$(printf 'x\n\n' | od -A n -c | tr -s ' ')" \
     "T152b while the printf x form keeps every byte -get produced / 而 printf x 的寫法保住了 -get 產生的每一個位元組"
 
+# The recipe as a WHOLE, which is the thing the README publishes. printf x
+# keeps two newlines -- the value's own and the one -get adds -- so a recipe
+# that stops there grows the value by one on every round trip. It was published
+# without the third line on 2026-08-21 and round 61 measured the growth.
+# 那份配方「整體」——那才是 README 發表出去的東西。printf x 保住的是兩個換行：值自己的，
+# 以及 -get 加上的那一個；因此一份「停在那裡」的配方，每來回一次就讓值多一個換行。
+# 它 2026-08-21 發表時就少了第三行，而第 61 回合量到了那個增長。
+_t152_final=${_t152_kept%$'\n'}
+"$CSV2" -update 1:2 "$_t152_final" -i "$TMP/t152.csv" -o "$TMP/t152_rt.csv"
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t152_rt.csv" | od -A n -c | tr -s ' ')" \
+          "$("$CSV2" -get 1:2 -i "$TMP/t152.csv" | od -A n -c | tr -s ' ')" \
+    "T152b1 and the three-line recipe round-trips a value ending in a newline / 而三行的配方能讓「以換行結尾的值」原樣來回"
+
+
 # And the whole recipe still round-trips a value with no trailing whitespace,
 # which is what T96 covers and what most values are.
 # 而對「結尾沒有空白」的值，整份配方仍然可以 round-trip——那是 T96 涵蓋的、也是大多數值的情況。

@@ -487,8 +487,16 @@ to see. csv2 handed over the right bytes and got different ones back. When a
 value may end in whitespace, carry it through a file instead, or pin the end:
 
 ```sh
-val=$(csv2 -get "$addr" -i f.csv2; printf x); val=${val%x}   # keeps the tail
+val=$(csv2 -get "$addr" -i f.csv2; printf x)   # x guards the value's own tail
+val=${val%x}                                   # drop the guard
+val=${val%$'\n'}                               # drop the newline -get itself adds
 ```
+
+All three lines are needed and the third is the one that is easy to miss: this
+recipe was published here on 2026-08-21 without it, and writing the result back
+grew a value ending in a newline by one more each time, at rc=0. `-get`
+terminates its output with a newline like every other command; `printf x`
+protects the value's trailing newline and `-get`'s along with it.
 
 **The report's own values are for reading, and this is a third reason:** `-get`
 is the only shape that hands you the stored bytes, and even it is at the mercy
@@ -1166,8 +1174,12 @@ by T131; the disk-full reproduction is in `todo/known-defects.md` (DV).
 **Every refusal exits `1`, and there is nothing else to tell them apart by.**
 Measured across 28 distinct refusals: exit status `1` every time, exactly two
 stderr lines every time, nothing on stdout, no error code, no category token,
-no stable grammar. `-debug` adds nothing on a refused run — the `metrics:` line
-belongs to a run that did work, so a refusal prints none. A script that must
+no stable grammar. **The two-line count is the count WITHOUT `-debug`.** A
+refusal detected after the arguments are parsed comes after whatever `-debug`
+has already printed, so `csv2 -update 99:1 X -i f.csv -so -debug` puts three
+lines on stderr and more with a longer run. The `metrics:` line is the only one
+a refusal never prints, because it belongs to a run that did work. If a script
+counts those two lines, do not hand it `-debug`. A script that must
 react differently to different refusals has to match on English prose, and
 there is no supported way around that today. This is stated rather than
 implied because a reader who assumes otherwise writes the matching anyway and
