@@ -9673,10 +9673,18 @@ echo
 echo "--- T183: a key file with one distinct byte / T183：只有一種位元組的金鑰檔 ---"
 
 printf 'a,secret\n1,x\n' > "$TMP/t183.csv"
-python3 - "$TMP/t183_zero.bin" <<'PY' 2>/dev/null || printf '0000000000000000' > "$TMP/t183_zero.bin"
-import sys
-open(sys.argv[1], 'wb').write(b'\x00' * 16)
-PY
+# Sixteen NUL bytes without python3: the guest has none, and `cmd || fallback`
+# does not help -- the shell's not-found handler records the call before the
+# fallback runs, so the suite reported a missing command that was never needed.
+# A key of sixteen identical NULs is what this case is about, and `head -c 16
+# /dev/zero` is the same sixteen bytes with nothing to install.
+# 不用 python3 生出十六個 NUL：guest 上沒有它，而 `cmd || fallback` 幫不上忙——shell 的
+# 「找不到指令」處理常式會在 fallback 執行之前就把那次呼叫記下來，於是測試回報了一個
+# 「其實從來不需要」的缺漏指令。這個案例要的就是十六個相同的 NUL，而 `head -c 16 /dev/zero`
+# 給的正是同樣那十六個位元組，還不必安裝任何東西。
+if ! head -c 16 /dev/zero > "$TMP/t183_zero.bin" 2>/dev/null; then
+    printf '0000000000000000' > "$TMP/t183_zero.bin"
+fi
 assert_fails "T183a a 16-byte all-one-value key is refused for creating / 一把 16 位元組、只有一種值的金鑰不能用來建立保護" -- \
     "$CSV2" -hash secret -keyfile "$TMP/t183_zero.bin" -i "$TMP/t183.csv" -o "$TMP/t183_o.csv" -t
 _t183_msg=$("$CSV2" -hash secret -keyfile "$TMP/t183_zero.bin" -i "$TMP/t183.csv" -o "$TMP/t183_o.csv" -t 2>&1 | head -1)
