@@ -10019,6 +10019,102 @@ else
         "T191b while replacing a 0644 file keeps 0644 / 而覆蓋一個 0644 檔案時保留 0644"
 fi
 
+
+# ---------------------------------------------------------------------
+# T192 -- two appends racing on one file.
+#
+# Round 69. The append fast path did `seek(toFileOffset: size)` then `write`,
+# under a comment claiming POSIX O_APPEND atomicity. Two concurrent appends
+# then computed the same end offset and wrote there, and the shorter write
+# landed on top of the longer one:
+#
+#   * the surviving fragment was sometimes a bare newline, so csv2's own
+#     blank-line rule refused a file csv2 had just written, at rc=0 from both
+#     writers;
+#   * and sometimes a WELL-FORMED record nobody appended -- `A,BBBB` left over
+#     from `AAAA,BBBB` -- which read back at rc=0 with nothing anywhere
+#     reporting it. That one hit on the round's first trial.
+#
+# The README's worst case for concurrent writers is "one edit is lost". This
+# was both edits lost and a file destroyed, or a record invented.
+#
+# The write now goes through a descriptor opened O_APPEND, where the kernel
+# makes finding the end and writing there one operation -- the same fix the
+# `-log` file received, one source file away, for the same reason.
+#
+# T192 —— 兩個追加在同一個檔案上競賽。
+# 第 69 回合。追加快路徑做的是 `seek(toFileOffset: size)` 再 `write`，而它上方的註解宣稱
+# 這是 POSIX 的 O_APPEND 原子性。兩個並行的追加於是算出同一個檔尾偏移量並寫在那裡，較短的
+# 那次蓋在較長的那次上面：留下的碎片有時是一個裸換行，於是 csv2 自己的空白行規則拒絕了一個
+# csv2 剛剛寫出來的檔案；有時是一筆「沒有任何人追加過、格式卻完整」的紀錄，以 rc=0 被讀回來。
+# ---------------------------------------------------------------------
+echo
+echo "--- T192: two appends, one file / T192：兩個追加，一個檔案 ---"
+
+{
+    printf 'x,y\n'
+    _i=1
+    while (( _i <= 400 )); do printf 'r%d,s%d\n' $_i $_i; _i=$((_i+1)); done
+} > "$TMP/t192_base.csv"
+
+# Rows of DIFFERENT lengths: an equal-length pair cannot leave a fragment, so
+# it would be a race that cannot fail.
+# 兩列長度「不同」：等長的一對留不下碎片，那會是一個不可能失敗的競賽。
+_t192_bad=0
+_t192_trials=6
+for _t in $(seq 1 $_t192_trials); do
+    cp "$TMP/t192_base.csv" "$TMP/t192.csv"
+    ( "$CSV2" -append 'AAAA,BBBB' -i "$TMP/t192.csv" --in-place 2>/dev/null & \
+      "$CSV2" -append 'C,' -i "$TMP/t192.csv" --in-place 2>/dev/null & \
+      wait ) 2>/dev/null
+    # The file must still be readable, and must hold exactly the two rows that
+    # were appended -- no fragment, and nothing invented.
+    # 檔案必須仍然讀得回來，而且必須恰好含有那兩列——沒有碎片，也沒有被憑空造出來的東西。
+    if ! "$CSV2" -r -t --no-index -i "$TMP/t192.csv" > "$TMP/t192_out.txt" 2>/dev/null; then
+        bad "T192a trial $_t: csv2 cannot read the file it wrote / 第 $_t 次：csv2 讀不回它自己寫出來的檔案"
+        _t192_bad=1
+        continue
+    fi
+    _t192_n=$("$CSV2" -r -t --json --no-index -i "$TMP/t192.csv" | tail -1 |
+              sed -n 's/.*"records":\([0-9]*\).*/\1/p')
+    if [[ "$_t192_n" != "402" ]]; then
+        bad "T192a trial $_t: $_t192_n records, want 402 / 第 $_t 次：$_t192_n 筆，應為 402 筆"
+        _t192_bad=1
+        continue
+    fi
+    if ! grep -q '^AAAA,BBBB$' "$TMP/t192_out.txt" || ! grep -q '^C,$' "$TMP/t192_out.txt"; then
+        bad "T192a trial $_t: one of the two appended rows is not whole / 第 $_t 次：兩列裡有一列不完整"
+        _t192_bad=1
+    fi
+done
+(( _t192_bad )) || ok "T192a $_t192_trials races: both rows whole, nothing invented, file readable / $_t192_trials 次競賽：兩列都完整、沒有東西被造出來、檔案讀得回來"
+
+# A single append is unaffected, and still maintains the index.
+# 單獨一次追加不受影響，而且仍然維護索引。
+cp "$TMP/t192_base.csv" "$TMP/t192s.csv"
+CSV2_INDEX_MIN_BYTES=100 "$CSV2" --build-index -i "$TMP/t192s.csv" > /dev/null
+assert_succeeds "T192b a lone append still works / 單獨一次追加仍然可用" -- \
+    env CSV2_INDEX_MIN_BYTES=100 "$CSV2" -append 'Z,Z' -i "$TMP/t192s.csv" --in-place
+assert_succeeds "T192c and its index still describes the file / 而它的索引仍然與檔案相符" -- \
+    env CSV2_INDEX_MIN_BYTES=100 "$CSV2" --verify-index -i "$TMP/t192s.csv"
+
+# When a race IS detected, the index is left alone rather than updated with
+# offsets that are no longer where the records are -- and the next read
+# discards it as stale, which is the safe direction.
+# 偵測到競賽時，索引會被原封不動地留著，而不是被更新成「已經不是紀錄所在」的偏移量——
+# 而下一次讀取會把它當成過期的丟棄，那是安全的方向。
+cp "$TMP/t192_base.csv" "$TMP/t192r.csv"
+CSV2_INDEX_MIN_BYTES=100 "$CSV2" --build-index -i "$TMP/t192r.csv" > /dev/null
+( CSV2_INDEX_MIN_BYTES=100 "$CSV2" -append 'AAAA,BBBB' -i "$TMP/t192r.csv" --in-place 2>/dev/null & \
+  CSV2_INDEX_MIN_BYTES=100 "$CSV2" -append 'C,' -i "$TMP/t192r.csv" --in-place 2>/dev/null & \
+  wait ) 2>/dev/null
+_t192_v=$(CSV2_INDEX_MIN_BYTES=100 "$CSV2" --verify-index -i "$TMP/t192r.csv" 2>&1)
+if [[ $_t192_v == *"index OK"* && $_t192_v != *"402 records"* ]]; then
+    bad "T192d an index survived a race while describing the wrong file / 一份索引在競賽後活了下來，而它描述的是另一個檔案"
+else
+    ok "T192d after a race the index is stale or correct, never wrong / 競賽之後，索引要嘛過期、要嘛正確，絕不會是「錯的」"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

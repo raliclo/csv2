@@ -41,7 +41,7 @@ described somewhere below; this is the list a reader should see first:
 | case-insensitive matching | `--json` and one pass of your own — see the note under `-contains` |
 | counting without reading (`-count`) | `records` on the trailing `--json` meta line |
 | converting between `.csv` and `.csv2` | refused on purpose; write the records out and read them back in |
-| safe concurrent writers | serialise them yourself; two writers silently lose one edit |
+| safe concurrent writers | serialise them yourself; two writers silently lose one edit. Two concurrent `-append --in-place` runs are the exception: both records land whole, and each run warns that it could not update the index |
 | telling refusals apart programmatically | nothing but exit 1 and English prose, in every one of them |
 
 `install.zsh` puts the binary where each platform's shell actually looks:
@@ -265,7 +265,13 @@ INPUT / OUTPUT
                         needs -si, and -si needs --headers. The disagreeing
                         case is already a refusal; there was nothing else the
                         sentence was guarding
-  --in-place            edit -i in place, via temp file + rename. An EDIT:
+  --in-place            edit -i in place, via temp file + rename -- EXCEPT for
+                        -append, which writes O(1) bytes onto the end of the
+                        file itself and keeps the inode. So an append is not
+                        atomic for a reader, and a crash mid-append can leave a
+                        partial record where every other edit would have left
+                        the original untouched. `-r -t --truncate-partial`
+                        writes a clean copy of such a file. An EDIT:
                         a run with no edit verb is refused, so a SELECTION
                         cannot be written back over its own input. Until
                         2026-08-21 `-head 1 -t -i f.csv --in-place` succeeded
@@ -479,19 +485,24 @@ DIAGNOSTICS / 診斷
                         every path. That line is
                         `read_bytes=N file_bytes=N peak_rss_bytes=N`:
                         read_bytes is what was actually pulled off the disk
-                        and file_bytes is the input's size, so the PAIR is what
-                        tells a partial read from a full one. A SCAN reads in
-                        64 KiB buffers, so stopping early on a large file
-                        reports a multiple of 65536 (`-mid 2,3` on 17.7 MB
-                        gives 65536 / 17732348) and reading to the end reports
-                        the file (17732348 / 17732348). A SEEK reports neither:
-                        it starts partway in, so `-tail 1` on a 29,790-byte
-                        indexed file gives 3328, and `-mid 1,1` on a 62-byte
-                        one gives 49 -- less than the file, and no multiple of
-                        anything. read_bytes < file_bytes is the index having
-                        done its job. This entry claimed whole buffers always,
-                        which is false on exactly the path the number exists to
-                        show
+                        and file_bytes is the input's size, so the PAIR says
+                        how much of the file this run had to touch. Reads are
+                        64 KiB at a time and the LAST one is short, so the
+                        number is a multiple of 65536 whenever the run stopped
+                        with more than a buffer left, and something else
+                        whenever it ran to the end of the file or the seek
+                        started within one buffer of it: `-r` on 17.7 MB reads
+                        17732348, `-mid 2,3` reads 65536, `-tail 1` on a
+                        29,790-byte indexed file reads 3328, and `-mid 1,1` on
+                        a 62-byte one reads 49.
+                        **read_bytes < file_bytes is the only thing to read
+                        into it** -- that the run did not have to touch the
+                        whole file. It does not tell a seek from an early stop:
+                        `-mid 200000,200000` on an indexed 17.7 MB file reports
+                        65536, and so does the same window with --no-index.
+                        This entry said whole buffers ALWAYS until 2026-08-21
+                        and NEVER on a seek until 2026-08-22; both were
+                        generalisations from the examples at hand
                         Measure with it rather than guessing:
                         23 MB of peak RSS on a 615 MB file in parallel, 9.5 MB
                         single-threaded over the same file. Until 2026-08-20
@@ -578,10 +589,23 @@ rc=0, and nothing says so. **What composes is the ADDRESS.** To carry a value
 across, read it with `-get`, which returns the stored bytes:
 
 ```sh
-addr=$(csv2 -contains "old" -i f.csv2 | head -1 | cut -f1)   # 12:6
+set -o pipefail                                              # or the refusal vanishes
+addr=$(csv2 -contains -- "old" -i f.csv2 | head -1 | cut -f1)   # 12:6
 val=$(csv2 -get "$addr" -i f.csv2)                           # the value itself
-csv2 -update "$addr" "$val" -i f.csv2 --in-place             # round-trips
+csv2 -update "$addr" -- "$val" -i f.csv2 --in-place          # round-trips
 ```
+
+**Two things in that first line are load-bearing.** The `| head -1` makes the
+pipeline's exit status `head`'s, so a csv2 that REFUSED exits 0 as far as the
+script is concerned and `addr` is empty — indistinguishable from "not found",
+which most maintenance scripts treat as "nothing to do" and skip. `pipefail`
+(or capturing the output before slicing it) is what keeps the refusal. And the
+search string sits in a DATA position like any other: `-contains --in-place`
+is refused as a flag in a data slot, so a script whose data can equal a flag
+name needs the `--` on the search too, not just on the value. Both were missing
+from this recipe until 2026-08-22, and a round following it verbatim reported
+"no cell contains --in-place" about a file whose record 3 contains exactly
+that.
 
 Asserted by T96 — **for the tool. The shell in the middle is the part that
 loses data**: `$( )` strips every trailing newline, so a value ending in one
@@ -1430,7 +1454,20 @@ misreport a `head`.
 **A search that matches nothing exits `0`.** `-contains` reports what it found;
 finding nothing is not an error. So `if csv2 -contains X -i f.csv` is not a
 test for presence — it succeeds either way. To ask the question, read `matched`
-from the trailing `--json` meta line.
+from the trailing `--json` meta line:
+
+```sh
+set -o pipefail
+n=$(csv2 -contains -- "$needle" --json -i f.csv | tail -1 |
+    sed -n 's/.*"matched":\([0-9]*\).*/\1/p')
+[ "${n:-0}" -gt 0 ] || { echo "not found" >&2; exit 1; }
+```
+
+`tail -1` because the meta line is last; `pipefail` because without it a
+refusal exits 0 through the pipeline and `n` is empty, which reads as "not
+found". A header hit does not count here — see `--include-headers`. This
+recipe was prescribed in two places and shown in none until 2026-08-22, in a
+document that spells out a whole Python block for case-folding.
 
 A run that fails writes nothing to `-o`, because output goes to a temp file
 that is renamed only after everything else worked.
@@ -1443,12 +1480,44 @@ in it will tell you this happened — the `-log` entries are each true of their
 own process and the trail as a whole is then wrong about the file. **If two
 writers can reach the same file, serialise them yourself.**
 
-**A reader never sees a half-written file — when the writer is csv2.** Output
-goes to a temp file and is renamed into place, and rename is atomic, so a
-concurrent reader gets either the whole old file or the whole new one and never
-a mixture, even while a writer is part-way through. That is a promise you can
-build on, not an implementation detail: it is why the temp-file-and-rename is
-there.
+**Two processes APPENDING to one file is the one case that is not "one edit
+lost".** `-append --in-place` does not rewrite the file, so there is no temp
+file and no rename: it writes its bytes onto the end. That write goes through
+a descriptor opened `O_APPEND`, where the kernel makes finding the end and
+writing there one operation — so two concurrent appends both land, whole, and
+neither can overwrite the other. Each one notices afterwards (the file grew by
+more than it wrote) and says so with a `WARN`, because the index beside the
+file cannot be updated by either of them: the offsets each computed are no
+longer where the records are. The sidecar is left alone and the next read
+discards it as stale.
+
+Until 2026-08-22 that write was a seek to the computed end followed by a plain
+write, which is not the same thing at all. Two appends racing then wrote at the
+same offset and the shorter landed on top of the longer, leaving a fragment of
+the overwritten row behind: sometimes a bare newline, so csv2's own blank-line
+rule refused a file csv2 had just written; sometimes a WELL-FORMED record that
+nobody appended, which read back at rc=0 with nothing anywhere reporting it.
+The `-log` file had been moved off that construction for exactly this reason,
+one source file away.
+
+**A reader never sees a half-written file — when the writer is csv2 and the
+edit is not an append.** Output goes to a temp file and is renamed into place,
+and rename is atomic, so a concurrent reader gets either the whole old file or
+the whole new one and never a mixture, even while a writer is part-way through.
+That is a promise you can build on, not an implementation detail: it is why the
+temp-file-and-rename is there. An append writes onto the end of the file
+itself, so a reader can see a record arriving; the bytes are never interleaved
+with another writer's, but they are not atomic for a READER the way a rename
+is.
+
+**An edit rewrites every record separator, including the ones it did not
+touch.** Output uses `\n` on every platform, so editing one cell of a CRLF
+file returns an LF file — the fields are byte-identical and the file is not.
+Every verification idiom that works on the whole file (a checksum, a `diff`,
+"the records I did not name are unchanged") is wrong on a CRLF input; compare
+VALUES instead, with `--json` or `-get`. `-append --in-place` is the exception
+that proves it: it writes onto the end and matches whatever line ending is
+already there, because it is not rewriting the rest.
 
 **What it costs is disk: peak usage is twice the file.** The temp file grows
 to the size of the finished output while the original is still there, so
@@ -1461,7 +1530,10 @@ the promise working, not failing.
 **The promise belongs to the writer, not to csv2's reader**, and this document
 sends you to other writers — `iconv`, `tr`, a shell redirect. Measured against
 an ordinary `cat > file` racing a read, 30 trials produced 12 silent
-truncations and 18 loud errors, and no whole file at all. csv2 cannot detect
+truncations and 18 loud errors, and no whole file at all. **The split between
+the two is not a property of csv2**: it is where the reader's EOF happens to
+land relative to a record boundary, so a later round measured 5 and 25 on its
+own fixture. "No whole file at all" is the part that reproduces. csv2 cannot detect
 the silent case: a file cut at a record boundary is a shorter file, not a
 malformed one, and **nothing csv2 prints can tell you a read was complete** —
 `records` reports what it reached, which is the number that would be wrong.
@@ -1529,13 +1601,17 @@ another user.
 
 **In a diagnostic, an INPUT path appears as you typed it and an OUTPUT path
 appears resolved.** `cannot open input file: ./nope.csv` keeps the `./`; an
-`-o` refusal prints the absolute path, and under `--in-place` the resolved one
-— `/private/tmp/x` comes back as `/tmp/x` on macOS — because `--in-place`
-resolves the destination and not the source. A refusal that quotes your `-i`
-argument therefore shows what you typed even when the run is `--in-place`. It
-matters because matching the English prose is the only way to tell refusals
-apart. The paragraph here said the opposite of both halves until 2026-08-21;
-it was written to fill a gap a round had found and was not measured.
+`-o` refusal prints the absolute path once the destination has been resolved,
+and under `--in-place` the resolved one — `/private/tmp/x` comes back as
+`/tmp/x` on macOS — because `--in-place` resolves the destination and not the
+source. A refusal that quotes your `-i` argument therefore shows what you typed
+even when the run is `--in-place`. **The exception is a destination that cannot
+be resolved because it is not there**: `-o nodir/out.csv` prints
+`the directory nodir does not exist`, as typed, since there is nothing to
+resolve against. It matters because matching the English prose is the only way
+to tell refusals apart. The paragraph here said the opposite of both halves
+until 2026-08-21 and had no exception until 2026-08-22; each version was
+written from the examples in front of it.
 
 Three things it does not preserve, all deliberate: a **hard link** is broken,
 because rename cannot do otherwise; **extended attributes** are lost, because
@@ -1578,11 +1654,12 @@ without it nothing else is printed. On the normal path csv2 prints nothing at al
 to work inside a pipeline.
 
 **One thing does print without `-debug`, and it is deliberate**: a `WARN`
-line. **It is a list, not a policy** — these five and no others: a `-mid`
+line. **It is a list, not a policy** — these six and no others: a `-mid`
 window that begins past the end of the file, a value over 1 MiB going into the
 log in full, `--truncate-partial` naming the bytes it discarded, an index
-sidecar that could not be written, and **a `-log` file that could not be
-written**. The last was missing from this list until 2026-08-21, and it is the
+sidecar that could not be written, **a `-log` file that could not be
+written**, and **another process appending to the same file during an
+`-append --in-place`**. The last was missing from this list until 2026-08-21, and it is the
 one it could least afford to miss: the caller asked for an audit trail, the run
 exits 0, no log file exists, and one line of English on stderr is the whole
 notice. It used to be introduced as a principle
@@ -1948,7 +2025,9 @@ and why:
 
 Every diagnostic line really begins `csv2: <ISO-8601 timestamp> LEVEL `, and
 the examples in this document **elide that prefix** so the message itself fits
-on one line. One shown in full, once, so a script can be written against the
+on one line. A REFUSAL is not one of them: the two-line error that ends a run
+prints `csv2: <message>` with no timestamp and no level, on both lines, and the
+examples of those are shown as they really are. One shown in full, once, so a script can be written against the
 real shape:
 
 ```console

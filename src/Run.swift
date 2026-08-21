@@ -1664,16 +1664,62 @@ func runAppendFast(_ o: Options) throws {
         }
     }
 
-    h.seek(toFileOffset: size)
-    // ONE write() per call. POSIX makes the offset update and the write atomic
-    // for O_APPEND, so two concurrent appends do not interleave -- the only
-    // multi-writer-safe operation this tool has. The guarantee has edges (NFS,
-    // very large writes), so it is best effort and detection still exists.
-    // 每次呼叫只做一次 write()。POSIX 保證 O_APPEND 的偏移量更新與寫入是原子的，
-    // 因此兩個並行的追加不會交錯——這是本工具唯一多寫入者安全的操作。該保證有
-    // 邊界（NFS、過大的寫入），所以它是盡力而為，偵測仍然必須存在。
-    h.write(Data(payload))
+    // ONE write() through a descriptor opened O_APPEND. POSIX makes the offset
+    // update and the write atomic there, so two concurrent appends cannot land
+    // on the same offset.
+    //
+    // The comment above this line used to say exactly that while the code did
+    // `seek(toFileOffset: size)` then `write` -- seek-to-computed-end, which is
+    // the construction the log file was moved OFF for this very reason, one
+    // file over. Two appends racing on one file then both wrote at the same
+    // offset, and the shorter write landed on top of the longer one:
+    //
+    //   * the tail of the overwritten row survived as a record NOBODY WROTE --
+    //     `A,BBBB` from a row that was `AAAA,BBBB` -- and the file read back
+    //     clean at rc=0 with a fabricated record in it;
+    //   * or the leftover byte was a bare newline, and csv2's own blank-line
+    //     rule then refused the file it had just written, at rc=0 from both
+    //     writers, both logging success.
+    //
+    // The README's worst case for concurrent writers is "one edit is lost".
+    // This was both edits lost, a record invented, or a file destroyed.
+    //
+    // 一次 write()，走的是以 O_APPEND 開啟的描述子。POSIX 保證那裡的偏移量更新與寫入是
+    // 原子的，因此兩個並行的追加不可能落在同一個偏移量上。
+    //
+    // 這一行上面的註解原本就是這樣寫的，而程式做的是 `seek(toFileOffset: size)` 再 `write`
+    // ——「先算出檔尾再寫到那裡」，正是 log 檔為了同一個理由而搬離的那個構造，就在隔壁一個
+    // 檔案裡。兩個追加在同一個檔案上競賽時，兩者於是寫在同一個偏移量上，較短的那次寫入
+    // 蓋在較長的那次上面：被蓋掉那一列的尾巴，會以「沒有任何人寫過的一筆紀錄」活下來，
+    // 而檔案以 rc=0 乾乾淨淨地讀得回來；或者剩下的是一個裸換行，而 csv2 自己的空白行規則
+    // 於是拒絕了它剛剛寫出來的那個檔案——兩個寫入者都以 rc=0 結束，都記下了成功。
+    //
+    // README 對並行寫入者的最壞情況是「有一次編輯會遺失」。這裡是兩次編輯都遺失、一筆紀錄
+    // 被憑空造出來，或者一個檔案被毀掉。
+    guard let ah = Platform.openForAppend(path: path) else {
+        throw fault("cannot open \(path) for appending", "無法開啟 \(path) 以追加")
+    }
+    let werr = Platform.writeAll(fd: ah.fileDescriptor, payload)
+    try? ah.close()
+    if werr != 0 {
+        throw fault("cannot write to \(path): \(Platform.errorText(werr))",
+                    "無法寫入 \(path)：\(Platform.errorText(werr))")
+    }
     Logger.shared.info("append fast path: wrote \(payload.count) bytes to \(path) (file was \(size) bytes)")
+
+    // Did somebody else append while we were? O_APPEND keeps both writes whole,
+    // so the DATA is fine either way -- but the offsets computed above are then
+    // wrong for the index, and an index that is wrong about where records start
+    // is worse than no index at all. The size is the evidence, and it is one
+    // stat.
+    // 在我們追加的同時，有別人也追加了嗎？O_APPEND 讓兩次寫入各自完整，因此「資料」無論如何
+    // 都是好的——但上面算出來的那些偏移量對索引就不對了，而一份「說錯紀錄從哪裡開始」的索引，
+    // 比沒有索引更糟。檔案大小就是證據，而那只要一次 stat。
+    var raced = false
+    if let now = Platform.fileIdentity(path: path), now.size != size + UInt64(payload.count) {
+        raced = true
+        Logger.shared.warn("another process appended to \(path) during this append; both records are whole, but the index beside it was left alone because the offsets this run computed are no longer where its records start")
+    }
 
     // Data first, then the index. Interrupted between them the index is stale,
     // which validation catches and turns into a scan -- a safe downgrade.
@@ -1737,7 +1783,10 @@ func runAppendFast(_ o: Options) throws {
         return out
     }
 
-    if let b = builder {
+    if raced {
+        // Nothing here can be trusted to describe the file that now exists.
+        // 這裡沒有任何東西可以被信任來描述「現在存在的那個檔案」。
+    } else if let b = builder {
         for r in appendedRecords(startingAt: b.recordCount + 1) {
             b.add(record: r.n, at: r.off, line: UInt64(r.line), spansLines: r.lines > 1)
         }
