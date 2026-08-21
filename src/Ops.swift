@@ -178,7 +178,8 @@ final class CSVEmitter: RecordEmitter {
 /// how to read the report.
 /// 以 `.csv2` 既有的反斜線慣例跳脫，另加 `\t`——因為 TAB 是這個格式自己的分隔符。
 /// 沿用既有慣例而非發明新的，讓看得懂檔案格式的人不必再學一套就能讀報告。
-/// Escapes ONLY what would end a line: a newline or a carriage return.
+/// Escapes what would end a line -- a newline or a carriage return -- and
+/// every other C0 control character and DEL, as `\xNN`.
 ///
 /// This is the whole-message escape, and it is deliberately narrower than
 /// `reportEscape`. One choke point protects line integrity -- an entry can
@@ -195,9 +196,23 @@ final class CSVEmitter: RecordEmitter {
 /// A reader who followed the message wrote a literal backslash-n into a
 /// `.csv2` cell and got rc=0 with the wrong value. Backslashes in prose are
 /// the author's; backslashes in a value are data. So the value sites escape
-/// fully -- `redact` and the logged invocation -- and this handles only the
-/// two characters that can break the format.
+/// fully -- `redact`, the logged invocation, and a message quoting input back
+/// -- and the BACKSLASH is still not touched here.
 ///
+/// The CONTROL CHARACTERS are, and that half of "escape everything" was thrown
+/// out with the half that was wrong. csv2's own prose contains no ESC, no BEL,
+/// no TAB: every control character in a message arrived from data. Leaving
+/// them raw put live terminal control on stderr from an input the caller may
+/// not have chosen -- `no column named "<ESC>[2K…"` erases the line it is
+/// printed on, which is the hazard this file already argues for escaping the
+/// locating report, one screen away. The line count held throughout; the rule
+/// did not.
+///
+/// 那個「全部都跳脫」的決定,被丟掉的不只是錯的那一半。csv2 自己的散文裡沒有 ESC、沒有 BEL、
+/// 沒有 TAB:訊息裡的每一個控制字元都來自資料。放它們原樣通過,等於把「活的」終端機控制序列
+/// 送上 stderr,而那個輸入未必是呼叫端挑的——`no column named "<ESC>[2K…"` 會擦掉它正被印出的
+/// 那一行,而這正是本檔案在一個螢幕之外、為「定位報告要跳脫」所給的同一個理由。行數的承諾
+/// 一直守著,規則沒有。
 /// 只跳脫「會結束一行」的東西：換行與歸位字元。
 ///
 /// 這是「整則訊息」的跳脫，而它刻意比 `reportEscape` 窄。單一的關卡守住「一筆一行」——
@@ -236,7 +251,13 @@ func lineEscape(_ s: String) -> String {
         switch u {
         case "\n": out += "\\n"
         case "\r": out += "\\r"
-        default: out.unicodeScalars.append(u)
+        case "\t": out += "\\t"
+        default:
+            if u.value < 0x20 || u.value == 0x7F {
+                out += String(format: "\\x%02X", u.value)
+            } else {
+                out.unicodeScalars.append(u)
+            }
         }
     }
     return out

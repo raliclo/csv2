@@ -255,7 +255,14 @@ INPUT / OUTPUT
                         disagreeing is refused -- the suffix declares the
                         format. See the warning above; never combine it with
                         an edit verb
-  --in-place            edit -i in place, via temp file + rename
+  --in-place            edit -i in place, via temp file + rename. An EDIT:
+                        a run with no edit verb is refused, so a SELECTION
+                        cannot be written back over its own input. Until
+                        2026-08-21 `-head 1 -t -i f.csv --in-place` succeeded
+                        and left one record of twenty-two, at rc=0, with
+                        nothing on either stream and only the invocation in
+                        the log. To crop a file, write the selection to a new
+                        file with -o
 
 OUTPUT SHAPE / 輸出形狀
   -md [--pretty]        Markdown table; needs -t. On a .csv2 the two header
@@ -1336,7 +1343,7 @@ yourself rather than writing over it.
 edit leaves the original **byte-for-byte unchanged**, and leaves no temp file
 beside it — including when the run is killed by `SIGINT`, `SIGTERM` or `SIGHUP`
 part-way through, and the same for every other catchable signal that ends a run
-— `SIGQUIT`, `SIGXFSZ`, `SIGALRM`, `SIGUSR1` and the rest. That list started at
+— `SIGQUIT`, `SIGXFSZ`, `SIGALRM`, `SIGUSR1`, `SIGUSR2` and the rest. **"The rest" is literal**: the handler is installed for every catchable terminating signal, not for a list someone maintains, so a signal not named here behaves like the ones that are. That list started at
 three, and a blind round found a hidden multi-megabyte file left by each of the
 others; `SIGXFSZ` is what an `ulimit -f` or a filesystem quota produces, which
 is not exotic (T131e, T131f). `SIGKILL` and a power cut cannot be caught and
@@ -1384,6 +1391,14 @@ it is being written either. It was 0644 for the duration until 2026-08-21, and
 on a large file that is a window measured in seconds. Asserted by T129, T130
 and T161.
 
+**A diagnostic names the path csv2 will actually write**, which under
+`--in-place` is the resolved one: `/private/tmp/x` comes back as `/tmp/x` on
+macOS, and a relative path comes back absolute. `-o` echoes what you typed,
+because `-o` names a destination rather than resolving an existing file. It
+matters because matching the English prose is the only way to tell refusals
+apart, so a script looking for its own path in the message will not find it
+under `--in-place`.
+
 Three things it does not preserve, all deliberate: a **hard link** is broken,
 because rename cannot do otherwise; **extended attributes** are lost, because
 the temp file is a new file and nothing copies them across; and a **read-only
@@ -1403,19 +1418,36 @@ replaces the operation, and asking for both is refused rather than silently
 dropping the verb (T160).
 
 Errors go to stderr as exactly **two** lines, English then Chinese — escaped
-by the same rule as the log, which is what makes the count reliable: a message
+by the same whole-line rule as the log, which is what makes the count
+reliable, **and that rule covers every control character**: a newline, tab or
+CR as `\n`, `\t`, `\r`, everything else below 0x20 and DEL as `\xNN`. Until
+2026-08-21 it covered the newline and the CR alone, so `no column named
+"<ESC>[2K…"` put a live erase-line sequence on the line carrying the
+diagnosis — the hazard this document gives as the reason for escaping the
+locating report, one screen away. The count held throughout; the rule did not.
+
+**A backslash is NOT escaped by that rule, on purpose**, because a message
+that teaches `\n` has to read as `\n` — `undefined escape sequence \q` is a
+sentence, not a value. Values interpolated INTO a message are escaped where
+they are interpolated, backslash and all, so `no column named "…"` tells a
+column literally named `na\nme` from one containing a newline. A message
+quoting a PATH is left alone: a Windows path is full of backslashes and
+doubling them would misname the file. A message
 quoting an input value that contained a newline used to print four, and a script
 reading the pair took the injected line for part of the error. Asserted by T102.
 With `-log FILE` the same failure is also appended there with a timestamp;
 without it nothing else is printed. On the normal path csv2 prints nothing at all — it has
 to work inside a pipeline.
 
-**One thing does print without `-debug`, and it is deliberate**: a `WARN` line,
-when a run succeeded while doing something the caller almost certainly did not
-intend — a `-mid` window that begins past the end of the file, a value over
-1 MiB going into the log in full, `--truncate-partial` naming the bytes it
-discarded, an index sidecar that could not be written. WARN is the default
-threshold. Unlike an
+**One thing does print without `-debug`, and it is deliberate**: a `WARN`
+line. **It is a list, not a policy** — these four and no others: a `-mid`
+window that begins past the end of the file, a value over 1 MiB going into the
+log in full, `--truncate-partial` naming the bytes it discarded, an index
+sidecar that could not be written. It used to be introduced as a principle
+("a run that succeeded while doing something the caller almost certainly did
+not intend") followed by the list, and a reader cannot tell from that which of
+the two they are being promised — the principle covered a case the list did
+not, and that case destroyed data. WARN is the default threshold. Unlike an
 error it is **one line and English only**, which is what every diagnostic in
 this tool is; the two-line bilingual shape belongs to the message that ends a
 run. Exit status stays 0, because the run did what it was told.
@@ -1482,6 +1514,7 @@ than matching the message against this table:
 | `-o /dev/stdout` | output is written to a temp file beside the target and renamed, which needs a regular file. Use `-so` |
 | `-update`/`-delete -cell` on a column the file marks `:enc:`, `:hmac:` or `:hash` | a raw value written there cannot be read back, and for an encrypted column `-decrypt` stops at that cell — so records the edit never touched are lost with it |
 | `-insert`/`-append` into a file that has such a column | every field of the literal row is raw, including that one, and no value you could supply would be right: the transform needs the key, and the header carries only its fingerprint |
+| a SELECTION with `--in-place` | `-head`, `-tail`, `-mid`, `-contains` and a bare `-r` all select; `--in-place` is where an EDIT goes. Writing a selection back over its own input discards every record it did not name, and until 2026-08-21 it did exactly that at rc=0 with nothing said and nothing logged. Crop with `-o NEW.csv` |
 | `-insert N ROW` whose field count differs from the header | the same check `-append` gets, and it names the count both ways: `-insert 2 has 2 fields but the header has 4`. It was missing from this table until 2026-08-21, and a table that presents itself as complete is read as one |
 | `-append` onto a file whose last record is incomplete | a short final record, or one left open by an unclosed quote. Checked for `-o` and for `--in-place` alike — the fast path used to skip it and produce a file csv2 then refused to read |
 | `-append` with `--truncate-partial` | appending adds bytes and cannot remove the incomplete record, so the file would keep it *and* gain a complete record after it. Write a clean copy first: `csv2 -r -t --truncate-partial -i f.csv -o clean.csv` |

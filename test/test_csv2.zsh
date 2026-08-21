@@ -9266,6 +9266,132 @@ assert_eq "$(CSV2_INDEX_MIN_BYTES=100 "$CSV2" -mid 1,1 --json -i "$TMP/t174out.c
           "$("$CSV2" -mid 1,1 --json --no-index -i "$TMP/t174out.csv2" | sed -n 2p)" \
     "T174b and the seek reports the same line as the scan / 而 seek 與掃描回報同一個行號"
 
+
+# ---------------------------------------------------------------------
+# T175 -- --in-place is the EDIT destination, and a selection is not an edit.
+#
+# Round 64. `csv2 -head 1 -t -i f.csv --in-place` exited 0 and left one record
+# of twenty-two: the selection was written back over the input. Nothing on
+# stdout, nothing on stderr, and the log held only the invocation, because the
+# `wrote N records` line belongs to the edit path -- so the most destructive
+# operation in the tool was also the least audited one, and the README points
+# an auditor at exactly that line.
+#
+# What stood in the way was `-t`, a flag about HEADERS: without it the write is
+# refused because a headerless file would lie about its format. A safety
+# property resting on a formatting flag is one nobody chose.
+#
+# T175 —— --in-place 是「編輯」的目的地，而選取不是編輯。
+# 第 64 回合。`csv2 -head 1 -t -i f.csv --in-place` 以 0 結束，22 筆只剩 1 筆：那個選取被寫回
+# 了輸入。兩條輸出流上都沒有東西，log 裡只有「呼叫」那一行——因為 `wrote N records` 屬於編輯
+# 路徑，於是這個工具最具破壞性的操作，同時是它最少被稽核的。擋在中間的是 `-t`，一個關於
+# 標頭的旗標。
+# ---------------------------------------------------------------------
+echo
+echo "--- T175: a selection cannot be written back over its input / T175：選取不能被寫回它的輸入 ---"
+
+printf 'a,b\n1,x\n2,y\n3,z\n' > "$TMP/t175.csv"
+_t175_before=$(wc -c < "$TMP/t175.csv" | tr -d ' ')
+
+for _verb in "-head 1" "-tail 2" "-mid 2,3" "-contains x --filter"; do
+    assert_fails "T175a $_verb -t --in-place is refused / $_verb -t --in-place 被拒絕" -- \
+        "$CSV2" ${=_verb} -t -i "$TMP/t175.csv" --in-place
+done
+assert_eq "$(wc -c < "$TMP/t175.csv" | tr -d ' ')" "$_t175_before" \
+    "T175b and the file is the size it was / 而檔案還是原來那麼大"
+
+# A bare -r gets a DIFFERENT message, because it is a different true sentence:
+# -r names every record, so "would discard every record the selection does not
+# name" would be a refusal describing a danger this command does not have.
+# 單獨的 -r 得到「另一則」訊息，因為那是另一句為真的話：-r 指名了每一筆，因此「會丟掉選取
+# 沒有指名的紀錄」會是一條「描述了這個指令並不存在的危險」的拒絕。
+_t175_r=$("$CSV2" -r -t -i "$TMP/t175.csv" --in-place 2>&1)
+assert_contains "$_t175_r" "has none" \
+    "T175c -r --in-place says there is no edit to apply / -r --in-place 說的是「這次執行沒有編輯」"
+_t175_h=$("$CSV2" -head 1 -t -i "$TMP/t175.csv" --in-place 2>&1)
+assert_contains "$_t175_h" "discard" \
+    "T175d while a selection is told what it would discard / 而選取被告知它會丟掉什麼"
+
+# The edits themselves must be untouched by the new refusal.
+# 那些「真正的編輯」不能被這條新的拒絕波及。
+assert_succeeds "T175e -update --in-place still works / -update --in-place 仍然可用" -- \
+    "$CSV2" -update 1:2 Q -i "$TMP/t175.csv" --in-place
+assert_succeeds "T175f -delete --in-place still works / -delete --in-place 仍然可用" -- \
+    "$CSV2" -delete 1 -i "$TMP/t175.csv" --in-place
+assert_succeeds "T175g -append --in-place still works / -append --in-place 仍然可用" -- \
+    "$CSV2" -append '9,q' -i "$TMP/t175.csv" --in-place
+printf 'a,b\n1,x\n' > "$TMP/t175h.csv"
+assert_succeeds "T175h -hash --in-place still works / -hash --in-place 仍然可用" -- \
+    "$CSV2" -hash b --yes -i "$TMP/t175h.csv" --in-place
+
+# ---------------------------------------------------------------------
+# T176 -- a control character in an error message.
+#
+# Round 64 went looking for a forged THIRD line on stderr and found the line
+# count solid and the escaping rule not. `lineEscape` handled a newline and a
+# carriage return and let everything else through, so
+# `no column named "<ESC>[2K…"` printed a live erase-line sequence on the very
+# line carrying the diagnosis -- the hazard this project argues for escaping
+# the locating report, one screen away in the same file.
+#
+# The backslash is still NOT escaped by the whole-line rule: a message that
+# teaches `\n` has to read as `\n`. What closes the remaining ambiguity is the
+# VALUE escaper at the site that quotes input back.
+#
+# T176 —— 錯誤訊息裡的控制字元。
+# 第 64 回合去找 stderr 上偽造的「第三行」，發現行數的承諾是穩的、跳脫的規則不是。
+# 反斜線仍然不由「整行」那條規則處理：一則在教 `\n` 的訊息必須讀作 `\n`。剩下的那個歧義，
+# 由「插值處的值跳脫」關掉。
+# ---------------------------------------------------------------------
+echo
+echo "--- T176: what an error message may put on your terminal / T176：一則錯誤訊息可以放什麼到你的終端機上 ---"
+
+printf 'a,b\n1,x\n' > "$TMP/t176.csv"
+
+_t176_esc=$("$CSV2" -delete -col "$(printf 'na\033[2Kme')" -i "$TMP/t176.csv" -o "$TMP/t176o.csv" 2>&1)
+assert_contains "$_t176_esc" '\x1B' \
+    "T176a an ESC in a column name is escaped on stderr / 欄名裡的 ESC 在 stderr 上被跳脫"
+_t176_raw=$(print -r -- "$_t176_esc" | od -A n -t x1 | tr -s ' ')
+if [[ $_t176_raw == *" 1b "* ]]; then
+    bad "T176b a raw ESC byte reached stderr / 一個原始的 ESC 位元組到了 stderr"
+else
+    ok "T176b and no raw ESC byte reaches stderr / 而沒有原始的 ESC 位元組到達 stderr"
+fi
+_t176_tab=$("$CSV2" -delete -col "$(printf 'na\tme')" -i "$TMP/t176.csv" -o "$TMP/t176o.csv" 2>&1)
+assert_contains "$_t176_tab" '\t' \
+    "T176c a TAB likewise / TAB 同樣如此"
+
+# The prose that TEACHES escaping must still read as prose. This is the case
+# that made "escape everything" wrong on 2026-08-20 and it is checked here so
+# the two halves cannot be confused again.
+# 那些「教你怎麼跳脫」的散文必須仍然讀作散文。這正是 2026-08-20 讓「全部都跳脫」變成錯誤答案
+# 的那個案例，在此檢查，好讓那兩半不會再被混為一談。
+printf 'k,v\n鍵,值\nrow1,a\\qb\n' > "$TMP/t176.csv2"
+_t176_prose=$("$CSV2" -r -i "$TMP/t176.csv2" 2>&1)
+assert_contains "$_t176_prose" 'sequence \q' \
+    "T176d and a message about \\q still says \\q, not \\\\q / 而一則講 \\q 的訊息仍然說 \\q，不是 \\\\q"
+
+# A literal backslash-n and a real newline must not produce the same line.
+# 字面的反斜線 n 與一個真正的換行，不可以產生同一行。
+_t176_lit=$("$CSV2" -delete -col 'na\nme' -i "$TMP/t176.csv" -o "$TMP/t176o.csv" 2>&1 | head -1)
+_t176_nl=$("$CSV2" -delete -col "$(printf 'na\nme')" -i "$TMP/t176.csv" -o "$TMP/t176o.csv" 2>&1 | head -1)
+if [[ "$_t176_lit" == "$_t176_nl" ]]; then
+    bad "T176e a literal backslash-n and a newline give the same error line / 字面反斜線 n 與換行給出同一行錯誤"
+else
+    ok "T176e a literal backslash-n and a newline are told apart / 字面反斜線 n 與換行分得出來"
+fi
+
+# And the two-line contract survives all of it.
+# 而「恰好兩行」的合約在這一切之下仍然成立。
+for _name in "$(printf 'na\033[2Kme')" "$(printf 'na\tme')" "$(printf 'na\nme')" 'na\nme' "$(printf 'na\rme')"; do
+    _n=$("$CSV2" -delete -col "$_name" -i "$TMP/t176.csv" -o "$TMP/t176o.csv" 2>&1 | wc -l | tr -d ' ')
+    if [[ "$_n" != "2" ]]; then
+        bad "T176f a refusal printed $_n lines / 一條拒絕印了 $_n 行"
+        break
+    fi
+done
+[[ "$_n" == "2" ]] && ok "T176f every one of them is exactly two lines / 它們每一個都恰好是兩行"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

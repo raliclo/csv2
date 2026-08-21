@@ -1071,6 +1071,63 @@ func validate(_ o: inout Options) throws {
         guard let inp = o.input else {
             throw usageError("--in-place needs -i FILE", "--in-place 需要 -i FILE")
         }
+        // A SELECTION is not an edit, and --in-place is the edit destination.
+        //
+        // `csv2 -head 1 -t -i f.csv --in-place` used to succeed: it wrote the
+        // selection back over the input, so a 22-record file became a
+        // 1-record file at rc=0, with nothing on either stream and -- because
+        // the outcome line belongs to the edit path -- nothing in the log
+        // either but the invocation. The README points an auditor at that
+        // line to ask whether a write landed, so the most destructive
+        // operation in the tool was also its least audited one.
+        //
+        // What stood between a caller and that was `-t`, a flag about
+        // HEADERS: without it the write is refused because a headerless file
+        // would lie about its format. A safety property resting on a
+        // formatting flag is a property nobody chose.
+        //
+        // Refused rather than warned, because on this path a mistyped flag
+        // and a deliberate crop produce the same bytes and the same rc. To
+        // crop a file, write the selection to a new file; that is one more
+        // command and it cannot be arrived at by accident.
+        //
+        // 選取不是編輯，而 --in-place 是「編輯」的目的地。
+        //
+        // `csv2 -head 1 -t -i f.csv --in-place` 原本會成功：它把那個選取寫回輸入，於是一個
+        // 22 筆的檔案變成 1 筆，rc=0，兩條輸出流上什麼也沒有，而且——因為那行「結果」屬於
+        // 編輯路徑——log 裡除了「呼叫」之外也什麼都沒有。README 叫稽核者去看那一行來判斷
+        // 「這次寫入到底有沒有落地」，於是這個工具最具破壞性的操作，同時是它最少被稽核的。
+        //
+        // 擋在呼叫端與這件事之間的是 `-t`，一個關於「標頭」的旗標：沒有它，那次寫入會因為
+        // 「無標頭的檔案會對自己的格式說謊」而被拒絕。一個建立在格式旗標上的安全性質，
+        // 是沒有人選擇過的性質。
+        //
+        // 選擇拒絕而不是警告，因為在這條路徑上「打錯一個旗標」與「刻意裁切」產生的位元組
+        // 與 rc 完全相同。要裁切一個檔案，請把選取寫到新檔案：那多一個指令，而它不會被
+        // 誤打誤撞地做出來。
+        if o.edits.isEmpty && o.encryptCols == nil && o.decryptCols == nil && o.hashCols == nil {
+            let verb = o.head != nil ? "-head" : o.tail != nil ? "-tail"
+                     : o.mid != nil ? "-mid" : o.contains != nil ? "-contains" : nil
+            // Two different true sentences. A selection DISCARDS what it did
+            // not name; a bare `-r` names everything, so saying it discards
+            // records would be a message that is wrong about the command it
+            // is refusing -- and a refusal explaining itself with a danger the
+            // program does not have teaches the reader something false about
+            // the tool, which is the note already written beside the -i/-o
+            // refusal above.
+            // 兩句各自為真的話。一個「選取」會丟掉它沒有指名的東西；而單獨的 `-r` 指名了
+            // 全部，因此說它會丟掉紀錄，會是一則「對自己正在拒絕的那個指令說錯話」的訊息
+            // ——而一條用「程式並不存在的危險」來解釋自己的拒絕，會讓讀者學到關於這支工具的
+            // 錯誤知識，那正是上面 -i/-o 那條拒絕旁邊已經寫下的註記。
+            if let v = verb {
+                throw usageError(
+                    "\(v) selects records; --in-place writes an EDIT back to its input, and writing a selection there would discard every record the selection does not name. Write it to a new file instead: csv2 \(v) ... -t -i \(inp) -o NEW.csv",
+                    "\(v) 是「選取」；--in-place 是把一次「編輯」寫回它的輸入，而把一個選取寫到那裡，會丟掉該選取沒有指名的每一筆紀錄。請改寫到新檔案：csv2 \(v) ... -t -i \(inp) -o NEW.csv")
+            }
+            throw usageError(
+                "--in-place applies an EDIT to its input, and this run has none: reading the file and writing it back over itself changes nothing. To repair or rewrite a file -- --truncate-partial, a format change -- write it to a new file: csv2 -r -t ... -i \(inp) -o NEW.csv",
+                "--in-place 是把一次「編輯」套用到它的輸入上，而這次執行沒有編輯：把檔案讀出來再寫回它自己，什麼也不會改變。要修復或重寫一個檔案——--truncate-partial、格式轉換——請寫到新檔案：csv2 -r -t ... -i \(inp) -o NEW.csv")
+        }
         // Resolved through symlinks, because `--in-place` means "edit this
         // file" and a symlink is not the file. Writing to the link's own path
         // made the temp-file-and-rename REPLACE the link with a regular file
@@ -1460,9 +1517,24 @@ func resolveColumn(_ token: String, header: Record) throws -> Int {
     // 每個名字都加引號，因為名字裡可以含有「這份清單用來分隔的那個字元」。第一欄叫做
     // `a,b` 的檔案原本會印出「the columns are: a,b, c」——讀起來像三欄，人與腳本都解析不了。
     // 對一般的名字加引號沒有任何代價，而它是讓那些尷尬的名字可讀的唯一辦法。
-    let names = header.fields.map { "\"\(baseName(headerName($0)))\"" }.joined(separator: ", ")
-    throw fault("no column named \"\(token)\"; the columns are: \(names)",
-              "沒有名為「\(token)」的欄位；本檔案的欄位是：\(names)")
+    // Both the name asked for and the names on offer go through the VALUE
+    // escaper, not just the whole-line one. The difference is the backslash:
+    // the line escape deliberately leaves it alone so that a message teaching
+    // `\n` still reads as `\n`, and the consequence here was that a column
+    // literally named `na\nme` and one containing a newline produced
+    // byte-identical error lines -- while the INFO line recording the same
+    // invocation told them apart. Applying the README's own unescape recipe to
+    // either gave a name with a real newline in it, inventing a character for
+    // the one that never had it, at rc=0 on the reading side.
+    // 「被詢問的那個名字」與「檔案提供的那些名字」都走「值」的跳脫，而不只是整行的那一個。
+    // 差別在反斜線：整行的跳脫刻意放過它，好讓一則在教 `\n` 的訊息仍然讀作 `\n`，而它在
+    // 這裡的後果是——一個字面叫做 `na\nme` 的欄位，與一個名字裡含換行的欄位，產生的錯誤行
+    // 逐位元組相同，而同一次執行的 INFO 行分得出來。把 README 自己那份解碼步驟套到任何一則
+    // 上，得到的都是一個帶著真換行的名字：替那個從來沒有換行的名字發明了一個字元，rc=0。
+    let names = header.fields.map { "\"\(reportEscape(baseName(headerName($0))))\"" }.joined(separator: ", ")
+    let asked = reportEscape(token)
+    throw fault("no column named \"\(asked)\"; the columns are: \(names)",
+              "沒有名為「\(asked)」的欄位；本檔案的欄位是：\(names)")
 }
 
 /// `1@L2` -> `1`, `1 [A2]` -> `1`. Nil when there is nothing that looks like
