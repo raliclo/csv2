@@ -372,10 +372,13 @@ INDEX / 索引
                         packages.csv.index, pkgs.csv2 -> pkgs.csv2.index
   --build-index         build the sidecar now, at any file size. Otherwise one
                         only appears as a SIDE EFFECT, and only at or above
-                        CSV2_INDEX_MIN_BYTES: a write builds one, and -tail
-                        builds one because it must read the whole file anyway
-                        -- so -mid alone never produces one, and nothing
-                        produces one for a small file unless you ask
+                        CSV2_INDEX_MIN_BYTES: a REWRITING edit builds one, and
+                        -tail builds one because it must read the whole file
+                        anyway -- so -mid alone never produces one, nothing
+                        produces one for a small file unless you ask, and
+                        `-append --in-place` produces none either, because its
+                        fast path never reads the file to the end. An existing
+                        index IS extended by that append
   --verify-index        O(n) full check of all three of the index's claims --
                         the grid offsets, the record count, and whether any
                         record spans lines. The O(1) check on the normal path
@@ -1260,9 +1263,14 @@ widening who can read a file, which is the half that hands data to someone
 else; refusing to write a read-only file would be csv2 having an opinion about
 your directory permissions, which is not its business.
 
-`--build-index` and `--verify-index` each print one line to **stdout** — they
-are explicit administrative actions, not the normal path, but if you pipe them
-anywhere that line is in your stream.
+`--build-index` and `--verify-index` print to **stdout** — they are explicit
+administrative actions, not the normal path, but if you pipe them anywhere
+those lines are in your stream. `--build-index` prints one line.
+`--verify-index` prints one on success and **one per claim that failed** on a
+mismatch, which is one line per wrong grid point: a large index that has
+shifted can print thousands. Neither can be combined with a verb — the flag
+replaces the operation, and asking for both is refused rather than silently
+dropping the verb (T160).
 
 Errors go to stderr as exactly **two** lines, English then Chinese — escaped
 by the same rule as the log, which is what makes the count reliable: a message
@@ -1626,7 +1634,12 @@ Each of these is argued in full in [plan/plan.md](./plan/plan.md).
   own contents too: the header carries a checksum over the whole index, offsets
   included, so a damaged one is discarded rather than followed, and the next
   operation that WRITES the file, or that has to read it to the end anyway —
-  `-tail`, an edit — puts a good one back. A plain `-contains` or `-r` reads
+  `-tail`, a rewriting edit — puts a good one back, **provided the file is at
+  or above `CSV2_INDEX_MIN_BYTES`**: below it nothing builds a sidecar, so a
+  damaged one simply stays there, discarded on every read. `-append
+  --in-place` does not replace one either, because its fast path never reads
+  to the end; it extends an index that is already valid and leaves a damaged
+  one alone. A plain `-contains` or `-r` reads
   every byte and writes nothing, because building an index is not free and a
   read was not asked to pay for one; the `--build-index` entry says the same
   thing from the other side. Asserted by T68.
