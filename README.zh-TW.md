@@ -649,7 +649,7 @@ remove it`。其他每一個 CSV 讀取器在這裡都有自己的看法，而�
 **未加引號的欄位裡的裸 CR 是資料，而這正是 csv2 與多數解析器不同的地方。** `1,x<CR>y` 是
 一筆、值為 `x<CR>y`；Python 的 `csv` 模組會把它讀成兩列。兩者都不算錯——RFC 4180 把紀錄
 分隔符定義為 CRLF，對「欄位中間的單獨 CR」什麼也沒說——但一支跨這兩者比對數量的腳本會看到差異。
-在「引號內」，CR 到哪裡都是資料；而「以裸 CR 作為紀錄結尾」的檔案會被直接拒絕（見上文）。
+在「引號內」，CR 到哪裡都是資料。這個承諾對「一筆紀錄帶著幾個 CR」都成立——2026-08-21 之前，第三個 CR 會把一個數量壓過去，同樣的紀錄就被拒絕了——而它對「紀錄」成立、對「欄名」不成立：標頭列裡的一個裸 CR，正是一個以 CR 結尾的檔案的樣子，會被拒絕（見上文）。把那個欄位加上引號，那個 CR 就又是名字了。
 
 **NUL 與其他控制位元組在檔案內容裡會被原樣接受**：它們是資料、可以原樣往返，而定位報告會為了
 顯示把它們跳脫。**「在檔案內容裡」就是這個承諾的全部**：NUL 根本沒辦法經由「引數」抵達 csv2，
@@ -670,11 +670,23 @@ new name has to keep a .csv or .csv2 suffix, because the suffix is what
 declares the format
 ```
 
-**CR 行尾得到同樣的處理**——那是 OS X 之前的 Mac 慣例，CSV 不支援它。判斷方式是「裸 CR 的
-數量多於 LF」，因此不論結尾有沒有被附加一個多餘的 LF，它對一個以 CR 分隔的檔案都會觸發。
-原本它問的是「有沒有『完全沒有』LF」，而一個結尾的 LF 就足以讓它閉嘴：那個檔案於是以
-**rc=0 讀成零筆紀錄**、`-contains` 什麼也找不到、`--verify-index` 說索引沒問題。引號欄位裡的
-裸 CR 是資料，不受影響。由 T115 斷言。
+**CR 行尾得到同樣的處理**——那是 OS X 之前的 Mac 慣例，CSV 不支援它。**判斷方式是「標頭列裡
+有一個裸 CR」**，而它是精確的、不是近似的：一個以 CR 結尾的檔案沒有 LF 去結束它的第一行，
+因此它的全部內容都落在第一筆紀錄裡，而欄名正是證據永遠所在的地方。
+
+這個判斷錯過兩次，方向相反，而兩次都值得知道，因為它們說出了「這條規則不是什麼」：
+
+- 一開始它問的是「有沒有『完全沒有』LF」，而一個結尾的 LF 就足以讓它閉嘴：那個檔案於是以
+  **rc=0 讀成零筆紀錄**。
+- 接著它問的是「裸 CR 有沒有比 LF 多」，那是一個數量，不是一件關於行尾的事實。
+  `a,b⏎1,x␍␍␍y⏎`——一筆紀錄、以 LF 結尾——被一則說它「使用 CR 行尾」的訊息拒絕，而那則訊息
+  指定的 `tr '\r' '\n'` 會把那一筆變成 csv2 讀不回來的檔案。另一個方向上，
+  `col␍"L⏎L⏎L⏎L"␍zz␍`——一個真正以 CR 結尾的檔案——有三個 CR、三個 LF，於是那個數量從未觸發：
+  它以 rc=0 被讀成三筆紀錄，欄名是 `col␍"L`，引號欄位沿著它自己的換行被撕開，stderr 上
+  一個字也沒有。
+
+**紀錄**裡的裸 CR 仍然是資料、仍然能原樣往返、仍然不受影響。而一個確實屬於「欄名」的 CR
+必須加上引號——一對引號，意圖就變成明說的。由 T115 與 T180 斷言。
 
 但比這兩件事都要緊的是它「不會」落在哪裡：第一欄的名稱是 `pkg_name`，永遠不會是
 `\ufeffpkg_name`。
@@ -710,9 +722,10 @@ $ csv2 -update 12:6 "new value" -i pkgs.csv --in-place
 因為命令替換剝除的是「全部」的結尾換行，不是一個：
 
 ```console
-$ csv2 -get 1:2 -i pkgs.csv | od -c | tail -2      # 該格是 "value ends here\n"
+$ csv2 -get 1:2 -i pkgs.csv | od -c            # 該格是 "value ends here\n"
 0000000   v   a   l   u   e       e   n   d   s       h   e   r   e  \n
 0000020  \n
+0000021
 
 $ csv2 -mid 1,1 --json -i pkgs.csv                 # 同一格，明確無歧義
 {"record":1,"line":2,"fields":{"a":"x","b":"value ends here\n"}}
@@ -863,6 +876,19 @@ INFO  csv2 -update 1:secret <value> -i pkgs.csv -o out.csv -log app.log
 **log 是一個具有一般權限的磁碟檔案。** 遮蔽讓秘密不進入它，但那不構成「可以把 log 放在
 隨便什麼地方」的理由。
 
+**log 不會記下、而第二個讀者也還原不出來的東西：**
+
+| 不在軌跡裡 | 為什麼有影響 |
+|---|---|
+| 工作目錄，以及「絕對路徑形式的 `-i`」 | 從兩個不同目錄各跑一次 `csv2 -update 1:2 X -i f.csv --in-place`、寫進同一份 log，得到的是同樣的三行。`-log` 的路徑「是」絕對的；輸入路徑則照你打的樣子被引用 |
+| 行程編號，或任何排序用的鍵 | 兩個並行的寫入者各自記下 `wrote N records … rename OK`，而其中一次編輯不在檔案裡。那些行無法與它們自己的 `update` 行配對 |
+| 一次寫入的目的地 | `wrote N records` 沒有指名任何檔案，而 `-o` 寫到一個「已被占用」的路徑會毀掉原本在那裡的東西，軌跡讀起來卻與「寫到一個新檔案」完全相同 |
+| 「某份索引被相信了」 | 那條唯一可能靜默出錯的分支（見 sidecar 那一節）只在 `-debug` 下、只在 stderr 上說得出來，別無他處 |
+| 一次搜尋找到了什麼 | 一次 `-contains` 只記下它的呼叫，因此之後 `-update` 所消費的那個位址，在軌跡裡沒有來歷 |
+
+單獨看，其中沒有一項是缺陷；合起來，它們正是「這份軌跡回答的是『這次執行做了什麼』，
+而不是『這個檔案發生過什麼』」的原因。
+
 ### 兩套編號，以及它們不一致的地方
 
 `-rownum` 會在最前面加一欄。其餘一切維持原本的編號：
@@ -870,13 +896,18 @@ INFO  csv2 -update 1:secret <value> -i pkgs.csv -o out.csv -log app.log
 ```console
 $ csv2 -contains busybox -i pkgs.csv
 1:1	pkg_name	busybox
+1:3	source	fork raliclo/busybox, branch develop
 $ csv2 -contains busybox -rownum -i pkgs.csv
 1:1	pkg_name	busybox
+1:3	source	fork raliclo/busybox, branch develop
 
 $ csv2 -r -t -rownum -i pkgs.csv
 rownum,pkg_name,version,source,license
 1,busybox,1.37.0,"fork raliclo/busybox, branch develop",GPL-2.0
 ```
+
+（兩個命中，因為那一列的 `source` 欄位裡也有這個詞——這個區塊到 2026-08-21 之前都只印一個，
+而那份 fixture 自己印出來的內容說的是另一回事。）
 
 位址 `1:1` 在兩次執行中都仍然代表 `pkg_name`。但在印出來的那一列裡，`pkg_name` 現在是
 **第二個**實體欄位。**只要開了 `-rownum`，位址編號與實體欄位位置就差一格**，而輸出裡沒有
@@ -923,9 +954,12 @@ $ csv2 -contains name --include-headers -i pkgs.csv     # 只有一列標頭
 
 **那個 `cut -f3` 沒有 `-d`，而少掉的正是重點。** 它切的是 TAB，因為定位報告是 TAB 分隔、
 值有跳脫的。不要對 `--filter` 或 `-mid` 的輸出動用 `cut`：那是 CSV，值裡可能有逗號，而
-`cut -d, -f3` 會交給你其中一段碎片——靜默地，以 0 結束。在本專案自己的 fixture 上，它會從
-一個 515 位元組的儲存格裡取回 104 位元組。那個失敗正是 csv2 存在的理由；從 csv2 自己的輸出
-上再遇到它一次，會是個很差的笑話。由 T65 斷言。
+`cut -d, -f3` 會交給你其中一段碎片——靜默地，以 0 結束。在本專案自己的 fixture
+（`test/fixtures/TARGET_PACKAGES.csv`）上，對第一筆資料列下 `cut -d, -f3` 得到 7 個位元組，
+而 `-get 1:6` 得到的那一格是 513 個位元組。那個失敗正是 csv2 存在的理由；從 csv2 自己的輸出
+上再遇到它一次，會是個很差的笑話。這裡的數字到 2026-08-21 之前是「一個 515 位元組的儲存格
+裡取回 104 位元組」，而且沒有指名 fixture——不可重現，出現在一段「不要相信看起來合理的碎片」
+的文字裡。由 T65 斷言。
 
 ```console
 $ csv2 -contains busybox --filter -i TARGET_PACKAGES.csv
@@ -1286,7 +1320,7 @@ r1  A  r2  B  C  r3  r4  r5
 
 ```console
 $ csv2 -head 1 -i pkgs.csv2 -o sel.csv2
-csv2: sel.csv2 declares a format with a header, so writing data rows there needs -t; without it the next read would take the first record(s) as the header
+csv2: /home/you/work/sel.csv2 declares a format with a header, so writing data rows there needs -t; without it the next read would take the first record(s) as the header
 csv2：sel.csv2 的副檔名宣告了帶標頭的格式，因此在此寫入資料列必須給 -t；否則下次讀取會把最前面的紀錄當成標頭
 $ echo $?
 1
@@ -1473,16 +1507,25 @@ $ csv2 -head 1 -t --json -i masked.csv
 前綴**，好讓訊息本身能放進一行。此處完整顯示一次，讓腳本可以照著「真正的形狀」去寫：
 
 ```console
-$ csv2 -r -i pkgs.csv -debug     # 2>&1
+$ csv2 -r -i pkgs.csv -debug     # 2>&1，全部四行
+csv2: 2026-08-20T19:32:39.922+08:00 INFO  csv2 -r -i pkgs.csv -debug
 csv2: 2026-08-20T19:32:39.922+08:00 DEBUG single-threaded: not a search; parallelism applies to -contains only
+csv2: 2026-08-20T19:32:39.922+08:00 DEBUG format=csv fields=4 records=2
+csv2: 2026-08-20T19:32:39.923+08:00 DEBUG metrics: read_bytes=103 file_bytes=103 peak_rss_bytes=8962048
 ```
+
+**第一行是那筆「呼叫」紀錄，層級是 `INFO`。** 它與 `-log` 寫下的是同一行，而 `-debug` 把門檻
+降得夠低，因此它也會出現在 stderr 上——於是一個去讀「`-debug` 輸出第一行」的腳本，拿到的是
+那個指令，不是那個診斷。這個區塊到 2026-08-21 之前，在一段「把它當成真實形狀提供給你」的
+文字裡，只印了四行中的一行。
 
 以下省略該前綴：
 
 ```console
 $ CSV2_PARALLEL_MIN_BYTES=1000 CSV2_PARALLEL_CHUNK_BYTES=512 \
-      csv2 -contains xyz -i pkgs.csv2 -debug     # 2>&1
-DEBUG parallel: 9 chunks, 10 workers, chunk 512 bytes
+      csv2 -contains xyz -i big.csv2 -debug      # 2>&1，在一個 2,980 bytes 的檔案上
+DEBUG parallel: 6 chunks, 10 workers, chunk 512 bytes
+DEBUG parallel: 199 records, 0 matched
 $ csv2 -contains xyz -i pkgs.csv -debug
 DEBUG single-threaded: .csv with no index proving one record per line; build one with --build-index
 $ csv2 -r -i pkgs.csv2 -debug
@@ -1490,9 +1533,12 @@ DEBUG single-threaded: not a search; parallelism applies to -contains only
 ```
 
 **第一行裡那兩個環境變數不是裝飾。** 沒有它們，那個指令印出的是
-`single-threaded: file is 44 bytes, under CSV2_PARALLEL_MIN_BYTES (16777216)`
+`single-threaded: file is 2980 bytes, under CSV2_PARALLEL_MIN_BYTES (16777216)`
 ——與這個範例要展示的正好相反——因為一個小到能印在這裡的 fixture，遠低於 16 MiB 的門檻。
-**一個逐字執行會給出相反答案的範例，比沒有範例更糟。**
+**一個逐字執行會給出相反答案的範例，比沒有範例更糟**——而到 2026-08-21 之前，**這個**就是
+那種範例：它指名的是上面那個 44 bytes 的 `pkgs.csv2`，而那低於同一行所設下的 1000 bytes
+門檻，因此那行印出來的 `parallel:` 不可能發生；9 個 512 bytes 的區塊也需要大約 4.6 kB。
+這裡用的檔案是 199 筆 `row<N>,value<N>`，而它做的就是印出來的那件事。
 
 只回報「有趣的那一種」會讓沉默變得有歧義，而那個歧義正好咬在這裡：拿一次「平行」執行去比對
 一次單執行緒執行，若兩者其實悄悄走了同一條路，那什麼也證明不了——而「輸出相同」看起來

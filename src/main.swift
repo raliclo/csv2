@@ -118,7 +118,21 @@ func resolved(_ path: String) -> String {
 /// the same file compare equal.
 /// 兩個路徑是不是同一個檔案，以「兩邊都解析」來判定。兩者以同一種方式正規化，因此一個
 /// 相對路徑與一個抵達同一個檔案的絕對路徑會相等。
-func sameFile(_ a: String, _ b: String) -> Bool { resolved(a) == resolved(b) }
+/// Two names for one file. The path comparison catches every SPELLING --
+/// `./x`, `../d/x`, an absolute path, a symlink -- and a hard link is not a
+/// spelling: it is a second name in the directory tree for the same inode, and
+/// resolving it changes nothing. So the identity is asked for as well, and it
+/// is the authority where it exists.
+/// 一個檔案的兩個名字。比對路徑抓得到每一種「拼法」——`./x`、`../d/x`、絕對路徑、symlink
+/// ——而硬連結不是一種拼法：它是同一個 inode 在目錄樹裡的第二個名字，解析它不會改變什麼。
+/// 因此也一併問「身分」，而在身分問得到的地方，以身分為準。
+func sameFile(_ a: String, _ b: String) -> Bool {
+    if resolved(a) == resolved(b) { return true }
+    guard let na = Platform.fileNode(path: a), let nb = Platform.fileNode(path: b) else {
+        return false
+    }
+    return na.dev == nb.dev && na.ino == nb.ino
+}
 
 // ---------------------------------------------------------------------
 // MARK: - Argument parsing / 參數解析
@@ -888,8 +902,18 @@ func validate(_ o: inout Options) throws {
     // 不可能同時成立，而產生出來的檔案會同時保留那筆不完整的、並在其後多出一筆完整的。
     if o.truncatePartial, o.edits.contains(where: { if case .append = $0 { return true }; return false }) {
         throw usageError(
-            "--truncate-partial is refused with -append: appending can only add bytes and cannot discard the incomplete record, so the file would keep it and gain a complete record after it. Write a clean copy first (csv2 -r -t --truncate-partial -i FILE -o CLEAN), then append to that",
-            "--truncate-partial 與 -append 併用會被拒絕：追加只能增加位元組，無法丟棄那筆不完整的紀錄，因此檔案會同時保留它、並在其後多出一筆完整的。請先寫出一份乾淨的複本（csv2 -r -t --truncate-partial -i FILE -o CLEAN），再對那一份追加")
+            // "the incomplete record" said there is one. This refusal fires on
+            // the flags alone, before the file is read, so it fires on
+            // complete files too and sent readers hunting for damage that was
+            // not there. The two flags are incompatible as a REQUEST -- one
+            // says drop the tail, the other can only add to it -- and that is
+            // true whatever the file turns out to be.
+            // 「那筆不完整的紀錄」等於說「有一筆」。這條拒絕只看旗標、在讀檔之前就觸發，
+            // 因此對完整的檔案也會觸發，於是讓讀者去找一個並不存在的損壞。這兩個旗標
+            // 作為一個「要求」就是不相容的——一個說丟掉尾巴，另一個只能往尾巴後面加——
+            // 而那句話不論檔案後來是什麼樣子都成立。
+            "--truncate-partial is refused with -append, whatever the file contains: one says discard an incomplete last record and the other can only add bytes after it, so the two cannot both be honoured in one run. If the file does have a torn tail, write a clean copy first (csv2 -r -t --truncate-partial -i FILE -o CLEAN) and append to that",
+            "--truncate-partial 與 -append 併用會被拒絕，不論檔案內容為何：一個說「丟掉不完整的最後一筆」，另一個只能在它後面加上位元組，兩者無法在同一次執行中同時被滿足。若那個檔案確實有一條撕裂的尾巴，請先寫出一份乾淨的複本（csv2 -r -t --truncate-partial -i FILE -o CLEAN），再對那一份追加")
     }
     if o.input == nil && !o.useStdin {
         throw usageError("no input: give -i FILE or -si", "沒有輸入：請給 -i FILE 或 -si")
@@ -1147,9 +1171,23 @@ func validate(_ o: inout Options) throws {
             // ——而一條用「程式並不存在的危險」來解釋自己的拒絕，會讓讀者學到關於這支工具的
             // 錯誤知識，那正是上面 -i/-o 那條拒絕旁邊已經寫下的註記。
             if let v = verb {
+                // "would discard every record it does not name" was the
+                // reason, and it is not true of every run this refuses: `-mid
+                // ,` and `-head 99` on a short file name every record there
+                // is. A refusal whose stated reason is false of the command in
+                // front of it teaches the reader something false about the
+                // tool -- the note beside the -i/-o refusal above says the
+                // same thing. What IS true of all of them is the shape: a
+                // selection is not an edit, and the count of records it names
+                // is not knowable before the file is read.
+                // 「會丟掉它沒有指名的每一筆」原本是那個理由，而它對這條拒絕所擋下的每一次
+                // 執行並不都成立：`-mid ,` 與短檔案上的 `-head 99` 指名了所有紀錄。一條
+                // 「理由對眼前這個指令為假」的拒絕，會讓讀者學到關於這個工具的錯誤知識——
+                // 上面 -i/-o 那條拒絕旁邊的註記說的正是同一件事。對它們全部都成立的是那個
+                // 形狀：選取不是編輯，而它指名幾筆，要讀完檔案才知道。
                 throw usageError(
-                    "\(v) selects records; --in-place writes an EDIT back to its input, and writing a selection there would discard every record the selection does not name. Write it to a new file instead: csv2 \(v) ... -t -i \(inp) -o NEW.csv",
-                    "\(v) 是「選取」；--in-place 是把一次「編輯」寫回它的輸入，而把一個選取寫到那裡，會丟掉該選取沒有指名的每一筆紀錄。請改寫到新檔案：csv2 \(v) ... -t -i \(inp) -o NEW.csv")
+                    "\(v) selects records and --in-place writes an EDIT back to its input; a selection is not an edit. Whether this one would have discarded anything is not knowable before the file is read, which is why it is refused rather than measured. Write it to a new file instead: csv2 \(v) ... -t -i \(inp) -o NEW.csv",
+                    "\(v) 是「選取」，而 --in-place 是把一次「編輯」寫回它的輸入；選取不是編輯。這一次究竟會不會丟掉東西，在讀完檔案之前是無從得知的——那正是它被「拒絕」而不是被「衡量」的理由。請改寫到新檔案：csv2 \(v) ... -t -i \(inp) -o NEW.csv")
             }
             throw usageError(
                 "--in-place applies an EDIT to its input, and this run has none: reading the file and writing it back over itself changes nothing. To repair or rewrite a file -- --truncate-partial, a format change -- write it to a new file: csv2 -r -t ... -i \(inp) -o NEW.csv",

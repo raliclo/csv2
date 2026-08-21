@@ -631,6 +631,40 @@ enum Platform {
     /// `.other` 涵蓋它實際會有的東西。
     enum FileKind { case regular, directory, fifo, other }
 
+    /// Device and inode: the pair that says two names are ONE file, which a
+    /// path comparison cannot. `-i x -o y` where the two are hard links to the
+    /// same inode passed every spelling check -- `./`, `../`, absolute,
+    /// symlink -- and then broke the link at rc=0, leaving the caller with one
+    /// name holding the edit and the other holding what used to be shared.
+    /// Nil on Windows, where the CRT reports inode 0 for everything and the
+    /// answer would be "every file is every other file".
+    /// 裝置號與 inode：這一對才說得出「兩個名字是同一個檔案」，而比對路徑說不出。
+    /// `-i x -o y` 在兩者是同一個 inode 的硬連結時，通過了每一種拼法的檢查——`./`、`../`、
+    /// 絕對路徑、symlink——然後以 rc=0 把那個連結斷開，留給呼叫端一個「有這次編輯」的名字，
+    /// 和一個「還是原本共用內容」的名字。Windows 上回傳 nil：CRT 對所有檔案都回報 inode 0，
+    /// 那個答案會變成「每個檔案都是彼此」。
+    static func fileNode(path: String) -> (dev: UInt64, ino: UInt64)? {
+        #if canImport(ucrt)
+        return nil
+        #else
+        var st = stat()
+        guard stat(path, &st) == 0 else { return nil }
+        return (UInt64(st.st_dev), UInt64(st.st_ino))
+        #endif
+    }
+
+    /// A blocking read-only open, for the one input that needs to WAIT: a
+    /// FIFO with no writer yet. Returns -1 on failure.
+    /// 一個會阻塞的唯讀開檔，給那個唯一需要「等」的輸入用：一個還沒有寫入端的 FIFO。
+    /// 失敗時回傳 -1。
+    static func openBlockingForRead(path: String) -> Int32 {
+        #if canImport(ucrt)
+        return -1   // no FIFOs in a path name on Windows / Windows 的路徑名裡沒有 FIFO
+        #else
+        return open(path, O_RDONLY)
+        #endif
+    }
+
     static func fileKind(path: String) -> FileKind? {
         var st = stat()
         guard stat(path, &st) == 0 else { return nil }

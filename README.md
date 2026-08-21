@@ -806,8 +806,11 @@ from most parsers.** `1,x<CR>y` is one record with the value `x<CR>y`; Python's
 `csv` module reads it as two rows. Neither is wrong — RFC 4180 defines the
 record separator as CRLF and says nothing about a lone CR mid-field — but a
 script that compares counts across the two will see the difference. Inside
-QUOTES a CR is data everywhere, and a file whose records END with bare CRs is
-refused outright (see above).
+QUOTES a CR is data everywhere. The promise holds for however many CRs a
+record carries — until 2026-08-21 a third one tipped a count and the same
+record was refused — and it holds for a record but not for a column NAME: a
+bare CR in the header row is how a CR-terminated file looks, and it is refused
+(see above). Quote the field and the CR is a name again.
 
 **NUL and the other control bytes are accepted verbatim** in file content:
 they are data, they round-trip, and the locating report escapes them for
@@ -832,12 +835,28 @@ declares the format
 ```
 
 **CR line endings get the same treatment** — the pre-OS X Mac convention, which
-CSV does not support. The check is that bare CRs outnumber LFs, so it fires on
-a CR-separated file whether or not something appended a stray LF at the end.
-It used to ask whether there was *no* LF at all, and one trailing LF was enough
-to silence it: the file then read as **zero records at rc=0**, `-contains`
-found nothing, and `--verify-index` reported the index fine. A bare CR inside a
-quoted field is data and is left alone. Asserted by T115. What matters more than either is
+CSV does not support. **The check is a bare CR in the HEADER row**, and it is
+exact rather than approximate: a file whose lines end in CR has no LF to end
+its first line, so everything it contains lands in the first record, and the
+column names are where the evidence always is.
+
+The check has been wrong twice, in opposite directions, and both are worth
+knowing because they say what the rule is not:
+
+- It first asked whether there was *no* LF at all, and one trailing LF
+  silenced it: the file read as **zero records at rc=0**.
+- It then asked whether bare CRs **outnumbered** LFs, which is a count and not
+  a fact about line endings. `a,b⏎1,x␍␍␍y⏎` — one record, LF-terminated — was
+  refused with a message stating it "uses CR line endings", and the `tr '\r'
+  '\n'` that message prescribes turned that record into a file csv2 will not
+  read. In the other direction, `col␍"L⏎L⏎L⏎L"␍zz␍` — a genuine CR-terminated
+  file — has three CRs and three LFs, so the count never fired: it was read at
+  rc=0 as three records under a column named `col␍"L`, the quoted field torn
+  down its own newlines, nothing on stderr.
+
+A bare CR inside a RECORD is still data, still round-trips, and is still left
+alone. A CR that really belongs to a column NAME has to be quoted — one pair of
+quotes, and the intent is explicit. Asserted by T115 and T180. What matters more than either is
 where it does **not** end up: the first column's name is `pkg_name`, never
 `\ufeffpkg_name`.
 
@@ -877,9 +896,10 @@ nothing marks which is which — `$(csv2 -get …)` then eats both, because comm
 substitution strips every trailing newline, not one:
 
 ```console
-$ csv2 -get 1:2 -i pkgs.csv | od -c | tail -2      # cell is "value ends here\n"
+$ csv2 -get 1:2 -i pkgs.csv | od -c            # cell is "value ends here\n"
 0000000   v   a   l   u   e       e   n   d   s       h   e   r   e  \n
 0000020  \n
+0000021
 
 $ csv2 -mid 1,1 --json -i pkgs.csv                 # the same cell, unambiguous
 {"record":1,"line":2,"fields":{"a":"x","b":"value ends here\n"}}
@@ -1066,6 +1086,19 @@ command that cannot work. Asserted by T40 and T73.
 **The log is a file on disk with normal permissions.** Redaction keeps secrets
 out of it; it is not a reason to put the log somewhere careless.
 
+**What the log does not record, and a second reader cannot recover:**
+
+| Not in the trail | Why it matters |
+|---|---|
+| the working directory, and the `-i` path as an absolute one | two runs of `csv2 -update 1:2 X -i f.csv --in-place` from different directories, into one shared log, are the same three lines. The `-log` path IS absolute; the input path is quoted as typed |
+| a process id, or any ordering key | two concurrent writers each log `wrote N records … rename OK`, and one of the two edits is not in the file. The lines cannot be paired with their `update` lines |
+| the destination of a write | `wrote N records` names no file, and `-o` onto an OCCUPIED path destroys what was there while the trail reads exactly as it does for a new file |
+| that an index was TRUSTED | the one branch that can be silently wrong (see the sidecar section) says so under `-debug`, on stderr, and nowhere else |
+| what a search found | a `-contains` run logs its invocation only, so the address a later `-update` consumed has no provenance |
+
+None of these is a defect on its own; together they are the reason the trail
+answers "what did this run do" and not "what happened to this file".
+
 ### Two numberings, and where they disagree
 
 `-rownum` prepends a column. Everything else keeps the numbering it had:
@@ -1073,13 +1106,19 @@ out of it; it is not a reason to put the log somewhere careless.
 ```console
 $ csv2 -contains busybox -i pkgs.csv
 1:1	pkg_name	busybox
+1:3	source	fork raliclo/busybox, branch develop
 $ csv2 -contains busybox -rownum -i pkgs.csv
 1:1	pkg_name	busybox
+1:3	source	fork raliclo/busybox, branch develop
 
 $ csv2 -r -t -rownum -i pkgs.csv
 rownum,pkg_name,version,source,license
 1,busybox,1.37.0,"fork raliclo/busybox, branch develop",GPL-2.0
 ```
+
+(Two hits, because the `source` field on that row contains the word too — this
+block showed one until 2026-08-21, on a fixture whose own printed content says
+otherwise.)
 
 The address `1:1` still means `pkg_name`, in both runs. But in the printed row,
 `pkg_name` is now the **second** physical column. **The address numbering and
@@ -1137,9 +1176,13 @@ else. Asserted by T66.
 cutting on TAB, because the locating report is TAB-separated with its values
 escaped. Do not reach for `cut` against `--filter` or `-mid` output: that is
 CSV, a value may contain a comma, and `cut -d, -f3` will hand you a fragment
-of one — silently, at exit 0. On this project's own fixture it returns 104
-bytes of a 515-byte cell. That failure is why csv2 exists; getting it from
-csv2's own output would be a poor joke. Asserted by T65.
+of one — silently, at exit 0. On this project's own fixture
+(`test/fixtures/TARGET_PACKAGES.csv`), `cut -d, -f3` on the first data line
+returns 7 bytes where `-get 1:6` returns a 513-byte cell. That failure is why
+csv2 exists; getting it from csv2's own output would be a poor joke. The
+numbers here were "104 bytes of a 515-byte cell" until 2026-08-21, with no
+fixture named — unreproducible, in the paragraph about not trusting a
+plausible-looking fragment. Asserted by T65.
 
 ```console
 $ csv2 -contains busybox --filter -i TARGET_PACKAGES.csv
@@ -1601,7 +1644,7 @@ destination both of them do.
 
 ```console
 $ csv2 -head 1 -i pkgs.csv2 -o sel.csv2
-csv2: sel.csv2 declares a format with a header, so writing data rows there needs -t; without it the next read would take the first record(s) as the header
+csv2: /home/you/work/sel.csv2 declares a format with a header, so writing data rows there needs -t; without it the next read would take the first record(s) as the header
 csv2：sel.csv2 的副檔名宣告了帶標頭的格式，因此在此寫入資料列必須給 -t；否則下次讀取會把最前面的紀錄當成標頭
 $ echo $?
 1
@@ -1827,16 +1870,26 @@ on one line. One shown in full, once, so a script can be written against the
 real shape:
 
 ```console
-$ csv2 -r -i pkgs.csv -debug     # 2>&1
+$ csv2 -r -i pkgs.csv -debug     # 2>&1, all of it
+csv2: 2026-08-20T19:32:39.922+08:00 INFO  csv2 -r -i pkgs.csv -debug
 csv2: 2026-08-20T19:32:39.922+08:00 DEBUG single-threaded: not a search; parallelism applies to -contains only
+csv2: 2026-08-20T19:32:39.922+08:00 DEBUG format=csv fields=4 records=2
+csv2: 2026-08-20T19:32:39.923+08:00 DEBUG metrics: read_bytes=103 file_bytes=103 peak_rss_bytes=8962048
 ```
+
+**The first line is the INVOCATION record, at `INFO`.** It is the same line
+`-log` writes, and `-debug` lowers the threshold far enough for it to reach
+stderr as well — so a script that reads "the first line" of a `-debug` run gets
+the command, not the diagnosis. This block showed one line of the four until
+2026-08-21, in the paragraph offering it as the real shape.
 
 With the prefix elided from here on:
 
 ```console
 $ CSV2_PARALLEL_MIN_BYTES=1000 CSV2_PARALLEL_CHUNK_BYTES=512 \
-      csv2 -contains xyz -i pkgs.csv2 -debug     # 2>&1
-DEBUG parallel: 9 chunks, 10 workers, chunk 512 bytes
+      csv2 -contains xyz -i big.csv2 -debug      # 2>&1, on a 2,980-byte file
+DEBUG parallel: 6 chunks, 10 workers, chunk 512 bytes
+DEBUG parallel: 199 records, 0 matched
 $ csv2 -contains xyz -i pkgs.csv -debug
 DEBUG single-threaded: .csv with no index proving one record per line; build one with --build-index
 $ csv2 -r -i pkgs.csv2 -debug
@@ -1844,11 +1897,15 @@ DEBUG single-threaded: not a search; parallelism applies to -contains only
 ```
 
 **The two environment variables in the first line are not decoration.** Without
-them that command prints `single-threaded: file is 44 bytes, under
+them that command prints `single-threaded: file is 2980 bytes, under
 CSV2_PARALLEL_MIN_BYTES (16777216)` — the opposite of what the example is
 showing — because a fixture small enough to print here is far below the 16 MiB
 threshold. An example that gives the opposite answer when run verbatim is worse
-than no example.
+than no example — and until 2026-08-21 **this** was that example: it named
+`pkgs.csv2`, the 44-byte fixture above, which is under the 1000-byte floor the
+same line sets, so the printed `parallel:` line could not happen. Nine chunks
+of 512 bytes also needs about 4.6 kB. The file here is 199 records of
+`row<N>,value<N>` and it does what is printed.
 
 Reporting only the interesting case would make silence ambiguous, and that
 ambiguity bites exactly here: comparing a "parallel" run against a

@@ -551,6 +551,7 @@ final class RecordParser {
             // 孤立的 CR 是資料。把它當分隔符會破壞任何合法含有它的值。
             sawCRAsData = true
             crAsDataCount += 1
+            try refuseCRInHeader()
             try appendDataByte(BYTE_CR)
         }
 
@@ -711,6 +712,56 @@ final class RecordParser {
         if try !sink(r) { stopped = true }
     }
 
+    /// A bare carriage return inside the FIRST record -- the header row, in
+    /// every format csv2 reads -- is the signature of a CR-terminated file,
+    /// and it is exact where counting was approximate.
+    ///
+    /// The test used to be `bare CRs > line feeds`, described in both READMEs
+    /// as "this file uses CR line endings". Those are different statements and
+    /// they came apart in both directions:
+    ///
+    ///   a,b<LF>1,x<CR><CR><CR>y<LF>       3 CRs, 2 LFs -> refused, and the
+    ///                                     file is LF-terminated. The message
+    ///                                     asserted something false about it,
+    ///                                     and `tr '\r' '\n'`, which the
+    ///                                     message prescribes, turned that one
+    ///                                     record into a file csv2 will not
+    ///                                     read.
+    ///   col<CR>"L<LF>L<LF>L<LF>L"<CR>zz<CR>
+    ///                                     3 CRs, 3 LFs -> accepted at rc=0 as
+    ///                                     three records under a column named
+    ///                                     `col<CR>"L`, quoted field shredded,
+    ///                                     nothing on stderr. A genuine
+    ///                                     CR-terminated file, silently
+    ///                                     misparsed -- the failure the count
+    ///                                     was written to prevent.
+    ///
+    /// A CR-terminated file has no LF to end its first line, so everything it
+    /// contains lands in the first record -- which is why the header row is
+    /// where the evidence always is, whatever the rest of the file holds. A
+    /// bare CR in a RECORD stays data and still round-trips; a CR that is part
+    /// of a column NAME has to be quoted, which costs one pair of quotes and
+    /// makes the intent explicit.
+    ///
+    /// 第一筆紀錄——在 csv2 讀得懂的每一種格式裡，那就是標頭列——中的一個裸 CR，是「以 CR
+    /// 結尾的檔案」的簽名，而它在「數數」只能近似的地方是精確的。
+    ///
+    /// 原本的判斷是「裸 CR 比換行多」，而兩份 README 都把它描述成「本檔案使用 CR 行尾」。
+    /// 那是兩句不同的話，而它們往兩個方向都裂開過：一個 LF 結尾、欄位裡有三個 CR 的檔案被
+    /// 拒絕，訊息對它說了一件假的事，而訊息指定的 `tr` 修法會把那一筆變成讀不回來的檔案；
+    /// 一個真正以 CR 結尾、CR 與 LF 一樣多的檔案則以 rc=0 被接受，成為三筆假紀錄、欄名是
+    /// `col<CR>"L`、引號欄位被撕開，stderr 上一個字也沒有。
+    ///
+    /// 以 CR 結尾的檔案沒有 LF 去結束它的第一行，因此它的全部內容都落在第一筆紀錄裡——那正是
+    /// 「證據永遠在標頭列」的原因。紀錄裡的裸 CR 仍然是資料、仍然能原樣往返；而屬於「欄名」
+    /// 的 CR 必須加引號，那只花一對引號，並且讓意圖變成明說的。
+    private func refuseCRInHeader() throws {
+        guard recordsEmitted == 0 else { return }
+        throw fault(
+            "the header row contains a bare carriage return, which is what a file with CR line endings (the pre-OS X Mac convention) looks like to a CSV reader; convert it first with: tr '\\r' '\\n' < file > converted.csv -- the new name has to keep a .csv or .csv2 suffix, because the suffix is what declares the format. If the CR really belongs to a column NAME, quote that field and it is read as data",
+            "標頭列中含有一個裸 CR，而那正是「以 CR 作為行尾的檔案」（OS X 之前的 Mac 慣例）在一個 CSV 讀取器眼中的樣子；請先轉換：tr '\\r' '\\n' < file > converted.csv——新檔名必須保留 .csv 或 .csv2 副檔名，因為宣告格式的正是副檔名。若那個 CR 確實屬於某個「欄名」，請把該欄位加上引號，它就會被當成資料讀入")
+    }
+
     /// Call once at end of input. Emits a trailing record if the file did not
     /// end with a newline, and reports the CR-only case.
     /// 輸入結束時呼叫一次。若檔案未以換行結尾則吐出最後一筆，並回報 CR-only。
@@ -729,6 +780,7 @@ final class RecordParser {
             pendingCR = false
             sawCRAsData = true
             crAsDataCount += 1
+            try refuseCRInHeader()
             try appendDataByte(BYTE_CR)
         }
         // A CR-only file (pre-OS X Mac) contains no LF at all, so the whole
@@ -739,18 +791,10 @@ final class RecordParser {
         // CR-only 檔案（OS X 之前的 Mac 慣例）完全沒有 LF，於是整份被解析成
         // 一筆有數百萬欄的紀錄，接著撞上欄數檢查——而那個訊息在講欄數，會把
         // 使用者引去一個完全無關的方向。診斷成本幾乎為零，少了它代價是一個下午。
-        // Bare CRs outnumbering LFs is what a CR-separated file looks like,
-        // with or without a stray LF at the end. A legitimate CSV can contain
-        // a bare CR inside a quoted field, so the test is strictly greater:
-        // one such CR in a one-record file must not trip it.
-        // 「裸 CR 的數量多於 LF」正是一個以 CR 分隔的檔案的樣子，不論結尾有沒有多一個 LF。
-        // 合法的 CSV 也可能在引號欄位裡含有裸 CR，因此這裡用「嚴格大於」：一筆紀錄裡的
-        // 一個裸 CR 不能觸發它。
-        if crAsDataCount > lfCount {
-            throw fault(
-                "this file uses CR line endings (the pre-OS X Mac convention), which CSV does not support; convert it first with: tr '\\r' '\\n' < file > converted.csv -- the new name has to keep a .csv or .csv2 suffix, because the suffix is what declares the format",
-                "本檔案使用 CR 行尾（OS X 之前的 Mac 慣例），非 CSV 所支援；請先轉換：tr '\\r' '\\n' < file > converted.csv——新檔名必須保留 .csv 或 .csv2 副檔名，因為宣告格式的正是副檔名")
-        }
+        // The CR test lives in refuseCRInHeader now, and fires the moment the
+        // byte arrives rather than at end of input.
+        // CR 的判斷現在在 refuseCRInHeader 裡，而且是在那個位元組抵達的當下就觸發，
+        // 不再等到輸入結束。
         let pending = recordDirty || !fields.isEmpty || !rawBuf.isEmpty || !valBuf.isEmpty
         guard pending else { return }
 
@@ -904,6 +948,34 @@ final class ByteSource {
     private(set) var bytesRead = 0
 
     init(path: String, chunkSize: Int = 1 << 16, startAt: UInt64 = 0) throws {
+        // A FIFO is opened with a plain blocking open(2), not through
+        // FileHandle. Foundation's opener does not wait for a writer, so
+        // `csv2 -r -i fifo.csv` started before the writer arrived read EOF
+        // immediately and reported `expected 1 header row(s), found 0` -- the
+        // message for a file with nothing in it -- for a stream that was about
+        // to deliver three lines. Every other Unix tool blocks there, and the
+        // block is what removes the race: the reader waits, the writer opens,
+        // the bytes arrive.
+        //
+        // Only for the non-regular case, so the ordinary path keeps the
+        // FileHandle it has always had, seeking included.
+        // FIFO 用一個單純的、會阻塞的 open(2) 開啟，不走 FileHandle。Foundation 的開檔不會
+        // 等待寫入端，於是「在寫入端出現之前就啟動」的 `csv2 -r -i fifo.csv` 立刻讀到 EOF，
+        // 並回報 `expected 1 header row(s), found 0`——那是「檔案裡什麼都沒有」的訊息——而那條
+        // 串流其實正要送來三行。其他每一個 Unix 工具都會在那裡阻塞，而正是那個阻塞消除了
+        // 這個競態：讀取端等待，寫入端開啟，位元組抵達。
+        //
+        // 只針對「非一般檔案」，因此原本那條路徑仍然用它一直以來的 FileHandle，seek 也照舊。
+        if Platform.fileKind(path: path) == .fifo {
+            let fd = Platform.openBlockingForRead(path: path)
+            guard fd >= 0 else {
+                throw fault("cannot open input file: \(path)", "無法開啟輸入檔：\(path)")
+            }
+            handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+            closeOnDeinit = true
+            self.chunkSize = chunkSize
+            return
+        }
         guard let h = FileHandle(forReadingAtPath: path) else {
             throw fault("cannot open input file: \(path)", "無法開啟輸入檔：\(path)")
         }

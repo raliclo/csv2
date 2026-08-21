@@ -438,6 +438,32 @@ enum KeySource {
         }
         let bytes = [UInt8](d)
 
+        // A key of one byte repeated is guessed on the first attempt whatever
+        // its length, so the length floor did not describe what it was for. 16
+        // NUL bytes -- what an all-zero file of the right size gives you, and
+        // what a truncated or never-written key file looks like -- was
+        // accepted, while 15 random bytes, some 10^36 times stronger, was
+        // refused. The stated reason is "a key this short is searched
+        // exhaustively": this file is searched in one guess.
+        //
+        // Only the shapes that are certainly not keys are refused. csv2 does
+        // not estimate entropy -- that is a judgement, and a judgement that
+        // refuses a caller's real key is worse than one that accepts a poor
+        // one -- but a file with one distinct byte in it is not a judgement.
+        // 一把「同一個位元組重複而成」的金鑰，不論多長都會在第一次嘗試就被猜中，因此那個
+        // 長度下限並沒有描述它存在的目的。16 個 NUL——一個「大小剛好、內容全零」的檔案會給你的
+        // 東西，也是一個被截斷或從未被寫入的金鑰檔的樣子——會被接受；而 15 個隨機位元組，
+        // 大約強上 10^36 倍，卻被拒絕。那條拒絕自陳的理由是「這麼短的金鑰會被窮舉」：
+        // 而這個檔案一次就被猜中。
+        //
+        // 只拒絕「確定不是金鑰」的形狀。csv2 不估算熵——那是一種判斷，而一個「把呼叫端真正的
+        // 金鑰擋下來」的判斷，比一個「接受了一把差金鑰」的判斷更糟——但「整個檔案只有一種
+        // 位元組」不是判斷。
+        if forCreating, bytes.count >= minimumKeyBytes, Set(bytes).count == 1 {
+            throw fault(
+                "keyfile \(p) is \(bytes.count) copies of one byte, which is guessed on the first attempt however long it is; csv2 will not create protection from it. Make one with: head -c 32 /dev/urandom > key.bin",
+                "金鑰檔 \(p) 是同一個位元組重複 \(bytes.count) 次，不論多長都會在第一次嘗試就被猜中；csv2 不會用它建立保護。請這樣產生一把：head -c 32 /dev/urandom > key.bin")
+        }
         if forCreating && bytes.count < minimumKeyBytes {
             throw fault(
                 "keyfile \(p) holds \(bytes.count) byte(s); csv2 will not create protection from fewer than \(minimumKeyBytes). A key this short is searched exhaustively in less time than this run took, and the file it produces looks encrypted. Make one with: head -c 32 /dev/urandom > key.bin. Reading a file that was already made with a short key is NOT refused -- only making a new one is",

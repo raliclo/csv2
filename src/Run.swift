@@ -433,7 +433,18 @@ func runSelect(_ o: Options) throws {
     if let (r, _) = o.getCell { lower = r; upper = r }
     if let n = o.head { upper = min(upper, n) }
 
-    let ip = planIndex(o, plan: try openInput(o), lower: lower, upper: upper)
+    // ONE open. `planIndex` only reads the plan's format and header count, and
+    // opening a second source to hand it was free on a regular file and fatal
+    // on a FIFO: the first open drained the pipe, the second waited for a
+    // writer that had already gone. `csv2 -r -i fifo.csv` reported `expected 1
+    // header row(s), found 0` -- the message for an empty file -- about a
+    // stream carrying three lines.
+    // 只開一次。`planIndex` 用到的只是這份 plan 的格式與標頭列數，而「為了交給它而多開一個
+    // 來源」在一般檔案上是免費的、在 FIFO 上是致命的：第一次開啟把管線抽乾，第二次則在等一個
+    // 早已離開的寫入端。`csv2 -r -i fifo.csv` 對一條正要送來三行的串流，回報了
+    // `expected 1 header row(s), found 0`——那是「空檔案」的訊息。
+    var plan = try openInput(o)
+    let ip = planIndex(o, plan: plan, lower: lower, upper: upper)
     var tailN = o.tail
     if ip.resumeOffset != nil, let l = ip.lower, let u = ip.upper {
         // The index turned `-tail N` into a range, so the ring buffer is no
@@ -445,7 +456,6 @@ func runSelect(_ o: Options) throws {
         tailN = nil
     }
 
-    var plan = try openInput(o)
     var headers: [Record] = []
     if let off = ip.resumeOffset, let path = o.input {
         headers = try readHeaderRows(path: path, format: plan.format, want: plan.headerRows)

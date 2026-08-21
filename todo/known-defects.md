@@ -5895,3 +5895,184 @@ $ cat s.csv | csv2 -update 1:2 X --headers 1 -si -so      rc=0，正確
 
 「不一致」的那個情況(`--headers` 與副檔名不符)本來就已經是一條拒絕。那句話沒有守著任何東西,
 只是讓讀者相信有一個他找不到的危險。已刪除,並改成那句真正成立的話。
+
+---
+
+## GW. CR 行尾的守衛:規則說的是「行尾」,測的是「數量」,而兩邊都裂開了(2026-08-21 修正,T180)
+
+第 66 回合,而它是本輪最重的一條——**因為其中一半是「rc=0、沒有任何輸出、資料被讀成別的東西」**。
+
+守衛的自陳理由是「本檔案使用 CR 行尾(OS X 之前的 Mac 慣例)」;實際的判斷是
+`crAsDataCount > lfCount`。
+
+**(a) 在理由不成立的地方觸發。**
+
+```console
+$ python3 -c "open('cr3.csv','wb').write(b'a,b\n1,x\r\r\ry\n')"
+$ csv2 -r -i cr3.csv
+csv2: this file uses CR line endings … convert it first with: tr '\r' '\n' < file > converted.csv
+$ echo $?
+1
+```
+
+**那個檔案沒有使用 CR 行尾。** 它有兩行、都以 LF 結尾,它有一筆紀錄,欄位 `b` 的值是
+`x\r\r\ry`——而那正是 README 自己承諾過的資料。訊息陳述了一件關於這個檔案的假話。
+
+邊界(LF 固定為 2):`CR=1 rc=0`、`CR=2 rc=0`、`CR=3 rc=1`。而 **照著訊息給的建議做會毀掉資料**:
+
+```console
+$ tr '\r' '\n' < cr3.csv > converted.csv
+$ csv2 -r --json -i converted.csv
+csv2: record 2 (line 3) is a blank line, …
+```
+
+**(b) 在理由成立的地方沉默,rc=0,而答案是錯的。**
+
+```console
+$ python3 -c "open('t3.csv','wb').write(b'col\r\"L\nL\nL\nL\"\rzz\r')"
+$ csv2 -r --json -i t3.csv
+{"meta":{"format":"csv","headers":1,"fields":1}}
+{"record":1,"line":2,"fields":{"col\r\"L":"L"}}
+{"record":2,"line":3,"fields":{"col\r\"L":"L"}}
+{"record":3,"line":4,"fields":{"col\r\"L":"L\"\rzz\r"}}
+{"meta":{"records":3,"matched":0}}
+$ echo $?      → 0，stderr 0 bytes
+```
+
+那個檔案**確實**以 CR 結尾:一欄、欄名 `col`、第 1 筆是一個內含 `L\nL\nL\nL` 的引號欄位、
+第 2 筆是 `zz`。csv2 把它讀成**三筆**,欄名成了 `col\r"L`,引號欄位沿著它自己的換行被撕開,
+開引號成了標頭的一部分、閉引號成了值的一部分。CR=3、LF=3,於是 `CR > LF` 為假,守衛從未執行。
+
+**而 README 把這個失敗描述成「已經修好」**:「原本它問的是『有沒有完全沒有 LF』,而一個結尾的
+LF 就足以讓它閉嘴」。那次修正把問題從「完全沒有 LF」改成「CR 比 LF 多」。**新的問題有同一個洞,
+只是從一個 LF 漲到三個。**
+
+**修法不是再調一次數量,而是換一個精確的判斷:標頭列裡有沒有裸 CR。** 一個以 CR 結尾的檔案
+沒有 LF 去結束它的第一行,因此它的全部內容都落在第一筆紀錄裡——證據永遠在標頭列。這條規則:
+
+- 抓得到上面三種形狀(多欄、單欄、CR 與 LF 一樣多);
+- 不會誤傷「紀錄裡的資料 CR」,那條承諾與它的位元組往返都完好;
+- 而一個確實屬於「欄名」的 CR 仍然到得了——加一對引號,而引號內的 CR 從來就不算數。
+
+**形狀:一條規則被實作成一個「大致相關」的統計量。** 與 GK 同族,但這一次那個統計量從一開始
+就不等價,只是在當時的測試資料上剛好一致。
+
+---
+
+## GX. `-i` 指向一個 FIFO,得到的是「這個檔案是空的」(2026-08-21 修正,T181)
+
+第 66 回合。
+
+```console
+$ mkfifo fifo.csv
+$ { sleep 0.2; printf 'a,b\n1,x\n2,y\n' > fifo.csv } &
+$ csv2 -r -i fifo.csv
+csv2: fifo.csv: expected 1 header row(s), found 0
+```
+
+**那條串流有三行。** 而 README 把那句訊息記載為「零位元組檔案」的診斷——被貼進一張工單時,
+它告訴第二個讀者「你的輸入是空的」。同樣的位元組走 `-si` 讀得完全正確。
+
+兩個原因,兩個都修了:
+
+1. **新鮮度戳記在解析之前讀走了頭尾各 64 個位元組**,而在管線上那些位元組不會回來。
+   `FileStamp.of` 現在對「非一般檔案」回傳 nil——那正是這棵樹在其他每一處用來表達
+   「這個輸入沒有索引」的寫法。
+2. **`runSelect` 把輸入開了兩次**:`planIndex(o, plan: try openInput(o), …)` 開一次只為了
+   讀那份 plan 的格式,然後丟掉,接著再開一次真正來讀。在一般檔案上那是免費的;在 FIFO 上
+   第一次把管線抽乾,第二次在等一個早已離開的寫入端。現在只開一次。
+
+修好之後,`-r`、`-contains`、`-mid`、`-tail`、`-get`、`-head` 在 FIFO 上都給出正確答案。
+
+---
+
+## GY. 硬連結不是一種拼法,而 `-i x -o y` 只比對拼法(2026-08-21 修正,T182)
+
+第 66 回合。README 說那條拒絕涵蓋「不論那兩者怎麼拼寫」。實測 `./x`、`././x`、絕對路徑、
+symlink 全部抓得到,而硬連結抓不到:
+
+```console
+$ ln same.csv hard.csv          # 兩者 inode 都是 175352245
+$ csv2 -update 1:2 Z -i same.csv -o hard.csv ; echo $?
+0
+```
+
+同一個 inode、同一個檔案,沒有拒絕——而那次執行悄悄地把連結斷開了:`hard.csv` 成了一個新的
+inode,`same.csv` 留著舊內容。沒有資料遺失,因此這是本輪四條之中最輕的一條;但那句
+「不論怎麼拼寫」是假的。已修:`sameFile` 現在在路徑比對之外,也比對 (dev, ino)。
+
+Windows 上回傳 nil 而不比對:那裡的 CRT 對所有檔案都回報 inode 0,比對的答案會是
+「每個檔案都是彼此」。
+
+---
+
+## GZ. 十六個 NUL 是一把合格的金鑰,而十五個隨機位元組不是(2026-08-21 修正,T183)
+
+第 66 回合。那個 16 位元組下限的自陳理由是:
+
+> A key this short is searched exhaustively in less time than this run took.
+
+```console
+$ head -c 15 /dev/urandom > k15.bin
+$ csv2 -hash secret -keyfile k15.bin …     → 拒絕
+$ python3 -c "open('kzero.bin','wb').write(b'\x00'*16)"
+$ csv2 -hash secret -keyfile kzero.bin …   → rc=0，secret:hmac:b610bfce
+```
+
+**十六個 NUL 一次就被猜中。** 而被拒絕的那把 15 位元組隨機金鑰,大約強上 10^36 倍。規則說的是
+「金鑰不可以被搜尋得到」,條件測的是 `size >= 16`。
+
+而「16 個 NUL」不是一個假想的檔案:那正是一個**被截斷、或從未被寫入**的金鑰檔的樣子。
+
+已修:建立保護時,拒絕「整個檔案只有一種位元組」的金鑰檔。這不是熵的估算——csv2 不做那種
+判斷,一個「把呼叫端真正的金鑰擋下來」的判斷比「接受了一把差金鑰」更糟——而「只有一種位元組」
+不是判斷。讀取一個「已經用弱金鑰做出來」的檔案仍然不被拒絕,與長度那條規則一致。
+
+---
+
+## HA. 那條 `--in-place` 拒絕的理由,對它擋下的一部分指令為假(2026-08-21 修正)
+
+第 66 回合。那句話是我在第 64 回合寫的:
+
+> writing a selection there would discard every record the selection does not name
+
+而 `-mid ,`(README 說它「兩端皆開,等於每一筆」)與短檔案上的 `-head 99`(README 說它會截斷)
+**指名了所有紀錄**。訊息對它們是假的。
+
+已改成一句對它擋下的每一次執行都成立的話:選取不是編輯,而「這一次究竟會不會丟掉東西」在讀完
+檔案之前無從得知——那正是它被「拒絕」而不是被「衡量」的理由。
+
+**形狀:一條拒絕用一個「具體後果」當理由,而那個後果只在多數情況下成立。** 與 GW 同族:
+一條規則,配上一個大致相關的說法。
+
+---
+
+## HB. `-append` 搭配 `--truncate-partial` 的訊息,斷言了一件關於檔案的事,而它沒有讀過那個檔案(2026-08-21 修正)
+
+第 66 回合。
+
+```console
+$ printf 'a,b\n1,x\n' > ap.csv        # 完整、以 LF 結尾、沒有未關閉的引號
+$ csv2 -append '9,z' --truncate-partial -i ap.csv --in-place
+csv2: --truncate-partial is refused with -append: appending can only add bytes and
+      cannot discard the incomplete record, …
+```
+
+**沒有「那筆不完整的紀錄」。** 這條拒絕只看旗標、在讀檔之前就觸發,於是它對完整的檔案也會
+觸發,而讀者會照著訊息去找一個不存在的損壞。已改成「不論檔案內容為何」的說法:兩個旗標作為
+一個要求就是不相容的。
+
+---
+
+## HC. 五個 `pkgs.csv`(2026-08-21 記錄,未改)
+
+第 66 回合。README 裡的 `pkgs.csv` 在不同段落是不同的檔案:2 欄、4 欄、`pkg,ver`、`a,b`、
+以及叫做 `packages.csv` 的 `pkg_name,version,source,license`。**讀者無法建出一個檔案去跑
+所有範例**;受測者建了六個。
+
+這一條沒有改,因為改法有兩種,而兩種都比現況糟:給每個區塊一個獨立的檔名(讀者要記六個名字),
+或統一成一個 fixture(每個範例都得重寫,而它們各自在示範不同的東西)。記錄在此,是因為
+「同一個名字在不同段落是不同的檔案」這件事,值得下一個讀者知道——尤其是在一份「叫人逐字執行
+範例」的文件裡。
+
+D6 的另一半已修:`-contains busybox` 那個區塊少印了一個命中(見 README 的更正)。

@@ -3707,7 +3707,13 @@ assert_fails "T91i --truncate-partial with -append is refused, not half-honoured
     "$CSV2" -append 'zstd,1.5.7,compression' --truncate-partial -i "$TMP/t91_quote.csv" --in-place
 assert_same "$TMP/t91_quote.csv" "$TMP/t91_quote.bak" \
     "T91j and it left the file alone rather than appending after the incomplete record / 而它沒有動那個檔案，不是在不完整的紀錄後面追加"
-assert_contains "$tp_msg" "appending can only add bytes" \
+# The message no longer says "the incomplete record", because this refusal
+# fires on the flags alone -- before the file is read -- and so fires on files
+# that have no torn tail at all. What it must still carry is the reason the two
+# cannot be honoured together, and the way through.
+# 訊息不再說「那筆不完整的紀錄」，因為這條拒絕只看旗標——在讀檔之前——因此對「根本沒有撕裂
+# 尾巴」的檔案也會觸發。它必須仍然帶著「兩者為何無法同時被滿足」的理由，以及走得通的那條路。
+assert_contains "$tp_msg" "can only add bytes after it" \
     "T91k the message says why, and names the way through / 訊息說出理由，並指出走得通的那條路"
 assert_contains "$tp_msg" "csv2 -r -t --truncate-partial" \
     "T91k2 and the way through is a command, not advice / 而那條路是一個指令，不是一句建議"
@@ -9528,6 +9534,158 @@ assert_fails "T179a --normalize alone is refused / 單獨的 --normalize 被拒�
 assert_succeeds "T179b and with -contains it is accepted / 搭配 -contains 則被接受" -- \
     "$CSV2" -contains 1 --normalize -i "$TMP/t178.csv"
 
+
+# ---------------------------------------------------------------------
+# T180 -- CR line endings: the rule, not a count.
+#
+# Round 66 pulled the stated reason and the actual trigger apart in both
+# directions. The guard said "this file uses CR line endings"; the test was
+# "bare CRs outnumber line feeds".
+#
+#   a,b<LF>1,x<CR><CR><CR>y<LF>   3 CRs, 2 LFs -> refused, and the file is
+#                                 LF-terminated. The message asserted something
+#                                 false about it, and `tr '\r' '\n'` -- which
+#                                 that message prescribes -- turns that one
+#                                 record into a file csv2 will not read.
+#   col<CR>"L<LF>L<LF>L<LF>L"<CR>zz<CR>
+#                                 3 CRs, 3 LFs -> accepted at rc=0 as three
+#                                 records under a column named `col<CR>"L`,
+#                                 the quoted field torn down its own newlines,
+#                                 nothing on stderr. A genuine CR-terminated
+#                                 file, silently misparsed.
+#
+# The rule is exact: a CR-terminated file has no LF to end its first line, so
+# everything lands in the first record, and the header row is where the
+# evidence always is.
+#
+# T180 —— CR 行尾：一條規則，不是一個數量。
+# 第 66 回合把「自陳的理由」與「實際的觸發條件」往兩個方向都拉開了。守衛說的是「本檔案使用
+# CR 行尾」，而測的是「裸 CR 比換行多」。規則是精確的：一個以 CR 結尾的檔案沒有 LF 去結束
+# 它的第一行，因此全部內容都落在第一筆紀錄裡，而證據永遠在標頭列。
+# ---------------------------------------------------------------------
+echo
+echo "--- T180: CR line endings / T180：CR 行尾 ---"
+
+printf 'a,b\r1,2\r3,4\r' > "$TMP/t180_cr.csv"
+printf 'col\r1\r2\r' > "$TMP/t180_cr1.csv"
+printf 'col\r"L\nL\nL\nL"\rzz\r' > "$TMP/t180_crmix.csv"
+printf 'a,b\n1,x\r\r\ry\n' > "$TMP/t180_data.csv"
+printf '"a\rb",c\n1,2\n' > "$TMP/t180_quoted.csv"
+
+assert_fails "T180a a CR-terminated file is refused / 以 CR 結尾的檔案被拒絕" -- \
+    "$CSV2" -r -i "$TMP/t180_cr.csv"
+assert_fails "T180b one column too / 單欄的也是" -- \
+    "$CSV2" -r -i "$TMP/t180_cr1.csv"
+assert_fails "T180c and when CRs and LFs are equal, which a count cannot see / CR 與 LF 一樣多時也是——那是數量看不見的" -- \
+    "$CSV2" -r -i "$TMP/t180_crmix.csv"
+_t180_msg=$("$CSV2" -r -i "$TMP/t180_crmix.csv" 2>&1 | head -1)
+assert_contains "$_t180_msg" "header row contains a bare carriage return" \
+    "T180d the message names what was actually seen / 訊息指出的是「實際看到的東西」"
+
+# Three CRs inside a field of an LF-terminated file: data, and it round-trips.
+# 一個 LF 結尾檔案的欄位裡有三個 CR：那是資料，而且原樣往返。
+assert_succeeds "T180e three CRs inside a record are still data / 一筆紀錄裡的三個 CR 仍然是資料" -- \
+    "$CSV2" -r -t -i "$TMP/t180_data.csv" -o "$TMP/t180_out.csv"
+assert_same "$TMP/t180_data.csv" "$TMP/t180_out.csv" \
+    "T180f and the file comes back byte for byte / 而檔案逐位元組回得來"
+
+# A CR that really belongs to a column name is reachable, by quoting it.
+# 一個確實屬於欄名的 CR 是到得了的：加引號。
+assert_succeeds "T180g a quoted CR in a header is a name / 標頭裡加了引號的 CR 是一個名字" -- \
+    "$CSV2" -r -t -i "$TMP/t180_quoted.csv" -o "$TMP/t180_q.csv"
+
+# ---------------------------------------------------------------------
+# T181 -- a FIFO given to -i.
+#
+# Round 66: `csv2 -r -i fifo.csv` on a stream carrying three lines reported
+# `expected 1 header row(s), found 0` -- the message for a file with nothing in
+# it. Two causes, both fixed here: the freshness stamp read the first and last
+# 64 bytes before the parse, and on a pipe those bytes do not come back; and
+# runSelect opened the input TWICE, once to hand planIndex a plan it only reads
+# the format from, so the second open waited for a writer that had already
+# gone.
+#
+# T181 —— 交給 -i 的一個 FIFO。
+# 第 66 回合：一條正要送來三行的串流，`csv2 -r -i fifo.csv` 回報的是
+# `expected 1 header row(s), found 0`——那是「檔案裡什麼都沒有」的訊息。兩個原因都在此修掉：
+# 新鮮度戳記在解析前讀了頭尾各 64 位元組，而在管線上那些位元組不會回來；以及 runSelect 把
+# 輸入開了「兩次」。
+# ---------------------------------------------------------------------
+echo
+echo "--- T181: -i on a FIFO / T181：-i 指向一個 FIFO ---"
+
+if (( $+commands[mkfifo] )); then
+    rm -f "$TMP/t181.fifo.csv"
+    if mkfifo "$TMP/t181.fifo.csv" 2>/dev/null; then
+        { sleep 0.2; printf 'a,b\n1,x\n2,y\n' > "$TMP/t181.fifo.csv" } &
+        _t181_out=$("$CSV2" -r -t "-i" "$TMP/t181.fifo.csv" 2>&1)
+        wait
+        assert_eq "$_t181_out" "$(printf 'a,b\n1,x\n2,y')" \
+            "T181a a FIFO reads as the stream it carries / 一個 FIFO 讀出來就是它承載的那條串流"
+        rm -f "$TMP/t181.fifo.csv"
+    else
+        skipt "T181a mkfifo is not permitted here / 此處不允許 mkfifo"
+        T181A_SKIPPED=1
+    fi
+else
+    skipt "T181a no mkfifo on this platform / 此平台沒有 mkfifo"
+    T181A_SKIPPED=1
+fi
+
+# ---------------------------------------------------------------------
+# T182 -- two names, one file.
+#
+# Round 66: `-i x -o y` was checked by comparing resolved PATHS, which catches
+# every spelling -- `./`, `../`, absolute, symlink -- and a hard link is not a
+# spelling. The edit broke the link at rc=0, leaving one name with the edit and
+# the other with what used to be shared.
+#
+# T182 —— 兩個名字，一個檔案。
+# ---------------------------------------------------------------------
+echo
+echo "--- T182: a hard link is not a spelling / T182：硬連結不是一種拼法 ---"
+
+printf 'a,b\n1,x\n' > "$TMP/t182.csv"
+rm -f "$TMP/t182_hard.csv"
+if ln "$TMP/t182.csv" "$TMP/t182_hard.csv" 2>/dev/null; then
+    assert_fails "T182a -i and -o as hard links to one inode is refused / -i 與 -o 是同一個 inode 的硬連結時被拒絕" -- \
+        "$CSV2" -update 1:2 Z -i "$TMP/t182.csv" -o "$TMP/t182_hard.csv"
+    assert_succeeds "T182b while an unrelated -o still works / 而一個無關的 -o 仍然可用" -- \
+        "$CSV2" -update 1:2 Z -i "$TMP/t182.csv" -o "$TMP/t182_other.csv"
+else
+    skipt "T182a hard links are not available here / 此處無法建立硬連結"
+    T182A_SKIPPED=1
+    skipt "T182b hard links are not available here / 此處無法建立硬連結"
+    T182B_SKIPPED=1
+fi
+
+# ---------------------------------------------------------------------
+# T183 -- a key that is one byte repeated.
+#
+# Round 66: the 16-byte floor exists because "a key this short is searched
+# exhaustively in less time than this run took". Sixteen NUL bytes -- what a
+# truncated or never-written key file looks like -- passed it, and is guessed
+# in one attempt; fifteen random bytes, refused, are some 10^36 times stronger.
+#
+# T183 —— 一把「同一個位元組重複而成」的金鑰。
+# ---------------------------------------------------------------------
+echo
+echo "--- T183: a key file with one distinct byte / T183：只有一種位元組的金鑰檔 ---"
+
+printf 'a,secret\n1,x\n' > "$TMP/t183.csv"
+python3 - "$TMP/t183_zero.bin" <<'PY' 2>/dev/null || printf '0000000000000000' > "$TMP/t183_zero.bin"
+import sys
+open(sys.argv[1], 'wb').write(b'\x00' * 16)
+PY
+assert_fails "T183a a 16-byte all-one-value key is refused for creating / 一把 16 位元組、只有一種值的金鑰不能用來建立保護" -- \
+    "$CSV2" -hash secret -keyfile "$TMP/t183_zero.bin" -i "$TMP/t183.csv" -o "$TMP/t183_o.csv" -t
+_t183_msg=$("$CSV2" -hash secret -keyfile "$TMP/t183_zero.bin" -i "$TMP/t183.csv" -o "$TMP/t183_o.csv" -t 2>&1 | head -1)
+assert_contains "$_t183_msg" "copies of one byte" \
+    "T183b and the message says what is wrong with it / 而訊息說出它哪裡不對"
+head -c 32 /dev/urandom > "$TMP/t183_good.bin" 2>/dev/null || printf 'kJ3#a91Zq7!vB2xLm5PdR8sTn0WyE4Uc' > "$TMP/t183_good.bin"
+assert_succeeds "T183c while a real key of the same length is accepted / 而同樣長度的一把真金鑰被接受" -- \
+    "$CSV2" -hash secret -keyfile "$TMP/t183_good.bin" -i "$TMP/t183.csv" -o "$TMP/t183_g.csv" -t
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
@@ -9639,6 +9797,13 @@ fi
 # T166d 需要 python3 才能在扳歪一個行號之後重算索引檢查碼。guest 的 busybox 使用者空間沒有
 # python3，而那是那個映像的性質、不是平台名字的性質——因此由該案例自己記錄，與上面四個相同。
 (( ${T166D_SKIPPED:-0} )) && (( want_skip += 1 ))
+# T181 needs mkfifo, T182 needs hard links; Windows has neither in the shape
+# these cases want. Recorded by the case, like the ones above it.
+# T181 需要 mkfifo，T182 需要硬連結；Windows 上沒有這兩者（至少沒有這些案例要的形狀）。
+# 與上面那些一樣，由案例自己記錄。
+(( ${T181A_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T182A_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T182B_SKIPPED:-0} )) && (( want_skip += 1 ))
 if [[ "$skip" == "$want_skip" ]]; then
     ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
 else

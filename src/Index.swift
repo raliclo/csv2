@@ -116,6 +116,27 @@ struct FileStamp {
     var hashTail: [UInt8]
 
     static func of(path: String) -> FileStamp? {
+        // A stamp reads the first and last 64 bytes, and on anything that is
+        // not a regular file those bytes do not come back: reading a FIFO
+        // CONSUMES them. `csv2 -r -i fifo.csv` on a three-line file therefore
+        // reached the parser empty and was reported as `expected 1 header
+        // row(s), found 0` -- the message for a file with nothing in it --
+        // while the same bytes through `-si` were read correctly.
+        //
+        // Returning nil here is what "there is no index for this input" is
+        // already spelled as everywhere else, so a pipe simply gets the
+        // no-sidecar path: no load, no save, no seek, and the read works.
+        // Refusing the input instead was tried first and it took `-i <(...)`
+        // with it, which had been working.
+        // 一個戳記會讀頭尾各 64 個位元組，而在「不是一般檔案」的東西上，那些位元組不會回來：
+        // 讀一個 FIFO 會把它們「吃掉」。於是 `csv2 -r -i fifo.csv` 對一個三行的檔案，抵達
+        // 解析器時是空的，並被回報為 `expected 1 header row(s), found 0`——那是「檔案裡什麼
+        // 都沒有」的訊息——而同樣的位元組走 `-si` 讀得完全正確。
+        //
+        // 在這裡回傳 nil，正是這棵樹在其他每一處用來表達「這個輸入沒有索引」的寫法，因此
+        // 一條管線就自然走上「沒有 sidecar」那條路：不載入、不儲存、不 seek，而讀取是對的。
+        // 先試過的是「拒絕這個輸入」，而那會連 `-i <(...)` 一起帶走，那原本是可用的。
+        guard Platform.fileKind(path: path) == .regular else { return nil }
         guard let id = Platform.fileIdentity(path: path) else { return nil }
         guard let h = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? h.close() }
