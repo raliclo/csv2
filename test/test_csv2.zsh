@@ -7950,6 +7950,61 @@ assert_contains "$("$CSV2" -r -t --json -i "$TMP/t158_ok.csv" | sed -n 2p)" 'caf
     "T158e while valid UTF-8 is carried as it always was / 而合法的 UTF-8 一如既往地被載著走"
 
 # ---------------------------------------------------------------------
+# T159 -- three things about reading that nothing had written down.
+#
+# Round 59, all three found by running the same read over a hundred small files
+# and comparing against Python's csv module:
+#   - a blank line anywhere is a hard error, including the one a file ending in
+#     two newlines has, and the message talked about field counts;
+#   - a bare CR inside an UNQUOTED field is data here and a row separator to
+#     most parsers, so the record counts differ across tools;
+#   - NUL and the other control bytes are accepted verbatim.
+# All three are now in both READMEs, so all three need holding.
+#
+# T159 —— 三件關於「讀取」、而先前沒有任何地方寫下來的事。
+# ---------------------------------------------------------------------
+echo
+echo "--- T159: blank lines, bare CR, and control bytes / T159：空白行、裸 CR，以及控制位元組 ---"
+
+print -r -- 'a,b'  > "$TMP/t159_blank.csv"
+print -r -- '1,x' >> "$TMP/t159_blank.csv"
+print -r -- ''    >> "$TMP/t159_blank.csv"
+print -r -- '2,y' >> "$TMP/t159_blank.csv"
+_t159=$("$CSV2" -r -t -i "$TMP/t159_blank.csv" 2>&1 >/dev/null)
+if [[ $_t159 == *"is a blank line"* ]]; then
+    ok "T159a a blank line is named as one / 空白行會被指名為空白行"
+else
+    bad "T159a $(print -r -- $_t159 | head -1) / 訊息如上"
+fi
+
+# The file that merely ends with an extra newline is the same case, and it is
+# the one most people will actually have.
+# 「只是多了一個結尾換行」的檔案是同一個情況，而那是多數人手上真正會有的那種。
+printf 'a,b\n1,x\n\n' > "$TMP/t159_trail.csv"
+_t159t=$("$CSV2" -r -t -i "$TMP/t159_trail.csv" 2>&1 >/dev/null)
+if [[ $_t159t == *"is a blank line"* ]]; then
+    ok "T159b and so is the blank line a trailing newline leaves / 多出來的結尾換行留下的那個空白行也是"
+else
+    bad "T159b $(print -r -- $_t159t | head -1) / 訊息如上"
+fi
+
+# A bare CR in an unquoted field: one record here.
+# 未加引號欄位裡的裸 CR：在這裡是一筆。
+printf 'a,b\n1,x\ry\n2,z\n' > "$TMP/t159_cr.csv"
+assert_eq "$("$CSV2" -r -t --json -i "$TMP/t159_cr.csv" | tail -1)" '{"meta":{"records":2,"matched":0}}' \
+    "T159c a bare CR inside an unquoted field is data, not a record break / 未加引號欄位裡的裸 CR 是資料，不是紀錄分隔"
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t159_cr.csv" | od -A n -c | tr -s ' ')" \
+          "$(printf 'x\ry\n' | od -A n -c | tr -s ' ')" \
+    "T159d and the CR is still in the value / 而那個 CR 還在值裡面"
+
+# NUL survives a round trip.
+# NUL 撐得過一次來回。
+printf 'a,b\n1,x\x00y\n' > "$TMP/t159_nul.csv"
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t159_nul.csv" | od -A n -c | tr -s ' ')" \
+          "$(printf 'x\x00y\n' | od -A n -c | tr -s ' ')" \
+    "T159e a NUL byte is data and comes back unchanged / NUL 是資料，而且原樣回來"
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one

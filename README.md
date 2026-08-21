@@ -227,7 +227,10 @@ SELECTING / 選取
 INPUT / OUTPUT
   -i FILE  -o FILE      file paths; -o writes a temp file and renames
   -si  -so              stdin / stdout, without buffering the whole file
-  --headers 1|2         required with -si: stdin has no extension. With -i it
+  --headers 1|2         required with -si: stdin has no extension, and
+                        required with -i when the path does not end in .csv or
+                        .csv2 -- the check is case-sensitive, so a file named
+                        .CSV needs it too. With -i it
                         is accepted only when it AGREES with the suffix, and
                         disagreeing is refused -- the suffix declares the
                         format. See the warning above; never combine it with
@@ -484,28 +487,43 @@ val=$(csv2 -get "$addr" -i f.csv2; printf x); val=${val%x}   # keeps the tail
 is the only shape that hands you the stored bytes, and even it is at the mercy
 of what you pour them into.
 
-**An address is only as current as the file it came from, and there is one way
-it can be wrong without anything saying so.** If a `.index` sidecar sits beside
-the file and the file has since been changed in a way the O(1) stamp cannot
-see — same size, same mtime, same first and last bytes — the search trusts it
-and can report a record number that is off. The three commands above then all
-exit 0, and the edit lands on a neighbouring record. Two ways to make that
-impossible, both cheap:
+**An address is only as current as the file it came from, and there are two
+ways it can be wrong without anything saying so.**
+
+The first is a stale sidecar. If a `.index` file sits beside the data and the
+data has since changed in a way the O(1) stamp cannot see — same size, same
+mtime, same first and last bytes — the search trusts it and can report a record
+number that is off. The three commands then all exit 0 and the edit lands on a
+neighbouring record. Two cheap ways to make that impossible:
 
 ```sh
 csv2 --verify-index -i f.csv2          # O(n): prove the sidecar first, exit 1 if not
 csv2 -contains "old" --no-index -i f.csv2   # or do not use one at all
 ```
 
+**The second is simpler and neither of those touches it: somebody edits the
+file between your two commands.** The address was true when `-contains` printed
+it and describes a different record by the time `-update` runs. csv2 has no way
+to see that — each command opens the file fresh, which is what makes it safe to
+run at all — so if a file can change under you, either serialise the writers or
+carry the VALUE rather than the address:
+
+```sh
+csv2 -update "$addr" "$new" -i f.csv2 --in-place    # trusts the address
+csv2 -contains "$old" -i f.csv2                     # or re-find, and accept a race you can see
+```
+
 `--no-index` is the flag for "refuse to trust a sidecar"; it is listed under
 the index flags and named here because this recipe is where it matters.
 
-**A write repairs the sidecar, which erases the evidence.** If a stale index
-sends an edit to the wrong record, the edit rewrites the file and builds a
-correct sidecar as it goes — so `--verify-index` afterwards says `index OK` at
-exit 0, about the file you have just damaged. Both halves are documented
-separately and the composition is the part that bites: verify BEFORE the edit,
-not after.
+**A write repairs the sidecar, which erases the evidence — on a file large
+enough to have one built.** If a stale index sends an edit to the wrong record,
+the edit rewrites the file and builds a correct sidecar as it goes, so
+`--verify-index` afterwards says `index OK` at exit 0, about the file you have
+just damaged. Below `CSV2_INDEX_MIN_BYTES` the write does not build one, so the
+stale sidecar is left where it is and `--verify-index` still exits 1 — the
+evidence survives on small files and not on large ones. Either way: verify
+BEFORE the edit, not after.
 
 **Only `-contains` reads the sidecar.** `-get` and the edit verbs scan, so a
 stale index does not make them miscount — it makes the ADDRESS you carry over
@@ -623,6 +641,24 @@ exactly the case in the paragraph above: it parses at rc=0 into records that
 mean nothing, and csv2 has nothing to detect it by that would not also
 misfire on legitimate data. If you are handed UTF-16, convert it; do not rely
 on being told.
+
+**A blank line anywhere is refused**, including the one a file ending in two
+newlines has: `record 2 (line 3) is a blank line, and a blank line is not a
+record with 2 empty fields; remove it`. Every other CSV reader has an opinion
+here and they differ — skip it, return one empty field, return N empty fields —
+and each of those quietly changes what record 3 is.
+
+**A bare CR inside an UNQUOTED field is data, and this is where csv2 differs
+from most parsers.** `1,x<CR>y` is one record with the value `x<CR>y`; Python's
+`csv` module reads it as two rows. Neither is wrong — RFC 4180 defines the
+record separator as CRLF and says nothing about a lone CR mid-field — but a
+script that compares counts across the two will see the difference. Inside
+QUOTES a CR is data everywhere, and a file whose records END with bare CRs is
+refused outright (see above).
+
+**NUL and the other control bytes are accepted verbatim** in file content:
+they are data, they round-trip, and the locating report escapes them for
+display.
 
 **A zero-byte file is refused too**, with `expected 1 header row(s), found 0` —
 a file with no header does not declare its own shape, and guessing one is how a
@@ -1452,7 +1488,7 @@ cannot be lowered can only be exercised by building a 16 MiB fixture.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `CSV2_INDEX_MIN_BYTES` | 16 MiB | below this, no index is read or written |
+| `CSV2_INDEX_MIN_BYTES` | 16 MiB | below this, no index is read or written as a SIDE EFFECT. `--build-index` is an explicit request and writes one at any size |
 | `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | set above the file size to force the single-threaded path |
 | `CSV2_PARALLEL_MAX_BYTES` | 1 GiB | ceiling on what the in-flight chunks may hold. It governs the **output** fragments — one batch of them is kept so they can be written in chunk order, which is what makes parallel output byte-identical to single-threaded. The read side needs no ceiling: a worker reads its chunk 64 KiB at a time and never holds more. Lowering this holds fewer chunks in flight and the rest queue; `-debug` says so, with the numbers. **It is not a cap on the process's memory** — under an 8 MiB setting, peak RSS was still 58 MB, because the fixed working set is not part of what it governs |
 | `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | smaller values make a small file yield many chunks, so chunk boundaries are actually exercised |
