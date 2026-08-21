@@ -865,7 +865,32 @@ final class RecordParser {
                 //
                 // 用位元組而不是筆數：從解析器內部看，被丟掉的文字「就是一筆」，而去數
                 // 「讀者本來會在裡面看到幾筆」，等於去解析一段剛剛被宣告為解析不了的文字。
-                let dropped = rawBuf.count + valBuf.count
+                // From where the record began to where the input ran out.
+                //
+                // It used to be `rawBuf.count + valBuf.count`, which counts the
+                // same text twice: rawBuf holds the bytes as they arrived
+                // (opening quote included) and valBuf the decoded value, so a
+                // tail of B bytes was reported as 2B+1. On a 38-byte file it
+                // said 55 -- more bytes than the file has -- and on a
+                // three-byte tail it said 1, under-reporting. The other half of
+                // the same sentence, "beginning at byte N", was right every
+                // time, which is what made the wrong half credible.
+                //
+                // Nothing in the tool could check it: there is no --json field,
+                // no -log entry and no -debug line for this number. The WARN is
+                // its only report, and both READMEs promise it.
+                //
+                // 從「這一筆開始的地方」到「輸入用完的地方」。
+                //
+                // 原本是 `rawBuf.count + valBuf.count`，而那把同一段文字數了兩次：rawBuf 裝的是
+                // 「抵達時的位元組」（含開引號），valBuf 裝的是解碼後的值，於是 B 個位元組的
+                // 尾巴被回報成 2B+1。在一個 38 位元組的檔案上它說 55——比整個檔案還多——而在一個
+                // 三位元組的尾巴上它說 1，少報。同一句話的另一半「beginning at byte N」每次都對，
+                // 而那正是讓錯的那一半顯得可信的原因。
+                //
+                // 工具裡沒有任何東西能檢查它：這個數字沒有 --json 欄位、沒有 -log 條目、
+                // 也沒有 -debug 行。那則 WARN 是它唯一的報告，而兩份 README 都承諾了它。
+                let dropped = max(0, offset - recOffset)
                 Logger.shared.warn(
                     "--truncate-partial discarded \(dropped) bytes: an unterminated record beginning at byte \(recOffset). If the quote opened early, that is everything after it")
                 fields = []

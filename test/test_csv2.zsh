@@ -9719,6 +9719,157 @@ head -c 32 /dev/urandom > "$TMP/t183_good.bin" 2>/dev/null || printf 'kJ3#a91Zq7
 assert_succeeds "T183c while a real key of the same length is accepted / 而同樣長度的一把真金鑰被接受" -- \
     "$CSV2" -hash secret -keyfile "$TMP/t183_good.bin" -i "$TMP/t183.csv" -o "$TMP/t183_g.csv" -t
 
+
+# ---------------------------------------------------------------------
+# T184 -- -o onto a device, and the trap a signed dev_t sets.
+#
+# Round 67. `csv2 -r -t -i f.csv -o /dev/null` died on SIGTRAP: exit 133, zero
+# bytes on stdout AND stderr. The refusal is written, correct, and one line
+# further down than the crash -- `Platform.fileNode`, added the day before for
+# hard links, does `UInt64(st.st_dev)`, and `st_dev` is a SIGNED 32-bit dev_t
+# on Darwin whose value for a device node is negative. `UInt64(-1)` is a Swift
+# trap.
+#
+# The README names `-o /dev/stdout` as its example of this refusal, so the one
+# case the document picks to illustrate the rule was the one that crashed. The
+# suite had no case for it, which is why a fix introduced on 2026-08-21 and a
+# round run on 2026-08-21 were needed to notice.
+#
+# T184 —— -o 指向一個裝置，以及一個有號 dev_t 設下的陷阱。
+# 第 67 回合。`csv2 -r -t -i f.csv -o /dev/null` 死在 SIGTRAP：exit 133，stdout 與 stderr
+# 都是零位元組。那條拒絕寫好好的、也是對的，就在當機的下一行——前一天為了硬連結而加的
+# `Platform.fileNode` 做了 `UInt64(st.st_dev)`，而 Darwin 上的 `st_dev` 是有號的 32 位元
+# dev_t，裝置節點的值是負的。`UInt64(-1)` 是一個 Swift trap。
+# ---------------------------------------------------------------------
+echo
+echo "--- T184: -o onto a device / T184：-o 指向一個裝置 ---"
+
+printf 'a,b\n1,x\n2,y\n' > "$TMP/t184.csv"
+
+if (( IS_WINDOWS )); then
+    skipt "T184a /dev/null is not a device node on Windows / Windows 上 /dev/null 不是裝置節點"
+    T184A_SKIPPED=1
+    skipt "T184b same reason / 同一個理由"
+    T184B_SKIPPED=1
+else
+    for _dev in /dev/null /dev/zero; do
+        _t184_out=$("$CSV2" -r -t -i "$TMP/t184.csv" -o "$_dev" 2>&1)
+        _t184_rc=$?
+        if (( _t184_rc == 1 )); then
+            ok "T184a -o $_dev is refused, exit 1 / -o $_dev 被拒絕，結束狀態 1"
+        else
+            bad "T184a -o $_dev exited $_t184_rc / -o $_dev 以 $_t184_rc 結束"
+        fi
+    done
+    assert_contains "$("$CSV2" -r -t -i "$TMP/t184.csv" -o /dev/null 2>&1)" "Use -so" \
+        "T184b and the refusal names the way through / 而那條拒絕指出走得通的那條路"
+fi
+
+# An empty -o resolves to the current directory, so the temp file lands in its
+# PARENT and the failure arrives as a raw rename errno quoting the internal
+# temp filename. Refused up front instead.
+# 空的 -o 會解析成目前目錄，於是暫存檔落在它的「上一層」，而失敗以一個原始的 rename errno
+# 抵達、還引用了內部暫存檔名。改成在最前面就拒絕。
+_t184_empty=$("$CSV2" -r -t -i "$TMP/t184.csv" -o "" 2>&1)
+assert_contains "$_t184_empty" "-o is empty" \
+    "T184c an empty -o is refused by name / 空的 -o 會被指名拒絕"
+if [[ $_t184_empty == *"csv2tmp"* ]]; then
+    bad "T184d the message leaked the temp filename / 訊息洩漏了暫存檔名"
+else
+    ok "T184d and no internal temp filename appears in it / 而訊息裡不會出現內部暫存檔名"
+fi
+
+# ---------------------------------------------------------------------
+# T185 -- how many bytes --truncate-partial discarded.
+#
+# Round 67 measured `reported = 2·B + 1` where the truth is `B + prefix`: the
+# count added rawBuf and valBuf, which hold the same text twice -- as it
+# arrived and as it decoded. On a 38-byte file it reported 55, more bytes than
+# the file has; on a three-byte tail it reported 1.
+#
+# The other half of the same sentence -- "beginning at byte N" -- was right
+# every time, which is what made the wrong half credible. And nothing in the
+# tool could check it: there is no --json field, no -log entry and no -debug
+# line for this number, so the WARN is its only report and both READMEs promise
+# it.
+#
+# T185 —— --truncate-partial 到底丟掉了幾個位元組。
+# 第 67 回合量到 `回報值 = 2·B + 1`，而真值是 `B + 前綴`：那個計數把 rawBuf 與 valBuf 相加，
+# 而它們裝的是同一段文字的兩種樣子。在一個 38 位元組的檔案上它說 55——比整個檔案還多。
+# ---------------------------------------------------------------------
+echo
+echo "--- T185: the discarded byte count / T185：被丟棄的位元組數 ---"
+
+_t185_bad=0
+for _n in 0 1 2 5 20 40; do
+    _f="$TMP/t185_$_n.csv"
+    _c="$TMP/t185_c_$_n.csv"
+    { printf 'a,b\n1,x\n2,"'; _i=0; while (( _i < _n )); do printf 'Z'; _i=$((_i+1)); done } > "$_f"
+    _total=$(wc -c < "$_f" | tr -d ' ')
+    _warn=$("$CSV2" -r -t --truncate-partial -i "$_f" -o "$_c" 2>&1)
+    _kept=$(wc -c < "$_c" | tr -d ' ')
+    _true=$(( _total - _kept ))
+    if [[ $_warn != *"discarded $_true bytes"* ]]; then
+        bad "T185a n=$_n: file $_total, kept $_kept, so $_true went -- the WARN said: $_warn / 檔案 $_total、留下 $_kept，因此走掉 $_true——而 WARN 說的如上"
+        _t185_bad=1
+    fi
+done
+(( _t185_bad )) || ok "T185a the WARN's count is the bytes that actually went, at six sizes / 那個 WARN 的數字就是實際走掉的位元組，六種大小都是"
+
+# ---------------------------------------------------------------------
+# T186 -- --json says WHICH header row.
+#
+# Round 67: the locating report says `0a` and `0b`, and the stated reason for
+# those two labels is that a hit in the English title row and one in the
+# Chinese title row are distinguishable. `--json` -- the shape meant for
+# programs -- gave `"record":0` for both, leaving only a physical line number.
+#
+# T186 —— --json 說得出「是哪一列標頭」。
+# ---------------------------------------------------------------------
+echo
+echo "--- T186: which header row, in JSON / T186：JSON 裡的「哪一列標頭」 ---"
+
+printf 'pkg,ver,note\n套件,版本,備註\nzlib,1.3,x\n' > "$TMP/t186.csv2"
+printf 'a,b\nx,y\n' > "$TMP/t186.csv"
+
+assert_contains "$("$CSV2" -contains pkg --include-headers --json -i "$TMP/t186.csv2" | sed -n 2p)" \
+    '"header_row":"0a"' \
+    "T186a an English-title hit is 0a / 命中英文標題列是 0a"
+assert_contains "$("$CSV2" -contains 套件 --include-headers --json -i "$TMP/t186.csv2" | sed -n 2p)" \
+    '"header_row":"0b"' \
+    "T186b and a Chinese-title hit is 0b / 命中中文標題列是 0b"
+assert_contains "$("$CSV2" -contains a --include-headers --json -i "$TMP/t186.csv")" \
+    '"header_row":"0"' \
+    "T186c a one-header file says 0, as the report does / 只有一列標頭的檔案說 0，與報告一致"
+_t186_data=$("$CSV2" -contains zlib --include-headers --json -i "$TMP/t186.csv2" | sed -n 2p)
+if [[ $_t186_data == *"header_row"* ]]; then
+    bad "T186d a data hit carried a header_row key / 一個資料命中帶著 header_row 鍵"
+else
+    ok "T186d while a data hit carries no header_row key / 而資料命中不帶 header_row 鍵"
+fi
+
+# ---------------------------------------------------------------------
+# T187 -- --en with --zh is a request with two answers.
+#
+# Round 67: giving both was order-dependent and silent -- last one won, rc=0,
+# nothing said. This tool refuses `--headers 1 --headers 2` with a message
+# arguing that taking the last one silently is how `-hash note -hash ver`
+# leaves note in plaintext. Same hazard, two different handlings.
+#
+# T187 —— `--en` 與 `--zh` 併用，是一個有兩個答案的要求。
+# ---------------------------------------------------------------------
+echo
+echo "--- T187: --en with --zh / T187：--en 與 --zh 併用 ---"
+
+assert_fails "T187a --en --zh is refused / --en --zh 被拒絕" -- \
+    "$CSV2" -contains zlib --en --zh -i "$TMP/t186.csv2"
+assert_fails "T187b and so is the other order / 反過來的順序也是" -- \
+    "$CSV2" -contains zlib --zh --en -i "$TMP/t186.csv2"
+assert_contains "$("$CSV2" -contains zlib --zh --zh -i "$TMP/t186.csv2" 2>&1)" "given more than once" \
+    "T187c while the same flag twice says THAT instead / 而「同一個旗標給兩次」說的是那一件事"
+assert_succeeds "T187d one of them alone still works / 只給其中一個仍然可用" -- \
+    "$CSV2" -contains zlib --zh -i "$TMP/t186.csv2"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
@@ -9837,6 +9988,8 @@ fi
 (( ${T181A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T182A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T182B_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T184A_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T184B_SKIPPED:-0} )) && (( want_skip += 1 ))
 if [[ "$skip" == "$want_skip" ]]; then
     ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
 else

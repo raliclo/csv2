@@ -68,6 +68,13 @@ struct Options {
     var jsonASCII = false
     var zh = false
     var enOnly = false
+    /// How many of `--en`/`--zh` were given, which the two Bools cannot say:
+    /// each clears the other, so both-given looks exactly like last-given.
+    /// `--en`／`--zh` 給了幾個——那是那兩個 Bool 說不出來的：它們互相清除，因此「兩個都給」
+    /// 看起來與「只給了後面那個」一模一樣。
+    var langFlags = 0
+    var sawEn = 0
+    var sawZh = 0
 
     /// `-get r:c` -- the read that matches `-update r:c VAL`. Kept out of
     /// `edits` because it writes nothing; it is a selection of exactly one cell.
@@ -479,8 +486,16 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "pretty": o.pretty = true
         case "json": o.json = true
         case "json-ascii": o.json = true; o.jsonASCII = true
-        case "zh": o.zh = true; o.enOnly = false
-        case "en": o.enOnly = true; o.zh = false
+        // Each clears the other so the LAST one wins -- which is what made
+        // giving both a silent, order-dependent choice. The pair is refused in
+        // validate(), and it can only see that both were given if the parse
+        // stops erasing the evidence: `langGiven` counts the flags, not the
+        // state they leave behind.
+        // 兩者互相清除，於是「後面那個贏」——而那正是「兩個都給」變成一個安靜、且與順序有關的
+        // 選擇的原因。這一對在 validate() 裡被拒絕，而它要看得見「兩個都給了」，解析就不能把
+        // 證據抹掉：`langGiven` 數的是旗標，不是它們留下的狀態。
+        case "zh": o.zh = true; o.enOnly = false; o.langFlags += 1; o.sawZh += 1
+        case "en": o.enOnly = true; o.zh = false; o.langFlags += 1; o.sawEn += 1
         case "cell": o.cellModifier = true
         case "col": o.colModifier = true
         case "truncate-partial": o.truncatePartial = true
@@ -1223,6 +1238,18 @@ func validate(_ o: inout Options) throws {
     // 自身的路徑上，會把連結換成一般檔案，而目標檔逐位元未變、rc=0——shell 的 `>` 是
     // 跟著連結走、寫進目標的，而呼叫端完全有理由那樣預期。DP 為 --in-place 定下了這件事，
     // 而這裡是同一句話同樣成立的地方。
+    // An empty -o is a variable that came out empty, and it resolves to the
+    // current directory: the temp file then lands in the PARENT of where the
+    // caller meant to write, and the failure arrives as a raw rename errno
+    // quoting the internal temp filename -- not the documented two-line
+    // refusal that the same condition (`-o adir`) produces one line below.
+    // 空的 -o 是一個「算成了空字串」的變數，而它會解析成目前目錄：暫存檔於是落在呼叫端本來
+    // 想寫的地方的「上一層」，而失敗是以一個原始的 rename errno 抵達、還引用了內部暫存檔名
+    // ——而不是同一個條件（`-o adir`）在下面一行所產生的、有記載的那兩行拒絕。
+    if let out = o.output, out.isEmpty {
+        throw usageError("-o is empty; name a file, or use -so to write to a stream",
+                         "-o 是空的；請指名一個檔案，或用 -so 寫到串流")
+    }
     if !o.inPlace, let out = o.output {
         // Before resolving, because this message has to name the path the
         // caller typed. `-o` writes a temp file beside the destination and
@@ -1239,7 +1266,10 @@ func validate(_ o: inout Options) throws {
         // 打過的路徑。
         if let k = Platform.fileKind(path: out), k != .regular {
             let kind = k == .directory ? "a directory" : k == .fifo ? "a FIFO" : "not a regular file"
-            let kindZh = k == .directory ? "一個目錄" : k == .fifo ? "一個 FIFO" : "不是一般檔案"
+            // The Chinese read "是不是一般檔案" -- "is is not a regular file" --
+            // because the sentence supplies 是 and this arm supplied it again.
+            // 中文原本讀成「是不是一般檔案」，因為句子已經給了「是」，而這一支又給了一次。
+            let kindZh = k == .directory ? "一個目錄" : k == .fifo ? "一個 FIFO" : "一個裝置或其他非一般檔案"
             throw usageError(
                 "-o \(out) is \(kind); -o writes a temp file beside the destination and renames it, which needs a regular file. Use -so to write to a stream",
                 "-o \(out) 是\(kindZh)；-o 會在目的地旁邊寫暫存檔再 rename，那需要一個一般檔案。要寫到串流請用 -so")
@@ -1406,6 +1436,30 @@ func validate(_ o: inout Options) throws {
     // 在 JSON 物件裡無處可去。它原本會被接受然後丟掉：沒有 rownum 鍵、fields 不變、rc=0。
     // 那與三行之上 `--a1`、`--physical` 被拒絕的沉默是同一種，也與 `-get` 明文以「它會被
     // 忽略」為由拒絕 -rownum 的那一種相同。
+    // --en and --zh choose which header row names the columns, so giving both
+    // is a request with two answers. The last one silently won, order-
+    // dependent, at rc=0 -- and this tool refuses `--headers 1 --headers 2`
+    // with a message arguing that taking the last one silently is how
+    // `-hash note -hash ver` leaves note in plaintext. Same hazard, and it was
+    // handled two different ways.
+    // --en 與 --zh 決定的是「由哪一列標頭來命名欄位」，因此兩個都給等於一個有兩個答案的要求。
+    // 原本是「後面那個安靜地贏」，與順序有關，rc=0——而這個工具拒絕 `--headers 1 --headers 2`
+    // 時所給的理由，正是「安靜地取最後一個，就是 `-hash note -hash ver` 把 note 留在明文的
+    // 那條路」。同一類危險，卻用了兩種不同的處理方式。
+    if o.langFlags > 1 {
+        // Two different flags and the same flag twice are different mistakes,
+        // and the message has to be true of the one in front of it -- the same
+        // note that stands beside the -i/-o and --in-place refusals.
+        // 「兩個不同的旗標」與「同一個旗標給兩次」是兩種不同的錯誤，而訊息必須對眼前這一個
+        // 為真——與 -i/-o、--in-place 那兩條拒絕旁邊的註記是同一件事。
+        if o.sawEn > 0 && o.sawZh > 0 {
+            throw usageError("--en and --zh both choose which header row names the columns; give one",
+                             "--en 與 --zh 都在決定「由哪一列標頭命名欄位」；請只給一個")
+        }
+        let f = o.sawEn > 1 ? "--en" : "--zh"
+        throw usageError("\(f) is given more than once; a repeated flag is refused rather than taken once, because the second one may have been meant to change something",
+                         "\(f) 給了不只一次；重複的旗標會被拒絕而不是「只取一次」，因為第二個很可能是想改變什麼")
+    }
     if o.rownum && o.json {
         throw usageError(
             "-rownum adds a column and --json names fields instead of numbering them, so it would be ignored; --json already carries the record number in its `record` key",

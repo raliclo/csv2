@@ -6076,3 +6076,203 @@ csv2: --truncate-partial is refused with -append: appending can only add bytes a
 範例」的文件裡。
 
 D6 的另一半已修:`-contains busybox` 那個區塊少印了一個命中(見 README 的更正)。
+
+---
+
+## HD. `-o /dev/null` 以 SIGTRAP 當機,exit 133,兩條輸出流上一個位元組也沒有(2026-08-21 修正,T184)
+
+第 67 回合。**這一條是我前一天(GY,硬連結)的修正帶進來的**,而它把一條「有記載、正確、
+兩行」的拒絕變成一次無聲的當機。
+
+```console
+$ csv2 -r -t -i t1.csv -o /dev/stdout > o.out 2> o.err
+$ echo $?
+133                                    # 128 + SIGTRAP
+$ wc -c o.out o.err
+       0 o.out
+       0 o.err
+```
+
+`/dev/null`、`/dev/zero`、以及「cwd 裡指向它們的一個 symlink」都一樣,三次執行皆可重現。
+而**旁邊的鄰居都是好的**:`-o` 指向目錄、`-o` 指向 FIFO,都得到那條正確的兩行拒絕。
+
+原因在 `Platform.fileNode`:
+
+```swift
+return (UInt64(st.st_dev), UInt64(st.st_ino))
+```
+
+Darwin 的 `st_dev` 是**有號**的 32 位元 `dev_t`,而一個裝置節點的值是**負的**(`/dev/null`
+是 -1)。`UInt64(-1)` 是一個 Swift trap。那條拒絕就寫在當機的下一行,永遠到不了。
+
+**這同時打破了那句全域宣稱**:「每一種拒絕都以 1 結束……每一次都是恰好兩行 stderr」。
+這裡是 exit 133、零行。而 README 拿來當這條拒絕範例的,正是 `-o /dev/stdout`。
+
+修法是 `UInt64(bitPattern: Int64(st.st_dev))`——那個身分只會被拿去比對相等,位元樣式就是
+它需要的全部。
+
+**形狀:一個修正,在一條沒有測試覆蓋的路徑上,把「拒絕」換成了「當機」。** 前一天那個修正
+有它自己的測試(T182),而 T182 測的是硬連結;沒有任何案例把 `-o` 指向一個裝置。現在有了。
+
+---
+
+## HE. `--truncate-partial` 說它丟掉了幾個位元組,而那個數字是編出來的(2026-08-21 修正,T185)
+
+第 67 回合。
+
+```console
+$ printf 'a,b\n1,x\n2,"unclosed and this trails on' > part.csv
+$ wc -c part.csv
+      38 part.csv
+$ csv2 -r -t --truncate-partial -i part.csv -o clean.csv
+WARN  --truncate-partial discarded 55 bytes: an unterminated record beginning at byte 8
+$ wc -c clean.csv
+       8 clean.csv
+```
+
+**檔案 38 個位元組,走掉 30 個,它說 55**——比整個檔案還多。掃過一輪之後,規律是
+`回報值 = 2·B + 1`(B 是開引號之後的位元組數),而真值是 `B + 前綴`:短尾巴時**少報**
+(3 個位元組走掉、它說 1),長尾巴時多報將近兩倍。
+
+原因:
+
+```swift
+let dropped = rawBuf.count + valBuf.count
+```
+
+`rawBuf` 裝的是「抵達時的位元組」(含開引號),`valBuf` 裝的是「解碼後的值」——**同一段文字
+被數了兩次。**
+
+**而同一句話的另一半永遠是對的**:「beginning at byte 8」每一次都正確。一個精確、可驗證的
+子句,緊挨著一個編造的子句——那正是讓編造的那一半顯得可信的原因。
+
+**工具裡沒有任何東西能檢查它**:這個數字沒有 `--json` 欄位、沒有 `-log` 條目、也沒有
+`-debug` 行。那則 WARN 是它唯一的報告,而兩份 README 都承諾了它。修法是
+`offset - recOffset`——從「這一筆開始的地方」到「輸入用完的地方」。六種大小實測全對。
+
+---
+
+## HF. 那張「封閉的四項 WARN 清單」漏了第五項,而它是最不該漏的那一項(2026-08-21 修正)
+
+第 67 回合。README 在第 64 回合被改成:
+
+> **It is a list, not a policy** — these four and no others
+
+而:
+
+```console
+$ csv2 -r -i o1.csv -log adir 2>&1 >/dev/null
+csv2: … WARN  cannot write log file adir; continuing without one
+$ echo $?
+0
+```
+
+**第五個 WARN,層級是 WARN,rc=0,在正常路徑上。** 而它是這張清單最不能漏掉的一個:
+**呼叫端要的是一份稽核軌跡,那次執行以 0 結束,沒有任何 log 檔存在,而全部的通知就是
+stderr 上一行英文。**
+
+那正是第 64 回合被刪掉的那條「原則」所涵蓋的情況——「一次成功、但幾乎確定不是呼叫端本意的
+執行」——而刪掉它的理由是「讀者無法分辨自己拿到的是原則還是清單」。**於是那張清單也不完整。**
+一個為那四個 WARN 寫了處理常式的人,沒有處理到「他的稽核軌跡靜靜消失了」那一個。
+
+---
+
+## HG. `--json` 丟掉了 `0a`／`0b` 的區別,而那個區別存在的全部理由就是「分得出來」(2026-08-21 修正,T186)
+
+第 67 回合。README 對那兩個標籤的說法是:「so that a hit in the English title row and one in
+the Chinese title row are **distinguishable**」。
+
+```console
+$ csv2 -contains pkg    --include-headers --json -i h2.csv2 | sed -n 2p
+{"record":0,"field":1,"header_en":"pkg","header_zh":"套件","value":"pkg","line":1}
+$ csv2 -contains 套件   --include-headers --json -i h2.csv2 | sed -n 2p
+{"record":0,"field":1,"header_en":"pkg","header_zh":"套件","value":"套件","line":2}
+```
+
+**兩者都是 `"record":0`**,只剩實體行號可以分辨——而那是在「給程式看的」那個輸出形狀裡。
+定位報告分得出來,JSON 分不出來,而 README 把 JSON 推薦為「每個命中自己一行、不受影響」的
+那一個。已修:命中標頭時多一個 `header_row` 鍵(`"0a"`／`"0b"`／`"0"`),資料命中則沒有。
+
+---
+
+## HH. 三個功能對「標頭列算不算一筆紀錄」的答案不一致(2026-08-21 以文件處理)
+
+第 67 回合。同一個檔案、同一次搜尋:
+
+```console
+$ csv2 -contains pkg --include-headers -i h1.csv
+0:1	pkg	pkg                          # 報告：有一個命中
+$ csv2 -contains pkg --include-headers --json -i h1.csv | tail -1
+{"meta":{"records":2,"matched":0}}       # matched：什麼也沒中
+$ csv2 -contains pkg --include-headers --filter -i h1.csv
+pkg,ver,note                             # --filter：它「是」一筆紀錄，在這裡
+```
+
+而 `-A`/`-B`/`-C` 的上下文進不去標頭列,動詞也拒絕定址它。
+
+**咬得最痛的是 `matched`**,因為 README 指名它是那個「有沒有」的檢查:「A search that matches
+nothing exits 0 … To ask the question, read `matched` from the trailing `--json` meta line.」
+搭配 `--include-headers` 時,那個檢查對一個「它自己剛剛印出來的命中」回答「沒有」。
+
+還有 `--filter --include-headers -t`:那列標頭會在輸出裡出現兩次,一次作為標頭、一次作為資料。
+csv2 讀得回來(往返是自洽的),因此不算壞掉——但沒有任何地方寫過它。
+
+**行為未改**:`matched` 數的是紀錄,而標頭列不是紀錄,那與 csv2 在其他每一處劃線的方式一致;
+改的是文件——三個後果現在都寫在 `--include-headers` 那一節裡,連同「用了它就改數命中行數」。
+
+---
+
+## HI. `--en` 與 `--zh` 併用:後面那個安靜地贏(2026-08-21 修正,T187)
+
+第 67 回合。
+
+```console
+$ csv2 -contains zlib --en --zh --include-headers -i h2.csv2   → 1:1  套件  zlib
+$ csv2 -contains zlib --zh --en --include-headers -i h2.csv2   → 1:1  pkg   zlib
+```
+
+rc=0,什麼也沒說,而且與順序有關。**而這個工具拒絕 `--headers 1 --headers 2`,理由是
+「安靜地取最後一個,就是 `-hash note -hash ver` 把 note 以 rc=0 留在明文的那條路」。**
+同一類危險,兩種處理方式。
+
+已修:兩個都給會被拒絕。順帶發現解析處本來就會互相清除(`--zh` 會把 `enOnly` 設回 false),
+因此「兩個都給」與「只給了後面那個」在狀態上一模一樣——要看得見它,得數旗標而不是看狀態。
+同一個旗標給兩次則得到另一則訊息,因為那是另一種錯誤。
+
+**順帶記下第 67 回合查出來的一條通則,而它從未被寫進文件**:除了 `-A`/`-B`/`-C`(後者是
+「後面那個贏」)之外,**重複給同一個旗標一律被拒絕**。README 只寫了那個例外,於是只讀 README
+的人會把例外當成通則。兩份 README 現在都寫了這條規則。
+
+---
+
+## HJ. `-o ""` 走到了同一個條件,卻走了另一條路(2026-08-21 修正,T184c/d)
+
+第 67 回合。
+
+```console
+$ csv2 -r -t -i o1.csv -o ""
+csv2: cannot rename /tmp/…/.round67.csv2tmp.73581 onto /tmp/…/round67: Is a directory
+```
+
+空的 `-o` 解析成目前目錄,於是暫存檔落在呼叫端本來想寫的地方的**上一層**,而失敗以一個原始的
+rename errno 抵達——沒有中文那一行、沒有指出出路、還洩漏了內部暫存檔名。同一個條件
+(`-o adir`,目的地是一個目錄)在一行之外有一條正確的兩行拒絕。已修:空的 `-o` 在最前面就被拒絕。
+
+---
+
+## HK. 「M 是幾欄」與其他三個沒有記載的數字(2026-08-21 以文件處理)
+
+第 67 回合的第 1 題:每一個印出來的數字,造一個「兩種合理讀法會給出不同答案」的輸入。
+
+- **`wrote N records, M fields`**:`M` 是「一列有幾欄」,不是「寫出了幾個欄位」。3 筆 3 欄的
+  檔案說 `3 records, 3 fields`——而寫出的欄位是 9 個。**這是 README 叫稽核者去找的那一行**,
+  而它的兩個數字裡有一個從未被定義。已補。
+- **`[+N more chars]` 的「字元」是「字素叢集」**:五個家庭 emoji 落在截斷之後回報
+  `[+5 more chars]`,而不是 35(Unicode 純量)或 55(UTF-16 單元)。README 為 `--pretty`
+  仔細定義過這個單位,在這裡沒有。已補。
+- **`-debug` 的 `format=csv fields=7 records=3`** 完全沒有記載,而它的 `records=` 遵循的是
+  「讀到的最高一筆」那條規則,只能靠推。(未補:那一行屬於 `-debug`,而 `-debug` 的每一行都是
+  「現在正在查問題的人」看的,不是穩定介面。)
+- **格點數是 ceil,而且第 1 筆有一個格點**:900,000 筆得到 3516 個格點。README 說「每 256 筆
+  一個位元組偏移量」,讀起來是 3515。(未補:差一個的數字,而那句話要改對得把「第 1 筆也是一個
+  格點」寫進去,那會讓一句已經夠長的話再長一截。記在這裡。)

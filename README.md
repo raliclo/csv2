@@ -372,6 +372,13 @@ PROTECTION / 保護
   --yes                 accept the default key without a prompt
   --version  -V         print the version and exit
   --help  -h            print the flag list and exit
+  REPEATS               giving the same flag twice is REFUSED, for every flag
+                        except -A/-B/-C, where the last one wins. A repeat is
+                        refused rather than taken once because the second one
+                        may have been meant to change something -- the same
+                        reason `-hash note -hash ver` is refused rather than
+                        leaving `note` in plaintext at rc=0. `--en` with `--zh`
+                        is refused too: they are two answers to one question
   --                    the NEXT argument is data, not a flag: write a value
                         that begins with a dash as
                         `-update 1:2 -- --in-place -i f.csv -o g.csv`.
@@ -521,6 +528,11 @@ happens afterwards, so a value made of control characters still produces a long
 line: 200 raw characters can become 800 written ones. `\xNN` is written with
 the hex in upper case. If you are measuring a length from this column, add
 `preview` and `N` in RAW characters and do not measure the bytes on the line.
+
+**"Character" here means a GRAPHEME CLUSTER** — the same unit `--pretty`
+measures with, and the reason a family emoji counts as one. Five of them past
+the cut report `[+5 more chars]`, not 35 (Unicode scalars) or 55 (UTF-16
+units), and the cut never lands inside a cluster.
 
 Three fields separated by a **TAB**: the address, the column name, the value.
 One line per matching **cell**, so two matching columns in one record print two
@@ -976,7 +988,7 @@ will not record:
 | a deleted **record** | its contents, column by column: `delete record 1: a="1", notes="…"`. The largest thing this tool destroys, so the entry says what was in it |
 | a deleted **column** | the column name, not its values — one entry for the run rather than one per record, because the values are the whole column |
 | `-hash` and `-encrypt` | which columns, and which key. Unkeyed hashing says so in as many words: `hashing columns notes with NO key (unsalted SHA-256)` |
-| the outcome of the run | `wrote N records, M fields, atomic rename OK` — the line that says the write completed, and the one to look for when asking whether an edit landed |
+| the outcome of the run | `wrote N records, M fields, atomic rename OK` — the line that says the write completed, and the one to look for when asking whether an edit landed. **`M` is the row WIDTH, not the number of fields written**: a 3-record 3-column file says `3 records, 3 fields`, and a 22×7 one says `22 records, 7 fields` |
 
 **One entry is one line, and every line is escaped to keep it that way.** A
 newline, tab, CR or backslash is written as `\n`, `\t`, `\r` or `\\`, and
@@ -1161,10 +1173,29 @@ $ csv2 -contains name --include-headers -i pkgs.csv     # one header row
 0:1	name	name
 ```
 
+In `--json` the same distinction is a `header_row` key — `"0a"`, `"0b"` or
+`"0"` — present only on a header hit. Until 2026-08-21 both rows came out as
+`"record":0` and the only discriminator left was the physical line, in the
+output shape meant for programs, under the very sentence that gives
+distinguishability as the reason the two labels exist.
+
+**A header hit does not count as a match.** `matched` on the trailing `--json`
+meta line counts matching RECORDS, and a header row is not a record — so a run
+that prints `0a:3 note note` reports `"matched":0`. That is consistent with
+every other place csv2 draws the line, and it means the documented presence
+test (`read matched from the meta line`) answers "nothing found" for a hit it
+just printed. Count the hit lines instead when `--include-headers` is in play.
+
+Two further consequences of a header row not being a record: `-A`/`-B`/`-C`
+context never enters the header rows, and `--filter --include-headers` emits a
+matching header row **as a record** — with `-t` the header then appears twice
+in the output, once as the header and once as data. csv2 reads that back
+correctly, and it is still worth knowing before piping it anywhere.
+
 None of these is addressable by a verb, in any spelling: `-get`, `-update` and
 `-delete -cell` all refuse `0:`, `0a:` and `0b:` with the same sentence, which
 says why rather than complaining about the shape of an address csv2 printed
-itself. Asserted by T132.
+itself. Asserted by T132 and T186.
 
 The middle field is the column's name **in the language you asked for**, not the
 name from whichever header row matched. That is why the second line says `note`
@@ -1512,10 +1543,14 @@ without it nothing else is printed. On the normal path csv2 prints nothing at al
 to work inside a pipeline.
 
 **One thing does print without `-debug`, and it is deliberate**: a `WARN`
-line. **It is a list, not a policy** — these four and no others: a `-mid`
+line. **It is a list, not a policy** — these five and no others: a `-mid`
 window that begins past the end of the file, a value over 1 MiB going into the
 log in full, `--truncate-partial` naming the bytes it discarded, an index
-sidecar that could not be written. It used to be introduced as a principle
+sidecar that could not be written, and **a `-log` file that could not be
+written**. The last was missing from this list until 2026-08-21, and it is the
+one it could least afford to miss: the caller asked for an audit trail, the run
+exits 0, no log file exists, and one line of English on stderr is the whole
+notice. It used to be introduced as a principle
 ("a run that succeeded while doing something the caller almost certainly did
 not intend") followed by the list, and a reader cannot tell from that which of
 the two they are being promised — the principle covered a case the list did

@@ -649,7 +649,21 @@ enum Platform {
         #else
         var st = stat()
         guard stat(path, &st) == 0 else { return nil }
-        return (UInt64(st.st_dev), UInt64(st.st_ino))
+        // bitPattern, not UInt64(_:). `st_dev` is a SIGNED 32-bit dev_t on
+        // Darwin and a device node's is negative: /dev/null reports -1, and
+        // `UInt64(-1)` is a Swift trap -- SIGTRAP, exit 133, nothing on either
+        // stream. Introduced on 2026-08-21 by the hard-link fix, which turned
+        // `-o /dev/null` from the documented two-line refusal into a silent
+        // crash, on the very example the refusals table names. The identity is
+        // only ever compared for equality, so the bit pattern is the whole of
+        // what it needs to be.
+        // 用 bitPattern，不用 UInt64(_:)。Darwin 上的 `st_dev` 是「有號」的 32 位元 dev_t，
+        // 而一個裝置節點的值是負的：/dev/null 回報 -1，而 `UInt64(-1)` 是一個 Swift trap
+        // ——SIGTRAP、exit 133、兩條輸出流上都沒有東西。這是 2026-08-21 那個「硬連結」修正
+        // 帶進來的，它把 `-o /dev/null` 從一條「有記載的兩行拒絕」變成一次無聲的當機，而那
+        // 正是拒絕表拿來當範例的那一個。這個身分只會被拿去比對相等，因此「位元樣式」就是
+        // 它需要的全部。
+        return (UInt64(bitPattern: Int64(st.st_dev)), UInt64(st.st_ino))
         #endif
     }
 

@@ -556,6 +556,21 @@ final class JSONEmitter: RecordEmitter {
         if reportMode {
             for idx in matches {
                 var parts = ["\"record\":\(r.number)", "\"field\":\(idx + 1)"]
+                // Which header row, when the hit IS in a header row. The
+                // locating report says `0a` and `0b`, and the whole stated
+                // reason for those two labels is that a hit in the English
+                // title row and one in the Chinese title row are
+                // distinguishable -- while `--json`, the shape meant for
+                // programs, gave `"record":0` for both and left only the
+                // physical line to tell them apart.
+                // 命中「就在標頭列裡」時，是哪一列。定位報告寫的是 `0a` 與 `0b`，而那兩個
+                // 標籤存在的全部理由，就是「英文標題列的命中」與「中文標題列的命中」分得出來
+                // ——而 `--json`（給程式看的那個形狀）對兩者都給 `"record":0`，只留下實體行號
+                // 可以分辨。
+                if let hr = r.headerRow {
+                    let label = (ctx.headers.count > 1) ? (hr == 0 ? "0a" : "0b") : "0"
+                    parts.append("\"header_row\":\"\(label)\"")
+                }
                 if let h = ctx.headers.first, idx < h.count {
                     parts.append("\"header_en\":\(JSONOut.string(h.fields[idx].value, asciiOnly: ctx.jsonASCII))")
                 }
