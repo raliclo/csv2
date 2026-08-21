@@ -9392,6 +9392,142 @@ for _name in "$(printf 'na\033[2Kme')" "$(printf 'na\tme')" "$(printf 'na\nme')"
 done
 [[ "$_n" == "2" ]] && ok "T176f every one of them is exactly two lines / 它們每一個都恰好是兩行"
 
+
+# ---------------------------------------------------------------------
+# T177 -- the guard is about SELECTION, not about the absence of an edit verb.
+#
+# Round 65, one day after T175. That guard asked "is there an edit verb?" and
+# `-hash` is one of a kind, so `-head 1 -hash license -i f.csv --in-place`
+# walked past it and left one record of six at rc=0 -- the same destruction
+# T175 stops, one flag away from the command T175 stops. `-encrypt` and
+# `-decrypt` reach it too, and the `-decrypt` form destroys ciphertext and the
+# header salt together, which the README says nobody can ever recover.
+#
+# The refusals table stated the rule correctly ("a SELECTION with --in-place")
+# while the implementation used a different predicate. This case pins the rule
+# rather than the predicate.
+#
+# T177 —— 那道守衛管的是「選取」，不是「沒有編輯動詞」。
+# 第 65 回合，在 T175 之後一天。那道守衛問的是「有沒有編輯動詞？」而 `-hash` 算是一種，
+# 於是 `-head 1 -hash license -i f.csv --in-place` 從它旁邊走了過去，六筆只剩一筆，rc=0。
+# 拒絕表寫的是正確的規則，實作用的是另一個謂詞。
+# ---------------------------------------------------------------------
+echo
+echo "--- T177: a selection plus a protection verb / T177：選取加上保護動詞 ---"
+
+printf 'pkg,ver,license\nzlib,1.3,Zlib\nzstd,1.5,BSD-3\nncurses,6.4,MIT\nmbedtls,3.5,Apache\nbusybox,1.37,GPL-2.0\n' > "$TMP/t177.csv"
+
+for _combo in "-head 1 -hash license --yes" "-tail 1 -hash license --yes" \
+              "-mid 2,3 -hash license --yes" "-contains zlib --filter -hash license --yes"; do
+    cp "$TMP/t177.csv" "$TMP/t177w.csv"
+    assert_fails "T177a $_combo --in-place is refused / $_combo --in-place 被拒絕" -- \
+        "$CSV2" ${=_combo} -i "$TMP/t177w.csv" --in-place
+    # cmp, not sha256_of: that helper hashes a STRING, so it was comparing two
+    # file NAMES and failing on the copy's different name -- a check that could
+    # not have passed, which is the other half of a check that cannot fail.
+    # 用 cmp 而不是 sha256_of：那個輔助函式雜湊的是「字串」，因此它比的是兩個檔案「名字」，
+    # 在複本名字不同時必然失敗——一個「不可能通過」的檢查，正是「不可能失敗」的另一半。
+    if ! cmp -s "$TMP/t177w.csv" "$TMP/t177.csv"; then
+        bad "T177b $_combo changed the file / $_combo 改動了那個檔案"
+    fi
+done
+ok "T177b and the file is byte-for-byte what it was / 而檔案逐位元組不變"
+
+# -encrypt and -decrypt take the same road, and the -decrypt one destroys
+# ciphertext and the salt that makes it readable at all.
+# -encrypt 與 -decrypt 走同一條路，而 -decrypt 那一個會把密文、以及讓它得以被讀懂的那個鹽，
+# 一起銷毀。
+printf 'k' > "$TMP/t177key.bin"
+for _i in 1 2 3 4; do printf 'k' >> "$TMP/t177key.bin"; done
+head -c 32 /dev/urandom > "$TMP/t177key.bin" 2>/dev/null || printf '0123456789abcdef0123456789abcdef' > "$TMP/t177key.bin"
+cp "$TMP/t177.csv" "$TMP/t177e.csv"
+"$CSV2" -r -encrypt license -keyfile "$TMP/t177key.bin" -i "$TMP/t177e.csv" --in-place
+cp "$TMP/t177e.csv" "$TMP/t177e.keep"
+assert_fails "T177c -head with -decrypt --in-place is refused / -head 搭配 -decrypt --in-place 被拒絕" -- \
+    "$CSV2" -head 1 -decrypt all -keyfile "$TMP/t177key.bin" -i "$TMP/t177e.csv" --in-place
+assert_same "$TMP/t177e.csv" "$TMP/t177e.keep" \
+    "T177d and the ciphertext is still there / 而那些密文還在"
+
+# A transform with NO selection must still work in place: that is what in-place
+# protection is for, and refusing it would be the fix eating the feature.
+# 「有轉換、沒有選取」必須繼續可以就地執行：那正是就地保護的用途，把它一起拒絕，
+# 等於修正把功能吃掉了。
+cp "$TMP/t177.csv" "$TMP/t177r.csv"
+assert_succeeds "T177e -r -hash --in-place still works / -r -hash --in-place 仍然可用" -- \
+    "$CSV2" -r -hash license --yes -i "$TMP/t177r.csv" --in-place
+assert_eq "$("$CSV2" -r -t --no-index -i "$TMP/t177r.csv" | wc -l | tr -d ' ')" "6" \
+    "T177f and every record survived it / 而每一筆都活了下來"
+
+# The outcome line: a protection write goes through the select path, which had
+# no such line. The README nominates it as the one to look for when asking
+# whether an edit landed, so it was missing from the writes that cannot be
+# undone.
+# 那一行「結果」：保護寫入走的是選取路徑，而那條路徑原本沒有這一行。README 指名它是
+# 「想知道編輯有沒有落地時該找的那一行」，於是它獨獨在「無法還原」的那些寫入上不存在。
+rm -f "$TMP/t177.log"
+"$CSV2" -hash license --yes -i "$TMP/t177.csv" -o "$TMP/t177h.csv" -t -log "$TMP/t177.log"
+assert_contains "$(cat "$TMP/t177.log")" "wrote 5 records" \
+    "T177g a -hash write logs its outcome / 一次 -hash 寫入會記下它的結果"
+rm -f "$TMP/t177b.log"
+"$CSV2" -head 2 -t -i "$TMP/t177.csv" -o "$TMP/t177s.csv" -log "$TMP/t177b.log"
+assert_contains "$(cat "$TMP/t177b.log")" "wrote 2 records" \
+    "T177h and a selection written to a file logs what it wrote / 而寫進檔案的選取會記下它寫了什麼"
+rm -f "$TMP/t177c.log"
+"$CSV2" -r -t -i "$TMP/t177.csv" -so -log "$TMP/t177c.log" > /dev/null
+if grep -q "atomic rename" "$TMP/t177c.log"; then
+    bad "T177i -so claimed an atomic rename / -so 宣稱有一次原子改名"
+else
+    ok "T177i while -so claims no rename, because it makes none / 而 -so 不宣稱改名，因為它沒有改名"
+fi
+
+# ---------------------------------------------------------------------
+# T178 -- -rownum is a column, and it follows the column rules.
+#
+# Round 65. Its Markdown header cell was hard-coded to `rownum<br>列號`, so
+# `--en` and `--zh` -- documented as giving "one clean row instead" -- could
+# not clean the one cell csv2 had invented, and a ONE-header `.csv` got a
+# `<br>` cell beside plain ones in a table whose join is explained by the data
+# having two header rows. And `--json`, which names fields rather than
+# numbering them, accepted `-rownum` and dropped it: the same silence `--a1`
+# and `--physical` are refused for, and that `-get` refuses `-rownum` for by
+# name.
+#
+# T178 —— -rownum 是一個「欄」，而它遵守欄的規則。
+# ---------------------------------------------------------------------
+echo
+echo "--- T178: -rownum as a column / T178：-rownum 作為一個欄 ---"
+
+printf 'k,v\n鍵,值\nr1,v1\n' > "$TMP/t178.csv2"
+printf 'a,b\n1,2\n' > "$TMP/t178.csv"
+
+assert_eq "$("$CSV2" -r -t -rownum -md -i "$TMP/t178.csv" | head -1)" "|rownum|a|b|" \
+    "T178a a one-header .csv gets no <br> cell / 只有一列標頭的 .csv 不會有 <br> 那一格"
+assert_eq "$("$CSV2" -r -t -rownum -md -i "$TMP/t178.csv2" | head -1)" "|rownum<br>列號|k<br>鍵|v<br>值|" \
+    "T178b a .csv2 joins it like every other column / .csv2 上它與其他每一欄一樣被合併"
+assert_eq "$("$CSV2" -r -t -rownum -md --en -i "$TMP/t178.csv2" | head -1)" "|rownum|k|v|" \
+    "T178c --en cleans it too / --en 也清得掉它"
+assert_eq "$("$CSV2" -r -t -rownum -md --zh -i "$TMP/t178.csv2" | head -1)" "|列號|鍵|值|" \
+    "T178d and --zh gives the Chinese name / 而 --zh 給的是中文名"
+assert_fails "T178e --json refuses -rownum rather than dropping it / --json 拒絕 -rownum，而不是把它丟掉" -- \
+    "$CSV2" -r -t -rownum --json -i "$TMP/t178.csv"
+
+# ---------------------------------------------------------------------
+# T179 -- a flag that decides how a search compares needs a search.
+#
+# Round 65: --normalize with no -contains was accepted and did nothing, while
+# its two neighbours in the same section, --filter and --include-headers, are
+# both refused for exactly that.
+#
+# T179 —— 一個「決定搜尋怎麼比較」的旗標，需要一次搜尋。
+# ---------------------------------------------------------------------
+echo
+echo "--- T179: --normalize needs -contains / T179：--normalize 需要 -contains ---"
+
+assert_fails "T179a --normalize alone is refused / 單獨的 --normalize 被拒絕" -- \
+    "$CSV2" -r -t --normalize -i "$TMP/t178.csv"
+assert_succeeds "T179b and with -contains it is accepted / 搭配 -contains 則被接受" -- \
+    "$CSV2" -contains 1 --normalize -i "$TMP/t178.csv"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

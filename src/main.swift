@@ -1105,7 +1105,34 @@ func validate(_ o: inout Options) throws {
         // 選擇拒絕而不是警告，因為在這條路徑上「打錯一個旗標」與「刻意裁切」產生的位元組
         // 與 rc 完全相同。要裁切一個檔案，請把選取寫到新檔案：那多一個指令，而它不會被
         // 誤打誤撞地做出來。
-        if o.edits.isEmpty && o.encryptCols == nil && o.decryptCols == nil && o.hashCols == nil {
+        // The test is "is a SELECTION present", not "is an edit verb absent".
+        //
+        // Those are different predicates, and the first version of this guard
+        // used the second: `-head 1 -hash license -i f.csv --in-place` has an
+        // edit verb of a kind, so the guard did not fire, and it left one
+        // record of six at rc=0 with nothing on either stream -- the very
+        // failure this block was added to stop, one flag away from the command
+        // it does stop. `-encrypt`, `-decrypt` and `-hash` all reach it, and
+        // the `-decrypt` form destroys ciphertext and the header salt
+        // together, which this document says nobody can ever recover.
+        //
+        // A transform with no selection is still allowed: `-r -hash col
+        // --in-place` rewrites every record and discards none, which is what
+        // in-place protection is FOR.
+        //
+        // 判斷的是「有沒有選取」，不是「有沒有編輯動詞」。
+        //
+        // 那是兩個不同的謂詞，而這道守衛的第一版用的是後者：`-head 1 -hash license -i f.csv
+        // --in-place` 有一個「算是編輯」的動詞，於是守衛沒有觸發，六筆只剩一筆，rc=0，兩條
+        // 輸出流上什麼也沒有——正是這個區塊當初要擋下的那個失敗，而它離「確實被擋下的那個
+        // 指令」只差一個旗標。`-encrypt`、`-decrypt`、`-hash` 都到得了，而 `-decrypt` 那個
+        // 形式會把密文與檔頭裡的鹽一起銷毀，而本文件說那是任何人都再也救不回來的。
+        //
+        // 「有轉換、沒有選取」仍然允許：`-r -hash col --in-place` 會重寫每一筆、不丟掉任何
+        // 一筆，而那正是「就地保護」存在的用途。
+        let selecting = o.head != nil || o.tail != nil || o.mid != nil || o.contains != nil
+        let transforming = o.encryptCols != nil || o.decryptCols != nil || o.hashCols != nil
+        if selecting || (o.edits.isEmpty && !transforming) {
             let verb = o.head != nil ? "-head" : o.tail != nil ? "-tail"
                      : o.mid != nil ? "-mid" : o.contains != nil ? "-contains" : nil
             // Two different true sentences. A selection DISCARDS what it did
@@ -1331,8 +1358,37 @@ func validate(_ o: inout Options) throws {
             "\(which) \(verb) to the address in the locating report, so \(need) -contains without --filter, -md or --json",
             "\(which) 是附加在定位報告的位址上的，因此需要搭配 -contains，且不能同時給 --filter、-md 或 --json")
     }
+    // -rownum adds a COLUMN, and --json names its fields rather than counting
+    // them, so there is nowhere in a JSON object for a generated position to
+    // go. It was accepted and dropped: no rownum key, `fields` unchanged,
+    // rc=0. That is the same silence `--a1` and `--physical` are refused for
+    // three lines up, and the same one `-get` refuses -rownum for BY NAME --
+    // with the explicit reason that it would be ignored.
+    // -rownum 加的是一個「欄」，而 --json 是替欄位命名而不是數位置，因此一個「生成的位置」
+    // 在 JSON 物件裡無處可去。它原本會被接受然後丟掉：沒有 rownum 鍵、fields 不變、rc=0。
+    // 那與三行之上 `--a1`、`--physical` 被拒絕的沉默是同一種，也與 `-get` 明文以「它會被
+    // 忽略」為由拒絕 -rownum 的那一種相同。
+    if o.rownum && o.json {
+        throw usageError(
+            "-rownum adds a column and --json names fields instead of numbering them, so it would be ignored; --json already carries the record number in its `record` key",
+            "-rownum 加的是一欄，而 --json 是替欄位命名、不是替它們編號，因此它會被忽略；--json 本來就以 `record` 鍵帶著紀錄號")
+    }
     if o.contains == nil && o.filter && o.edits.isEmpty {
         throw usageError("--filter needs -contains", "--filter 需要搭配 -contains")
+    }
+    // --normalize decides how a SEARCH compares, and nothing else reads it.
+    // Without -contains it was accepted and did nothing, while its two
+    // neighbours in the same section -- --filter and --include-headers --
+    // are both refused for exactly that. The rule this project keeps
+    // rediscovering is that a flag the caller passed and the tool discarded is
+    // indistinguishable from a flag that does not work.
+    // --normalize 決定的是一次「搜尋」怎麼比較，沒有別的東西會讀它。沒有 -contains 時它會被
+    // 接受然後什麼也不做，而同一節裡它的兩個鄰居——--filter 與 --include-headers——都正是為此
+    // 被拒絕。這個專案一再重新發現的那條規則是：一個呼叫端給了、而工具丟棄了的旗標，與一個
+    // 「壞掉的旗標」無從分辨。
+    if o.normalize && o.contains == nil {
+        throw usageError("--normalize decides how -contains compares, so it needs -contains; storage is never normalised",
+                         "--normalize 決定的是 -contains 怎麼比較，因此需要搭配 -contains；儲存的內容永遠不會被正規化")
     }
     // An output SHAPE with an edit verb. An edit writes CSV -- that is what it
     // is for -- so --json and -md were accepted, ignored and exited 0, while

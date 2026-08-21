@@ -5608,3 +5608,290 @@ ERROR no column named "na\nme"; …       ← 與上一則逐位元組相同
 
 **讀者無法從那段文字判斷自己拿到的是哪一種承諾。** GF 修掉之後那個具體矛盾消失了,但那段文字
 仍然把一張清單寫成一條原則。改法是照實說:那是一張清單,而清單的內容就在下一句裡。
+
+---
+
+## GK. 一個選取加上 `-hash`／`-encrypt`／`-decrypt` 再加 `--in-place`,照樣把檔案截斷——那道守衛是我昨天寫的(2026-08-21 修正,T177)
+
+第 65 回合。GF 修好的那個缺陷,**加一個旗標就回來了**:
+
+```console
+$ csv2 -head 1 -t -i T.csv --in-place
+csv2: -head selects records; --in-place writes an EDIT back to its input, …
+rc=1,22 筆完好                                    ← GF 的守衛,正確
+
+$ csv2 -head 1 -hash license -i T.csv --in-place -log L.log
+rc=0
+22 筆 → 1 筆
+$ cat L.log
+… INFO  csv2 -head 1 -hash license -i T.csv --in-place -log L.log
+… INFO  hashing columns license with NO key (unsalted SHA-256)
+```
+
+**rc=0、兩條輸出流上什麼也沒有、log 裡沒有結果行。** 五種形式全部可重現:`-head`+`-hash`、
+`-tail`+`-hash`、`-mid`+`-encrypt`、`-contains --filter`+`-hash`、`-head`+`-decrypt`。
+
+**`-decrypt` 那一個最糟**:六筆 ChaCha20-Poly1305 密文變成兩筆明文,而帶著鹽的檔頭被重寫。
+README 對那個鹽的說法是「沒有它,密文再也沒有任何人解得開」。四筆密文與它們的鹽一起消失,rc=0。
+
+**原因是我寫的那道守衛用錯了謂詞。** 它問的是「有沒有編輯動詞?」
+
+```swift
+if o.edits.isEmpty && o.encryptCols == nil && o.decryptCols == nil && o.hashCols == nil {
+```
+
+而規則是「有沒有**選取**?」。`-hash` 讓第一個條件為假,於是守衛整個跳過。而拒絕表裡我自己寫的
+那一列說的是另一件事:「a SELECTION with `--in-place`」——**表寫的是規則,程式做的是另一個謂詞**,
+兩者恰好在要命的地方分岔。
+
+而這條路徑之所以連 `editing and selection cannot be combined` 那道舊守衛也躲過,是因為那道守衛
+的清單是 `-insert`/`-append`/`-delete`/`-update`。**`-hash` 掉在兩道守衛中間。**
+
+**形狀:一條規則被實作成「另一個剛好在當時等價的條件」。** 這與 DN→FG→FJ 同族,而這次的
+「當時」只有一天——GF 是 2026-08-21 修的,GK 是同一天被找到的。修法是照規則本身寫:
+`selecting || (沒有編輯也沒有轉換)`。而「有轉換、沒有選取」必須繼續可用——
+`-r -hash col --in-place` 重寫每一筆、不丟掉任何一筆,那正是就地保護存在的用途。
+
+---
+
+## GL. 每一次保護寫入的稽核軌跡,都少了那一行「結果」(2026-08-21 修正,T177d)
+
+同一回合。README 對 `wrote N records, M fields, atomic rename OK` 的說法是:
+
+> **the one to look for when asking whether an edit landed**
+
+實測(修正前):
+
+| 執行 | 有那一行嗎 |
+|---|---|
+| `-update … --in-place -log` | 有 |
+| `-delete 2 --in-place -log` | 有 |
+| `-hash license -o … -log` | **沒有** |
+| `-encrypt license -keyfile … -o … -log` | **沒有** |
+| `-head 1 -hash license --in-place -log`(毀掉 21 筆) | **沒有** |
+
+**原因與 GK 同源**:`-hash`/`-encrypt`/`-decrypt` 沒有「編輯」,因此 `main()` 把它們送去
+`runSelect` 而不是 `runEdit`——而那一行寫在 `runEdit` 裡。於是「結果無法還原」的那一類編輯,
+恰恰是那行「結果」缺席的那一類。
+
+一個照著 README 的指示去問「這次執行到底寫了沒有」的稽核者,對一次剛剛把一整欄變成雜湊、
+或剛剛毀掉 21 筆的執行,得到的答案是「什麼也沒寫」。
+
+---
+
+## GM. 「加上 `--yes` 會讓輸出更強」——實測用一次 `csv2` 呼叫就把六個值全部還原(2026-08-21 以文件處理,T178)
+
+第 65 回合。README 的 `-hash` 一節花了很多篇幅警告「不加金鑰的雜湊可以用字典還原」,接著說:
+
+> **Pass `-keyfile` and it becomes HMAC-SHA256.** … the digests now depend on a secret and
+> **the word list is useless without it**.
+> So adding `--yes` to make a script non-interactive **strengthens the output**.
+
+而 `--yes` 的意思是「不詢問、直接用預設金鑰」,那把預設金鑰是**這台機器上的一個檔案**:
+
+```console
+… INFO  using the default multissh key at /Users/…/.multissh/generated/mldsa44-ed25519.key.raw (--yes)
+… INFO  hashing columns license with a key from … (fingerprint 9c65c01a)
+```
+
+攻擊者不需要讀那個檔案,也不需要看到明文——他只要能執行 `csv2`:
+
+```console
+$ printf 'w,license\n1,Zlib\n2,MIT\n…\n' > wordlist.csv
+$ csv2 -hash license --yes -i wordlist.csv -o wl.csv -t     # rc=0，一次呼叫
+$ head -1 wl.csv ; head -1 受害檔.csv
+w,license:hmac:9c65c01a
+pkg,ver,license:hmac:9c65c01a                                ← 同一個指紋
+```
+
+以摘要對接後:**六個值全部還原**。不加金鑰的那種還原了五個;「被強化過」的這種還原了六個。
+
+那句話把「有金鑰」與「有秘密」混為一談。一把「這台機器上任何行程都能用一個有文件記載的單字
+旗標取得」的金鑰,對「本地讀取者」不是秘密——而本地讀取者正是整個 `-hash` 一節所設想的威脅
+(「任何拿到這個雜湊過的檔案的人」)。
+
+**兩個加重情節,而且都出自 README 自己**:檔案裡的標記 `license:hmac:9c65c01a` **公告了**
+這次用的是預設金鑰;而 README **把那個指紋印在文件裡**,所以攻擊者連猜都不必猜。受測者第一次
+就重現出 `9c65c01a`。
+
+`-keyfile` 搭配一把真正隨機的 32 位元組金鑰是穩的——同樣的攻擊在金鑰不對時什麼也還原不出來。
+缺陷限於 `--yes`,而 README 恰恰是在「非互動、沒有人在看」的場合推薦它。
+
+程式端不改:`--yes` 的用途就是「不要問我」,而它記錄了自己用了哪一把。改的是那句話。
+
+---
+
+## GN. 訊息裡的路徑有四種呈現,而我昨天寫的那兩句話把它們都說反了(2026-08-21 以文件處理)
+
+第 65 回合。GI 那一條我以文件處理,而**我寫下的那段話沒有量過**:
+
+> `-o` echoes what you typed … A diagnostic names the path csv2 will actually write, which
+> under `--in-place` is the resolved one
+
+實測:
+
+| 訊息 | 打的 | 印出來的 |
+|---|---|---|
+| `-o md1.csv` 的拒絕 | `md1.csv` | `/private/tmp/…/md1.csv` — 絕對化 |
+| `--in-place` 選取守衛 | `s.csv` | `s.csv` — 照打的 |
+| `cannot open input file` | `./nope.csv` | `./nope.csv` — 照打的 |
+
+**兩句都說反了。** 而真正的規則其實簡單,且與程式一致:**輸入路徑照打的印,輸出路徑印解析過的**
+——因為 `--in-place` 只解析「輸出」(那是 DP 那個修正的內容),而選取守衛引用的是 `-i` 的參數,
+所以它照打的印。
+
+**形狀:一句「為了補上文件缺口」而寫、卻沒有量過的話。** 這與 FH（「只有 `-contains` 會讀
+sidecar」）、FN（「只有 `--json` 對此不出聲」）是同一族,而這是第三次。
+
+---
+
+## GO. `-rownum`:一個「顯示」旗標寫出了一個真的欄位,而 `--en`／`--zh` 清不掉它(2026-08-21 修正,T179)
+
+第 65 回合,三件相關的事。
+
+**(a) `-md` 的標頭。** `-rownum` 的那一格被寫死成 `rownum<br>列號`:
+
+```console
+$ csv2 -r -t -rownum -md --en -i pkgs.csv2      → |rownum<br>列號|pkg|ver|note|
+$ csv2 -r -t -rownum -md --zh -i pkgs.csv2      → |rownum<br>列號|套件|版本|備註|
+$ csv2 -r -t -rownum -md -i pkgs.csv            → |rownum<br>列號|pkg|ver|note|
+```
+
+README 對 `--en`／`--zh` 的說法是「gives one clean row instead」,而它們唯獨清不掉 csv2 自己
+發明的那一格;而一份**只有一列標頭**的 `.csv`,在一張「以『資料有兩列標頭』來解釋合併」的表格裡,
+得到一個 `<br>` 格與其他純文字格並排。已修:那一格現在跟著其他每一欄的規則走。
+
+**(b) `-rownum` + `--json` 被安靜地忽略。** 沒有 rownum 鍵、`fields` 不變、rc=0——而
+`--a1`、`--physical` 在同樣的情況下被拒絕,`-get` 更是**指名 `-rownum`** 並以「它會被忽略」
+為由拒絕。已修:`--json` 也拒絕它。
+
+**(c) `-rownum` + `-o` 把生成的欄位寫進檔案,而其後每一個位址都永久位移一格。**
+
+```console
+$ csv2 -head 2 -t -rownum -i pkgs.csv -o rn.csv
+$ head -1 rn.csv                → rownum,pkg,ver,note
+$ csv2 -get 1:1 -i pkgs.csv     → zlib
+$ csv2 -get 1:1 -i rn.csv       → 1
+```
+
+而 README 對位址穩定性的說法是:「an address you found earlier … **has to keep meaning the
+same cell no matter which display flags a later run uses**」。跨過 `-o` 之後那句話不成立。
+
+(c) 未改行為:把列號輸出成一欄是正當的匯出需求,而沒有別的做法可以達成。改的是文件——那個
+代價現在寫在旗標條目裡,而不是只寫「讀取者會看到 rownum 在第 1 欄」。
+
+---
+
+## GP. 讀標記的兩個建議用 `cut -d,` 切 CSV——正是這個工具存在所要防止的那件事(2026-08-21 修正,T180)
+
+第 65 回合。README 印了兩次:
+
+```sh
+head -1 masked.csv | cut -d, -f7            # -hash 那一節
+head -1 e$i.csv | rev | cut -d, -f1 | rev   # -encrypt 那一節
+```
+
+在最後一欄的欄名含有帶引號的逗號時(README 自己說那是真實且可達的:「`-delete -col a,b`
+指的是一個叫做 `a,b` 的欄位,而那也是含逗號的欄名唯一抵達得到的方式」):
+
+```console
+$ head -1 cmh.csv
+pkg,"secret, real:hash"
+$ head -1 cmh.csv | rev | cut -d, -f1 | rev
+ real:hash"                                   ← 半個值，rc=0
+```
+
+而同一份 README 在另一處說:「**Do not reach for `cut` against `--filter` or `-mid` output:
+that is CSV… That failure is why csv2 exists; getting it from csv2's own output would be a
+poor joke.**」**標頭那一行也是 CSV。**
+
+正確的工具存在、而且有記載,只是從來沒有被當成「怎麼讀標記」的答案:
+
+```console
+$ csv2 -r -t --json -i cmh.csv | head -1
+{"meta":{…,"protected":{"secret, real":"hash"}}}
+```
+
+兩個配方都已改成這一個。這條同時違反了本機全域 `CLAUDE.md` 的第一條規則,而那條規則的理由,
+正是這棵樹付過的代價。
+
+---
+
+## GQ. `-hash`／`-encrypt`／`-decrypt` 在文件裡沒有被歸類,而三道守衛對它們的答案各不相同(2026-08-21 修正)
+
+第 65 回合把 GK 與 GL 的共同根因指了出來,而它是文件問題:**保護動詞是「編輯」還是「選取」,
+文件從來沒說。** 它們不在拒絕表列出的編輯動詞清單裡(`-insert`/`-append`/`-delete`/`-update`),
+不在選取清單裡(`-head`/`-tail`/`-mid`/`-contains`/`-r`),自己住在 `PROTECTION` 一節。
+
+於是三道守衛給了三種答案:對 `--in-place` 它們算編輯(GK),對「編輯+選取」那道守衛它們不算編輯,
+對「編輯需要明確目的地」那條規則它們也不算——因此:
+
+```console
+$ csv2 -hash license -i s.csv          # 沒有 -o、沒有 -so、沒有 --in-place
+pkg,ver,license:hash
+zlib,1.3.2,dc65a73a…                   ← 直接寫到 stdout，rc=0
+```
+
+那是第五種輸出模式,而那張拒絕表的四動詞清單沒有涵蓋它。同樣沒有記載的還有:`-hash` **一律**
+寫出標頭(文件只為 `-encrypt` 寫了這件事),以及 `-hash` 會標記 `.csv2` 的**兩列**標頭。
+
+已修:兩份 README 現在明說保護動詞是「會重寫每一筆的編輯」、它們一律寫標頭、沒有目的地時寫到
+stdout,而且它們不能與選取合用於 `--in-place`。
+
+---
+
+## GR. 中文 README 還留著英文版剛剛以「危險」為由刪掉的那條 WARN「原則」(2026-08-21 修正)
+
+第 65 回合。GJ 的修正只做了一半:英文版把 WARN 從「一條原則」改成「一張封閉清單」並寫明理由,
+而 `README.zh-TW.md` 在兩處仍然寫著
+
+> **一次成功、但幾乎確定不是呼叫端本意的執行**,會有一行 WARN
+
+**只讀中文的人拿到的,正是英文版說「會毀掉資料」的那個讀法。** 而在 GK 尚未修好時,他拿到的是
+一個「確實會成功並毀掉 21 筆、而且完全不印 WARN」的工具。
+
+**形狀:一份雙語文件,只修了一半。** 這是本專案的雙語規則存在的理由,也是它第一次被違反。
+
+---
+
+## GS. 「三條拒絕跟著它」——實際上有四條(2026-08-21 修正)
+
+第 65 回合。COLS 那一段說有三條拒絕跟著欄位清單,而實測有四條:一個「名字同時匹配到兩欄」的
+token 也會被拒絕,而那條拒絕寫在文件的另一個地方。數字已改,並把第四條指到它所在的位置。
+
+---
+
+## GT. 一份 `.csv2` 戴著 `.csv` 的名字——反方向文件寫得很長,這個方向一句也沒有(2026-08-21 修正)
+
+第 65 回合。README 用一整段加一個工作範例加 T97 描述「`.csv` 改名成 `.csv2`」會怎麼樣,而
+「`.csv2` 改名成 `.csv`」一句也沒有——同一次改名的另一個方向,產生同一類的靜默損壞:那一列
+中文欄名成為第 1 筆資料,搜尋得到、也定址得到,rc=0。
+
+而 README 推薦的自我檢查在這個方向上幫不上忙:`--json` 的第一行會說 `{"format":"csv","headers":1}`
+——那句話對「名字」為真,對「內容」什麼也沒說。已補上一段,連同「怎麼確認」的實際做法。
+
+---
+
+## GU. `--normalize` 沒有 `-contains` 時被安靜地接受(2026-08-21 修正,T181)
+
+第 65 回合。它的兩個鄰居 `--filter` 與 `--include-headers` 都會因「需要 -contains」而被拒絕,
+而 `--normalize` 不會:rc=0,什麼也不做。`--normalize` 決定的是一次搜尋怎麼比較,沒有別的東西
+會讀它。已修:同樣拒絕,並在訊息裡順帶說明「儲存的內容永遠不會被正規化」。
+
+---
+
+## GV. 「絕不要把 `--headers` 與編輯動詞合用」——沒有強制、沒有後果,而且與兩行之上的一條要求矛盾(2026-08-21 修正)
+
+第 65 回合。`--headers` 條目結尾寫著 `never combine it with an edit verb`。實測三種形式:
+
+```console
+$ csv2 -update 1:2 X --headers 1 -i UP.CSV -o OUT.CSV     rc=0，正確
+$ csv2 -update 1:2 X --headers 1 -i UP.CSV --in-place     rc=0，正確
+$ cat s.csv | csv2 -update 1:2 X --headers 1 -si -so      rc=0，正確
+```
+
+**而第三種是被要求的**:同一個條目的第一句就說 `--headers` 對 `-si` 是**必要**的。於是那句話
+禁止的,正是文件自己規定必須做的事。
+
+「不一致」的那個情況(`--headers` 與副檔名不符)本來就已經是一條拒絕。那句話沒有守著任何東西,
+只是讓讀者相信有一個他找不到的危險。已刪除,並改成那句真正成立的話。

@@ -230,7 +230,13 @@ SELECTING / 選取
                         to SELECTIONS only -- an edit rewrites the whole file
                         and always writes the headers, with or without -t
   -rownum               prepend a record-number column. It does NOT renumber
-                        anything: see "Two numberings" below
+                        anything: see "Two numberings" below. With -o or -so
+                        the column is written, header and all, so every
+                        address in that FILE is one greater than in the input
+                        -- `-get 1:1` on it returns the row number, not the
+                        first field. The address-stability rule below is about
+                        display flags on a read; this writes a file. Refused
+                        with -get and with --json, each of which would ignore it
   --physical            also print the physical line the record starts on, as
                         `record:field@Lline`; with --a1 the two combine into
                         `13:6@L14 [F14]`. The two numbers are the same
@@ -253,8 +259,12 @@ INPUT / OUTPUT
                         .CSV needs it too. With -i it
                         is accepted only when it AGREES with the suffix, and
                         disagreeing is refused -- the suffix declares the
-                        format. See the warning above; never combine it with
-                        an edit verb
+                        format. See the warning above. This entry used to end
+                        "never combine it with an edit verb", which forbade
+                        what its own first line requires: editing a stream
+                        needs -si, and -si needs --headers. The disagreeing
+                        case is already a refusal; there was nothing else the
+                        sentence was guarding
   --in-place            edit -i in place, via temp file + rename. An EDIT:
                         a run with no edit verb is refused, so a SELECTION
                         cannot be written back over its own input. Until
@@ -379,7 +389,7 @@ PROTECTION / 保護
                         before -- and the refusal names the way through
 
 COLS is a comma-separated list of column names, 1-based column numbers, or a
-mix: `-hash license`, `-hash 7`, `-hash 6,license`. Three refusals go with it,
+mix: `-hash license`, `-hash 7`, `-hash 6,license`. Four refusals go with it,
 all of them cases where guessing would be worse than stopping:
 
 - **An empty list is refused.** `-hash ""` used to exit 0 having protected
@@ -393,6 +403,10 @@ all of them cases where guessing would be worse than stopping:
 - **A comma inside a name has no escape**, because the list separates on
   commas. Reach such a column by its NUMBER, or with `-delete -col`, which
   takes exactly one name and therefore takes the comma with it.
+- **A name that matches more than one column is refused**, naming both
+  positions rather than picking one — the duplicate-header rule further down,
+  which applies here too. This paragraph said "three" until 2026-08-21 while
+  the fourth was implemented, tested and documented elsewhere.
 
 Asserted by T140 and T144.
 
@@ -732,6 +746,19 @@ formats); reading one cannot be, and that asymmetry is deliberate — csv2
 believes the name because inventing a detector would mean guessing, which is
 the thing the suffix rule exists to prevent. Asserted by T97.
 
+**The other direction is the same rename and the same damage**, and this
+document described only one of them until 2026-08-21. A `.csv2` handed to you
+as `.csv` loses nothing and gains a record: its row of Chinese titles becomes
+data record 1, searchable and addressable, at rc=0. `--json`'s meta line
+cannot tell you — it reports `{"format":"csv","headers":1}`, which is true of
+the NAME and says nothing about the content. Looking is again the only check:
+
+```console
+$ csv2 -mid 1,1 -t -i handed-to-me.csv       # is record 1 a row of titles?
+pkg,ver,note
+套件,版本,備註                                <- titles sitting in the data
+```
+
 ### A UTF-8 BOM is stripped; a UTF-16 one is refused
 
 A file that opens with a **UTF-8** BOM — anything exported by Excel, typically —
@@ -985,13 +1012,13 @@ markers have to be read out of the files afterwards:
 
 ```console
 $ for i in 1 2 3; do csv2 -encrypt secret -keyfile k.bin -i s.csv -o e$i.csv -t; done
-$ for i in 1 2 3; do head -1 e$i.csv | rev | cut -d, -f1 | rev; done
+$ for i in 1 2 3; do csv2 -contains ':enc:' --include-headers -i e$i.csv | cut -f3; done
 secret:enc:d88cdbf1:…      # one keyfile,
 secret:enc:e16b394a:…      # three runs,
 secret:enc:869e54ce:…      # three fingerprints
 
 $ for i in 1 2 3; do csv2 -hash secret -keyfile k.bin -i s.csv -o h$i.csv -t; done
-$ for i in 1 2 3; do head -1 h$i.csv | rev | cut -d, -f1 | rev; done
+$ for i in 1 2 3; do csv2 -contains ':hmac:' --include-headers -i h$i.csv | cut -f3; done
 secret:hmac:9acc9081       # the same number every time; a different keyfile changes it
 ```
 
@@ -1391,13 +1418,15 @@ it is being written either. It was 0644 for the duration until 2026-08-21, and
 on a large file that is a window measured in seconds. Asserted by T129, T130
 and T161.
 
-**A diagnostic names the path csv2 will actually write**, which under
-`--in-place` is the resolved one: `/private/tmp/x` comes back as `/tmp/x` on
-macOS, and a relative path comes back absolute. `-o` echoes what you typed,
-because `-o` names a destination rather than resolving an existing file. It
+**In a diagnostic, an INPUT path appears as you typed it and an OUTPUT path
+appears resolved.** `cannot open input file: ./nope.csv` keeps the `./`; an
+`-o` refusal prints the absolute path, and under `--in-place` the resolved one
+— `/private/tmp/x` comes back as `/tmp/x` on macOS — because `--in-place`
+resolves the destination and not the source. A refusal that quotes your `-i`
+argument therefore shows what you typed even when the run is `--in-place`. It
 matters because matching the English prose is the only way to tell refusals
-apart, so a script looking for its own path in the message will not find it
-under `--in-place`.
+apart. The paragraph here said the opposite of both halves until 2026-08-21;
+it was written to fill a gap a round had found and was not measured.
 
 Three things it does not preserve, all deliberate: a **hard link** is broken,
 because rename cannot do otherwise; **extended attributes** are lost, because
@@ -1607,16 +1636,16 @@ licences in the sample file from the hashed output alone, with no access to the
 original and nothing but a list of SPDX identifiers.
 
 **Pass `-keyfile` and it becomes HMAC-SHA256.** Still deterministic, so equal
-values still compare equal, but the digests now depend on a secret and the word
-list is useless without it:
+values still compare equal, but the digests now depend on the key — and the
+word list is useless to anyone who does not have it:
 
 ```console
 $ csv2 -hash license -i TARGET_PACKAGES.csv -o masked.csv -t
-$ head -1 masked.csv | cut -d, -f7
+$ csv2 -contains ':hash' --include-headers -i masked.csv | cut -f3
 license:hash                       # unkeyed — dictionary applies
 
 $ csv2 -hash license -keyfile k.bin -i TARGET_PACKAGES.csv -o masked.csv -t
-$ head -1 masked.csv | cut -d, -f7
+$ csv2 -contains ':hmac:' --include-headers -i masked.csv | cut -f3
 license:hmac:289b9391              # keyed — fingerprint of the key used
 ```
 
@@ -1629,8 +1658,28 @@ $ csv2 -hash license -i pkgs.csv -o m.csv -t          # license:hash
 $ csv2 -hash license --yes -i pkgs.csv -o m.csv -t    # license:hmac:9c65c01a
 ```
 
-So adding `--yes` to make a script non-interactive strengthens the output, and
-removing it weakens it, at rc=0 either way. **The file records which happened**
+So adding `--yes` to make a script non-interactive changes the algorithm at
+rc=0, and removing it changes it back.
+
+**It does not, however, make the column secret from anyone else on the
+machine.** The default key is a FILE on this host, and `--yes` is a documented
+one-word way to ask csv2 to use it — so a local reader builds the same table
+you did:
+
+```console
+$ printf 'w,license\n1,Zlib\n2,MIT\n3,GPL-2.0\n' > words.csv
+$ csv2 -hash license --yes -i words.csv -o rainbow.csv -t
+$ csv2 -contains ':hmac:' --include-headers -i rainbow.csv | cut -f3
+license:hmac:9c65c01a               # the same fingerprint your file carries
+```
+
+Joining on the digest recovers every value the word list contains — measured at
+6 of 6 on a licence column, one MORE than the unkeyed form recovered, because
+the keyed digests collide less. The marker even announces which key was used,
+and this document publishes that fingerprint. **`--yes` is for "do not prompt
+me", not for "keep this from the people who can run csv2 here".** Against a
+local reader, use `-keyfile` with a key they cannot read; against nobody in
+particular, the unkeyed form is honest about what it is. **The file records which happened**
 — that is what the marker is for — but two files hashed differently never
 compare equal, so a join across them silently matches nothing. Decide once, per
 column, and read the marker rather than the command line. Asserted by T142.
@@ -1638,6 +1687,27 @@ column, and read the marker rather than the command line. Asserted by T142.
 Choose the unkeyed form only when the value space is genuinely large — a long
 free-text field, an opaque identifier — or when you do not actually need the
 values hidden from someone holding the file.
+
+### `-hash`, `-encrypt` and `-decrypt` are EDITS
+
+They rewrite every record, so they behave like the edit verbs and not like the
+selection verbs, and this was written nowhere until 2026-08-21 — which is how a
+selection combined with one of them wrote itself back over its own input.
+
+- **They may not be combined with a selection under `--in-place`.** `-head 1
+  -hash col -i f.csv --in-place` is refused for the same reason `-head 1 -t
+  --in-place` is: the records the selection did not name would be discarded.
+  `-r -hash col --in-place` is fine — it rewrites every record and drops none.
+- **With no destination they write CSV to stdout.** They are the exception to
+  "an edit with no `-o`, `-so` or `--in-place` is refused"; that rule names
+  `-insert`, `-append`, `-delete` and `-update`, and means exactly those four.
+- **They always write the header**, with or without `-t`, because the marker
+  lives there and a masked file without its marker cannot be read back
+  correctly. On a `.csv2` both header rows are marked.
+- **They log the outcome line** — `wrote N records, M fields, atomic rename
+  OK` — like every other write. Until 2026-08-21 they did not, so the one line
+  this document tells an auditor to look for was missing from exactly the
+  writes that cannot be undone.
 
 ### Protected columns are marked in the file
 

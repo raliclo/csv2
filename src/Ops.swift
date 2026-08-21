@@ -629,7 +629,22 @@ final class MarkdownEmitter: RecordEmitter {
 
     func begin(_ ctx: EmitContext) throws {
         var names: [String] = []
-        if ctx.rownum { names.append("rownum<br>列號") }
+        // The generated column follows the same rule as every other one: `--zh`
+        // gives the Chinese name, `--en` the English, neither joins both. It
+        // was hard-coded to the joined form, so `--en` and `--zh` -- documented
+        // as giving "one clean row instead" -- could not clean the one cell
+        // csv2 itself had invented, and a ONE-header `.csv` got a `<br>` cell
+        // beside plain ones, in a table whose join is explained by the data
+        // having two header rows.
+        // 這個「生成的」欄位遵守與其他每一欄相同的規則：`--zh` 給中文、`--en` 給英文，都不給
+        // 才合併。它原本被寫死成合併的樣子，於是 `--en` 與 `--zh`——文件說它們「會給你乾淨的
+        // 一列」——唯獨清不掉 csv2 自己發明的那一格；而一份「只有一列標頭」的 `.csv`，會在一張
+        // 「以『資料有兩列標頭』來解釋合併」的表格裡，得到一個與其他純文字格並排的 `<br>` 格。
+        if ctx.rownum {
+            names.append(ctx.zh ? "列號"
+                       : ctx.enOnly || (ctx.headers.count < 2) ? "rownum"
+                       : "rownum<br>列號")
+        }
         for i in 0..<(ctx.headers.first?.count ?? 0) {
             // A Markdown table has ONE header row and .csv2 has two. Merging
             // them into one cell with <br> matches how this project's docs

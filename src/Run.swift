@@ -519,6 +519,18 @@ func runSelect(_ o: Options) throws {
         Logger.shared.log(.trace, "select: record \(r.number) line \(r.line) not emitted: \(why)")
     }
 
+    // Counted for the audit trail's outcome line, which this path did not
+    // write. `-hash`, `-encrypt` and `-decrypt` rewrite a file and run through
+    // the SELECT path, not the edit path, so every protection write finished
+    // with the log saying only that it had started. The README nominates that
+    // line -- "the one to look for when asking whether an edit landed" -- and
+    // it was missing for the class of edit whose result cannot be undone.
+    // 為了稽核軌跡的那一行「結果」而計數，而這條路徑原本不寫它。`-hash`、`-encrypt`、
+    // `-decrypt` 會重寫一個檔案，走的卻是「選取」路徑而不是編輯路徑，於是每一次保護寫入
+    // 結束時，log 只說了它開始過。README 指名的正是那一行——「想知道一次編輯有沒有落地時
+    // 該找的那一行」——而它獨獨在「結果無法還原」的那一類編輯上不存在。
+    var emittedCount = 0
+
     func emitRecord(_ r: Record, matches: [Int]) throws {
         guard let c = ctx else { return }
         // TRACE is per-record: the question it answers is "why was record N not
@@ -536,6 +548,7 @@ func runSelect(_ o: Options) throws {
         }
         try emitter.emit(r, matches: matches, ctx: c)
         lastEmitted = r.number
+        emittedCount += 1
     }
 
     func headersComplete() throws {
@@ -725,6 +738,14 @@ func runSelect(_ o: Options) throws {
     plan.source.close()
     try sink.close()
     aborted = false
+    // Only when a FILE was written. `-so` and the bare stdout path have no
+    // rename to report, and saying "atomic rename OK" about a stream would be
+    // a line that is false in the one word that matters.
+    // 只有在「有寫出檔案」時才寫。`-so` 與直接寫 stdout 的那條路徑沒有 rename 可回報，
+    // 而對一條串流說「atomic rename OK」，會是一行「錯在最要緊的那個字上」的紀錄。
+    if o.output != nil {
+        Logger.shared.info("wrote \(emittedCount) records, \(headers.first?.count ?? 0) fields, atomic rename OK")
+    }
 
     // The index is written only after everything else has succeeded, and it is
     // never allowed to turn a completed operation into a failed one.
