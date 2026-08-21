@@ -157,7 +157,32 @@ struct FileStamp {
 /// 檢查碼在檔頭中的位移，位於 2026-08-18 之前保留而未使用的那 8 個位元組。
 let INDEX_SUM_OFFSET = 80
 
-/// FNV-1a over the whole index with the checksum field itself read as zero.
+/// A 64-bit FNV-1a over the whole index with the checksum field itself read as
+/// zero -- except for the multiplier, which is `0x1000_0000_01b3` and NOT the
+/// FNV-1a prime `0x100000001b3`. The underscores are grouped one nibble wrong,
+/// which makes it 2^44 + 0x1b3 instead of 2^40 + 0x1b3.
+///
+/// It is left as it is, and named accurately here instead. The multiplier is
+/// odd, so the map is still a bijection modulo 2^64 and still detects the bit
+/// flips and short writes this is for; correcting it would make every sidecar
+/// already on disk report "checksum does not match (damaged)", which is a
+/// message about corruption for files that have none. Anyone reimplementing
+/// this check -- the test suite does, in Python, so that the constant is
+/// pinned by something that is not this line -- needs the constant above, not
+/// the name below it. Reading the name and writing the prime is exactly the
+/// failure the -log escape table had: a documented reader that cannot
+/// reproduce what the tool wrote.
+///
+/// 這是對整份索引所做的 64-bit FNV-1a、並把檢查碼欄位本身當成零——但乘數是
+/// `0x1000_0000_01b3`，而**不是** FNV-1a 的質數 `0x100000001b3`：底線的分組錯了一個
+/// nibble，於是它成了 2^44 + 0x1b3 而不是 2^40 + 0x1b3。
+///
+/// 它維持原狀，改成在這裡誠實地說出來。那個乘數是奇數，因此模 2^64 仍是雙射，仍然抓得到
+/// 它要抓的位元翻轉與寫入不完整；改正它會讓每一份已經在磁碟上的 sidecar 回報「檢查碼不符
+/// （已損毀）」——對一批毫無損毀的檔案說損毀。任何要重新實作這個檢查的人（測試套件就用
+/// Python 做了一份，好讓這個常數被「這一行以外的東西」釘住）需要的是上面那個常數，而不是
+/// 它下面那個名字。照著名字去寫那個質數，正是 `-log` 跳脫表犯過的同一個錯：一份照文件寫成
+/// 的讀取器，重現不出工具實際寫下的東西。
 ///
 /// This detects CORRUPTION -- a flipped bit, a short write, a partially
 /// overwritten file. It is not a signature and does not pretend to be: anyone
@@ -534,11 +559,16 @@ final class CSVIndex {
         lastLine = line
     }
 
-    /// O(1) update after the append fast path. If there is no index, one is
-    /// NOT created: doing an O(n) scan to serve an O(1) operation cancels out
-    /// the entire point of the fast path.
-    /// 追加快路徑之後的 O(1) 更新。沒有索引時不建立：為了一個 O(1) 的操作去做
-    /// 一次 O(n) 全掃描，會把快路徑的意義完全抵銷。
+    /// O(1) update after the append fast path, for an index that already
+    /// exists. When there is none, one is built from the scan that path now
+    /// performs anyway -- see runAppendFast. The comment that used to be here
+    /// refused to build one "because an O(n) scan to serve an O(1) operation
+    /// cancels out the entire point of the fast path", and by then the scan
+    /// was unconditional.
+    /// 追加快路徑之後、針對「已經存在」的索引所做的 O(1) 更新。不存在時，會由那條路徑
+    /// 現在無論如何都會做的掃描建出一份——見 runAppendFast。原本這裡的註解以「為了一個
+    /// O(1) 的操作去做一次 O(n) 全掃描，會把快路徑的意義完全抵銷」為由拒絕建立，而那時
+    /// 那次掃描已經是無條件的了。
     func noteAppend(record n: Int, at offset: UInt64, line: UInt64) {
         note(record: n, at: offset, line: line)
     }
@@ -603,6 +633,12 @@ final class IndexBuilder {
     }
 
     func headerEnded(at offset: UInt64) { headEnd = offset }
+
+    /// How many records have been added. The append fast path continues the
+    /// numbering from here when it finishes a builder that was filled by the
+    /// validation scan.
+    /// 已經加入幾筆。追加快路徑在結束一個「由驗證掃描填好的」builder 時，從這裡接著編號。
+    var recordCount: Int { count }
 
     func add(record n: Int, at offset: UInt64, line: UInt64, spansLines: Bool) {
         if spansLines { embeddedNewlineSeen = true }

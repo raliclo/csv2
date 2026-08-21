@@ -8928,6 +8928,344 @@ else
         "$CSV2" -head 1 -t -i "$TMP/t130_src.csv" -o "$TMP/t130_new.csv"
 fi
 
+# ---------------------------------------------------------------------
+# T165 -- the append fast path reads the whole file, so it leaves an index.
+#
+# Round 63 measured `-append --in-place` at 50/188/802 ms on 2/8/35 MB and
+# caught the README saying, in three places, that its fast path "never reads
+# the file to the end". It stopped being true when the unclosed-quote check
+# was added: that check parses every byte on every append. Two of those three
+# sentences were load-bearing -- they were the stated REASON for the one
+# behaviour that made this the only write path in the tool to leave a file it
+# had just read from end to end without a sidecar.
+#
+# So the behaviour moved to match the rule the document already states: the
+# next operation that writes the file, or that has to read it to the end
+# anyway, puts a good index back. Appending does both.
+#
+# T165 —— 追加快路徑會把整個檔案讀完，因此它會留下一份索引。
+# 第 63 回合量到 `-append --in-place` 在 2/8/35 MB 上是 50/188/802 ms，並抓到 README 有
+# 三處說它的快路徑「從不把檔案讀到結尾」。那句話在「未關閉引號」檢查加進來時就不再成立：
+# 那個檢查每一次追加都會解析每一個位元組。三處之中有兩處是承重的——它們是某個「行為」的
+# 理由，而那個行為讓這條路徑成為本工具唯一一條「剛剛從頭到尾讀完一個檔案、卻沒有留下
+# sidecar」的寫入路徑。
+# ---------------------------------------------------------------------
+echo
+echo "--- T165: an append leaves an index / T165：一次追加會留下索引 ---"
+
+printf 'id,note\n' > "$TMP/t165.csv"
+for _i in $(seq 1 40); do printf 'r%d,n%d\n' $_i $_i >> "$TMP/t165.csv"; done
+cp "$TMP/t165.csv" "$TMP/t165b.csv"
+cp "$TMP/t165.csv" "$TMP/t165c.csv"
+
+CSV2_INDEX_MIN_BYTES=0 "$CSV2" -append 'r41,n41' -i "$TMP/t165.csv" --in-place
+if [[ -f "$TMP/t165.csv.index" ]]; then
+    ok "T165a an append builds the index its own scan paid for / 一次追加會建出「它自己的掃描已經付過帳」的那份索引"
+else
+    bad "T165a no index beside $TMP/t165.csv after an append / 追加之後旁邊沒有索引"
+fi
+assert_succeeds "T165b and that index describes the file / 而那份索引與檔案相符" -- \
+    "$CSV2" --verify-index -i "$TMP/t165.csv"
+
+# --no-index still means none, and the size threshold still decides. Both were
+# checked because "builds one now" must not become "builds one always": the
+# flag is the user saying do not, and the threshold is the reason a two-line
+# file has no sidecar.
+# --no-index 仍然表示不建，而大小門檻仍然說了算。兩者都要檢查，因為「現在會建」不可以變成
+# 「一律會建」：那個旗標是使用者說不要，而那個門檻是「兩行的檔案旁邊沒有 sidecar」的理由。
+CSV2_INDEX_MIN_BYTES=0 "$CSV2" -append 'r41,n41' -i "$TMP/t165b.csv" --in-place --no-index
+assert_eq "$([[ -f "$TMP/t165b.csv.index" ]] && echo yes || echo no)" "no" \
+    "T165c --no-index still builds none / --no-index 仍然什麼都不建"
+CSV2_INDEX_MIN_BYTES=99999999 "$CSV2" -append 'r41,n41' -i "$TMP/t165c.csv" --in-place
+assert_eq "$([[ -f "$TMP/t165c.csv.index" ]] && echo yes || echo no)" "no" \
+    "T165d below CSV2_INDEX_MIN_BYTES it still builds none / 在 CSV2_INDEX_MIN_BYTES 以下仍然不建"
+
+# ---------------------------------------------------------------------
+# T166 -- the line an appended record starts on.
+#
+# Found while checking T165, not reported by the round. The append path
+# computed the appended record's line as `index.lastLine + prefix`, and
+# lastLine is the line the LAST record STARTS on -- so the sum was short by
+# however many lines that record occupies. An appended record landing on a
+# grid point put a wrong line into the sidecar; `-mid N,N --json` printed it,
+# `--no-index` disagreed by one, and `--verify-index` said OK because it did
+# not check the lines it stores.
+#
+# The fixture makes record 1 span two lines, so record 257 -- the second grid
+# point at stride 256 -- lands one line further down than its record number
+# suggests, and the two answers can differ.
+#
+# T166 —— 一筆被追加的紀錄從哪一行開始。
+# 這是檢查 T165 時發現的，不是那個回合回報的。追加路徑用 `index.lastLine + prefix` 算它，
+# 而 lastLine 是「最後一筆『開始』的那一行」——因此那個和少了那一筆自己佔掉的行數。fixture
+# 讓第 1 筆跨兩行，於是第 257 筆（stride 256 的第二個格點）比它的紀錄號多落一行，兩個答案
+# 因此才可能不同。
+# ---------------------------------------------------------------------
+echo
+echo "--- T166: the appended record's line / T166：被追加那一筆的行號 ---"
+
+{
+    printf 'id,note\n'
+    printf 'r1,"two\nlines"\n'
+    for _i in $(seq 2 256); do printf 'r%d,n%d\n' $_i $_i; done
+} > "$TMP/t166.csv"
+cp "$TMP/t166.csv" "$TMP/t166b.csv"
+
+# With an index already there: the extend-an-index branch.
+# 已經有索引時：走「延續索引」那一條分支。
+CSV2_INDEX_MIN_BYTES=0 "$CSV2" --build-index -i "$TMP/t166.csv" > /dev/null
+CSV2_INDEX_MIN_BYTES=0 "$CSV2" -append 'r257,n257' -i "$TMP/t166.csv" --in-place
+_t166_idx=$(CSV2_INDEX_MIN_BYTES=0 "$CSV2" -mid 257,257 --json -i "$TMP/t166.csv" | sed -n 2p)
+_t166_raw=$("$CSV2" -mid 257,257 --json --no-index -i "$TMP/t166.csv" | sed -n 2p)
+assert_eq "$_t166_idx" "$_t166_raw" \
+    "T166a the seek and the scan agree on the appended record's line / seek 與掃描對「被追加那一筆的行號」說法一致"
+assert_contains "$_t166_raw" '"line":259' \
+    "T166b and 259 is where it actually is / 而它實際上就在第 259 行"
+
+# With no index: the build-an-index branch, which must get the same line.
+# 沒有索引時：走「建立索引」那一條，行號必須相同。
+CSV2_INDEX_MIN_BYTES=0 "$CSV2" -append 'r257,n257' -i "$TMP/t166b.csv" --in-place
+assert_eq "$(CSV2_INDEX_MIN_BYTES=0 "$CSV2" -mid 257,257 --json -i "$TMP/t166b.csv" | sed -n 2p)" \
+          "$_t166_raw" \
+    "T166c the index built during the append says the same / 追加期間建出的索引說法相同"
+
+# --verify-index has to be able to CATCH a wrong line, or T166a passes for
+# free the next time this regresses. The index is bent by one line and its
+# checksum recomputed in Python -- an independent implementation, which is
+# also what pins the multiplier: `0x1000_0000_01b3`, not the FNV-1a prime the
+# comment beside it used to claim (see GC in todo/known-defects.md).
+# --verify-index 必須「抓得到」一個錯的行號，否則下次退化時 T166a 會白白通過。這裡把索引
+# 的行號扳歪一行，並用 Python 重算檢查碼——一份獨立實作，同時也把那個乘數釘住：
+# `0x1000_0000_01b3`，不是它旁邊那則註解曾經宣稱的 FNV-1a 質數（見 known-defects 的 GC）。
+if command -v python3 >/dev/null 2>&1; then
+    cp "$TMP/t166b.csv" "$TMP/t166c.csv"
+    CSV2_INDEX_MIN_BYTES=0 "$CSV2" --build-index -i "$TMP/t166c.csv" > /dev/null
+    python3 - "$TMP/t166c.csv.index" <<'PY'
+import struct, sys
+p = sys.argv[1]
+b = bytearray(open(p, 'rb').read())
+off, ln = struct.unpack_from('<QQ', b, 96)
+struct.pack_into('<Q', b, 96 + 8, ln + 1)          # bend grid 0's line by one
+h = 0xcbf29ce484222325
+for i, by in enumerate(b):
+    h ^= 0 if 80 <= i < 88 else by
+    h = (h * 0x1000000001b3) & 0xFFFFFFFFFFFFFFFF   # the constant, not the name
+struct.pack_into('<Q', b, 80, h)
+open(p, 'wb').write(bytes(b))
+PY
+    _t166_v=$(CSV2_INDEX_MIN_BYTES=0 "$CSV2" --verify-index -i "$TMP/t166c.csv" 2>&1)
+    if [[ $_t166_v == *"index says line"* ]]; then
+        ok "T166d --verify-index catches a wrong line, checksum and all / --verify-index 抓得到錯的行號，連檢查碼都對得上"
+    else
+        bad "T166d --verify-index said: $_t166_v / --verify-index 的回答如上"
+    fi
+else
+    skipt "T166d needs python3 to rebuild the index checksum / 需要 python3 才能重算索引檢查碼"
+    T166D_SKIPPED=1
+fi
+
+# ---------------------------------------------------------------------
+# T167 -- what --pretty's memory figure is measuring.
+#
+# The README taught CSV2_PRETTY_MAX_BYTES with an example that said a
+# five-record slice "holds 9 MB". The slice is 237 bytes; 9 MB is what
+# `csv2 -tail 1` costs too. The rule was right and the number was the
+# process's floor, attached to the one concept the paragraph existed to teach.
+# There is no portable way to measure RSS here, so what this case pins is the
+# claim that survived: the limit counts the MATERIAL, so a small slice of a
+# file too large to pretty-print whole is still fine.
+#
+# T167 —— `--pretty` 那個記憶體數字量的是什麼。
+# README 用一個例子教 CSV2_PRETTY_MAX_BYTES，說五筆的切片「holds 9 MB」。那個切片是 237
+# bytes，而 9 MB 是 `csv2 -tail 1` 也要付的。規則是對的，數字是行程的地板。這裡沒有可攜的
+# RSS 量法，因此這個案例釘住的是活下來的那個宣稱：上限量的是「材料」。
+# ---------------------------------------------------------------------
+echo
+echo "--- T167: --pretty counts the material / T167：--pretty 量的是材料 ---"
+
+{
+    printf 'id,note\n'
+    for _i in $(seq 1 400); do printf 'r%d,this is a note of some length %d\n' $_i $_i; done
+} > "$TMP/t167.csv"
+
+assert_fails "T167a --pretty refuses when the material is over the limit / 材料超過上限時 --pretty 拒絕" -- \
+    env CSV2_PRETTY_MAX_BYTES=200 "$CSV2" -r -t -md --pretty -i "$TMP/t167.csv"
+assert_succeeds "T167b and a slice of the same file under it is fine / 而同一個檔案在上限以下的切片沒問題" -- \
+    env CSV2_PRETTY_MAX_BYTES=200 "$CSV2" -mid 1,2 -t -md --pretty -i "$TMP/t167.csv"
+
+# ---------------------------------------------------------------------
+# T168 -- the buffered-record refusal names the knob, and the flag typed.
+#
+# The README says the message "names the request, the limit and the variable"
+# and covers `-tail N` and `-B N` with that one sentence. `-tail` named all
+# three; `-B` named two. And `-C 6`, which sets `before` as well, was reported
+# as `-B 6` -- a message pointing at a flag that is not on the command line.
+#
+# T168 —— 緩衝上限那條拒絕會指出旋鈕，以及使用者實際打的那個旗標。
+# ---------------------------------------------------------------------
+echo
+echo "--- T168: the buffered-record refusal / T168：緩衝紀錄上限的拒絕 ---"
+
+printf 'a,b\n1,MIT\n2,MIT\n3,x\n4,y\n5,z\n6,w\n' > "$TMP/t168.csv"
+
+_t168_tail=$(CSV2_MAX_BUFFER_RECORDS=5 "$CSV2" -tail 6 -i "$TMP/t168.csv" 2>&1)
+_t168_b=$(CSV2_MAX_BUFFER_RECORDS=5 "$CSV2" -contains MIT -B 6 -i "$TMP/t168.csv" 2>&1)
+_t168_c=$(CSV2_MAX_BUFFER_RECORDS=5 "$CSV2" -contains MIT -C 6 -i "$TMP/t168.csv" 2>&1)
+
+assert_contains "$_t168_tail" "CSV2_MAX_BUFFER_RECORDS" \
+    "T168a -tail names the variable / -tail 指出變數名稱"
+assert_contains "$_t168_b" "CSV2_MAX_BUFFER_RECORDS" \
+    "T168b and so does -B / -B 也是"
+assert_contains "$_t168_c" "-C 6" \
+    "T168c and -C is reported as -C, not as -B / 而 -C 被回報成 -C，不是 -B"
+assert_fails "T168d all three refuse rather than truncate / 三者都是拒絕而非截斷" -- \
+    env CSV2_MAX_BUFFER_RECORDS=5 "$CSV2" -contains MIT -C 6 -i "$TMP/t168.csv"
+
+# ---------------------------------------------------------------------
+# T169 -- the log's escape set is the report's escape set.
+#
+# `-log` documented four escapes and told the reader to unescape those four
+# and then read the quoted fields. The log also writes `\xNN` for every other
+# control byte -- the same convention the locating report documents -- so a
+# script written to the documented procedure mis-decodes any value carrying
+# one, in the output the document calls the authoritative audit trail.
+#
+# T169 —— log 的跳脫集合，就是報告的跳脫集合。
+# ---------------------------------------------------------------------
+echo
+echo "--- T169: what the audit trail escapes / T169：稽核軌跡會跳脫什麼 ---"
+
+printf 'a,b\n1,old\n' > "$TMP/t169.csv"
+"$CSV2" -update 1:2 "$(printf 'e\033f\007g')" -i "$TMP/t169.csv" --in-place -log "$TMP/t169.log"
+_t169=$(grep 'update 1:' "$TMP/t169.log")
+assert_contains "$_t169" '\x1B' \
+    "T169a ESC is written as \\x1B, upper-case hex / ESC 寫成 \\x1B，大寫十六進位"
+assert_contains "$_t169" '\x07' \
+    "T169b and BEL as \\x07 / BEL 寫成 \\x07"
+
+# ---------------------------------------------------------------------
+# T170 -- the refusals and warnings the lists left out.
+#
+# Both are cases of the program doing the right thing while a list that
+# presents itself as complete does not count it. A reader uses "not on the
+# list" to conclude "does not happen".
+#
+# T170 —— 清單漏掉的那些拒絕與警告。
+# ---------------------------------------------------------------------
+echo
+echo "--- T170: -insert's field count, and the discard warning / T170：-insert 的欄數，與丟棄警告 ---"
+
+printf 'a,b,c,d\n1,2,3,4\n' > "$TMP/t170.csv"
+assert_fails "T170a -insert checks the field count too / -insert 同樣會檢查欄數" -- \
+    "$CSV2" -insert 2 'x,y' -i "$TMP/t170.csv" -o "$TMP/t170out.csv"
+printf 'a,b\n1,2\n3,"unterminated' > "$TMP/t170p.csv"
+_t170w=$("$CSV2" -r -t --truncate-partial -i "$TMP/t170p.csv" -o "$TMP/t170clean.csv" 2>&1)
+assert_contains "$_t170w" "WARN" \
+    "T170b --truncate-partial warns about what it discarded / --truncate-partial 會就它丟掉的東西發出警告"
+
+# ---------------------------------------------------------------------
+# T171 -- --no-index gives up the parallel path on a .csv, and says so.
+#
+# The README recommends `--no-index` in two places as "slower, and right by
+# construction". How much slower is not only the index: on a `.csv` it also
+# forfeits the parallel search, because a `.csv` needs an index to prove one
+# record per line. The program says this under -debug; the document said it
+# in a different table. Measured 2.6x on 450,000 records.
+#
+# T171 —— `--no-index` 在 `.csv` 上還會放棄平行路徑，而且它說得出來。
+# ---------------------------------------------------------------------
+echo
+echo "--- T171: what --no-index costs / T171：--no-index 的代價 ---"
+
+_t171=$("$CSV2" -contains MIT --no-index -debug -i "$TMP/t168.csv" 2>&1)
+assert_contains "$_t171" "single-threaded" \
+    "T171a --no-index says which path it took / --no-index 會說它走了哪一條路"
+assert_contains "$_t171" "--no-index" \
+    "T171b and names --no-index as the reason / 並指出理由是 --no-index"
+
+# ---------------------------------------------------------------------
+# T172 -- the -- example from the flag list, run verbatim.
+#
+# `:359` shows `-update 1:2 -- --in-place` to explain that `--` marks ONE
+# argument as data. Typed as printed it refuses: an edit needs a destination.
+# It is a fragment, and this README has twice apologised for printing blocks
+# that look runnable and are not -- so the fragment now carries its
+# destination, and this case is what keeps the printed form working.
+#
+# T172 —— 旗標清單裡那個 `--` 範例，逐字執行。
+# ---------------------------------------------------------------------
+echo
+echo "--- T172: the -- example runs as printed / T172：那個 -- 範例照印出來的樣子能跑 ---"
+
+printf 'a,b\n1,2\n' > "$TMP/t172.csv"
+assert_succeeds "T172a -update 1:2 -- --in-place -i F -o G is a whole command / 這一整串是一個完整的指令" -- \
+    "$CSV2" -update 1:2 -- --in-place -i "$TMP/t172.csv" -o "$TMP/t172out.csv"
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t172out.csv")" "--in-place" \
+    "T172b and it stored the literal --in-place / 而它存進去的是字面的 --in-place"
+
+
+# ---------------------------------------------------------------------
+# T173 -- an inserted row is a record of the output.
+#
+# Caught by T166d's new check rather than by a round: an inserted row went out
+# through emit(), which advances the byte offset and nothing else, so the same
+# run wrote N+1 records and an index claiming N. Every grid point after the
+# insertion then named a byte belonging to some other record, and the seek
+# followed it: `-mid 257,258` returned records 258 and 259 labelled 257 and
+# 258, at rc=0, while --no-index returned the right ones. The same counter
+# feeds the audit trail, which said "wrote 300 records" for a file with 301.
+#
+# T173 —— 被插入的一列，是輸出的一筆紀錄。
+# 由 T166d 新加的檢查抓到，而不是由某個回合回報：被插入的一列走 emit()，而 emit() 只推進
+# 位元組偏移量，於是同一次執行寫出 N+1 筆、建出一份說 N 筆的索引。插入點之後的每一個格點
+# 指向的位元組都成了另一筆紀錄的開頭，而 seek 照著走。同一個計數器也餵給稽核軌跡。
+# ---------------------------------------------------------------------
+echo
+echo "--- T173: -insert and the index it leaves / T173：-insert 與它留下的索引 ---"
+
+{
+    printf 'id,note\n'
+    for _i in $(seq 1 300); do printf 'r%d,n%d\n' $_i $_i; done
+} > "$TMP/t173.csv"
+
+CSV2_INDEX_MIN_BYTES=100 "$CSV2" -insert 5 'X,Y' -i "$TMP/t173.csv" -o "$TMP/t173out.csv"
+assert_succeeds "T173a the index left by -insert describes the file / -insert 留下的索引與檔案相符" -- \
+    "$CSV2" --verify-index -i "$TMP/t173out.csv"
+assert_eq "$(CSV2_INDEX_MIN_BYTES=100 "$CSV2" -mid 257,258 -t -i "$TMP/t173out.csv")" \
+          "$("$CSV2" -mid 257,258 -t --no-index -i "$TMP/t173out.csv")" \
+    "T173b and a seek past the insertion agrees with a scan / 而越過插入點的 seek 與掃描說法一致"
+_t173_log="$TMP/t173.log"
+CSV2_INDEX_MIN_BYTES=100 "$CSV2" -insert 5 'X,Y' -i "$TMP/t173.csv" -o "$TMP/t173out2.csv" -log "$_t173_log"
+assert_contains "$(grep 'wrote ' "$_t173_log")" "wrote 301 records" \
+    "T173c and the audit trail counts the row it inserted / 而稽核軌跡把它插入的那一列算了進去"
+
+# ---------------------------------------------------------------------
+# T174 -- the header rows advance the line, because they are lines.
+#
+# Also caught by T166d. The line was counted in emitData and the header rows
+# go out through emit, so an index built by a write said record 1 was on line
+# 1 -- off by exactly the number of header rows, on every such index since v4
+# added the line.
+#
+# T174 —— 標頭列會推進行號，因為它們就是行。
+# 同樣由 T166d 抓到。行號在 emitData 裡數，而標頭列走 emit：一次寫入建出的索引因此說第 1 筆
+# 在第 1 行，差距恰好等於標頭列數。
+# ---------------------------------------------------------------------
+echo
+echo "--- T174: where record 1 is, according to a written index / T174：一份寫出來的索引說第 1 筆在哪 ---"
+
+{
+    print -r -- 'k,v'
+    print -r -- '鍵,值'
+    for _i in $(seq 1 300); do print -r -- "row$_i,value$_i"; done
+} > "$TMP/t174.csv2"
+CSV2_INDEX_MIN_BYTES=100 "$CSV2" -update '1:v' 'CHANGED' -i "$TMP/t174.csv2" -o "$TMP/t174out.csv2"
+assert_succeeds "T174a a .csv2 written with two header rows puts record 1 on line 3 / 兩列標頭的 .csv2 把第 1 筆放在第 3 行" -- \
+    "$CSV2" --verify-index -i "$TMP/t174out.csv2"
+assert_eq "$(CSV2_INDEX_MIN_BYTES=100 "$CSV2" -mid 1,1 --json -i "$TMP/t174out.csv2" | sed -n 2p)" \
+          "$("$CSV2" -mid 1,1 --json --no-index -i "$TMP/t174out.csv2" | sed -n 2p)" \
+    "T174b and the seek reports the same line as the scan / 而 seek 與掃描回報同一個行號"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
@@ -9032,6 +9370,13 @@ fi
 # T161 在 Windows 上、以及「寫入跑得比取樣迴圈還快」時會跳過，而後者是這台機器的速度的性質，
 # 不是平台名字的性質。
 (( ${T161_SKIPPED:-0} )) && (( want_skip += 1 ))
+# T166d needs python3 to rebuild the index checksum after bending a line. The
+# guest's busybox userland has no python3, and that is a property of the image
+# rather than of the platform's name -- so it is recorded by the case, like
+# the four above it.
+# T166d 需要 python3 才能在扳歪一個行號之後重算索引檢查碼。guest 的 busybox 使用者空間沒有
+# python3，而那是那個映像的性質、不是平台名字的性質——因此由該案例自己記錄，與上面四個相同。
+(( ${T166D_SKIPPED:-0} )) && (( want_skip += 1 ))
 if [[ "$skip" == "$want_skip" ]]; then
     ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
 else

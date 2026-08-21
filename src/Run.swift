@@ -284,6 +284,22 @@ func runVerifyIndex(_ o: Options) throws {
             if g < idx.offsets.count && idx.offsets[g] != UInt64(rec.offset) {
                 mismatches.append("record \(n): index says byte \(idx.offsets[g]), actual \(rec.offset)")
             }
+            // The line at each grid point is checked because the index STORES
+            // one. Version 4 added it and this proof was not extended, so an
+            // index with a wrong line passed at rc=0 saying "index OK" -- and
+            // the append fast path was writing exactly that, short by however
+            // many lines the previous last record occupied. The same door as
+            // T79: a sidecar asserting something nothing re-derived. A wrong
+            // line is quieter than a wrong offset, because it surfaces only in
+            // `--json`, `--physical` and an `@L` address.
+            // 每個格點的行號會被檢查，因為索引「存了」一個。第 4 版加了它，而這份證明沒有
+            // 跟著擴充，於是一份帶著錯行號的索引以 rc=0 通過並說「index OK」——而追加快路徑
+            // 寫進去的正是那種，少了上一筆佔掉的行數。與 T79 是同一扇門：一份 sidecar 宣稱了
+            // 一件沒有任何東西重新推導過的事。錯的行號比錯的偏移量更安靜，因為它只在
+            // `--json`、`--physical` 與 `@L` 位址上露臉。
+            if g < idx.lines.count && idx.lines[g] != UInt64(rec.line) {
+                mismatches.append("record \(n): index says line \(idx.lines[g]), actual \(rec.line)")
+            }
         }
         if spanningRecord == nil, recordSpansLines(rec, format: plan.format) { spanningRecord = n }
         return true
@@ -391,8 +407,19 @@ func runSelect(_ o: Options) throws {
                     "-tail \(n) 超過可緩衝的紀錄上限（\(maxBuffer)）；若確實需要請調高 CSV2_MAX_BUFFER_RECORDS")
     }
     if o.before > maxBuffer {
-        throw fault("-B \(o.before) exceeds the buffered-record limit (\(maxBuffer))",
-                    "-B \(o.before) 超過可緩衝的紀錄上限（\(maxBuffer)）")
+        // The variable name belongs in EVERY message that reports this limit,
+        // not only in `-tail`'s. The README says the message "names the
+        // request, the limit and the variable" and covers both flags with that
+        // one sentence; this one named two of the three, so the operator was
+        // told a wall exists and not which knob moves it. And the flag quoted
+        // is the one the operator typed: `-C 6` sets `before` too, and used to
+        // be reported as `-B 6`.
+        // 變數名稱屬於「每一則回報這個上限的訊息」，不是只屬於 `-tail` 那一則。README 說
+        // 訊息會「指出請求、上限與變數名稱」，而那一句同時涵蓋兩個旗標；這一則只給了三者
+        // 中的兩個，於是撞牆的人知道有牆、不知道該轉哪個旋鈕。引用的旗標則是他實際打的那個：
+        // `-C 6` 同樣會設定 `before`，而它原本被回報成 `-B 6`。
+        throw fault("\(o.beforeFlag) \(o.before) exceeds the buffered-record limit (\(maxBuffer)); raise CSV2_MAX_BUFFER_RECORDS if you really mean it",
+                    "\(o.beforeFlag) \(o.before) 超過可緩衝的紀錄上限（\(maxBuffer)）；若確實需要請調高 CSV2_MAX_BUFFER_RECORDS")
     }
 
     var lower = 1
@@ -926,14 +953,24 @@ func runEdit(_ o: Options) throws {
         builder = IndexBuilder(isCSV2: plan.format == .csv2)
     }
 
+    // Every byte that leaves this function is counted here -- offset AND line.
+    // The line used to be counted in emitData only, so the header rows, which
+    // go out through this one, advanced the offset and not the line: the index
+    // built by a write said record 1 was on line 1 when a `.csv2` puts it on
+    // line 3. Nothing checked it until --verify-index learned to compare the
+    // lines it stores.
+    // 每一個離開這個函式的位元組都在這裡被計入——偏移量「與」行號。行號原本只在 emitData
+    // 裡數，而標頭列走的是這一個：於是它們推進了偏移量卻沒有推進行號，一次寫入建出的索引
+    // 便說第 1 筆在第 1 行，而 `.csv2` 會把它放在第 3 行。在 --verify-index 學會比對它自己
+    // 存的行號之前，沒有任何東西檢查過這件事。
     func emit(_ r: Record) {
         let bytes = FieldEncoder.encodeRecord(r, format: plan.format, preserveRaw: true)
         sink.write(bytes)
         outOffset += bytes.count
+        outLine += bytes.filter { $0 == BYTE_LF }.count
     }
 
     func emitData(_ r: Record) {
-        let bytes = FieldEncoder.encodeRecord(r, format: plan.format, preserveRaw: true)
         outRecords += 1
         // A record that itself contains a newline makes the record number stop
         // matching the line number, and the index cannot then be used to seek
@@ -948,9 +985,7 @@ func runEdit(_ o: Options) throws {
         // 「只有一個函式」才是讓那件事不可能再發生的東西。
         builder?.add(record: outRecords, at: UInt64(outOffset), line: UInt64(outLine),
                      spansLines: recordSpansLines(r, format: plan.format))
-        sink.write(bytes)
-        outOffset += bytes.count
-        outLine += bytes.filter { $0 == BYTE_LF }.count
+        emit(r)
     }
 
     let parser = RecordParser(format: plan.format, truncatePartial: o.truncatePartial) { rec in
@@ -1117,7 +1152,26 @@ func runEdit(_ o: Options) throws {
                     let ins = try parseRowLiteral(row, format: plan.format,
                                                   expected: expectedFields,
                                                   what: "-insert \(r.number)")
-                    emit(ins)
+                    // emitData, not emit: an inserted row is a record of the
+                    // OUTPUT and has to be counted like one. Through emit it
+                    // moved the offset and nothing else, so the index built by
+                    // the same run said there were N records when the file had
+                    // N+1, and every grid point after the insertion named a
+                    // byte that was now some other record. `-mid 257,258` on a
+                    // file with one row inserted at 5 returned records 258 and
+                    // 259 labelled 257 and 258, at rc=0, while `--no-index`
+                    // returned the right ones -- the index giving the wrong
+                    // data quickly, which this design calls far worse than no
+                    // index. Caught by --verify-index only after it learned to
+                    // check the lines it stores.
+                    // 用 emitData 而不是 emit：被插入的一列是「輸出」的一筆紀錄，就該被當成
+                    // 一筆來計。走 emit 時它只推進了偏移量、其餘什麼也沒做，於是同一次執行建出
+                    // 的索引說有 N 筆而檔案有 N+1 筆，插入點之後的每一個格點指的位元組都成了
+                    // 另一筆紀錄。在第 5 筆插入一列的檔案上，`-mid 257,258` 回傳的是第 258 與
+                    // 259 筆、標成 257 與 258，rc=0，而 `--no-index` 回傳的是對的——「索引很快
+                    // 地給出錯的資料」，本設計稱之為比沒有索引糟得多。直到 --verify-index 學會
+                    // 檢查它自己存的行號，才抓到。
+                    emitData(ins)
                 }
             }
             if deletes.contains(where: { r.number >= $0.0 && r.number <= $0.1 }) {
@@ -1466,10 +1520,24 @@ func runAppendFast(_ o: Options) throws {
     // 代價是一次「快路徑當初就是為了避免它」的掃描。之所以付這個代價，是因為另一個選項是
     // 「一次被回報為成功的寫入，產生一個這個工具自己拒絕讀取的檔案」——那正是 csv2 存在所要
     // 防止的失敗，也正是 README 早已宣稱「`-o` 與 `--in-place` 一視同仁地檢查」的那一項。
+    //
+    // Because that scan happens, the fast path is in the same position as
+    // every other write path: it has just read the whole file. So it builds
+    // an index like the others do, instead of being the one exception -- an
+    // exception whose stated reason ("its fast path never reads to the end")
+    // had been false since the scan above was added, in three sentences of
+    // the README and two comments here.
+    //
+    // 正因為那次掃描會發生，快路徑就和其他每一條寫入路徑處於同一個位置：它剛剛讀完整個
+    // 檔案。因此它像其他路徑一樣建索引，而不再是那個唯一的例外——一個「它的快路徑從不讀到
+    // 檔尾」的理由早已不成立的例外，那句話在 README 裡有三份、在這個檔案裡有兩份。
+    let wantsIndex = existingIndex == nil && !o.noIndex && size >= UInt64(indexMinBytes())
+    let builder = wantsIndex ? IndexBuilder(isCSV2: fmt == .csv2) : nil
+    var fileLineFeeds = 0
     if size > 0 {
         do {
-            try validateBeforeAppend(path: path, format: fmt, headerRows: headerRows,
-                                     truncatePartial: false)
+            fileLineFeeds = try validateBeforeAppend(path: path, format: fmt, headerRows: headerRows,
+                                                     truncatePartial: false, builder: builder)
         } catch let e as CSV2Error {
             guard o.truncatePartial else { throw e }
             throw fault(
@@ -1580,7 +1648,80 @@ func runAppendFast(_ o: Options) throws {
     // which validation catches and turns into a scan -- a safe downgrade.
     // 先寫資料，再更新索引。中間被打斷的話索引是過期的，會被驗證擋下並退回掃描
     // ——安全的降級。
-    if let idx = existingIndex {
+    // The physical line the first appended record starts on, from the file's
+    // own bytes rather than from the index.
+    //
+    // This used to be `Int(idx.lastLine) + prefix.count`, and `lastLine` is
+    // documented in Index.swift as the line the LAST record STARTS on -- so
+    // the sum was short by however many lines that record itself occupies, at
+    // least one and more when it carries newlines inside quotes. An appended
+    // record landing on a grid point then put a wrong line in the sidecar,
+    // `-mid N,N --json` reported it, `--no-index` disagreed by one, and
+    // `--verify-index` said OK because it did not check the lines it stores.
+    //
+    // The line feeds are counted by the scan above, so this is exact: a file
+    // ending in LF has that many complete lines and the next record starts on
+    // the one after; a file not ending in LF gets the prefix LF that completes
+    // its last line, which `prefix.count` adds.
+    //
+    // 被追加的第一筆紀錄從哪一個實體行開始，由檔案自己的位元組決定，而不是由索引決定。
+    //
+    // 原本寫的是 `Int(idx.lastLine) + prefix.count`，而 `lastLine` 在 Index.swift 裡的
+    // 定義是「最後一筆『開始』的那一行」——因此這個和少了那一筆自己佔掉的行數，至少一行，
+    // 引號內含換行時更多。一筆剛好落在格點上的追加紀錄，於是把一個錯的行號放進 sidecar，
+    // `-mid N,N --json` 會照著報，`--no-index` 差一行，而 `--verify-index` 說 OK，因為
+    // 它根本沒有檢查自己存的行號。
+    //
+    // 換行數由上面那次掃描順手數好，因此這是精確值：以 LF 結尾的檔案有那麼多完整的行，
+    // 下一筆從再下一行開始；不以 LF 結尾的檔案會得到那個補上的 LF 來把最後一行補完，
+    // 而那正是 `prefix.count` 加進去的。
+    let firstAppendedLine = fileLineFeeds + 1 + prefix.count
+
+    /// Walks the payload once, handing back each appended record's number,
+    /// offset, starting line and how many lines it occupies. Both the
+    /// extend-an-index and the build-an-index branch need exactly this, and
+    /// having it twice is how the two would drift apart.
+    /// 走過 payload 一次，交出每一筆被追加紀錄的編號、偏移量、起始行，以及它佔掉幾行。
+    /// 「延續索引」與「建立索引」兩條分支要的正好是同一份資料，寫兩次就是它們日後分岔的方式。
+    func appendedRecords(startingAt firstNumber: Int) -> [(n: Int, off: UInt64, line: Int, lines: Int)] {
+        var out: [(n: Int, off: UInt64, line: Int, lines: Int)] = []
+        var line = firstAppendedLine
+        var n = firstNumber
+        var cursor = prefix.count
+        for off in appendOffsets {
+            let start = cursor
+            var end = start
+            var seen = 0
+            while end < payload.count {
+                if payload[end] == BYTE_LF { seen += 1 }
+                end += 1
+                if seen == 1 && end > start { break }
+            }
+            let lines = payload[start..<end].filter { $0 == BYTE_LF }.count
+            out.append((n: n, off: off, line: line, lines: max(lines, 1)))
+            line += lines
+            n += 1
+            cursor = end
+        }
+        return out
+    }
+
+    if let b = builder {
+        for r in appendedRecords(startingAt: b.recordCount + 1) {
+            b.add(record: r.n, at: r.off, line: UInt64(r.line), spansLines: r.lines > 1)
+        }
+        // finish() stamps the file, so it has to run AFTER the write -- an
+        // index stamped before the append describes a file that no longer
+        // exists and is discarded on the next read, which is safe and useless.
+        // finish() 會為檔案蓋戳記，因此必須在寫入「之後」執行——在追加之前蓋的戳記描述的是
+        // 一個已經不存在的檔案，下次讀取時會被丟棄：安全，但毫無用處。
+        if let idx = b.finish(dataPath: path) {
+            if idx.save(dataPath: path) {
+                Logger.shared.info(
+                    "append fast path: built the index beside \(path) from the scan it had to do anyway: \(idx.records) records, \(idx.offsets.count) grid points")
+            }
+        }
+    } else if let idx = existingIndex {
         // A record that spans lines makes `no_embedded_newlines` false, and
         // this path used to update the count, the offsets and the freshness
         // stamp while leaving that claim exactly as it was.
@@ -1628,29 +1769,9 @@ func runAppendFast(_ o: Options) throws {
         // 每一筆被追加紀錄的起始行號，由「實際寫出去的位元組」算出。自 v4 起索引每個格點都帶
         // 一個行號，而追加是唯一一條「延續索引」而非「重建索引」的路徑——因此它也是唯一一個
         // 能把錯的行號放進索引的地方，而那正是 T79 當初讓「筆數」出錯的同一扇門。
-        var line = Int(idx.lastLine) + prefix.count   // the prefix is at most one LF
-        var n = Int(idx.records)
-        var cursor = prefix.count
-        for off in appendOffsets {
-            n += 1
-            // Lines consumed by the records already written in this payload.
-            // 這一批 payload 中「已經寫出的那些紀錄」用掉的行數。
-            let start = cursor
-            var end = start
-            var seen = 0
-            while end < payload.count {
-                if payload[end] == BYTE_LF { seen += 1 }
-                end += 1
-                if seen == 1 && end > start { break }
-            }
-            idx.noteAppend(record: n, at: off, line: UInt64(line))
-            line += payload[start..<end].filter { $0 == BYTE_LF }.count
-            cursor = end
+        for r in appendedRecords(startingAt: Int(idx.records) + 1) {
+            idx.noteAppend(record: r.n, at: r.off, line: UInt64(r.line))
         }
-        // No index means do NOT build one here: an O(n) scan to serve an O(1)
-        // operation cancels out the whole point of the fast path.
-        // 沒有索引時不在此建立：為了一個 O(1) 的操作去做 O(n) 全掃描，會把快路徑
-        // 的意義完全抵銷。
         idx.save(dataPath: path)
     }
 }

@@ -356,7 +356,12 @@ PROTECTION / 保護
   --version  -V         print the version and exit
   --help  -h            print the flag list and exit
   --                    the NEXT argument is data, not a flag: write a value
-                        that begins with a dash as `-update 1:2 -- --in-place`.
+                        that begins with a dash as
+                        `-update 1:2 -- --in-place -i f.csv -o g.csv`.
+                        The destination is part of the example because typed
+                        without one it refuses -- an edit needs somewhere to
+                        go -- and this file has printed runnable-looking
+                        fragments that were not before.
                         It is not "everything after this is data" -- flags that
                         follow are still flags, which is what lets `-i` and
                         `-o` come after the value in the same command
@@ -390,16 +395,30 @@ INDEX / 索引
                         packages.csv.index, pkgs.csv2 -> pkgs.csv2.index
   --build-index         build the sidecar now, at any file size. Otherwise one
                         only appears as a SIDE EFFECT, and only at or above
-                        CSV2_INDEX_MIN_BYTES: a REWRITING edit builds one, and
+                        CSV2_INDEX_MIN_BYTES: a REWRITING edit builds one,
                         -tail builds one because it must read the whole file
-                        anyway -- so -mid alone never produces one, nothing
-                        produces one for a small file unless you ask, and
-                        `-append --in-place` produces none either, because its
-                        fast path never reads the file to the end. An existing
-                        index IS extended by that append
-  --verify-index        O(n) full check of all three of the index's claims --
-                        the grid offsets, the record count, and whether any
-                        record spans lines. The O(1) check on the normal path
+                        anyway, and `-append --in-place` builds one for the
+                        same reason -- it reads the file to the end to prove
+                        the last record is complete. So -mid alone never
+                        produces one, and nothing produces one for a small
+                        file unless you ask. An existing index is EXTENDED by
+                        an append rather than rebuilt.
+                        Until 2026-08-21 the append was the exception, on the
+                        grounds that its fast path never read to the end; that
+                        had not been true since the unclosed-quote check was
+                        added, and the cost of the entry above is a grid point
+                        per 256 records on a scan that was happening anyway.
+                        The build-index cost is the SCAN: 505 ms on 17.7 MB /
+                        450,000 records, against 4 ms for the -mid window it
+                        makes possible -- about 130 windows to break even
+  --verify-index        O(n) full check of all four of the index's claims --
+                        the grid offsets, the line each grid point names, the
+                        record count, and whether any record spans lines.
+                        The line was added to the format on 2026-08-20 and to
+                        this proof on 2026-08-21; in between, an index with a
+                        wrong line passed. It is not free: 451 ms on 17.7 MB /
+                        450,000 records, more than the 204 ms search it is
+                        protecting. The O(1) check on the normal path
                         is deliberately a heuristic, not a proof.
                         Exit 0 when the index is there and accurate, 1 when
                         there is none or it cannot be used. It runs the O(n)
@@ -412,7 +431,19 @@ INDEX / 索引
 
 DIAGNOSTICS / 診斷
   -debug                diagnostics to stderr, including a metrics: line on
-                        every path. Measure with it rather than guessing:
+                        every path. That line is
+                        `read_bytes=N file_bytes=N peak_rss_bytes=N`:
+                        read_bytes is what was actually pulled off the disk
+                        and it moves in whole 64 KiB buffers, never past the
+                        end of the file -- so an early stop reports 65536 on a
+                        17.7 MB file and the file's whole size (20 bytes, or
+                        263) on a file smaller than one buffer. file_bytes is
+                        the input's size, and the PAIR is what tells a partial
+                        read from a full one: equal on a small file proves
+                        nothing, equal on a large one proves everything was
+                        read. Measured, not asserted -- `-mid 2,3` gives
+                        65536 / 17732348 and `-r` gives 17732348 / 17732348.
+                        Measure with it rather than guessing:
                         23 MB of peak RSS on a 615 MB file in parallel, 9.5 MB
                         single-threaded over the same file. Until 2026-08-20
                         the parallel figure was 608 MB -- one byte resident per
@@ -516,6 +547,30 @@ grew a value ending in a newline by one more each time, at rc=0. `-get`
 terminates its output with a newline like every other command; `printf x`
 protects the value's trailing newline and `-get`'s along with it.
 
+**And there is a second thing in the middle, which the three lines above do
+not fix: the command line itself.** A shell variable can hold a NUL byte;
+`execve` cannot pass one. The argument stops at the first NUL, so a value with
+one in the middle arrives at csv2 already cut short, and csv2 writes exactly
+what it was handed:
+
+```console
+$ printf 'pkg,note\nzlib,before\x00after\n' > nul.csv
+$ val=$(csv2 -get 1:2 -i nul.csv; printf x); val=${val%x}; val=${val%$'\n'}
+$ csv2 -update 1:2 "$val" -i nul.csv --in-place; echo $?
+0
+$ csv2 -get 1:2 -i nul.csv | od -t x1 | head -1
+0000000 62 65 66 6f 72 65 0a               # "before" -- six bytes gone, rc=0
+```
+
+**csv2 cannot see this.** The truncation happens before the process starts,
+and a shorter value is indistinguishable from a deliberate edit. It is the
+same boundary the refusals table already guards for a value that is not valid
+UTF-8 — and the same remedy: **carry the value through a file, where bytes
+survive.** The refusal exists for the case that mangles one character and
+there is nothing to refuse in the case that drops the rest of the value.
+`-log` records what was actually written (`"before\x00after" -> "before"`),
+which is the only place the loss is visible.
+
 **The report's own values are for reading, and this is a third reason:** `-get`
 is the only shape that hands you the stored bytes, and even it is at the mercy
 of what you pour them into.
@@ -527,12 +582,20 @@ The first is a stale sidecar. If a `.index` file sits beside the data and the
 data has since changed in a way the O(1) stamp cannot see — same size, same
 mtime, same first and last bytes — the search trusts it and can report a record
 number that is off. The three commands then all exit 0 and the edit lands on a
-neighbouring record. Two cheap ways to make that impossible:
+neighbouring record. Two ways to make that impossible, and they are priced
+differently:
 
 ```sh
 csv2 --verify-index -i f.csv2          # O(n): prove the sidecar first, exit 1 if not
 csv2 -contains "old" --no-index -i f.csv2   # or do not use one at all
 ```
+
+On 17.7 MB / 450,000 records: proving the sidecar costs 451 ms and the search
+that follows 204 ms, so 655 ms; not using the index costs 528 ms. **For a
+single search, proving it first is the more expensive of the two.** It wins
+from about the second search onward, because the proof is paid once. Both were
+called "cheap" here until 2026-08-21, which is doing work the numbers do not
+support.
 
 **The second is simpler and neither of those touches it: somebody edits the
 file between your two commands.** The address was true when `-contains` printed
@@ -714,7 +777,9 @@ refused outright (see above).
 
 **NUL and the other control bytes are accepted verbatim** in file content:
 they are data, they round-trip, and the locating report escapes them for
-display.
+display. **In file content** is the whole of that promise: a NUL cannot reach
+csv2 through an argument at all, because the command line stops at the first
+one — see the compose recipe above.
 
 **A zero-byte file is refused too**, with `expected 1 header row(s), found 0` —
 a file with no header does not declare its own shape, and guessing one is how a
@@ -860,7 +925,10 @@ will not record:
 | the outcome of the run | `wrote N records, M fields, atomic rename OK` — the line that says the write completed, and the one to look for when asking whether an edit landed |
 
 **One entry is one line, and every line is escaped to keep it that way.** A
-newline, tab, CR or backslash is written as `\n`, `\t`, `\r` or `\\`. Without
+newline, tab, CR or backslash is written as `\n`, `\t`, `\r` or `\\`, and
+**every other control character becomes `\xNN`, hex in upper case** — the same
+convention the locating report uses, described in one place and not the other
+until 2026-08-21. A value carrying an ESC arrives as `\x1B`. Without
 that, text containing a newline started a new line whose entire content that
 text chose — a forged entry, with a timestamp of its choosing, in the audit
 trail, at rc=0. Truncating did not prevent that; it only shortened the forged
@@ -885,8 +953,11 @@ do it — so `INNOCENT" -> "ALSO INNOCENT` is written
 `"INNOCENT"" -> ""ALSO INNOCENT"` and a reader who knows the format needs
 nothing new. Without that doubling a value could rewrite which half of the
 entry was old and which was new, inside an otherwise legitimate line, and no
-regex could recover the truth. Asserted by T106. Unescape the line first
-(`\n`, `\t`, `\r`, `\\`), then read the quoted fields.
+regex could recover the truth. Asserted by T106. Unescape the line first —
+`\n`, `\t`, `\r`, `\\` **and `\xNN`** — then read the quoted fields. A reader
+written to the shorter list, which is what this paragraph gave until
+2026-08-21, rebuilds a value carrying an ESC as six literal characters and
+reports a mismatch that is not there.
 
 **"In full" has no upper bound, and above 1 MiB it says so.** A value larger
 than that is still written whole, with a `WARN` naming its size: a cap would
@@ -1243,6 +1314,14 @@ a mixture, even while a writer is part-way through. That is a promise you can
 build on, not an implementation detail: it is why the temp-file-and-rename is
 there.
 
+**What it costs is disk: peak usage is twice the file.** The temp file grows
+to the size of the finished output while the original is still there, so
+rewriting one cell of a 1 GiB file needs 1 GiB free, not the few bytes the
+edit changes. The write-amplification figure further down counts the bytes
+WRITTEN; this is the space that has to exist at the same time, and ENOSPC
+part-way through leaves the original intact and reports the failure — which is
+the promise working, not failing.
+
 **The promise belongs to the writer, not to csv2's reader**, and this document
 sends you to other writers — `iconv`, `tr`, a shell redirect. Measured against
 an ordinary `cat > file` racing a read, 30 trials produced 12 silent
@@ -1334,7 +1413,9 @@ to work inside a pipeline.
 **One thing does print without `-debug`, and it is deliberate**: a `WARN` line,
 when a run succeeded while doing something the caller almost certainly did not
 intend — a `-mid` window that begins past the end of the file, a value over
-1 MiB going into the log in full. WARN is the default threshold. Unlike an
+1 MiB going into the log in full, `--truncate-partial` naming the bytes it
+discarded, an index sidecar that could not be written. WARN is the default
+threshold. Unlike an
 error it is **one line and English only**, which is what every diagnostic in
 this tool is; the two-line bilingual shape belongs to the message that ends a
 run. Exit status stays 0, because the run did what it was told.
@@ -1401,6 +1482,7 @@ than matching the message against this table:
 | `-o /dev/stdout` | output is written to a temp file beside the target and renamed, which needs a regular file. Use `-so` |
 | `-update`/`-delete -cell` on a column the file marks `:enc:`, `:hmac:` or `:hash` | a raw value written there cannot be read back, and for an encrypted column `-decrypt` stops at that cell — so records the edit never touched are lost with it |
 | `-insert`/`-append` into a file that has such a column | every field of the literal row is raw, including that one, and no value you could supply would be right: the transform needs the key, and the header carries only its fingerprint |
+| `-insert N ROW` whose field count differs from the header | the same check `-append` gets, and it names the count both ways: `-insert 2 has 2 fields but the header has 4`. It was missing from this table until 2026-08-21, and a table that presents itself as complete is read as one |
 | `-append` onto a file whose last record is incomplete | a short final record, or one left open by an unclosed quote. Checked for `-o` and for `--in-place` alike — the fast path used to skip it and produce a file csv2 then refused to read |
 | `-append` with `--truncate-partial` | appending adds bytes and cannot remove the incomplete record, so the file would keep it *and* gain a complete record after it. Write a clean copy first: `csv2 -r -t --truncate-partial -i f.csv -o clean.csv` |
 | a value, row or search string that is not valid UTF-8 | Swift decodes `argv` with replacement, so the bytes are already gone; storing what arrives would put U+FFFD where a byte was, silently. Put the value in a file — bytes survive there, which is what the round-trip guarantee is about. **Paths are not checked**: on Linux they may legitimately hold any bytes, and csv2 hands a path to the filesystem rather than storing it as data. **POSIX only**: a Windows command line arrives as UTF-16, so whatever happened to an invalid byte happened before the process started and there is nothing left for csv2 to inspect |
@@ -1569,10 +1651,12 @@ itself. It is derived, never the source of truth: put the name in
 
 **When one appears.** `--build-index` builds one at any size. Otherwise only as
 a side effect, and only at or above `CSV2_INDEX_MIN_BYTES` (16 MiB): a
-rewriting edit builds one, and `-tail` builds one because it must read to the
-end anyway. `-mid`, `-contains`, `-r` and `-get` never build one. `-append
---in-place` builds none — its fast path never reads to the end — but it does
-extend one that already exists.
+rewriting edit builds one, `-tail` builds one because it must read to the end
+anyway, and `-append --in-place` builds one because it reads to the end too —
+it has to prove the file's last record is complete before adding bytes after
+it. `-mid`, `-contains`, `-r` and `-get` never build one. An append EXTENDS an
+index that already exists rather than rebuilding it, which is the only place
+in the tool where an index is edited instead of derived.
 
 **Who reads it.** `-contains` (to split the file into chunks), `-mid` and
 `-tail` (to seek). `-get` and the edit verbs scan and ignore it. `--no-index`
@@ -1610,8 +1694,8 @@ cannot be lowered can only be exercised by building a 16 MiB fixture.
 | `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | set above the file size to force the single-threaded path |
 | `CSV2_PARALLEL_MAX_BYTES` | 1 GiB | ceiling on what the in-flight chunks may hold. It governs the **output** fragments — one batch of them is kept so they can be written in chunk order, which is what makes parallel output byte-identical to single-threaded. The read side needs no ceiling: a worker reads its chunk 64 KiB at a time and never holds more. Lowering this holds fewer chunks in flight and the rest queue; `-debug` says so, with the numbers. **It is not a cap on the process's memory** — under an 8 MiB setting, peak RSS was still 58 MB, because the fixed working set is not part of what it governs |
 | `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | smaller values make a small file yield many chunks, so chunk boundaries are actually exercised |
-| `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `-md --pretty` refuses above this rather than being OOM-killed. **It measures the material being aligned, not the input file** — `--pretty` has to hold the whole table to compute column widths. So a slice of an arbitrarily large file is always fine: `-mid 150000,150004 -t -md --pretty` on a 23 MB file holds 9 MB and succeeds, while `-r` over the same file refuses |
-| `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | upper bound on `-tail N` and `-B N`. Asking for more is **refused, not truncated** — a short answer that looks like a whole one is the failure this tool exists to avoid. The message names the request, the limit and the variable |
+| `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `-md --pretty` refuses above this rather than being OOM-killed. **It measures the material being aligned, not the input file** — `--pretty` has to hold the whole table to compute column widths. So a slice of an arbitrarily large file is always fine: `-mid 150000,150004 -t -md --pretty` on a 23 MB file aligns 237 bytes of material and succeeds, while `-r` over the same file refuses. **The limit is not a cap on the process's memory**: aligning 15 MB of material took 81 MB of peak RSS, about 5x, because the table is held as records before it is rendered. Until 2026-08-21 this entry said the slice "holds 9 MB", which is what `csv2 -tail 1` costs too — the process's floor, attached to the one concept this row exists to teach |
+| `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | upper bound on `-tail N` and `-B N`. Asking for more is **refused, not truncated** — a short answer that looks like a whole one is the failure this tool exists to avoid. The message names the request, the limit and the variable -- and it quotes the flag that was TYPED, so `-C 6`, which sets the before side too, is reported as `-C 6` and not as `-B 6`. Until 2026-08-21 the `-B` message named two of the three and `-C` was reported as `-B` |
 
 **Parallelism applies to `-contains` and to nothing else**, and only when every
 one of these holds. Setting the two knobs above does not by itself make a run
@@ -1694,9 +1778,13 @@ is each later chunk's starting record number.
 **If you cannot accept that risk on a given run, `--no-index` is the answer**,
 and it is worth naming here rather than leaving it as a mechanism described
 elsewhere. It means "never read or write a sidecar", so the search reads the
-file and counts for itself: slower, and right by construction. On the file
-above, the trusted stale index reports `40000:2` for a record whose true
-address is `39999:2`; `--no-index` reports `39999:2`. `--verify-index` answers
+file and counts for itself: slower, and right by construction. **How much
+slower is not only the scan**: on a `.csv` it also gives up the parallel
+search, because a `.csv` needs an index to prove one record per line. Measured
+on 17.7 MB / 450,000 records, `-contains` goes from 204 ms to 528 ms — 2.6x,
+and `-debug` says which of the two reasons applied. On the file above, the
+trusted stale index reports `40000:2` for a record whose true address is
+`39999:2`; `--no-index` reports `39999:2`. `--verify-index` answers
 the same question the other way — it proves the sidecar before you rely on it,
 once, instead of on every run.
 
@@ -1731,9 +1819,10 @@ Each of these is argued in full in [plan/plan.md](./plan/plan.md).
   `-tail`, a rewriting edit — puts a good one back, **provided the file is at
   or above `CSV2_INDEX_MIN_BYTES`**: below it nothing builds a sidecar, so a
   damaged one simply stays there, discarded on every read. `-append
-  --in-place` does not replace one either, because its fast path never reads
-  to the end; it extends an index that is already valid and leaves a damaged
-  one alone. A plain `-contains` or `-r` reads
+  --in-place` replaces one too, for the same reason `-tail` does: it reads to
+  the end to prove the last record is complete. An index that is already
+  VALID is extended rather than rebuilt; a damaged one is discarded and a
+  fresh one written in its place. A plain `-contains` or `-r` reads
   every byte and writes nothing, because building an index is not free and a
   read was not asked to pay for one; the `--build-index` entry says the same
   thing from the other side. Asserted by T68.

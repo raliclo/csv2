@@ -38,6 +38,12 @@ struct Options {
     /// shape follows the flag, not the number -- see the parse site.
     /// 是否「給了」上下文旗標，與它的值無關。輸出形狀跟著旗標走，不跟著數字走——見解析處。
     var contextGiven = false
+    /// Which flag SET `before`. The buffered-record refusal quotes it, and a
+    /// message naming `-B` to someone who typed `-C` sends them looking for a
+    /// flag that is not on their command line.
+    /// 是哪一個旗標設定了 `before`。緩衝上限那條拒絕會引用它——對一個打了 `-C` 的人說
+    /// `-B`，會讓他去找一個並不在自己指令列上的旗標。
+    var beforeFlag = "-B"
     var before = 0
 
     var head: Int?
@@ -436,10 +442,12 @@ func parseArgs(_ argv: [String]) throws -> Options {
         // `-A "$N"` 的腳本，會依一個變數拿到兩種不相容的格式——TAB 分隔的報告對上 CSV，
         // rc=0，什麼也不說。那正是 README 開頭那個錯誤，只是經由一次旗標互動抵達。
         case "A": o.after = try nonNegativeInt(arg, try need(arg)); o.contextGiven = true
-        case "B": o.before = try nonNegativeInt(arg, try need(arg)); o.contextGiven = true
+        case "B":
+            o.before = try nonNegativeInt(arg, try need(arg))
+            o.beforeFlag = "-B"; o.contextGiven = true
         case "C":
             let n = try nonNegativeInt(arg, try need(arg))
-            o.after = n; o.before = n; o.contextGiven = true
+            o.after = n; o.before = n; o.beforeFlag = "-C"; o.contextGiven = true
         case "head": try once("-head"); o.head = try positiveInt(arg, try need(arg))
         case "tail": try once("-tail"); o.tail = try positiveInt(arg, try need(arg))
         case "mid": try once("-mid"); o.mid = try parseMid(try need(arg))
@@ -1606,17 +1614,39 @@ func checkTornAppend(path: String, format: Format, truncatePartial: Bool) throws
 /// 更便宜的檢查考慮過，而且不成立：讀回一段有界的視窗、解析最後一個換行之後的部分，分不出
 /// 「半筆」與「一筆含內嵌換行的完整紀錄」——兩者看起來都是碎片，而答案取決於該紀錄開頭處的
 /// 引號狀態，那只有從檔案前面解析才知道。在唯一可能出錯的那個情況上付 O(n)，好過安靜地弄錯。
+/// Returns the number of line feeds in the file, which the append fast path
+/// needs to know which physical line the appended record starts on. Counting
+/// them here is free: this function already reads every byte.
+///
+/// `builder`, when given, is filled in from the same pass. The scan happens
+/// either way -- see the long comment at the call site -- so an index costs
+/// one grid entry per 256 records on top of it, and the alternative was the
+/// only write path in the tool that left a file it had just read from end to
+/// end without a sidecar.
+///
+/// 回傳檔案裡的換行數，追加快路徑需要它來決定被追加的紀錄從哪一個實體行開始。在這裡數
+/// 是免費的：這個函式本來就會讀過每一個位元組。
+///
+/// 給了 `builder` 時，它也在同一次掃描中被填好。那次掃描無論如何都會發生（理由見呼叫處
+/// 的長註解），因此一份索引的額外成本是每 256 筆一個格點——而不做的話，這會是本工具唯一
+/// 一條「剛剛從頭到尾讀完一個檔案、卻沒有留下 sidecar」的寫入路徑。
+@discardableResult
 func validateBeforeAppend(path: String, format: Format, headerRows: Int,
-                          truncatePartial: Bool) throws {
+                          truncatePartial: Bool,
+                          builder: IndexBuilder? = nil) throws -> Int {
     let source = try ByteSource(path: path)
     defer { source.close() }
     var headers: [Record] = []
     var expected = 0
     var pending: Error?
+    var lineFeeds = 0
     let parser = RecordParser(format: format, truncatePartial: truncatePartial) { rec in
         if headers.count < headerRows {
             headers.append(rec)
-            if headers.count == headerRows { expected = headers[0].count }
+            if headers.count == headerRows {
+                expected = headers[0].count
+                builder?.headerEnded(at: UInt64(rec.offset + 1))
+            }
             return true
         }
         var r = rec
@@ -1628,15 +1658,21 @@ func validateBeforeAppend(path: String, format: Format, headerRows: Int,
             pending = error
             return false
         }
+        builder?.add(record: r.number, at: UInt64(r.offset), line: UInt64(r.line),
+                     spansLines: recordSpansLines(r, format: format))
         return true
     }
-    while !parser.stopped, let c = source.next() { try parser.feed(c) }
+    while !parser.stopped, let c = source.next() {
+        for b in c where b == BYTE_LF { lineFeeds += 1 }
+        try parser.feed(c)
+    }
     // finish() is what reports a file ending inside a quoted field, so it must
     // run even though nothing else here needs it.
     // finish() 才是回報「檔案結束在引號欄位內」的地方，因此即使此處沒有別的東西需要它，
     // 它也必須被執行。
     if !parser.stopped { try parser.finish() }
     if let e = pending { throw e }
+    return lineFeeds
 }
 
 // ---------------------------------------------------------------------

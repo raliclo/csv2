@@ -5094,3 +5094,403 @@ $ csv2 -r -t -md -i lat.csv | od -t x1
 每一項在本文後面都有描述——**而讀者最先掃到的那張表,呈現的是一個只剩一件事沒做的工具。**
 
 兩份 README 現在都多一張「不提供／改用什麼」的表,緊接在那張表後面。
+
+---
+
+## FP. `-append --in-place`「從不把檔案讀到結尾」——它會,而且已經會了一段時間(2026-08-21 修正,T165)
+
+第 63 回合。README 用**同一個理由**在三個地方解釋同一件事:
+
+```
+README.md:398   fast path never reads the file to the end. An existing …
+README.md:1574  --in-place` builds none — its fast path never reads to the end — …
+README.md:1733  --in-place` does not replace one either, because its fast path never reads
+README.zh-TW.md:327   `-append --in-place` 也不會建,因為它的快路徑根本不會把檔案讀到結尾
+README.zh-TW.md:1414  `-append --in-place` 同樣不會替換它,因為它的快路徑根本不會讀到檔尾
+```
+
+而 `src/Run.swift` 裡那條路徑上,**每一次追加都無條件呼叫 `validateBeforeAppend()`**,它從第一個
+位元組解析到最後一個。那個呼叫是為了修「一筆停在未關閉引號裡的紀錄」而加的——當時連同它上方
+那段長註解一起加,註解自己就寫著「代價是一次快路徑當初就是為了避免它的掃描」。**加的時候改了
+`-append` 條目的計時表(`:302`,0.07/0.24/0.92 s)與 `:1809`,沒有改那三處**。
+
+實測(本機,中位數 5 次,inode 追加前後相同):
+
+```console
+2.0 MB → 50 ms   8.0 MB → 188 ms   35.0 MB → 802 ms
+```
+
+線性,與 README 自己 `:302` 的表一致。「O(1) 的是**寫出的位元組**,不是時間」才是真的。
+
+**形狀:一個理由被修掉之後,只有引用它的其中一部分被更新。** 與 DN→FG→FJ 同一族,但這次
+被留下的不是一條規則的另一半,而是**同一句話的另外三份副本**。
+
+**而它的後果不只是那三句話。** 那個理由同時被用來正當化一項**行為**:「`-append --in-place`
+不會建索引」。README 自己的規則是「下一個**寫入檔案**、或**本來就必須讀到檔尾**的操作,會寫回
+一份好的索引」。追加兩項都符合,卻是唯一的例外,而例外的理由已經不成立——那次掃描本來就在跑,
+順手記格點幾乎免費。`src/Index.swift` 的 `noteAppend()` 與 `src/Run.swift` 追加尾端的註解,
+都還寫著「沒有索引時不在此建立:為了一個 O(1) 的操作去做一次 O(n) 全掃描,會把快路徑的意義
+完全抵銷」——那次 O(n) 全掃描已經在那裡了。
+
+修法是讓那次「本來就在跑」的驗證掃描順便建索引,而不是把三句話改成描述一個沒必要的例外。
+
+---
+
+## GA. 追加寫進索引的那個行號,少了「上一筆佔掉的行數」(2026-08-21 修正,T166)
+
+驗證 FP 時自己撞到的,**不是第 63 回合回報的**。
+
+`-append --in-place` 是唯一一條「延續」索引而不是重建索引的路徑,而它這樣算新紀錄的起始行:
+
+```swift
+var line = Int(idx.lastLine) + prefix.count   // Run.swift:1631
+```
+
+`lastLine` 的定義寫在 `src/Index.swift:40`:**「最後一筆紀錄『開始』的那一行」**。因此這個算式
+給的是「上一筆開始的行」,而不是「下一筆開始的行」——中間少了上一筆自己佔掉的行數(至少一行,
+引號內含換行時更多)。
+
+重現(header + 第 1 筆跨兩行 + 到第 256 筆,追加第 257 筆恰好落在格點上):
+
+```console
+$ export CSV2_INDEX_MIN_BYTES=0
+$ csv2 --build-index -i b.csv
+index built: 256 records, stride 256, 1 grid points
+$ csv2 -append 'r257,n257' -i b.csv --in-place
+$ csv2 -mid 257,257 --json -i b.csv | sed -n 2p
+{"record":257,"line":258,"fields":{"id":"r257","note":"n257"}}
+$ csv2 -mid 257,257 --json --no-index -i b.csv | sed -n 2p
+{"record":257,"line":259,"fields":{"id":"r257","note":"n257"}}
+```
+
+**rc=0,兩者相差一行,而索引的那一個是錯的。** 直接讀 sidecar 的位元組也看得到:
+
+```console
+$ python3 -c "import struct;b=open('b.csv.index','rb').read();d=open('b.csv','rb').read();
+off,ln=struct.unpack_from('<QQ',b,96+16);print('stored',ln,'true',d[:off].count(10)+1)"
+stored 258 true 259
+```
+
+修法不是去補「上一筆佔幾行」——索引裡沒有那個數字,而 v4 也不該為此擴欄。修法是:那條路徑
+**現在會把檔案讀到結尾**(見 FP),於是換行數是現成的,新紀錄的起始行 = 檔案裡的換行總數 + 1 +
+(補上的那個換行,0 或 1)。這是精確值,而且不依賴索引先前存了什麼。
+
+---
+
+## GB. `--verify-index` 不驗它自己存的行號,所以 GA 通過了驗證(2026-08-21 修正,T166d;它一啟用就抓到 GD 與 GE)
+
+同上一條。GA 那份索引裡有一個確定是錯的行號,而:
+
+```console
+$ csv2 --verify-index -i b.csv
+index OK: 257 records, stride 256, 2 grid points
+$ echo $?
+0
+```
+
+README 說 `--verify-index` 是「O(n) 的完整比對,涵蓋索引的**全部三項宣稱**:格點偏移量、紀錄
+筆數,以及是否有紀錄跨行」。自 v4 起索引存的是**四項**——每個格點還帶一個行號——而驗證沒有跟上。
+
+**形狀:一個格式加了一個欄位,而「證明這份索引是對的」那個函式沒有把新欄位加進證明。** 這與
+T79 是同一個門:一份索引宣稱了一件「沒有任何東西重新推導過」的事。差別只在那次是筆數,這次是
+行號,而行號更難察覺——它只在 `--json`、`--physical` 與 `@L` 位址上露臉。
+
+---
+
+## FQ. 「holds 9 MB」——那 9 MB 是這個行程的地板,不是 `--pretty` 配置的(2026-08-21 修正,T167)
+
+第 63 回合。`CSV2_PRETTY_MAX_BYTES` 的說明(`:1613`)要教的是「上限量的是**被對齊的材料**,不是
+輸入檔」,而它舉的例子把一個數字釘在那個概念上:
+
+> `-mid 150000,150004 -t -md --pretty` on a 23 MB file **holds 9 MB** and succeeds
+
+實測:
+
+```console
+$ csv2 -mid 150000,150004 -t -i big.csv | wc -c
+     237                                   ← 材料是 237 bytes
+$ /usr/bin/time -l csv2 -mid 150000,150004 -t -md --pretty -i big.csv   → 7.45 MB peak RSS
+$ /usr/bin/time -l csv2 -tail 1 -i big.csv                             → 7.34 MB peak RSS
+```
+
+**那個數字是 `csv2 -tail 1` 也要付的固定開銷**,與 `--pretty`、與「被對齊的材料」都無關。照字面
+讀它的人會得到「5 筆佔 9 MB」,於是推出「16 MiB 上限只夠 pretty 兩個這種切片」——與同一句話裡的
+「always fine」直接矛盾。
+
+**規則本身是對的**(二分法確認:材料 15.0 MB 通過、18.8 MB 拒絕)。錯的是被拿來教它的那個例子。
+
+---
+
+## FR. 「訊息會指出請求、上限與變數名稱」——`-tail` 是,`-B` 不是,而 `-C` 指的是沒被打過的旗標(2026-08-21 修正,T168)
+
+第 63 回合(前兩項),第三項是驗證時自己撞到的。
+
+```console
+$ CSV2_MAX_BUFFER_RECORDS=5 csv2 -tail 6 -i s.csv
+csv2: -tail 6 exceeds the buffered-record limit (5); raise CSV2_MAX_BUFFER_RECORDS if you really mean it
+$ CSV2_MAX_BUFFER_RECORDS=5 csv2 -contains MIT -B 6 -i s.csv
+csv2: -B 6 exceeds the buffered-record limit (5)          ← 沒有變數名稱
+$ CSV2_MAX_BUFFER_RECORDS=5 csv2 -contains MIT -C 6 -i s.csv
+csv2: -B 6 exceeds the buffered-record limit (5)          ← 使用者打的是 -C
+```
+
+安全性質(拒絕而不截斷)在三者上都成立,rc=1。壞掉的是「撞牆的人被告知該轉哪個旋鈕」——第二則
+沒說,第三則還指了一個他沒碰過的旗標,於是他會去找自己的指令列裡並不存在的 `-B`。
+
+**形狀:一句涵蓋兩個旗標的宣稱,只被其中一個滿足。** 與 FJ 同族。
+
+---
+
+## FS. 「兩種都很便宜」——實測其中一種比它保護的那次搜尋還貴(2026-08-21 以文件處理)
+
+第 63 回合。README `:530` 對「sidecar 可能過期」給了兩條出路,並稱兩者都 cheap:
+
+```sh
+csv2 --verify-index -i f.csv2               # O(n)
+csv2 -contains "old" --no-index -i f.csv2
+```
+
+實測(17.7 MB / 450,000 筆,中位數 5 次):
+
+```
+--verify-index            451 ms
+-contains(用索引)         204 ms      → 路線一合計 655 ms
+-contains --no-index      528 ms      → 路線二
+```
+
+**對「只搜一次」的人,先證明再搜比完全不用索引還慢 1.24 倍。** 兩次以上才划算,損益平衡大約在
+1.3 次——而那個數字文件裡沒有。
+
+---
+
+## FT. `-log` 用了一個它自己那一節沒有記載的跳脫,而它給的解碼步驟會解錯(2026-08-21 修正,T169)
+
+第 63 回合。`-log` 那一節(`:862`)把跳脫集合寫成一份**四個的封閉清單**,並在 `:888` 指示讀者
+怎麼消化它:
+
+> A newline, tab, CR or backslash is written as `\n`, `\t`, `\r` or `\\`.
+> Unescape the line first (`\n`, `\t`, `\r`, `\\`), then read the quoted fields.
+
+實測——值裡有 ESC 與 BEL:
+
+```console
+$ csv2 -update 1:2 "$(printf 'e\033[31mR\007b')" -i l.csv --in-place -log lg.txt
+$ sed -n 2p lg.txt
+2026-08-21T11:52:57.926+08:00 INFO  update 1:b: "old" -> "e\x1B[31mR\x07b"
+```
+
+程式是對的:其他控制字元一律寫成 `\xNN`、大寫十六進位——那正是**定位報告**那一節(`:480`)已經
+記載的同一套約定。錯的是 `-log` 那一節說自己只有四個,並把一份不完整的解碼步驟講成足夠的。
+
+照那份步驟寫出來的稽核腳本,會把一個 17 字元的值重建成 21 個字面字元,然後回報一個不存在的
+不一致——**在這份文件自己稱為「權威、絕不截斷」的那個輸出上**。
+
+---
+
+## FU. argv 在 NUL 處截斷,而同一個邊界上的另一半已經有一條拒絕(2026-08-21 以文件處理,T171)
+
+第 63 回合的第 1 題:只用文件推薦的做法,做出一串「結尾是資料悄悄變短」的指令。
+
+```console
+$ printf 'pkg,note\nzlib,before\x00after\nzstd,plain\n' > nul.csv
+$ addr=1:2
+$ val=$(csv2 -get "$addr" -i nul.csv; printf x); val=${val%x}; val=${val%$'\n'}
+$ csv2 -update "$addr" "$val" -i nul.csv --in-place ; echo $?
+0
+$ csv2 -get 1:2 -i nul.csv | od -t x1 | head -1
+0000000 62 65 66 6f 72 65 0a                      ← before,六個位元組不見了
+```
+
+**csv2 看不到這件事**:截斷發生在 `execve`,csv2 收到的就是 `before`,而它忠實地寫下了 `before`。
+zsh 那一端反而是好的(`set -x` 顯示變數裡的 NUL 完好)。
+
+但這棵樹**已經在這個邊界上蓋了一條拒絕**:拒絕表對「不是合法 UTF-8 的值」寫著「Swift 用替代字元
+解 `argv`,位元組已經沒了……把值放進檔案,位元組在那裡活得下來」。也就是說文件**早就認定 argv
+是一條有損通道**,而它對同一條通道上「截掉整個尾巴」的那一半,沒有一句話。
+
+兩句各自為真、合起來誤導人的話:
+
+- `:715`「**NUL 與其他控制位元組原樣接受**……它們會 round-trip」——對**檔案**那條路完全成立
+  (實測 `-r -t` 位元組相同、`--json` 給 ` `、報告給 `\x00`)。
+- `:501–517` 那個「先取值、再寫回」的配方,**把唯一一個 shell 陷阱指名、修好、還自陳上一版
+  漏了第三行**。那種「已經徹底審過」的語氣,讀者會當成這個邊界已經關上了。
+
+**唯一記下真相的是稽核軌跡**——`update 1:note: "before\x00after" -> "before"`——而那要你有加 `-log`
+(配方沒有),而且要看懂它得先知道 FT 那個沒被記載的 `\xNN`。
+
+程式端沒有可修的東西。文件端有三處:那個配方、那句 round-trip、以及拒絕表裡那條已經在講 argv 的
+說明。
+
+---
+
+## FV. 四個沒有標價的保證(2026-08-21 以文件處理,材料上限由 T167 釘住)
+
+第 63 回合的第 4 題。實測(17.7 MB / 450,000 筆):
+
+| 保證 | 文件寫的價錢 | 實測 |
+|---|---|---|
+| `--build-index`,也就是那個 5.6 ms 視窗的來源 | **沒有** | **505 ms**,是它換來的那次視窗的 24 倍;要約 130 次視窗才回本 |
+| `--verify-index` 的 O(n) 證明 | 「O(n) because it has to be」,沒有數字,而且被稱為 cheap | **451 ms**(見 FS) |
+| `-o` / `--in-place` 的原子改名 | 名稱、權限(0600)、原子性都寫了 | **峰值磁碟是檔案的 2 倍**——完全沒寫。`:1808` 量化了「寫出的位元組」(改 1 GiB 檔的一格要寫 1 GiB),卻沒說你還要有 1 GiB **可用空間**,而這是文件自己說「唯一沒有退路」的那個保證 |
+| `--pretty` 的記憶體 | 只有一個 16 MiB 的材料上限 | 材料 15.0 MB → **峰值 RSS 81 MB,約 5.4 倍**。同一則警告 `CSV2_PARALLEL_MAX_BYTES` 有(「這不是行程記憶體的上限」),`--pretty` 沒有,而這裡的倍數更大 |
+
+---
+
+## FW. `-debug` 的 `metrics:` 印了兩個從未被定義的數字(2026-08-21 以文件處理)
+
+第 63 回合。`-debug` 被賣成量測工具(`:414`「Measure with it rather than guessing」),而它印的是:
+
+```
+DEBUG metrics: read_bytes=65536 file_bytes=19688912 peak_rss_bytes=9175040
+```
+
+文件只提過 `peak_rss_bytes`。受測者為了確認 `read_bytes` 不是自相矛盾——小檔案上 `-mid 2,3`
+同時印出「stopping after record 3」與 `read_bytes=263`(整個檔案)——必須自己造一個 20 MB 的
+fixture 才能確定那是「一個 64 KiB 緩衝區」而不是缺陷。那個 64 KiB 的數字出現在文件的另一處
+(`:1163`,講 `-so` 的緩衝),兩者從未被連起來。
+
+---
+
+## FX. 拒絕表少了 `-insert`,WARN 清單少了 `--truncate-partial`(2026-08-21 修正,T170)
+
+第 63 回合。兩處都是「程式做了對的事,而清單沒有把它算進去」:
+
+```console
+$ csv2 -insert 2 'a,b' -i four.csv -o out.csv
+csv2: -insert 2 has 2 fields but the header has 4     ← 對的,但拒絕表只列了 -append
+$ csv2 -r -t --truncate-partial -i partial.csv -o clean.csv
+WARN --truncate-partial discarded 27 bytes: …         ← 對的,但 :1334 的 WARN 清單只列了兩項
+```
+
+一份宣稱自己完整的清單漏掉一項,比沒有清單糟:讀者會用「不在清單上」推論「不會發生」。
+
+---
+
+## FY. `--no-index` 在 `.csv` 上還會放棄平行路徑,而那寫在另一張表裡(2026-08-21 修正,T171)
+
+第 63 回合。`--no-index` 在 `:534` 與 `:1694` 被推薦為「比較慢,但構造上就是對的」。實測慢多少:
+
+```
+-contains(用索引,平行)   204 ms
+-contains --no-index      528 ms      → 2.6 倍
+$ csv2 -contains pkg150000 --no-index -i big.csv -debug
+DEBUG single-threaded: --no-index, and a .csv needs an index to prove one record per line
+```
+
+原因**程式自己說得很清楚**,而文件把它放在 `:1628` 的平行化要求表裡,離推薦它的那兩處很遠。
+推導得出來,但沒有在該說的地方說。
+
+---
+
+## FZ. `-update 1:2 -- --in-place`——第三個「看起來可以貼進終端機」的片段(2026-08-21 修正,T172)
+
+第 63 回合。`:359` 用這串解釋 `--`:
+
+```console
+$ csv2 -update 1:2 -- --in-place -i d1.csv -o d1out.csv     ← 這樣才會動
+$ csv2 -update 1:2 -- --in-place                            ← 逐字照抄:
+csv2: an edit needs an explicit destination …
+```
+
+它是片段而不是指令,這沒問題;有問題的是這份 README **已經為了同一件事道歉過兩次**(`-log` 那組、
+加密標記那組),而這是第三個。一份自陳「我曾經印出看起來能跑但不能跑的區塊」的文件,再印一個,
+會把那份自陳變成裝飾。
+
+---
+
+## GC. 那個檢查碼不是 FNV-1a,而註解說它是(2026-08-21 以文件處理,T166d 把常數釘住)
+
+為了替 GB 寫一個「檢查碼合法、但行號是錯的」索引,我照 `src/Index.swift:160` 的註解在 Python 裡
+重寫了那個檢查碼。算出來的值與檔案裡的不符,而**只有最高的三個位元組不同**——那不是「讀錯了
+某個欄位」會有的形狀。
+
+原因是這一個字面值:
+
+```swift
+h = h &* 0x1000_0000_01b3      // 底線的分組錯了一個 nibble
+```
+
+FNV-1a 的 64 位元質數是 `0x100000001b3`(2^40 + 0x1b3)。上面那個是 `0x1000000001b3`
+(2^44 + 0x1b3)。實測兩者:
+
+```
+以 0x100000001b3   算 → 0x7a5800e06861298f   不符
+以 0x1000000001b3  算 → 0xe72f92e06861298f   符合檔案
+```
+
+**沒有安全性後果**:乘數仍是奇數,模 2^64 仍是雙射,抓位元翻轉與寫入不完整的能力不變。有後果的
+是那個名字——照著註解重新實作的人(我)會算出另一個數字,然後推論那份索引壞了。
+
+**與 FT 是同一個形狀,只是低了一層**:一份「按照文件寫成的讀取器,重現不出工具實際寫下的東西」。
+FT 那次是稽核軌跡的跳脫,這次是 sidecar 的檢查碼。
+
+改常數會讓每一份已經在磁碟上的 sidecar 被回報成「已損毀」——對一批毫無損毀的檔案說損毀。因此
+改的是名字,不是常數;而測試套件現在用 Python 獨立算一次,把常數釘在「那一行以外的地方」。
+
+---
+
+## GD. `-insert` 建出的索引描述的是另一個檔案,而 `-mid` 照著它回答(2026-08-21 修正,T173)
+
+**這一條是 GB 抓到的。** 在 `--verify-index` 學會比對它自己存的行號之後,既有的 T41b 與 T46b
+立刻變紅——而那兩個案例從來沒有動過。順著紅字往回追,發現的不是行號,是這個。
+
+被插入的一列走的是 `emit()`,而不是 `emitData()`。`emit()` 只推進位元組偏移量:它不增加
+`outRecords`、不通知 builder、也不推進行號。於是同一次執行寫出了 N+1 筆紀錄,卻建出一份說
+「N 筆」的索引,而插入點之後的每一個格點,指的位元組都已經是另一筆紀錄的開頭。
+
+```console
+$ export CSV2_INDEX_MIN_BYTES=100        # 300 筆的 ins.csv,在第 5 筆插入一列
+$ csv2 -insert 5 'X,Y' -i ins.csv -o ins2.csv
+$ csv2 --verify-index -i ins2.csv
+index MISMATCH: record 1: index says line 1, actual 2
+index MISMATCH: record 257: index says byte 2356, actual 2346
+index MISMATCH: record 257: index says line 257, actual 258
+index MISMATCH: record count: index says 300, actual 301
+```
+
+而讀取端照著它回答:
+
+```console
+$ csv2 -mid 257,258 -t -i ins2.csv          $ csv2 -mid 257,258 -t --no-index -i ins2.csv
+id,note                                     id,note
+r257,n257     ← 這是第 258 筆              r256,n256
+r258,n258     ← 這是第 259 筆              r257,n257
+```
+
+**rc=0,兩個都沒有出聲,而用了索引的那一個是錯的。** 這正是本設計自己寫下的那句話所指的情況:
+「一個會很快給你錯資料的索引,比沒有索引糟得多。」
+
+同一個計數器還餵給稽核軌跡的最後一行。以修正前的二進位檔實測:
+
+```console
+$ csv2 -insert 5 'X,Y' -i ins.csv -o ins5.csv -log /dev/stdout | grep wrote
+… INFO  wrote 300 records, 2 fields, atomic rename OK      ← 檔案裡有 301 筆
+```
+
+**那份「說得出這次寫入做了什麼」的紀錄,少算的正好是它剛剛插入的那一筆。**
+
+修法是 `emitData(ins)`:被插入的一列是輸出的一筆紀錄,就該被當成一筆計。
+
+**形狀:兩個寫出位元組的函式,只有其中一個負責記帳。** 這與 GA 是同一族(唯一一條「延續」索引
+的路徑,是唯一一條能把索引記錯的路徑),而它存活得更久,因為 `-insert` 的**資料**一直都是對的
+——錯的只有旁邊那份 sidecar,而在 GB 之前,沒有任何東西會去讀它並提出異議。
+
+---
+
+## GE. 一次寫入建出的索引,說第 1 筆在第 1 行(2026-08-21 修正,T174)
+
+同樣由 GB 抓到,是 T41b 紅字裡的第一行。
+
+標頭列是透過 `emit()` 寫出去的,而行號是在 `emitData()` 裡數的。於是標頭推進了偏移量、沒有
+推進行號:一份 `.csv2`(兩列標頭)寫出後,索引說第 1 筆在第 1 行,而它在第 3 行。
+
+```console
+$ csv2 --verify-index -i ix.csv2
+index MISMATCH: record 1: index says line 1, actual 3
+```
+
+差距**恰好等於標頭列數**,因此 `.csv` 上是差 1、`.csv2` 上是差 2——每一份由寫入建出的索引都有,
+自 v4 加進行號那天起就有,而在 GB 之前沒有任何東西看過它。
+
+修法是把行號的計數移進 `emit()`——也就是那個「每一個離開的位元組都經過」的函式——並讓
+`emitData()` 呼叫它,而不是各寫一份。**兩份記帳會分岔,一份不會。**
