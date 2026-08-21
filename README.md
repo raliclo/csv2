@@ -31,6 +31,19 @@ and the macOS host it is built from.
 | builds and runs on aarch64 Linux, byte-identical to macOS | |
 | builds and passes on x86_64 Linux (WSL2) and on Windows (MSVC) | |
 
+**And what it does not do at all**, because a table of eleven wins and one
+deployment item reads as a tool with one outstanding thing. Each of these is
+described somewhere below; this is the list a reader should see first:
+
+| Not offered | What to do instead |
+|---|---|
+| column projection (`-cols`) | `--json` and `jq`, or `-get` per cell |
+| case-insensitive matching | `--json` and one pass of your own — see the note under `-contains` |
+| counting without reading (`-count`) | `records` on the trailing `--json` meta line |
+| converting between `.csv` and `.csv2` | refused on purpose; write the records out and read them back in |
+| safe concurrent writers | serialise them yourself; two writers silently lose one edit |
+| telling refusals apart programmatically | nothing but exit 1 and English prose, in every one of them |
+
 `install.zsh` puts the binary where each platform's shell actually looks:
 `$(brew --prefix)/bin` where Homebrew is present, `~/.local/bin` as the
 user-level fallback, and on Windows `%LOCALAPPDATA%\csv2\csv2.exe` — the path
@@ -1091,9 +1104,12 @@ it.
 defined over text, so those bytes cannot be carried: the decoder would put
 U+FFFD where they are and the line would still be valid JSON — data loss that
 looks exactly like success, in the shape this document recommends when the
-value is what matters. `-get` hands back the bytes and the locating report
-names them as `<non-UTF-8: 63 61 66 e9>`; only `--json` was quiet about it.
-Asserted by T158.
+value is what matters. `-get` and the CSV shapes hand back the bytes and the
+locating report names them as `<non-UTF-8: 63 61 66 e9>`. **`-md` substitutes
+U+FFFD and says nothing**, and that is deliberate: it is a rendering, not a
+round trip, and `--pretty` even pads the column to the substituted width. Do
+not read a value back out of `-md` — T136 says the same thing about `<br>`.
+Asserted by T158 and T164.
 
 **The last line is absent when the stream is cut short** — a reader that left
 (exit 141), or a `-so` edit that failed after emitting records. There is no

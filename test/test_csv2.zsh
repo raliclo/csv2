@@ -8297,6 +8297,45 @@ assert_eq "$("$CSV2" -contains HIT -A 2 -i "$TMP/t163.csv" | wc -l | tr -d ' ')"
     "T163f and -A 2 selects three / 而 -A 2 選出三筆"
 
 # ---------------------------------------------------------------------
+# T164 -- which shapes substitute, and which refuse.
+#
+# Round 62, reading the document as its author's adversary: "only --json was
+# quiet about it" -- a sentence I wrote -- is false. `-md` substitutes U+FFFD
+# for a byte sequence that is not UTF-8, silently, at rc=0, and --pretty pads
+# the column to the substituted width. That is defensible for a RENDERING and
+# it is not what the sentence claimed.
+#
+# T164 —— 哪些形狀會替換，哪些會拒絕。
+# ---------------------------------------------------------------------
+echo
+echo "--- T164: a byte that is not text / T164：一個不是文字的位元組 ---"
+
+printf 'a,b\nx,caf\xe9\n' > "$TMP/t164.csv"
+
+assert_eq "$("$CSV2" -r -t -i "$TMP/t164.csv" | od -A n -c | tr -s ' ')" \
+          "$(printf 'a,b\nx,caf\xe9\n' | od -A n -c | tr -s ' ')" \
+    "T164a the CSV shapes hand back the bytes / 各種 CSV 形狀交還的是位元組"
+assert_contains "$("$CSV2" -contains caf -i "$TMP/t164.csv")" "<non-UTF-8: 63 61 66 e9>" \
+    "T164b the locating report names them in hex / 定位報告以十六進位指出它們"
+assert_fails "T164c --json refuses them / --json 拒絕它們" -- \
+    "$CSV2" -r -t --json -i "$TMP/t164.csv"
+
+# -md substitutes, and the README says so rather than claiming otherwise.
+# -md 會替換，而 README 現在照實寫，不再宣稱相反的事。
+# Hex, not `od -c`: this platform's od renders the replacement character as a
+# glyph plus `** **`, so an octal probe found nothing and reported that -md
+# does not substitute -- measuring od's rendering rather than the bytes.
+# 用十六進位，不用 `od -c`：這個平台的 od 會把替換字元印成一個字形加上 `** **`，因此一個
+# 用八進位去探測的檢查什麼也沒找到，於是回報「-md 不會替換」——量到的是 od 的呈現方式，
+# 不是那些位元組。
+_t164_md=$("$CSV2" -r -t -md -i "$TMP/t164.csv" | od -A n -t x1 | tr -s ' ')
+if [[ $_t164_md == *"ef bf bd"* ]]; then
+    ok "T164d while -md substitutes U+FFFD, as a rendering does / 而 -md 會換成 U+FFFD——算繪就是這樣"
+else
+    bad "T164d -md produced: $_t164_md / -md 的輸出如上"
+fi
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one
