@@ -9870,6 +9870,148 @@ assert_contains "$("$CSV2" -contains zlib --zh --zh -i "$TMP/t186.csv2" 2>&1)" "
 assert_succeeds "T187d one of them alone still works / 只給其中一個仍然可用" -- \
     "$CSV2" -contains zlib --zh -i "$TMP/t186.csv2"
 
+
+# ---------------------------------------------------------------------
+# T188 -- what a repeated flag does, measured rather than asserted.
+#
+# Round 68. The flag list said "giving the same flag twice is REFUSED, for
+# every flag except -A/-B/-C" -- a sentence written on 2026-08-21 from the
+# eleven value-taking flags that were checked, and never run against a boolean.
+# Sixteen boolean flags accept a repeat silently at rc=0. Nothing can be lost
+# that way, which is why the fix is the sentence; but the sentence promised a
+# universal and the flag list is where a reader looks for one.
+#
+# This case pins BOTH halves, so the next person to write that sentence has to
+# get it right in both directions.
+#
+# T188 —— 重複給同一個旗標會怎樣，用量的，不是用斷言的。
+# 第 68 回合。旗標清單說「重複給同一個旗標一律被拒絕，除了 -A/-B/-C」——那句話是 2026-08-21
+# 從「十一個帶值的旗標」寫出來的，從來沒有拿一個布林旗標去跑過。十六個布林旗標會安靜地
+# 接受重複，rc=0。那樣不會遺失任何東西，因此要改的是那句話；但那句話承諾的是一個全稱，
+# 而旗標清單正是讀者會去找全稱的地方。
+# ---------------------------------------------------------------------
+echo
+echo "--- T188: repeating a flag / T188：重複給同一個旗標 ---"
+
+printf 'a,b\n1,x\n2,y\n' > "$TMP/t188.csv"
+
+# Value-taking flags: refused, every one.
+# 帶值的旗標：一律拒絕。
+_t188_bad=0
+for _pair in "-head 1 -head 2" "-tail 1 -tail 2" "-mid 1,1 -mid 2,2" \
+             "-contains x -contains y" "-get 1:1 -get 1:2" "--headers 1 --headers 1"; do
+    if "$CSV2" ${=_pair} -i "$TMP/t188.csv" > /dev/null 2>&1; then
+        bad "T188a $_pair was accepted / $_pair 被接受了"
+        _t188_bad=1
+    fi
+done
+(( _t188_bad )) || ok "T188a a repeated value-taking flag is refused / 重複給「帶值的旗標」會被拒絕"
+
+# Booleans: accepted, silently, and the run is the same as without the repeat.
+# 布林旗標：安靜地接受，而那次執行與「沒有重複」時相同。
+_t188_once=$("$CSV2" -r -t --json -i "$TMP/t188.csv" 2>/dev/null)
+_t188_twice=$("$CSV2" -r -t --json --json -i "$TMP/t188.csv" 2>/dev/null)
+assert_eq "$_t188_twice" "$_t188_once" \
+    "T188b a repeated boolean changes nothing / 重複給一個布林旗標不會改變任何事"
+_t188_err=$("$CSV2" -r -t --json --json -i "$TMP/t188.csv" 2>&1 >/dev/null)
+assert_eq "$_t188_err" "" \
+    "T188c and says nothing about it / 而且對此不出聲"
+
+# -A/-B/-C: the documented exception, last one wins.
+# -A/-B/-C：文件記載的例外，後面那個贏。
+printf 'a,b\n1,HIT\n2,y\n3,z\n4,w\n5,v\n' > "$TMP/t188c.csv"
+assert_eq "$("$CSV2" -contains HIT -A 3 -A 1 -i "$TMP/t188c.csv" | wc -l | tr -d ' ')" "2" \
+    "T188d -A 3 -A 1 takes the last one / -A 3 -A 1 取後面那個"
+
+# ---------------------------------------------------------------------
+# T189 -- read_bytes on the seek path.
+#
+# Round 68. The metrics entry said read_bytes "moves in whole 64 KiB buffers,
+# never past the end of the file" -- true of a scan, false of a seek, which is
+# the path the number exists to show. `-tail 1` on a 29,790-byte indexed file
+# reads 3,328 bytes: not a multiple of 65536, and less than the file.
+#
+# T189 —— seek 路徑上的 read_bytes。
+# 第 68 回合。那個條目說 read_bytes「以 64 KiB 為單位推進、且不會超過檔案結尾」——那對「掃描」
+# 為真，對「seek」為假，而 seek 正是這個數字存在所要展示的那條路徑。
+# ---------------------------------------------------------------------
+echo
+echo "--- T189: read_bytes when the index seeks / T189：索引 seek 時的 read_bytes ---"
+
+{
+    printf 'a,b\n'
+    _i=1
+    while (( _i <= 2000 )); do printf 'r%d,value%d\n' $_i $_i; _i=$((_i+1)); done
+} > "$TMP/t189.csv"
+_t189_size=$(wc -c < "$TMP/t189.csv" | tr -d ' ')
+CSV2_INDEX_MIN_BYTES=100 "$CSV2" --build-index -i "$TMP/t189.csv" > /dev/null
+
+_t189_seek=$(CSV2_INDEX_MIN_BYTES=100 "$CSV2" -tail 1 -i "$TMP/t189.csv" -debug 2>&1 \
+             | sed -n 's/.*read_bytes=\([0-9]*\).*/\1/p')
+_t189_scan=$("$CSV2" -r -t --no-index -i "$TMP/t189.csv" -debug 2>&1 >/dev/null \
+             | sed -n 's/.*read_bytes=\([0-9]*\).*/\1/p')
+
+if (( _t189_seek > 0 && _t189_seek < _t189_size )); then
+    ok "T189a a seek reads less than the file ($_t189_seek of $_t189_size) / 一次 seek 讀得比整個檔案少"
+else
+    bad "T189a a seek read $_t189_seek of $_t189_size / 一次 seek 讀了 $_t189_size 中的 $_t189_seek"
+fi
+assert_eq "$_t189_scan" "$_t189_size" \
+    "T189b while a full scan reads the file / 而一次完整掃描讀的是整個檔案"
+
+# ---------------------------------------------------------------------
+# T190 -- a message that names columns from somebody else's file.
+#
+# Round 68: `-insert -cell` refused with "so status_notes ends up under
+# license" -- two columns from this project's own fixture, printed at a caller
+# whose file has neither. On a one-column file it named two columns that do not
+# exist, and it reads as a report about the file that was passed.
+#
+# T190 —— 一則指名了「別人檔案裡的欄位」的訊息。
+# ---------------------------------------------------------------------
+echo
+echo "--- T190: an illustration must look like one / T190：舉例必須看得出來是舉例 ---"
+
+printf 'a\n1\n' > "$TMP/t190.csv"
+_t190=$("$CSV2" -insert -cell 1 'x' -i "$TMP/t190.csv" -so 2>&1)
+if [[ $_t190 == *"status_notes"* || $_t190 == *"license"* ]]; then
+    bad "T190a the refusal named columns from another file / 那條拒絕指名了另一個檔案裡的欄位"
+else
+    ok "T190a the refusal does not name columns this file has never had / 那條拒絕不會指名這個檔案從來沒有的欄位"
+fi
+assert_contains "$_t190" "does not exist" \
+    "T190b and still says what does not exist / 而它仍然說出「不存在的是什麼」"
+
+# ---------------------------------------------------------------------
+# T191 -- a newly created -o destination is 0600.
+#
+# Round 68 needed this and could not find it: the mode carried onto the temp
+# file comes from the file being REPLACED, and when -o names a path that does
+# not exist there is nothing to carry, so the file keeps the temp file's own
+# 0600 rather than the umask's.
+#
+# T191 —— 新建的 -o 目的地是 0600。
+# ---------------------------------------------------------------------
+echo
+echo "--- T191: the mode of a file -o creates / T191：-o 新建的檔案的權限 ---"
+
+if (( IS_WINDOWS )); then
+    skipt "T191a Windows does not carry POSIX modes here / Windows 上沒有這組 POSIX 權限位元"
+    T191A_SKIPPED=1
+else
+    printf 'a,b\n1,x\n' > "$TMP/t191_src.csv"
+    chmod 644 "$TMP/t191_src.csv"
+    rm -f "$TMP/t191_new.csv"
+    ( umask 022; "$CSV2" -r -t -i "$TMP/t191_src.csv" -o "$TMP/t191_new.csv" )
+    assert_eq "$(stat_mode "$TMP/t191_new.csv")" "600" \
+        "T191a a destination csv2 creates is 0600 / csv2 新建的目的地是 0600"
+    printf 'x,y\n9,9\n' > "$TMP/t191_over.csv"
+    chmod 644 "$TMP/t191_over.csv"
+    "$CSV2" -r -t -i "$TMP/t191_src.csv" -o "$TMP/t191_over.csv"
+    assert_eq "$(stat_mode "$TMP/t191_over.csv")" "644" \
+        "T191b while replacing a 0644 file keeps 0644 / 而覆蓋一個 0644 檔案時保留 0644"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
@@ -9990,6 +10132,7 @@ fi
 (( ${T182B_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T184A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T184B_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T191A_SKIPPED:-0} )) && (( want_skip += 1 ))
 if [[ "$skip" == "$want_skip" ]]; then
     ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
 else

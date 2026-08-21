@@ -372,13 +372,22 @@ PROTECTION / 保護
   --yes                 accept the default key without a prompt
   --version  -V         print the version and exit
   --help  -h            print the flag list and exit
-  REPEATS               giving the same flag twice is REFUSED, for every flag
-                        except -A/-B/-C, where the last one wins. A repeat is
-                        refused rather than taken once because the second one
-                        may have been meant to change something -- the same
-                        reason `-hash note -hash ver` is refused rather than
-                        leaving `note` in plaintext at rc=0. `--en` with `--zh`
-                        is refused too: they are two answers to one question
+  REPEATS               giving a flag that takes a VALUE twice is REFUSED --
+                        -i, -o, -head, -tail, -mid, -contains, -get, -hash,
+                        -keyfile, -log, --headers and the rest of them -- with
+                        -A/-B/-C the documented exception, where the last one
+                        wins. A repeat is refused rather than taken once
+                        because the second value may have been meant to change
+                        something: the same reason `-hash note -hash ver` is
+                        refused rather than leaving `note` in plaintext at
+                        rc=0. `--en` with `--zh` is refused too: they are two
+                        answers to one question.
+                        A repeated BOOLEAN is accepted and does nothing --
+                        `-r --json --json` is `-r --json`. It carries no second
+                        value to lose, so the reason above has nothing to bite
+                        on. This entry said "every flag" until 2026-08-22,
+                        which is a promise the program does not keep for the
+                        sixteen boolean flags
   --                    the NEXT argument is data, not a flag: write a value
                         that begins with a dash as
                         `-update 1:2 -- --in-place -i f.csv -o g.csv`.
@@ -455,22 +464,34 @@ INDEX / 索引
                         WITHOUT being compared against the data, and says so.
                         That exit 1 is about this command, which was asked to
                         prove the sidecar; on every other path an unusable
-                        sidecar is discarded for a scan and is not an error
+                        sidecar is discarded for a scan and is not an error.
+                        There are TWO exit 1s and they mean opposite things
+                        about whether the data was read: the unusable case
+                        prints nothing on stdout, while an index the stamp
+                        accepted and the data contradicts prints one
+                        `index MISMATCH:` line per failed claim on stdout --
+                        thousands of them on a large shifted index -- before
+                        the two-line refusal on stderr. Empty stdout means the
+                        sidecar was never compared
 
 DIAGNOSTICS / 診斷
   -debug                diagnostics to stderr, including a metrics: line on
                         every path. That line is
                         `read_bytes=N file_bytes=N peak_rss_bytes=N`:
                         read_bytes is what was actually pulled off the disk
-                        and it moves in whole 64 KiB buffers, never past the
-                        end of the file -- so an early stop reports 65536 on a
-                        17.7 MB file and the file's whole size (20 bytes, or
-                        263) on a file smaller than one buffer. file_bytes is
-                        the input's size, and the PAIR is what tells a partial
-                        read from a full one: equal on a small file proves
-                        nothing, equal on a large one proves everything was
-                        read. Measured, not asserted -- `-mid 2,3` gives
-                        65536 / 17732348 and `-r` gives 17732348 / 17732348.
+                        and file_bytes is the input's size, so the PAIR is what
+                        tells a partial read from a full one. A SCAN reads in
+                        64 KiB buffers, so stopping early on a large file
+                        reports a multiple of 65536 (`-mid 2,3` on 17.7 MB
+                        gives 65536 / 17732348) and reading to the end reports
+                        the file (17732348 / 17732348). A SEEK reports neither:
+                        it starts partway in, so `-tail 1` on a 29,790-byte
+                        indexed file gives 3328, and `-mid 1,1` on a 62-byte
+                        one gives 49 -- less than the file, and no multiple of
+                        anything. read_bytes < file_bytes is the index having
+                        done its job. This entry claimed whole buffers always,
+                        which is false on exactly the path the number exists to
+                        show
                         Measure with it rather than guessing:
                         23 MB of peak RSS on a 615 MB file in parallel, 9.5 MB
                         single-threaded over the same file. Until 2026-08-20
@@ -985,7 +1006,7 @@ will not record:
 | the keyfile **path**, and the key fingerprint | yes — never the key itself. But see below: the two markers' fingerprints do not mean the same thing |
 | old and new values in an **ordinary** column | in full, never truncated; that is the point of an audit trail. This covers `-update` and `-delete -cell` alike — blanking a cell records what was in it |
 | old and new values in a **protected** column | `<redacted>`, including inside a deleted record |
-| a deleted **record** | its contents, column by column: `delete record 1: a="1", notes="…"`. The largest thing this tool destroys, so the entry says what was in it |
+| a deleted **record** | its contents, column by column: `delete record 2: "a"="4", "b"="5", "c"="6"`. The largest thing this tool destroys, so the entry says what was in it. **The column names are quoted too** — a name can contain a comma or an `=` — and this example showed them bare until 2026-08-22, which is enough to mis-split the line in a parser written from it |
 | a deleted **column** | the column name, not its values — one entry for the run rather than one per record, because the values are the whole column |
 | `-hash` and `-encrypt` | which columns, and which key. Unkeyed hashing says so in as many words: `hashing columns notes with NO key (unsalted SHA-256)` |
 | the outcome of the run | `wrote N records, M fields, atomic rename OK` — the line that says the write completed, and the one to look for when asking whether an edit landed. **`M` is the row WIDTH, not the number of fields written**: a 3-record 3-column file says `3 records, 3 fields`, and a 22×7 one says `22 records, 7 fields` |
@@ -1399,6 +1420,13 @@ there is no supported way around that today. This is stated rather than
 implied because a reader who assumes otherwise writes the matching anyway and
 finds out later.
 
+**A signal gives `128 + signo`, not `1`.** A `SIGTERM` from a job scheduler is
+143, `SIGINT` is 130, `SIGKILL` is 137 — measured across eight signals. Those
+are not csv2 refusals and mean nothing about the file, which is intact in every
+one of them. A script that treats "not 0, not 141" as "csv2 rejected my input"
+will misreport a scheduler timeout exactly the way this section warns it would
+misreport a `head`.
+
 **A search that matches nothing exits `0`.** `-contains` reports what it found;
 finding nothing is not an error. So `if csv2 -contains X -i f.csv` is not a
 test for presence — it succeeds either way. To ask the question, read `matched`
@@ -1491,6 +1519,13 @@ file is created 0600 to begin with, so it is not readable by anyone else while
 it is being written either. It was 0644 for the duration until 2026-08-21, and
 on a large file that is a window measured in seconds. Asserted by T129, T130
 and T161.
+
+**When `-o` names a path that does not yet exist there is no original**, so
+nothing is carried over and the file keeps the temp file's mode: **0600**, not
+your umask. `csv2 -r -t -i pkgs.csv -o new.csv` under `umask 022` produces
+`-rw-------`, while writing over an existing 0644 file produces `-rw-r--r--`.
+Safe by default, and worth knowing before a pipeline hands that file to
+another user.
 
 **In a diagnostic, an INPUT path appears as you typed it and an OUTPUT path
 appears resolved.** `cannot open input file: ./nope.csv` keeps the `./`; an
@@ -1596,13 +1631,25 @@ Refusals are the point of the tool, so they are listed rather than discovered.
 Each of these exits non-zero with a message saying why. **The right-hand column
 is the reason, not the message**: the text csv2 prints is often shorter and
 names the argument it saw, so match on exit status and read the message, rather
-than matching the message against this table:
+than matching the message against this table.
+
+**This table is the interesting refusals, not all of them.** It exists for the
+combinations a caller would otherwise have to discover; it does not list the
+ordinary argument errors (`-get: expected r:c, got "x"`, `--headers takes 1 or
+2`, an unreadable `-i`, an `-o` whose directory does not exist or cannot be
+written), nor the ones described in prose elsewhere — repeated flags,
+`--headers` disagreeing with the suffix, a file with no suffix, re-masking a
+marked column in either direction, `0:`/`0a:`/`0b:` addressing, the four COLS
+refusals, `--verify-index` or `--build-index` given a verb, and the
+environment-variable limits. A round read this table as a closed contract in
+August 2026 and found nine refusals it does not mention; the fix was to say so
+here rather than to grow the table into something nobody reads.
 
 | Combination | Why it is refused |
 |---|---|
 | `-head 3 -o out.csv2` (no `-t`), reading a `.csv2` | data rows without a header written to a path whose suffix promises one; the next read would eat the first records as the header. **This applies to selections, not to edits** — see below. Reading a `.csv` and writing `.csv2` hits a different refusal first, whatever flags you add: csv2 does not convert between the formats |
 | `-md` without `-t` | a Markdown table has no shape without a header row, and silently adding one would make "no header by default" grow an invisible exception |
-| `-md -o out.csv2` | the suffix declares CSV, the content would be Markdown |
+| `-md -o out.csv2` | the suffix declares CSV, the content would be Markdown. Reaching this needs a `.csv2` INPUT: from a `.csv` the format-conversion refusal on the first row fires first, whatever flags you add |
 | `-si` without `--headers 1` or `2` | stdin has no suffix, so the format is not declared; a default here would be a guess |
 | `-head` with `-tail` | no single reading of both is obviously right |
 | `-mid 7,3` | `a > b`; not swapped for you, because a range written backwards usually means the logic is backwards too |
@@ -1625,7 +1672,7 @@ than matching the message against this table:
 | `-insert N ROW` whose field count differs from the header | the same check `-append` gets, and it names the count both ways: `-insert 2 has 2 fields but the header has 4`. It was missing from this table until 2026-08-21, and a table that presents itself as complete is read as one |
 | `-append` onto a file whose last record is incomplete | a short final record, or one left open by an unclosed quote. Checked for `-o` and for `--in-place` alike — the fast path used to skip it and produce a file csv2 then refused to read |
 | `-append` with `--truncate-partial` | appending adds bytes and cannot remove the incomplete record, so the file would keep it *and* gain a complete record after it. Write a clean copy first: `csv2 -r -t --truncate-partial -i f.csv -o clean.csv` |
-| a value, row or search string that is not valid UTF-8 | Swift decodes `argv` with replacement, so the bytes are already gone; storing what arrives would put U+FFFD where a byte was, silently. Put the value in a file — bytes survive there, which is what the round-trip guarantee is about. **Paths are not checked**: on Linux they may legitimately hold any bytes, and csv2 hands a path to the filesystem rather than storing it as data. **POSIX only**: a Windows command line arrives as UTF-16, so whatever happened to an invalid byte happened before the process started and there is nothing left for csv2 to inspect |
+| a value, row or search string that is not valid UTF-8 | Swift decodes `argv` with replacement, so the bytes are already gone; storing what arrives would put U+FFFD where a byte was, silently. Put the value in a file — bytes survive there, which is what the round-trip guarantee is about. **Paths are not checked**: on Linux they may legitimately hold any bytes, and csv2 hands a path to the filesystem rather than storing it as data. **Nor is a COLS list** — `-hash`, `-encrypt`, `-decrypt` and `-delete -col` take a column NAME, and an invalid byte there fails to match a column and is reported as `no column named "caf<U+FFFD>"`, which refuses the run without storing anything. **POSIX only**: a Windows command line arrives as UTF-16, so whatever happened to an invalid byte happened before the process started and there is nothing left for csv2 to inspect |
 | unknown flag | never swallowed as something else |
 
 ### Every edit index refers to the input, and that is visible with `-insert`
@@ -2035,14 +2082,16 @@ Each of these is argued in full in [plan/plan.md](./plan/plan.md).
   answer is off by one where a scan is correct — reproduced, and pinned by T143
   so that it stays reproducible for as long as this paragraph claims it. For a proof, run
   `--verify-index`, which is O(n) because it has to be. **What it proves is
-  that the index's three claims are accurate — not what those claims say.** On
+  that the index's four claims are accurate — not what those claims say.** On
   a file where every other record spans lines it prints `index OK` just the
   same, because the index correctly records that. It is not a way to ask "does
   this file have embedded newlines"; the search's `-debug` line answers that
   one, explicitly. **What it proves** is
-  all three of the index's claims: the grid offsets, the record count, and
-  whether any record spans lines. The third was added on 2026-08-19, and it is
-  the one that mattered — it is the claim the parallel path consumes when it
+  all four of the index's claims: the grid offsets, the line each grid point
+  names, the record count, and whether any record spans lines. The line was
+  added on 2026-08-21 and this passage said "three" until 2026-08-22 — the
+  drift this document is otherwise about. The spans-lines claim was added on
+  2026-08-19, and it is the one that mattered — it is the claim the parallel path consumes when it
   treats a line as a record, it was the only claim nothing re-derived, and the
   edit that breaks it leaves the other two intact, so checking those two alone
   returned `index OK` on an index that then produced the wrong record number.

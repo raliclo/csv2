@@ -540,9 +540,19 @@ func parseArgs(_ argv: [String]) throws -> Options {
             }
             let row = try needData(arg)
             if o.cellModifier {
+                // The names were `status_notes` and `license` -- two columns
+                // from this project's own fixture, printed at anyone whose
+                // file has neither. It read as a report about the file that
+                // was passed, and on a one-column file it named two columns
+                // that do not exist. An illustration has to be visibly an
+                // illustration when the message cannot see the file.
+                // 原本寫的是 `status_notes` 與 `license`——本專案自己 fixture 裡的兩個欄名，
+                // 卻被印給一個「兩個都沒有」的使用者看。它讀起來像是在描述「你傳進來的那個
+                // 檔案」，而在一個單欄檔案上，它指名了兩個不存在的欄位。當訊息看不到那個檔案時，
+                // 舉例就必須「看得出來是舉例」。
                 throw usageError(
-                    "-insert -cell does not exist: inserting a cell mid-record pushes every later field one column along, so status_notes ends up under license. To add a column, every record and both header rows have to change together.",
-                    "沒有 -insert -cell：在一列中間插入儲存格會把該列後面的欄位全部往後推一格，於是 status_notes 跑到 license 底下。要新增一欄，必須每一列與兩列標頭一起改。")
+                    "-insert -cell does not exist: inserting a cell mid-record pushes every later field one column along, so the value in column 5 would end up under the name of column 6, and so on to the end of the row. To add a column, every record and both header rows have to change together.",
+                    "沒有 -insert -cell：在一列中間插入儲存格，會把該列後面的欄位全部往後推一格，於是原本第 5 欄的值會跑到第 6 欄的名字底下，並一路推到該列結尾。要新增一欄，必須每一列與兩列標頭一起改。")
             }
             o.edits.append(.insert(at: at, row: row))
             o.cellModifier = false; o.colModifier = false
