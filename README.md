@@ -1504,6 +1504,49 @@ $ csv2 -head 1 -t --json -i masked.csv
 
 The key is absent entirely when nothing is protected.
 
+## The index sidecar
+
+Everything about the `.index` file in one place, because the paragraph that
+warns you about it used to point here and there was nothing here to point at.
+
+**What it is.** `packages.csv` gets `packages.csv.index` — the whole filename
+plus `.index`, so `foo.csv` and `foo.csv2` never collide. It holds a byte
+offset and a physical line for every 256th record, the record count, a
+`no_embedded_newlines` flag, a stamp of the data file, and a checksum over
+itself. It is derived, never the source of truth: put the name in
+`.gitignore`.
+
+**When one appears.** `--build-index` builds one at any size. Otherwise only as
+a side effect, and only at or above `CSV2_INDEX_MIN_BYTES` (16 MiB): a
+rewriting edit builds one, and `-tail` builds one because it must read to the
+end anyway. `-mid`, `-contains`, `-r` and `-get` never build one. `-append
+--in-place` builds none — its fast path never reads to the end — but it does
+extend one that already exists.
+
+**Who reads it.** `-contains` (to split the file into chunks), `-mid` and
+`-tail` (to seek). `-get` and the edit verbs scan and ignore it. `--no-index`
+turns all of that off.
+
+**What it is checked against, and what that cannot catch.** Before use: the
+data file's size, mtime **to the nanosecond**, and a hash of its first and last
+64 bytes, plus the index's own checksum. That is O(1) and it is a heuristic —
+a change that keeps all of those identical is not detected, and one exists:
+overwrite a record with the same number of bytes, restore the mtime exactly.
+`--verify-index` is the O(n) answer and compares the index's three claims
+against the data; it exits 0 when they hold, 1 when they do not or there is no
+index, and prints one line per failing claim.
+
+**The two ways an address from it can be wrong.** A stale sidecar that the
+stamp still accepts (above), and the file simply changing between your two
+commands, which no sidecar is involved in and no flag prevents. Verify before
+an edit, not after: a rewriting edit repairs the sidecar as it goes, so
+`--verify-index` afterwards reports on the file you have already changed.
+
+**Why it is never required.** Every operation gives the same answer without it.
+Stale, truncated, corrupt or a version behind — all discarded in favour of a
+scan, none an error, because an index that quickly gives you the wrong data is
+worse than no index at all.
+
 ### Environment variables
 
 Each exists so its logic can be **tested** without producing the data it was
