@@ -8090,10 +8090,93 @@ done
 # 拒絕它等於拒絕那個最單純的寫法。
 assert_succeeds "T160b --build-index alone still works / 單獨的 --build-index 照舊可用" -- \
     "$CSV2" --build-index -i "$TMP/t160.csv"
-assert_succeeds "T160c and with -r, which is the default anyway / 搭配 -r 也是——它本來就是預設值" -- \
-    "$CSV2" --build-index -r -i "$TMP/t160.csv"
+# `-r` typed explicitly is refused like any other verb. The first version of
+# T160 excluded it on the reasoning that -r is also the default -- true of the
+# DEFAULT, and not of a caller who typed it and got no output. Round 61 found
+# the difference; the flag alone (T160b) is the case that had to keep working.
+# 明確打出來的 `-r` 與其他動詞一樣會被拒絕。T160 的第一版把它排除在外，理由是「-r 也是
+# 預設值」——那對「預設」成立，對「一個真的打了它、卻沒有拿到輸出的呼叫端」不成立。
+# 第 61 回合找出了這個差別；必須繼續可用的是「單獨那個旗標」（T160b）。
+_t160_r=$("$CSV2" --build-index -r -i "$TMP/t160.csv" 2>&1)
+if [[ $_t160_r == *"cannot both run"* ]]; then
+    ok "T160c and an explicitly typed -r is refused too / 而明確打出來的 -r 同樣會被拒絕"
+else
+    bad "T160c $(print -r -- $_t160_r | head -1) / 結果如上"
+fi
+
+for _t160_shape in --json "-md -t"; do
+    _t160_out=$("$CSV2" --build-index ${=_t160_shape} -i "$TMP/t160.csv" 2>&1)
+    if [[ $_t160_out == *"cannot both run"* ]]; then
+        ok "T160e and so is $_t160_shape / $_t160_shape 也是"
+    else
+        bad "T160e $_t160_shape: $(print -r -- $_t160_out | head -1) / 結果如上"
+    fi
+done
+
+_t160_both=$("$CSV2" --build-index --verify-index -i "$TMP/t160.csv" 2>&1)
+if [[ $_t160_both == *"cannot both run"* ]]; then
+    ok "T160f and the two administrative flags refuse each other / 而那兩個管理用旗標會互相拒絕"
+else
+    bad "T160f $(print -r -- $_t160_both | head -1) / 結果如上"
+fi
 assert_succeeds "T160d and --verify-index alone / 單獨的 --verify-index 也是" -- \
     "$CSV2" --verify-index -i "$TMP/t160.csv"
+
+# ---------------------------------------------------------------------
+# T161 -- the temp file's permissions while the write is happening.
+#
+# Round 61: "--in-place exposes the contents of a restrictively-permissioned
+# file for the duration of the write." The temp file was created with the
+# umask's mode and the source's mode applied just before the rename, so a 0600
+# file spent the whole write as -rw-r--r-- under a name anyone could open.
+# On a 15 MB file that is a real window, and the README's "an edit does not
+# change who can read it" was true only of the finished file.
+#
+# T161 —— 寫入進行中，那個暫存檔的權限。
+# ---------------------------------------------------------------------
+echo
+echo "--- T161: who can read the temp file / T161：誰讀得到那個暫存檔 ---"
+
+if (( IS_WINDOWS )); then
+    T161_SKIPPED=1
+    skipt "T161 the temp file is not world-readable while it is written / 暫存檔在寫入期間不是所有人可讀 (POSIX modes; MSYS2 reports a fiction over an ACL / 這是 POSIX 模式；MSYS2 回報的是覆在 ACL 之上的虛構)"
+else
+    # Big enough that the write takes long enough to look at.
+    # 大到「寫入會花上足以觀察的時間」。
+    {
+        print -r -- 'a,b'
+        for i in {1..120000}; do printf '%d,value-%d-padding-padding\n' $i $i; done
+    } > "$TMP/t161.csv"
+    chmod 600 "$TMP/t161.csv"
+
+    "$CSV2" -update 1:2 Q -i "$TMP/t161.csv" --in-place &
+    _t161_pid=$!
+    _t161_modes=""
+    for _ in {1..40}; do
+        _t161_tmp=$(print -r -- "$TMP"/.t161.csv.csv2tmp.*(N))
+        if [[ -n $_t161_tmp ]]; then
+            _t161_modes="$_t161_modes $(file_mode "$_t161_tmp")"
+            break
+        fi
+        sleep 0.02
+    done
+    wait $_t161_pid 2>/dev/null
+
+    if [[ -z ${_t161_modes// /} ]]; then
+        # The write finished before the temp file could be looked at. Saying so
+        # beats reporting a pass for a window nobody observed.
+        # 寫入在暫存檔被看到之前就結束了。說出來，好過為一個「沒有人觀察到的時間窗」回報通過。
+        T161_SKIPPED=1
+        skipt "T161 the temp file is not world-readable while it is written / 暫存檔在寫入期間不是所有人可讀 (the write finished before it could be sampled / 寫入在能被取樣之前就結束了)"
+    elif [[ ${_t161_modes// /} == 600 ]]; then
+        ok "T161 the temp file is 600 while it is being written / 暫存檔在寫入期間是 600"
+    else
+        bad "T161 the temp file was${_t161_modes} while a 600 file was being edited / 編輯一個 600 的檔案時，暫存檔是${_t161_modes}"
+    fi
+
+    assert_eq "$(file_mode "$TMP/t161.csv")" "600" \
+        "T161b and the file still has its own mode afterwards / 而那個檔案事後仍然是它自己的模式"
+fi
 
 # ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
@@ -8787,6 +8870,11 @@ fi
 # 不是「平台叫什麼名字」的性質。
 (( ${T146E_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T145E_SKIPPED:-0} )) && (( want_skip += 1 ))
+# T161 skips on Windows and where the write outran the sampling loop, which is
+# a property of this machine's speed rather than of the platform's name.
+# T161 在 Windows 上、以及「寫入跑得比取樣迴圈還快」時會跳過，而後者是這台機器的速度的性質，
+# 不是平台名字的性質。
+(( ${T161_SKIPPED:-0} )) && (( want_skip += 1 ))
 if [[ "$skip" == "$want_skip" ]]; then
     ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
 else

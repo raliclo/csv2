@@ -776,12 +776,30 @@ func validate(_ o: inout Options) throws {
     // stdout，於是 README 自己那句 `val=$(csv2 -get …)` 會把那句話寫進一個資料儲存格，rc=0。
     // `-r` 不列入，因為它同時也是預設值：拒絕它等於拒絕 `csv2 --build-index -i f.csv`
     // 這個最平常的用法，而那正是這個旗標的用途。那種情況下沒有任何東西被丟棄——沒有動詞可丟。
+    // `-r` counts when it was TYPED. It is also the default, so it cannot be
+    // read off `o.read` alone -- but a caller who wrote it asked for output and
+    // got none, which is the same silent drop as any other verb. Round 61
+    // found the flags this list missed: -r, --json, -md, and the two
+    // administrative flags given together.
+    // 只有「被打出來」的 `-r` 算數。它同時也是預設值，因此不能只看 `o.read`——但一個真的
+    // 寫了它的呼叫端，要的是輸出、而拿到的是沒有輸出，那與其他任何動詞被靜默丟棄是同一件事。
+    // 第 61 回合找出了這份清單漏掉的那些：-r、--json、-md，以及那兩個管理用旗標同時給出。
     let selectionVerb: String? =
         o.contains != nil ? "-contains" :
         o.getCell != nil ? "-get" :
         o.head != nil ? "-head" :
         o.tail != nil ? "-tail" :
-        o.mid != nil ? "-mid" : nil
+        o.mid != nil ? "-mid" :
+        o.read ? "-r" :
+        o.json ? "--json" :
+        o.markdown ? "-md" : nil
+    // Two administrative flags together drop one of each other, which is the
+    // same failure with no verb involved at all.
+    // 兩個管理用旗標同時給出時，其中一個會被另一個丟棄——那是同一種失敗，而且完全不涉及動詞。
+    if o.buildIndex && o.verifyIndex {
+        throw usageError("--build-index and --verify-index cannot both run: each replaces the operation, so one of them would be dropped",
+                         "--build-index 與 --verify-index 不能同時執行：兩者都是「取代」該操作，因此其中一個會被丟棄")
+    }
     for (flag, on) in [("--build-index", o.buildIndex), ("--verify-index", o.verifyIndex)] where on {
         if !o.edits.isEmpty {
             throw usageError("\(flag) and an edit verb cannot both run: \(flag) replaces the operation rather than joining it, so the edit would be silently dropped",

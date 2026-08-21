@@ -1252,13 +1252,17 @@ link for a regular file and leave the target untouched — while the shell's `>`
 writes through it. Both `-o` and `--in-place` therefore resolve the destination
 first: the link keeps pointing where it did, and the file it points at is the
 one written. The original file's permission bits are carried onto the temp file
-before the rename, so an edit does not change who can read it. Asserted by
-T129 and T130.
+before the rename, so an edit does not change who can read it — and the temp
+file is created 0600 to begin with, so it is not readable by anyone else while
+it is being written either. It was 0644 for the duration until 2026-08-21, and
+on a large file that is a window measured in seconds. Asserted by T129, T130
+and T161.
 
-Two things it still does not preserve, both deliberate: a **hard link** is
-broken, because rename cannot do otherwise, and a **read-only file** in a
-writable directory is still replaced, because rename asks permission of the
-DIRECTORY and never looks at the file. Restoring the mode stops an edit from
+Three things it does not preserve, all deliberate: a **hard link** is broken,
+because rename cannot do otherwise; **extended attributes** are lost, because
+the temp file is a new file and nothing copies them across; and a **read-only
+file** in a writable directory is still replaced, because rename asks
+permission of the DIRECTORY and never looks at the file. Restoring the mode stops an edit from
 widening who can read a file, which is the half that hands data to someone
 else; refusing to write a read-only file would be csv2 having an opinion about
 your directory permissions, which is not its business.

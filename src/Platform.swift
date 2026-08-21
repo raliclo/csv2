@@ -530,7 +530,25 @@ enum Platform {
         guard fd >= 0 else { CloseHandle(h); return nil }
         return fd
         #else
-        let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+        // 0600, not the umask's 0644. The temp file holds the whole contents of
+        // the file being edited, and copyMode does not run until just before
+        // the rename -- so a 0600 source spent the entire write world-readable
+        // under a name anyone could open. Measured on a 15 MB file: the temp
+        // was -rw-r--r-- for the duration and -rw------- afterwards, and the
+        // README's "an edit does not change who can read it" was true only of
+        // the finished file.
+        //
+        // Starting private and widening at the end is the right order: the
+        // mode that matters during the write is the source's, and 0600 is
+        // never wider than that.
+        // 用 0600，不是 umask 的 0644。暫存檔裝的是「正在被編輯的那個檔案」的全部內容，而
+        // copyMode 要到 rename 之前才執行——因此一個 0600 的來源，在整個寫入期間都以一個
+        // 「任何人都開得了」的名字、對所有人可讀。15 MB 檔案上的實測：暫存檔在那段時間是
+        // -rw-r--r--，結束後才是 -rw-------，而 README 那句「一次編輯不會改變誰讀得到它」
+        // 只對「完成後的檔案」成立。
+        // 先私有、最後再放寬，才是對的順序：寫入期間該生效的是來源的模式，而 0600 永遠不會
+        // 比它更寬。
+        let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
         guard fd >= 0 else { return nil }
         return fd
         #endif
