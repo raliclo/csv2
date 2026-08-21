@@ -8193,6 +8193,64 @@ else
 fi
 
 # ---------------------------------------------------------------------
+# T162 -- the smallest file that breaks each rule.
+#
+# Round 62 built, for every rule about input, the smallest file that violates
+# it and the smallest that satisfies it by one byte. Two rules failed at the
+# boundary:
+#
+#   - a file that IS a UTF-16 BOM and nothing else -- two bytes, which is what
+#     an editor writes for an empty document saved as UTF-16 -- was accepted at
+#     rc=0 as a one-column CSV whose column name is those two invalid bytes,
+#     because the UTF-8 BOM test needs three bytes and the check waited for
+#     three. A zero-byte file, semantically the same, is refused;
+#   - a blank line in a ONE-column file is a record with one empty field,
+#     because they are the same bytes -- true, defensible, and stated nowhere,
+#     while the rule reads "a blank line anywhere is refused".
+#
+# T162 —— 讓每一條規則破掉的最小檔案。
+# ---------------------------------------------------------------------
+echo
+echo "--- T162: two bytes either way / T162：兩個位元組的兩邊 ---"
+
+printf '\xff\xfe' > "$TMP/t162_le.csv"
+printf '\xfe\xff' > "$TMP/t162_be.csv"
+for _t162 in le be; do
+    _t162_out=$("$CSV2" -r -t -i "$TMP/t162_$_t162.csv" 2>&1 >/dev/null)
+    _t162_rc=$?
+    if (( _t162_rc == 1 )) && [[ $_t162_out == *"byte-order mark"* ]]; then
+        ok "T162a a file that is nothing but a UTF-16 BOM is refused ($_t162) / 「整個檔案就是一個 UTF-16 BOM」會被拒絕（$_t162）"
+    else
+        bad "T162a $_t162 exited $_t162_rc: $(print -r -- $_t162_out | head -1) / 結果如上"
+    fi
+done
+
+# One byte more, and one byte less, still behave as documented.
+# 多一個位元組、少一個位元組，行為仍如文件所述。
+printf '\xff\xfea\x00' > "$TMP/t162_more.csv"
+assert_fails "T162b and so is a longer UTF-16 file / 較長的 UTF-16 檔案同樣如此" -- \
+    "$CSV2" -r -t -i "$TMP/t162_more.csv"
+: > "$TMP/t162_empty.csv"
+assert_fails "T162c while a zero-byte file is refused for its own reason / 而零位元組的檔案因為它自己的理由被拒絕" -- \
+    "$CSV2" -r -t -i "$TMP/t162_empty.csv"
+
+# A UTF-8 BOM is still stripped, not refused -- the two tests must not have
+# merged.
+# UTF-8 的 BOM 仍然是被剝除、不是被拒絕——那兩個判斷不能被合成一個。
+printf '\xef\xbb\xbfa,b\n1,x\n' > "$TMP/t162_u8.csv"
+assert_eq "$("$CSV2" -r -t -i "$TMP/t162_u8.csv" | head -1)" 'a,b' \
+    "T162d a UTF-8 BOM is still stripped rather than refused / UTF-8 的 BOM 仍然是被剝除，而不是被拒絕"
+
+# The one-column blank line, which is documented now rather than refused.
+# 單欄檔案裡的空白行——現在是被寫進文件，而不是被拒絕。
+printf 'a\n\n' > "$TMP/t162_one.csv"
+assert_eq "$("$CSV2" -r -t --json -i "$TMP/t162_one.csv" | sed -n 2p)" '{"record":1,"line":2,"fields":{"a":""}}' \
+    "T162e a blank line in a one-column file is a record with one empty field / 單欄檔案裡的空白行，是一筆「有一個空欄位」的紀錄"
+printf 'a,b\n\n' > "$TMP/t162_two.csv"
+assert_fails "T162f while two columns make it a blank line again / 而兩欄時它又是一個空白行" -- \
+    "$CSV2" -r -t -i "$TMP/t162_two.csv"
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one

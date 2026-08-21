@@ -310,6 +310,24 @@ enum FieldEncoder {
 // MARK: - The parser / 解析器
 // ---------------------------------------------------------------------
 
+/// Refuse a UTF-16 file by its byte-order mark. Two bytes is the whole test:
+/// FF FE and FE FF cannot begin a UTF-8 file, so seeing one is not a guess.
+/// Called as soon as two bytes are known rather than after three, because a
+/// file that IS two bytes would otherwise never reach it.
+/// 以位元組順序記號拒絕一個 UTF-16 檔案。整個判斷就是那兩個位元組：FF FE 與 FE FF 不可能
+/// 出現在 UTF-8 檔案的開頭，因此看到它不是在猜。一知道兩個位元組就呼叫，而不是等到三個，
+/// 因為「整個檔案就是兩個位元組」的情況否則永遠到不了這裡。
+func refuseUTF16BOM(_ head: [UInt8]) throws {
+    guard head.count >= 2 else { return }
+    let b0 = head[0], b1 = head[1]
+    guard (b0 == 0xFF && b1 == 0xFE) || (b0 == 0xFE && b1 == 0xFF) else { return }
+    let which = b0 == 0xFF ? "UTF-16LE" : "UTF-16BE"
+    throw fault(
+        "this file begins with a \(which) byte-order mark; csv2 reads bytes and does not convert encodings, so it would parse as records that mean nothing. Convert it first with: iconv -f \(which) -t UTF-8 file > converted.csv -- the new name has to keep a .csv or .csv2 suffix, because the suffix is what declares the format",
+        "本檔案以 \(which) 的位元組順序記號開頭；csv2 讀的是位元組、不做編碼轉換，因此它會被解析成一堆沒有意義的紀錄。請先轉換：iconv -f \(which) -t UTF-8 file > converted.csv——新檔名必須保留 .csv 或 .csv2 副檔名，因為宣告格式的正是副檔名")
+}
+
+
 /// Push-based so that `-si` can stream: bytes go in a chunk at a time and
 /// records come out as they complete. Nothing here ever holds the whole
 /// input, because the tool has to work on files larger than the 2-4 GiB the
@@ -449,6 +467,20 @@ final class RecordParser {
         var bytes = chunk
         if !bomDone {
             bomPending.append(contentsOf: bytes)
+            // The UTF-16 test needs two bytes and the UTF-8 BOM needs three,
+            // so waiting for three skipped it entirely on a file that IS two
+            // bytes -- and a file consisting of nothing but FF FE is what an
+            // editor writes when you save an empty document as UTF-16. It was
+            // accepted at rc=0 as a one-column CSV whose column name is those
+            // two bytes, which are not valid UTF-8, while a zero-byte file --
+            // semantically the same empty file -- is refused for not declaring
+            // its shape. Two rules disagreeing at adjacent sizes.
+            // 判斷 UTF-16 只要兩個位元組，判斷 UTF-8 BOM 要三個，而「等到三個」讓前者在
+            // 「整個檔案就是兩個位元組」時完全沒有機會執行——而一個「只有 FF FE」的檔案，
+            // 正是編輯器把一份空文件存成 UTF-16 時寫出來的東西。它會以 rc=0 被接受，成為一個
+            // 「欄名是那兩個非法 UTF-8 位元組」的單欄 CSV；而一個零位元組的檔案——語意上同樣是
+            // 空的——則因為「沒有宣告自己的形狀」而被拒絕。兩條規則在相鄰的大小上互相矛盾。
+            if bomPending.count >= 2 { try refuseUTF16BOM(bomPending) }
             if bomPending.count < BOM.count {
                 return // wait for more; a 1-byte file cannot carry a BOM anyway
             }
@@ -473,25 +505,6 @@ final class RecordParser {
             //
             // 選擇拒絕而非轉換，理由與上面那個 CR 檢查相同：猜測編碼，正是一個工具最後
             // 「靜默產生出看似合理而錯誤的東西」的方式。`iconv` 知道怎麼做，csv2 不需要會。
-            if bomPending.count >= 2 {
-                let b0 = bomPending[0], b1 = bomPending[1]
-                if (b0 == 0xFF && b1 == 0xFE) || (b0 == 0xFE && b1 == 0xFF) {
-                    let which = b0 == 0xFF ? "UTF-16LE" : "UTF-16BE"
-                    throw fault(
-                        // `> file.utf8` was the recipe, and csv2 then refuses
-                        // the result: the suffix declares the format, and
-                        // `.utf8` declares nothing. A round followed both this
-                        // and the CR recipe and had to work out the rename for
-                        // itself. Advice that produces a file this tool will
-                        // not open is not advice.
-                        // 原本的建議是 `> file.utf8`，而 csv2 接著會拒絕那個結果：宣告格式的
-                        // 是副檔名，而 `.utf8` 什麼也沒宣告。有一個回合照著這條與 CR 那條做，
-                        // 最後得自己想出「要改回 .csv」。一條會產生「本工具打不開的檔案」的
-                        // 建議，不是建議。
-                        "this file begins with a \(which) byte-order mark; csv2 reads bytes and does not convert encodings, so it would parse as records that mean nothing. Convert it first with: iconv -f \(which) -t UTF-8 file > converted.csv -- the new name has to keep a .csv or .csv2 suffix, because the suffix is what declares the format",
-                        "本檔案以 \(which) 的位元組順序記號開頭；csv2 讀的是位元組、不做編碼轉換，因此它會被解析成一堆沒有意義的紀錄。請先轉換：iconv -f \(which) -t UTF-8 file > converted.csv——新檔名必須保留 .csv 或 .csv2 副檔名，因為宣告格式的正是副檔名")
-                }
-            }
             if Array(bomPending.prefix(3)) == BOM {
                 // A UTF-8 BOM marks "this came from Windows"; Excel exports
                 // one. Left in place it becomes part of the first column

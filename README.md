@@ -670,11 +670,22 @@ which is an accident, not a check: do not read that error as csv2 having
 noticed the encoding. If you are handed UTF-16, convert it; do not rely
 on being told.
 
-**A blank line anywhere is refused**, including the one a file ending in two
-newlines has: `record 2 (line 3) is a blank line, and a blank line is not a
+**A blank line anywhere is refused — in a file with two or more columns**,
+including the one a file ending in two newlines has: `record 2 (line 3) is a blank line, and a blank line is not a
 record with 2 empty fields; remove it`. Every other CSV reader has an opinion
 here and they differ — skip it, return one empty field, return N empty fields —
 and each of those quietly changes what record 3 is.
+
+**In a ONE-column file there is nothing to refuse:** a blank line and a record
+holding one empty field are the same bytes, so it is read as a record. Write
+`""` on that line if you want the file to say which it means — it reads
+identically and cannot be mistaken for anything else.
+
+**A `.csv2` must end with a newline; a `.csv` need not.** One record per line is
+what `.csv2` means, so a file that stops mid-line has a torn last record and is
+refused, naming `--truncate-partial` as the way to discard it. A `.csv` with no
+final newline is ordinary — plenty of tools write one — and is read as it
+stands.
 
 **A bare CR inside an UNQUOTED field is data, and this is where csv2 differs
 from most parsers.** `1,x<CR>y` is one record with the value `x<CR>y`; Python's
@@ -690,7 +701,10 @@ display.
 
 **A zero-byte file is refused too**, with `expected 1 header row(s), found 0` —
 a file with no header does not declare its own shape, and guessing one is how a
-data row becomes a header.
+data row becomes a header. So is a file that is nothing but a UTF-16
+byte-order mark, which is what an editor writes for an empty document saved as
+UTF-16: two bytes, semantically the same empty file, and until 2026-08-21 it
+was accepted as a one-column CSV whose column name was those two bytes (T162).
 
 ```console
 $ csv2 -r -i export.csv
