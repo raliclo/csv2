@@ -611,6 +611,29 @@ enum MarkdownOut {
     /// 儲存格內的 `|` 會把表格切開，內嵌換行會把一列拆成兩列，兩者都必須跳脫。
     /// 這與天真的逗號切割是同一類錯誤：輸出看起來像表格、renderer 也不會抱怨，
     /// 只是欄位跑到別欄去了。
+    /// The control characters go too, as `\xNN`, for the reason the locating
+    /// report already gives: `-md` is a RENDERING, read by a person, and a
+    /// control character is not text on a terminal.
+    ///
+    /// It passed them through until 2026-08-22, and the attack is small: a
+    /// licence column holding `GPL-3.0<BS><BS><BS><BS><BS><BS><BS>MIT` renders
+    /// as `MIT` on any terminal that moves the cursor for a backspace, at rc=0,
+    /// with `-get` still returning the real bytes. An auditor running the
+    /// command this document calls "for reading" reads the wrong licence. No
+    /// pipes are needed, so the `\|` escape never fires; `--pretty` happens to
+    /// catch that particular payload because it counts the backspaces in the
+    /// column width and the row goes visibly short, but that is an accident of
+    /// alignment and not a defence.
+    ///
+    /// 控制字元也要跳脫，寫成 `\xNN`，理由與定位報告已經給過的相同：`-md` 是一種「算繪」，
+    /// 給人讀的，而控制字元在終端機上不是文字。
+    ///
+    /// 它到 2026-08-22 之前都原樣放行，而攻擊很小：一個授權欄位存著
+    /// `GPL-3.0<BS><BS><BS><BS><BS><BS><BS>MIT`，在任何「退格會移動游標」的終端機上算繪成
+    /// `MIT`，rc=0，而 `-get` 仍然交還真正的位元組。一個執行「這份文件稱為『給人讀』的那個
+    /// 指令」的稽核者，讀到的是錯的授權。這個 payload 不需要任何 `|`，因此 `\|` 那道跳脫
+    /// 從未觸發；`--pretty` 剛好擋得住這一種，因為它把那些退格算進了欄寬、那一列會明顯變短
+    /// ——但那是對齊的意外，不是一道防線。
     static func cell(_ bytes: [UInt8]) -> String {
         var s = String(bytes: bytes, encoding: .utf8) ?? String(decoding: bytes, as: UTF8.self)
         s = s.replacingOccurrences(of: "\\", with: "\\\\")
@@ -618,7 +641,23 @@ enum MarkdownOut {
         s = s.replacingOccurrences(of: "\r\n", with: "<br>")
         s = s.replacingOccurrences(of: "\n", with: "<br>")
         s = s.replacingOccurrences(of: "\r", with: "<br>")
-        return s
+        var out = ""
+        out.reserveCapacity(s.count)
+        for u in s.unicodeScalars {
+            // A tab is `\t` here because it is `\t` in the locating report,
+            // and two shapes of this tool spelling the same byte two ways is
+            // the drift everything else in this file argues against.
+            // TAB 在這裡寫成 `\t`，因為它在定位報告裡就是 `\t`；這個工具的兩種形狀
+            // 把同一個位元組拼成兩種樣子，正是這個檔案其他部分一直在反對的那種漂移。
+            if u == "\t" {
+                out += "\\t"
+            } else if u.value < 0x20 || u.value == 0x7F {
+                out += String(format: "\\x%02X", u.value)
+            } else {
+                out.unicodeScalars.append(u)
+            }
+        }
+        return out
     }
 }
 

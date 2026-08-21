@@ -8465,10 +8465,20 @@ _t136_md=$("$CSV2" -md -t -i "$TMP/t136.csv")
 
 assert_contains "$_t136_md" 'C:\\path' \
     "T136a -md doubles a backslash, as the README now says / -md 會把反斜線變成兩個，一如 README 現在所寫"
-if [[ $_t136_md == *$'\t'* ]]; then
-    ok "T136b and passes a TAB through unchanged / 而 TAB 原樣通過"
+# A TAB used to pass through raw, and this case asserted that. It does not any
+# more: -md is a RENDERING read by a person, so it escapes control characters
+# the way the locating report does -- a `\t` for the tab and `\xNN` for the
+# rest. Round 70 built a licence column reading `GPL-3.0<BS>*7 MIT`, which
+# rendered as `MIT` on any terminal that moves the cursor for a backspace,
+# while `-get` returned the real bytes. The old assertion was pinning the hole.
+# 原本 TAB 會原樣通過，而這個案例斷言了那件事。現在不會了：`-md` 是一種給人讀的「算繪」，
+# 因此它像定位報告那樣跳脫控制字元——TAB 是 `\t`，其餘是 `\xNN`。第 70 回合造了一個
+# 授權欄位 `GPL-3.0<BS>×7 MIT`，在任何「退格會移動游標」的終端機上算繪成 `MIT`，而 `-get`
+# 交還的是真正的位元組。舊的那條斷言，釘住的正是那個洞。
+if [[ $_t136_md == *'\t'* && $_t136_md != *$'\t'* ]]; then
+    ok "T136b and escapes a TAB the way the report does / 而 TAB 以定位報告的方式被跳脫"
 else
-    bad "T136b the TAB did not survive / TAB 沒有留下來"
+    bad "T136b the TAB is not escaped / TAB 沒有被跳脫"
 fi
 
 # The collision, stated as a fact rather than discovered by someone relying on
@@ -10114,6 +10124,92 @@ if [[ $_t192_v == *"index OK"* && $_t192_v != *"402 records"* ]]; then
 else
     ok "T192d after a race the index is stale or correct, never wrong / 競賽之後，索引要嘛過期、要嘛正確，絕不會是「錯的」"
 fi
+
+
+# ---------------------------------------------------------------------
+# T193 -- what -md may put on a terminal.
+#
+# Round 70. The locating report escapes control characters and the README
+# gives the reason: an ESC recolours the output from inside a cell, and can
+# erase the line it is printed on. `-md` -- which the same document calls "a
+# RENDERING ... for reading" -- passed them through.
+#
+# The attack needs no pipes, so the `\|` escape never fires: a licence column
+# holding `GPL-3.0` followed by seven backspaces and `MIT` renders as `MIT` on
+# any terminal that moves the cursor for a backspace, while `-get` returns the
+# real bytes. An auditor running the documented reading command reads the
+# wrong licence, at rc=0, with nothing on stderr.
+#
+# T193 —— `-md` 可以把什麼放到終端機上。
+# 第 70 回合。定位報告會跳脫控制字元，而 README 給了理由：ESC 會從儲存格裡面把輸出重新上色，
+# 也能抹掉它正被印出的那一行。而 `-md`——同一份文件稱它為「一種算繪……拿來讀的」——原樣放行。
+# 那個攻擊不需要任何 `|`，因此 `\|` 那道跳脫從未觸發。
+# ---------------------------------------------------------------------
+echo
+echo "--- T193: control characters in -md / T193：-md 裡的控制字元 ---"
+
+printf 'pkg,license\nzlib,Zlib\nevil,GPL-3.0\b\b\b\b\b\b\bMIT\n' > "$TMP/t193.csv"
+printf 'a,b\n1,X\033Y\tZ\007W\n' > "$TMP/t193c.csv"
+
+_t193_md=$("$CSV2" -r -t -md -i "$TMP/t193.csv")
+_t193_raw=$(print -r -- "$_t193_md" | od -A n -t x1 | tr -s ' ')
+if [[ $_t193_raw == *" 08 "* ]]; then
+    bad "T193a a raw backspace reached the rendered table / 一個原始的退格進到了算繪出來的表格裡"
+else
+    ok "T193a no raw backspace reaches the rendered table / 沒有原始的退格進到算繪出來的表格裡"
+fi
+assert_contains "$_t193_md" '\x08' \
+    "T193b it is shown as \\x08, the way the report shows it / 它以 \\x08 顯示，與定位報告一致"
+
+_t193_ctl=$("$CSV2" -r -t -md -i "$TMP/t193c.csv")
+assert_contains "$_t193_ctl" '\x1B' \
+    "T193c an ESC likewise / ESC 同樣如此"
+assert_contains "$_t193_ctl" '\x07' \
+    "T193d and a BEL / BEL 也是"
+assert_contains "$_t193_ctl" '\t' \
+    "T193e while a TAB is \\t, as in the report / 而 TAB 是 \\t，與報告相同"
+
+# The DATA shapes still hand back the bytes -- that is their job, and the
+# README defends it. -md is the one that renders.
+# 各種「資料」形狀仍然交還位元組——那是它們的工作，README 也為此辯護。-md 才是負責算繪的那個。
+assert_eq "$("$CSV2" -get 2:2 -i "$TMP/t193.csv" | od -A n -t x1 | tr -s ' ' | tr -d '\n' | grep -c '08')" "1" \
+    "T193f -get still returns the real bytes / -get 仍然交還真正的位元組"
+
+# ---------------------------------------------------------------------
+# T194 -- a metrics line on every path.
+#
+# Round 70 measured ten paths and found five without one: both index commands
+# and every --in-place edit. The flag entry says "on every path", and the
+# missing half is the writes -- the runs whose cost a caller most wants to see.
+#
+# T194 —— 每一條路徑都有一行 metrics。
+# 第 70 回合量了十條路徑，其中五條沒有：兩個索引指令，以及每一次 --in-place 編輯。
+# 而旗標條目說的是「每一條路徑」，缺掉的那一半全是「寫入」。
+# ---------------------------------------------------------------------
+echo
+echo "--- T194: metrics on every path / T194：每一條路徑上的 metrics ---"
+
+printf 'a,b\n' > "$TMP/t194.csv"
+_i=1
+while (( _i <= 300 )); do printf 'r%d,s%d\n' $_i $_i >> "$TMP/t194.csv"; _i=$((_i+1)); done
+
+_t194_bad=0
+for _verb in "-r -t" "-contains r5" "-get 1:1" "-tail 1" "-update 1:2 Z --in-place" \
+             "-append A,b --in-place" "-delete 5 --in-place" "--build-index" "--verify-index"; do
+    _n=$(CSV2_INDEX_MIN_BYTES=100 "$CSV2" ${=_verb} -i "$TMP/t194.csv" -debug 2>&1 >/dev/null |
+         grep -c "metrics:")
+    if [[ "$_n" != "1" ]]; then
+        bad "T194a [$_verb] printed $_n metrics lines / [$_verb] 印了 $_n 行 metrics"
+        _t194_bad=1
+    fi
+done
+(( _t194_bad )) || ok "T194a nine paths, one metrics line each / 九條路徑，各一行 metrics"
+
+# A refusal still prints none: it belongs to a run that did work.
+# 一次拒絕仍然不印：那一行屬於「真的做了事」的執行。
+_t194_r=$("$CSV2" -mid 7,3 -i "$TMP/t194.csv" -debug 2>&1 >/dev/null | grep -c "metrics:")
+assert_eq "$_t194_r" "0" \
+    "T194b while a refusal prints none / 而一次拒絕不印"
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"

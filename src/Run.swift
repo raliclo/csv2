@@ -230,6 +230,7 @@ func runBuildIndex(_ o: Options) throws {
     guard let idx = builder.finish(dataPath: path) else {
         throw fault("cannot stat \(path)", "無法取得 \(path) 的狀態")
     }
+    Metrics.report(bytesRead: plan.source.bytesRead, fileSize: Int(idx.stamp.size))
     let sink = ByteSink(stdout: 1 << 13)
     if idx.save(dataPath: path) {
         sink.write("index built: \(idx.records) records, stride \(idx.stride), \(idx.offsets.count) grid points\n")
@@ -333,6 +334,8 @@ func runVerifyIndex(_ o: Options) throws {
         mismatches.append("no_embedded_newlines: index says the file has none, "
                         + "but record \(bad) spans lines")
     }
+    Metrics.report(bytesRead: plan.source.bytesRead,
+                   fileSize: Int(FileStamp.of(path: path)?.size ?? 0))
     let sink = ByteSink(stdout: 1 << 13)
     if mismatches.isEmpty {
         sink.write("index OK: \(n) records, stride \(idx.stride), \(idx.offsets.count) grid points\n")
@@ -1405,6 +1408,13 @@ func runEdit(_ o: Options) throws {
     // `outRecords` 在 emitData 裡遞增，因此它數的是「真的到達輸出端」的紀錄；而執行到這裡時，
     // `headers[0]` 已經移除過被刪掉的欄位，所以它的寬度就是輸出的寬度。
     Logger.shared.info("wrote \(outRecords) records, \(headers.first?.count ?? expectedFields) fields, atomic rename OK")
+    // "a metrics: line on every path" was true of the reads and of nothing
+    // else: every --in-place edit and both index commands printed none, and
+    // those are the runs whose cost a caller most wants to see.
+    // 「每一條路徑都有一行 metrics」對「讀取」為真，對其餘一切為假：每一次 --in-place 編輯
+    // 與兩個索引指令都不印，而那些正是呼叫端最想看到成本的執行。
+    Metrics.report(bytesRead: plan.source.bytesRead,
+                   fileSize: o.input.flatMap { Int(FileStamp.of(path: $0)?.size ?? 0) } ?? 0)
 }
 
 // ---------------------------------------------------------------------
@@ -1715,6 +1725,12 @@ func runAppendFast(_ o: Options) throws {
     // 在我們追加的同時，有別人也追加了嗎？O_APPEND 讓兩次寫入各自完整，因此「資料」無論如何
     // 都是好的——但上面算出來的那些偏移量對索引就不對了，而一份「說錯紀錄從哪裡開始」的索引，
     // 比沒有索引更糟。檔案大小就是證據，而那只要一次 stat。
+    // The append path reads the whole file to validate it (see above), so the
+    // bytes it read are the file as it was before this write.
+    // 追加路徑會把整個檔案讀過一遍來驗證它（見上文），因此它讀到的位元組數，就是「這次寫入
+    // 之前」的那個檔案。
+    Metrics.report(bytesRead: Int(size), fileSize: Int(size))
+
     var raced = false
     if let now = Platform.fileIdentity(path: path), now.size != size + UInt64(payload.count) {
         raced = true

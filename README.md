@@ -41,7 +41,7 @@ described somewhere below; this is the list a reader should see first:
 | case-insensitive matching | `--json` and one pass of your own — see the note under `-contains` |
 | counting without reading (`-count`) | `records` on the trailing `--json` meta line |
 | converting between `.csv` and `.csv2` | refused on purpose; write the records out and read them back in |
-| safe concurrent writers | serialise them yourself; two writers silently lose one edit. Two concurrent `-append --in-place` runs are the exception: both records land whole, and each run warns that it could not update the index |
+| safe concurrent writers | serialise them yourself; two writers silently lose one edit. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one that finishes SECOND warns that it could not update the index |
 | telling refusals apart programmatically | nothing but exit 1 and English prose, in every one of them |
 
 `install.zsh` puts the binary where each platform's shell actually looks:
@@ -287,8 +287,16 @@ OUTPUT SHAPE / 輸出形狀
                         header row and the data has two; --en or --zh gives
                         one clean row instead.
                         In DATA cells `|` becomes `\|`, `\` becomes `\\`
-                        and an embedded newline becomes <br>. A TAB is passed
-                        through unchanged. Note this before writing a checker:
+                        and an embedded newline becomes <br>. **Control
+                        characters are escaped the way the locating report
+                        escapes them** -- a TAB as `\t`, everything else below
+                        0x20 and DEL as `\xNN` -- because -md is read by a
+                        person and a control character is not text on a
+                        terminal. It passed them through until 2026-08-22, and
+                        a licence cell holding `GPL-3.0` followed by seven
+                        backspaces and `MIT` then RENDERED as `MIT` while -get
+                        returned the real bytes. Note this before writing a
+                        checker:
                         splitting a rendered row on `|` counts the escaped
                         ones too and reports an alignment fault that is not
                         there. -md is a RENDERING and is not reversible: a
@@ -482,27 +490,32 @@ INDEX / 索引
 
 DIAGNOSTICS / 診斷
   -debug                diagnostics to stderr, including a metrics: line on
-                        every path. That line is
+                        every path -- reads, writes, and both index commands.
+                        A refusal prints none, because that line belongs to a
+                        run that did work. It was missing from the writes and
+                        from --build-index/--verify-index until 2026-08-22,
+                        which is five paths of ten, and the missing half was
+                        the one whose cost a caller most wants to see. That line is
                         `read_bytes=N file_bytes=N peak_rss_bytes=N`:
                         read_bytes is what was actually pulled off the disk
-                        and file_bytes is the input's size, so the PAIR says
-                        how much of the file this run had to touch. Reads are
-                        64 KiB at a time and the LAST one is short, so the
-                        number is a multiple of 65536 whenever the run stopped
-                        with more than a buffer left, and something else
-                        whenever it ran to the end of the file or the seek
-                        started within one buffer of it: `-r` on 17.7 MB reads
-                        17732348, `-mid 2,3` reads 65536, `-tail 1` on a
-                        29,790-byte indexed file reads 3328, and `-mid 1,1` on
-                        a 62-byte one reads 49.
-                        **read_bytes < file_bytes is the only thing to read
-                        into it** -- that the run did not have to touch the
-                        whole file. It does not tell a seek from an early stop:
-                        `-mid 200000,200000` on an indexed 17.7 MB file reports
-                        65536, and so does the same window with --no-index.
-                        This entry said whole buffers ALWAYS until 2026-08-21
-                        and NEVER on a seek until 2026-08-22; both were
-                        generalisations from the examples at hand
+                        and file_bytes is the input's size. Reads are 64 KiB at
+                        a time and the last one is short, so on a 17.5 MB file
+                        of 450,000 records:
+                          -r                          17550004  (the file)
+                          -mid 2,3 --no-index            65536  (stopped early)
+                          -mid 200000,200000 --no-index 7864320 (scanned there)
+                          -mid 200000,200000           65536    (index seek)
+                          -tail 1                        8112   (seek near EOF)
+                        **read_bytes < file_bytes means the run did not have
+                        to touch the whole file**, and that is the claim this
+                        line supports. Anything more precise has been wrong
+                        three times: this entry said whole buffers ALWAYS until
+                        2026-08-21, NEVER on a seek until 2026-08-22, and then
+                        that a seek and an early stop are indistinguishable --
+                        which the third and fourth rows above disprove. Each
+                        version was a rule generalised from whichever examples
+                        were at hand; the numbers are the measurement, and the
+                        sentence under them now claims only what they show.
                         Measure with it rather than guessing:
                         23 MB of peak RSS on a 615 MB file in parallel, 9.5 MB
                         single-threaded over the same file. Until 2026-08-20
@@ -1485,9 +1498,10 @@ lost".** `-append --in-place` does not rewrite the file, so there is no temp
 file and no rename: it writes its bytes onto the end. That write goes through
 a descriptor opened `O_APPEND`, where the kernel makes finding the end and
 writing there one operation — so two concurrent appends both land, whole, and
-neither can overwrite the other. Each one notices afterwards (the file grew by
-more than it wrote) and says so with a `WARN`, because the index beside the
-file cannot be updated by either of them: the offsets each computed are no
+neither can overwrite the other. The run that finishes SECOND notices (the file grew by more than it wrote)
+and says so with a `WARN` -- the first one has already looked and seen its own
+write and nothing else, which is why exactly one warning appears and not two.
+The index beside the file cannot be updated by either of them: the offsets each computed are no
 longer where the records are. The sidecar is left alone and the next read
 discards it as stale.
 
@@ -1626,7 +1640,8 @@ your directory permissions, which is not its business.
 administrative actions, not the normal path, but if you pipe them anywhere
 those lines are in your stream. `--build-index` prints one line.
 `--verify-index` prints one on success and **one per claim that failed** on a
-mismatch, which is one line per wrong grid point: a large index that has
+mismatch, which can be more than one line per grid point -- a point whose byte
+offset AND line are both wrong prints two: a large index that has
 shifted can print thousands. Neither can be combined with a verb — the flag
 replaces the operation, and asking for both is refused rather than silently
 dropping the verb (T160).
@@ -1972,7 +1987,7 @@ data file's size, mtime **to the nanosecond**, and a hash of its first and last
 64 bytes, plus the index's own checksum. That is O(1) and it is a heuristic —
 a change that keeps all of those identical is not detected, and one exists:
 overwrite a record with the same number of bytes, restore the mtime exactly.
-`--verify-index` is the O(n) answer and compares the index's three claims
+`--verify-index` is the O(n) answer and compares the index's four claims
 against the data; it exits 0 when they hold, 1 when they do not or there is no
 index, and prints one line per failing claim.
 
