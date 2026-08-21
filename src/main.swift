@@ -295,8 +295,16 @@ func parseArgs(_ argv: [String]) throws -> Options {
                 // 而後面的旗標依然是旗標——那正是 -i、-o 可以接在值後面的原因。有一個回合
                 // 讀了這個說法、把它寫成 README 裡的「其後一律視為資料」，而下一個回合用
                 // 一個指令就證明那是錯的。
-                "\(flag) \(v): \(v) is a flag, and this position takes DATA. csv2 will not write a flag into your file. If the value really is \(v), mark it as data with --: \(flag) -- \(v)",
-                "\(flag) \(v)：\(v) 是一個旗標，而這個位置要的是「資料」。csv2 不會把一個旗標寫進你的檔案。若這個值真的就是 \(v)，請用 -- 把它標成資料：\(flag) -- \(v)")
+                // "will not write a flag into your file" was written for the
+                // edit verbs and reused for every verb, so `-contains -r`
+                // answered a SEARCH with a sentence about writing. The refusal
+                // is right either way; what it is protecting differs, and the
+                // wording now says the part that is common to both.
+                // 「不會把一個旗標寫進你的檔案」是為編輯動詞寫的，卻被每一個動詞共用，
+                // 於是 `-contains -r` 用一句關於「寫入」的話去回答一次「搜尋」。兩種情況下
+                // 這條拒絕都是對的；不同的是它在保護什麼，而現在的措辭說的是兩者共通的那一半。
+                "\(flag) \(v): \(v) is a flag, and this position takes DATA. csv2 will not treat a flag as data. If the value really is \(v), mark it as data with --: \(flag) -- \(v)",
+                "\(flag) \(v)：\(v) 是一個旗標，而這個位置要的是「資料」。csv2 不會把一個旗標當成資料。若這個值真的就是 \(v)，請用 -- 把它標成資料：\(flag) -- \(v)")
         }
         dataIsLiteral = false
         // argv[0] is the program, and `argv` here is CommandLine.arguments

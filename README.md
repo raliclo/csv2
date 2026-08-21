@@ -188,7 +188,8 @@ SELECTING / 選取
   -head N               first N records          (records, not lines)
   -tail N               last N records
   -mid a,b              records a through b, inclusive; `a,` and `,b` are
-                        open. A range that overruns the end is CLAMPED, not
+                        open, and `,` alone is both ends open, which is every
+                        record -- the same as `-r`. A range that overruns the end is CLAMPED, not
                         refused, and a start past the end gives empty output
                         at rc=0 -- but it says so: a single WARN line on
                         stderr naming the start you asked for and the last
@@ -1345,7 +1346,7 @@ than matching the message against this table:
 
 | Combination | Why it is refused |
 |---|---|
-| `-head 3 -o out.csv2` (no `-t`) | data rows without a header written to a path whose suffix promises one; the next read would eat the first records as the header. **This applies to selections, not to edits** — see below |
+| `-head 3 -o out.csv2` (no `-t`), reading a `.csv2` | data rows without a header written to a path whose suffix promises one; the next read would eat the first records as the header. **This applies to selections, not to edits** — see below. Reading a `.csv` and writing `.csv2` hits a different refusal first, whatever flags you add: csv2 does not convert between the formats |
 | `-md` without `-t` | a Markdown table has no shape without a header row, and silently adding one would make "no header by default" grow an invisible exception |
 | `-md -o out.csv2` | the suffix declares CSV, the content would be Markdown |
 | `-si` without `--headers 1` or `2` | stdin has no suffix, so the format is not declared; a default here would be a guess |
