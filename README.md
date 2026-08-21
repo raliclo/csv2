@@ -46,9 +46,11 @@ satisfy are reported as SKIP with the reason rather than quietly left out.
 
 **Designed but not built: `csv2view`, a native SwiftUI viewer.** Nothing below
 describes it, because none of it exists yet — the design lives in
-[plan/plan.md](./plan/plan.md) and names the two things csv2 has to gain
-first: a `-count` verb and line numbers in the index so a file with a quoted
-newline can still be seeked into. (A third item, "an error instead of empty
+[plan/plan.md](./plan/plan.md) and named two things csv2 had to gain first: a
+`-count` verb, and line numbers in the index so a file with a quoted newline
+can still be seeked into. **The second arrived on 2026-08-21** — index v4
+stores the line beside each grid point, and a `.csv` with a record spanning
+lines now seeks exactly as a `.csv2` does (T157). (A third item, "an error instead of empty
 output when `-mid`'s START record is past the end", was on this list until
 2026-08-20 and is now a WARN naming both numbers — see `-mid` above.) A measured 5.6 ms per 40-record window on a
 19.5 MB file is why the viewer will call this binary rather than embed a copy
@@ -1461,7 +1463,7 @@ parallel:
 | `-i FILE`, not stdin | chunking needs to seek |
 | more than one core | |
 | at least `CSV2_PARALLEL_MIN_BYTES` | |
-| **one record per line** | `.csv2` guarantees it. A `.csv` qualifies only with an index that scanned the file and recorded there are no embedded newlines — build one with `--build-index` |
+| **one record per line** | `.csv2` guarantees it. A `.csv` qualifies only with an index that scanned the file and recorded there are no embedded newlines — build one with `--build-index`. This is the PARALLEL path's requirement, and it is not the seek's: since index v4 a `-mid` or `-tail` seek works on any indexed file, because each grid point carries its line |
 
 That last row is the one that surprises. A `.csv` containing an embedded
 newline can never take the parallel path, which is also the case a
