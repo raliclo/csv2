@@ -36,10 +36,12 @@ import Foundation
 //    56  records    u64  total data records
 //    64  hashHead   8    first 8 bytes of SHA-256 over the first 64 bytes
 //    72  hashTail   8    first 8 bytes of SHA-256 over the last 64 bytes
-//    80  reserved   8
-//   entries: u64 LE, one per stride grid point
+//    80  checksum   8   over the whole file, written back here last
+//    88  lastLine   u64  physical line the LAST record starts on
+//   entries: two u64 LE per grid point -- byte offset, then the physical line
+//            that record starts on
 //
-//  Fixed width, so record N's grid entry is at `88 + 8*(N-1)/stride` -- an
+//  Fixed width, so record N's grid entry is at `96 + 16*((N-1)/stride)` -- an
 //  O(1) seek. Written as one number per line of text it would have to be
 //  scanned to find entry N, which is the very cost the index exists to avoid.
 //  定寬，因此第 N 筆的格點位於 `88 + 8*(N-1)/stride`——O(1) 直接 seek。若寫成
@@ -74,8 +76,19 @@ let INDEX_MAGIC: [UInt8] = Array("CSV2IDX\0".utf8)
 // 該檔案並不具備的性質，而平行路徑照著它做了。那些檔案還在磁碟上，且索引內部沒有任何
 // 檢查抓得到；只有版本抓得到。版本不符本來就處理得對：以 INFO 忽略，取而代之的掃描
 // 是正確的。
-let INDEX_VERSION: UInt32 = 3
-let INDEX_HEADER_SIZE = 88
+// Bumped to 4 on 2026-08-21. Version 3 grid entries are a byte offset alone,
+// and a seek from one could not say which physical LINE it had landed on -- so
+// the seek was refused for any file with a record spanning lines, and one such
+// record in 450,000 cost the whole file: `-tail 40` read 15 MB instead of 7 kB.
+// A `.csv2` never has one, so the two formats behaved differently for a reason
+// that was never the format. Each entry now carries the line, and the seek
+// applies to both.
+// 2026-08-21 推進為 4。版本 3 的格點只有一個位元組偏移量，從它 seek 過去說不出「落在第幾
+// 實體行」——因此只要檔案裡有一筆跨行紀錄，seek 就整個被拒絕，而 45 萬筆裡的一筆就要付上
+// 整個檔案的代價：`-tail 40` 讀了 15 MB 而不是 7 kB。`.csv2` 不可能有那種紀錄，於是兩種格式
+// 表現不同——而原因從來不是格式。現在每個格點都帶著行號，兩者都 seek 得到。
+let INDEX_VERSION: UInt32 = 4
+let INDEX_HEADER_SIZE = 96
 let INDEX_DEFAULT_STRIDE = 256
 
 /// Threshold in BYTES, never in rows. Two reasons. Row counts differ by 20x
@@ -182,9 +195,21 @@ final class CSVIndex {
     /// Offset of the first record of each grid point: entry g is record
     /// g*stride + 1. / 每個格點第一筆的偏移量：第 g 格是第 g*stride + 1 筆。
     var offsets: [UInt64]
+    /// The physical line each of those records starts on. Same length as
+    /// `offsets`, and the reason a file with an embedded newline can be seeked
+    /// into at all: without it a resume could not report the line a full scan
+    /// would, and `--physical` puts that line in the output.
+    /// 那些紀錄各自起始的實體行號。長度與 `offsets` 相同，而它正是「含內嵌換行的檔案也能被
+    /// seek」的原因：沒有它，恢復解析就報不出「完整掃描會給的那個行號」，而 `--physical`
+    /// 會把那個行號放進輸出。
+    var lines: [UInt64]
+    /// The line the last record starts on, so an append can extend `lines`
+    /// without scanning. / 最後一筆起始的行號，讓追加可以在不掃描的情況下延續 `lines`。
+    var lastLine: UInt64
 
     init(stride: Int, noEmbeddedNewlines: Bool, isCSV2: Bool,
-         headEnd: UInt64, records: UInt64, stamp: FileStamp, offsets: [UInt64]) {
+         headEnd: UInt64, records: UInt64, stamp: FileStamp,
+         offsets: [UInt64], lines: [UInt64], lastLine: UInt64) {
         self.stride = stride
         self.noEmbeddedNewlines = noEmbeddedNewlines
         self.isCSV2 = isCSV2
@@ -192,6 +217,8 @@ final class CSVIndex {
         self.records = records
         self.stamp = stamp
         self.offsets = offsets
+        self.lines = lines
+        self.lastLine = lastLine
     }
 
     static func path(for dataPath: String) -> String { dataPath + ".index" }
@@ -361,7 +388,7 @@ final class CSVIndex {
         }
 
         let want = (Int(records) + stride - 1) / stride
-        let have = (b.count - INDEX_HEADER_SIZE) / 8
+        let have = (b.count - INDEX_HEADER_SIZE) / 16
         guard have >= want else {
             // Truncated. Same treatment: discard, scan. Not an error.
             // 被截斷。同樣處理：丟棄、掃描。不是錯誤。
@@ -369,14 +396,20 @@ final class CSVIndex {
             return nil
         }
         var offsets = [UInt64]()
+        var lines = [UInt64]()
         offsets.reserveCapacity(want)
-        for g in 0..<want { offsets.append(getU64(b, INDEX_HEADER_SIZE + 8 * g)) }
+        lines.reserveCapacity(want)
+        for g in 0..<want {
+            offsets.append(getU64(b, INDEX_HEADER_SIZE + 16 * g))
+            lines.append(getU64(b, INDEX_HEADER_SIZE + 16 * g + 8))
+        }
 
         return CSVIndex(stride: stride,
                         noEmbeddedNewlines: (flags & 1) != 0,
                         isCSV2: (flags & 2) != 0,
                         headEnd: headEnd, records: records,
-                        stamp: now, offsets: offsets)
+                        stamp: now, offsets: offsets, lines: lines,
+                        lastLine: getU64(b, 88))
     }
 
     // -----------------------------------------------------------------
@@ -385,7 +418,7 @@ final class CSVIndex {
 
     func encode() -> [UInt8] {
         var b = [UInt8]()
-        b.reserveCapacity(INDEX_HEADER_SIZE + 8 * offsets.count)
+        b.reserveCapacity(INDEX_HEADER_SIZE + 16 * offsets.count)
         b.append(contentsOf: INDEX_MAGIC)
         putU32(INDEX_VERSION, into: &b)
         var flags: UInt32 = 0
@@ -400,8 +433,12 @@ final class CSVIndex {
         putU64(records, into: &b)
         b.append(contentsOf: stamp.hashHead)
         b.append(contentsOf: stamp.hashTail)
-        b.append(contentsOf: [UInt8](repeating: 0, count: 8))
-        for o in offsets { putU64(o, into: &b) }
+        b.append(contentsOf: [UInt8](repeating: 0, count: 8))   // checksum, filled in below
+        putU64(lastLine, into: &b)
+        for (g, o) in offsets.enumerated() {
+            putU64(o, into: &b)
+            putU64(g < lines.count ? lines[g] : 0, into: &b)
+        }
         // Computed last, over everything including the offsets, and written
         // back into the reserved field. Computing it over the header alone
         // would leave the offsets -- the part that decides where a read lands
@@ -481,19 +518,20 @@ final class CSVIndex {
     /// stride-1 records.
     /// `record` 之前（或正好）的格點，回傳（位元組偏移量、該偏移量上的紀錄號）。
     /// 從該處恢復解析，最多向前走 stride-1 筆。
-    func gridPoint(forRecord record: Int) -> (offset: UInt64, recordNumber: Int)? {
-        guard record >= 1, !offsets.isEmpty else { return nil }
+    func gridPoint(forRecord record: Int) -> (offset: UInt64, recordNumber: Int, line: UInt64)? {
+        guard record >= 1, !offsets.isEmpty, lines.count == offsets.count else { return nil }
         let g = (record - 1) / stride
         guard g < offsets.count else { return nil }
-        return (offsets[g], g * stride + 1)
+        return (offsets[g], g * stride + 1, lines[g])
     }
 
     /// Called while writing: record `n` starts at `offset`. Only grid points
     /// are kept.
     /// 寫入時呼叫：第 n 筆從 offset 開始。只保留格點。
-    func note(record n: Int, at offset: UInt64) {
-        if (n - 1) % stride == 0 { offsets.append(offset) }
+    func note(record n: Int, at offset: UInt64, line: UInt64) {
+        if (n - 1) % stride == 0 { offsets.append(offset); lines.append(line) }
         records = UInt64(n)
+        lastLine = line
     }
 
     /// O(1) update after the append fast path. If there is no index, one is
@@ -501,8 +539,8 @@ final class CSVIndex {
     /// the entire point of the fast path.
     /// 追加快路徑之後的 O(1) 更新。沒有索引時不建立：為了一個 O(1) 的操作去做
     /// 一次 O(n) 全掃描，會把快路徑的意義完全抵銷。
-    func noteAppend(record n: Int, at offset: UInt64) {
-        note(record: n, at: offset)
+    func noteAppend(record n: Int, at offset: UInt64, line: UInt64) {
+        note(record: n, at: offset, line: line)
     }
 }
 
@@ -553,6 +591,8 @@ final class IndexBuilder {
     private let stride: Int
     private let isCSV2: Bool
     private var offsets: [UInt64] = []
+    private var lines: [UInt64] = []
+    private var lastLine: UInt64 = 1
     private var count = 0
     private var headEnd: UInt64 = 0
     private var embeddedNewlineSeen = false
@@ -564,10 +604,11 @@ final class IndexBuilder {
 
     func headerEnded(at offset: UInt64) { headEnd = offset }
 
-    func add(record n: Int, at offset: UInt64, spansLines: Bool) {
+    func add(record n: Int, at offset: UInt64, line: UInt64, spansLines: Bool) {
         if spansLines { embeddedNewlineSeen = true }
-        if (n - 1) % stride == 0 { offsets.append(offset) }
+        if (n - 1) % stride == 0 { offsets.append(offset); lines.append(line) }
         count = n
+        lastLine = line
     }
 
     /// `no_embedded_newlines` is free to compute while building and is worth a
@@ -585,6 +626,6 @@ final class IndexBuilder {
                         headEnd: headEnd,
                         records: UInt64(count),
                         stamp: stamp,
-                        offsets: offsets)
+                        offsets: offsets, lines: lines, lastLine: lastLine)
     }
 }

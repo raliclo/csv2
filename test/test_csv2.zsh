@@ -7821,6 +7821,93 @@ assert_contains "$("$CSV2" -contains x --zh -i "$TMP/t156.csv2")" "乙" \
     "T156d while it does change the report's column name / 而它確實會改變報告裡的欄名"
 
 # ---------------------------------------------------------------------
+# T157 -- a .csv with an embedded newline seeks like a .csv2.
+#
+# Round 59 measured `-tail 40` on a 15 MB .csv reading the entire file where a
+# .csv2 of the same shape read 7 kB, and reported it as the two formats
+# behaving differently. It was never the format: the seek required
+# `no_embedded_newlines`, because a grid point was a byte offset alone and a
+# resume could not say which physical LINE it had landed on -- and --physical
+# puts that line in the output, which must be byte-identical with and without
+# an index. One quoted newline in 450,000 records cost the whole file.
+#
+# Index v4 stores the line with each grid point, so the gate is gone. The
+# property it protected is the thing to hold onto here: the two runs must still
+# agree, exactly, including --physical, across the record that spans lines.
+#
+# T157 —— 含內嵌換行的 .csv，seek 得跟 .csv2 一樣。
+# 第 59 回合量到 15 MB 的 .csv 上 `-tail 40` 讀了整個檔案，而同樣形狀的 .csv2 只讀 7 kB，
+# 並把它回報成「兩種格式行為不同」。那從來不是格式的問題：seek 需要 `no_embedded_newlines`，
+# 因為格點只有位元組偏移量、恢復解析說不出「落在第幾實體行」——而 --physical 會把那個行號
+# 放進輸出，且有無索引的輸出必須逐位元相同。45 萬筆裡的一個引號換行，代價是整個檔案。
+# 索引 v4 把行號與格點存在一起，那道門因此拿掉了。這裡要守住的，正是它當初保護的那個性質。
+# ---------------------------------------------------------------------
+echo
+echo "--- T157: seeking into a file whose records span lines / T157：seek 進一個「紀錄會跨行」的檔案 ---"
+
+# Small file, thresholds lowered to meet it -- the property is not about size.
+# 小檔案，門檻降下來遷就它——這個性質與大小無關。
+{
+    print -r -- 'id,note'
+    for i in {1..400}; do
+        if (( i == 5 )); then printf '%03d,"alpha
+bravo %03d"
+' $i $i
+        else printf '%03d,alpha bravo %03d
+' $i $i
+        fi
+    done
+} > "$TMP/t157.csv"
+
+export CSV2_INDEX_MIN_BYTES=512
+"$CSV2" --build-index -i "$TMP/t157.csv" >/dev/null
+
+# The seek is taken at all -- the debug line names the grid point.
+# seek 真的被走了——debug 那一行會指名它用的格點。
+_t157_dbg=$("$CSV2" -tail 40 -i "$TMP/t157.csv" -debug 2>&1 >/dev/null)
+if [[ $_t157_dbg == *"index hit"* ]]; then
+    ok "T157a a .csv whose records span lines still takes the seek / 紀錄會跨行的 .csv 仍然走得到 seek"
+else
+    bad "T157a no index hit: $(print -r -- $_t157_dbg | grep -o 'single-threaded[^\n]*' | head -1) / 沒有走到索引"
+fi
+
+# And it reads a fraction of the file, which is the point of taking it.
+# 而它只讀了整個檔案的一小部分，那才是走 seek 的意義。
+_t157_read=$(print -r -- "$_t157_dbg" | grep -oE 'read_bytes=[0-9]+' | cut -d= -f2)
+_t157_size=$(wc -c < "$TMP/t157.csv" | tr -d ' ')
+if [[ -n $_t157_read ]] && (( _t157_read * 2 < _t157_size )); then
+    ok "T157b reading $_t157_read bytes of $_t157_size / 讀了 $_t157_size 中的 $_t157_read 位元組"
+else
+    bad "T157b read $_t157_read of $_t157_size -- the seek saved nothing / 讀了 $_t157_size 中的 $_t157_read，seek 沒有省下任何東西"
+fi
+
+# The guarantee the old gate existed to protect, and the reason this is safe:
+# with and without the index, byte for byte, INCLUDING the physical line.
+# 舊守衛存在所要保護的那條保證，也正是這件事安全的理由：有無索引，逐位元組相同，
+# **包含實體行號**。
+"$CSV2" -tail 40 --physical -t -i "$TMP/t157.csv"            > "$TMP/t157_with.txt" 2>/dev/null
+"$CSV2" -tail 40 --physical -t --no-index -i "$TMP/t157.csv" > "$TMP/t157_without.txt" 2>/dev/null
+assert_same "$TMP/t157_with.txt" "$TMP/t157_without.txt" \
+    "T157c -tail --physical is byte-identical with and without the index / -tail --physical 在有無索引下逐位元組相同"
+
+"$CSV2" -mid 1,10 --physical -t -i "$TMP/t157.csv"            > "$TMP/t157_mid_with.txt" 2>/dev/null
+"$CSV2" -mid 1,10 --physical -t --no-index -i "$TMP/t157.csv" > "$TMP/t157_mid_without.txt" 2>/dev/null
+assert_same "$TMP/t157_mid_with.txt" "$TMP/t157_mid_without.txt" \
+    "T157d and so is a window that spans the record that spans lines / 而「跨過那筆跨行紀錄」的視窗也是"
+
+# The append path extends an index instead of rebuilding it, so it is the one
+# place that can put a wrong LINE into one -- the same door the record count
+# came through in T79.
+# 追加是「延續索引」而非「重建索引」的那條路，因此它是唯一能把錯的「行號」放進索引的地方
+# ——與 T79 當初讓「筆數」出錯的是同一扇門。
+"$CSV2" -append '401,tail record' -i "$TMP/t157.csv" --in-place
+"$CSV2" -tail 3 --physical -t -i "$TMP/t157.csv"            > "$TMP/t157_ap_with.txt" 2>/dev/null
+"$CSV2" -tail 3 --physical -t --no-index -i "$TMP/t157.csv" > "$TMP/t157_ap_without.txt" 2>/dev/null
+assert_same "$TMP/t157_ap_with.txt" "$TMP/t157_ap_without.txt" \
+    "T157e and after an append the lines still agree / 而在一次追加之後，行號仍然一致"
+unset CSV2_INDEX_MIN_BYTES
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one

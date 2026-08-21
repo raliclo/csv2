@@ -391,7 +391,24 @@ func parseArgs(_ argv: [String]) throws -> Options {
         }
         switch normalizeFlag(arg) {
         case "r": o.read = true
-        case "contains": try once("-contains"); o.contains = try needData(arg)
+        case "contains":
+            try once("-contains")
+            let needle = try needData(arg)
+            // An empty search string matched every cell in the file. Refused
+            // for the reason an empty column list is refused: "search for
+            // nothing" and "a variable that came out empty" cannot be told
+            // apart, and one of them prints the whole file as a report of
+            // matches. `-r` is how you ask for every record, and the sibling
+            // refusal for -hash said so first.
+            // 空的搜尋字串會匹配檔案裡的每一個儲存格。拒絕它的理由與「空的欄位清單」相同：
+            // 「搜尋空字串」與「某個變數算成了空字串」無法區分，而其中一種會把整個檔案當成
+            // 「命中報告」印出來。要每一筆請用 `-r`，而 -hash 那條同輩的拒絕先說了這件事。
+            if needle.isEmpty {
+                throw usageError(
+                    "-contains was given an empty string, which matches every cell. Searching for nothing cannot be told from a variable that came out empty; use -r to read every record",
+                    "-contains 收到一個空字串，而它會匹配每一個儲存格。「搜尋空字串」與「某個變數算成了空字串」無法區分；要讀每一筆請用 -r")
+            }
+            o.contains = needle
         case "filter": o.filter = true
         case "include-headers": o.includeHeaders = true
         case "normalize": o.normalize = true
@@ -1564,6 +1581,19 @@ func checkFieldCount(_ r: Record, expected: Int, what: String) throws {
         // reporting anything.
         // 絕不補空。這正是 `artifacts.csv` 被寫壞那天缺少的檢查——一個 commit
         // 字串被寫進 built_utc 欄位，沒有任何東西報錯。
+        // A blank line is the common case and produced a message about field
+        // counts, which is true and unhelpful: a reader looking at "record 2
+        // (line 3) has 1 fields but the header has 2" goes hunting for a
+        // missing comma. A file that merely ends with an extra newline lands
+        // here too, and that is what most people will have.
+        // 空白行是最常見的情況，而它得到的是一則關於欄數的訊息——那句話是對的，也幫不上忙：
+        // 一個看著「第 2 筆（第 3 行）有 1 欄，標頭有 2 欄」的讀者，會去找一個少掉的逗號。
+        // 一個「只是多了一個結尾換行」的檔案也會落在這裡，而多數人手上的正是那種。
+        if r.count == 1, r.fields.first?.value.isEmpty == true {
+            throw fault(
+                "\(what) is a blank line, and a blank line is not a record with \(expected) empty fields; remove it. A file that ends with two newlines has one",
+                "\(what) 是一個空白行，而空白行不是「一筆有 \(expected) 個空欄位的紀錄」；請把它移除。以兩個換行結尾的檔案就有一個")
+        }
         throw fault(
             "\(what) has \(r.count) fields but the header has \(expected); csv2 will not pad or truncate to fit",
             "\(what) 有 \(r.count) 欄，標頭有 \(expected) 欄；csv2 不會補空或截斷來湊合")

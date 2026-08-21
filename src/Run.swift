@@ -86,6 +86,7 @@ func readHeaderRows(path: String, format: Format, want: Int) throws -> [Record] 
 struct IndexPlan {
     var resumeOffset: UInt64?
     var resumeRecord: Int = 1
+    var resumeLine: Int = 1
     var lower: Int?
     var upper: Int?
     var builder: IndexBuilder?
@@ -98,17 +99,26 @@ func planIndex(_ o: Options, plan: InputPlan, lower: Int, upper: Int) -> IndexPl
     guard wantsRandomAccess else { return out }
 
     if let idx = CSVIndex.load(dataPath: path) {
-        // The seek is only taken when the file has no embedded newlines. With
-        // one, a record number no longer equals a line number, and the index
-        // stores byte offsets but not line numbers -- so resuming would report
-        // a physical line the full scan would not. Output with and without an
-        // index must be byte-identical, and `--physical` puts the line in the
-        // output.
-        // 只有在檔案沒有內嵌換行時才走 seek。有內嵌換行時紀錄號不再等於行號，
-        // 而索引存的是位元組偏移量、不是行號——恢復解析會回報一個完整掃描不會
-        // 給出的物理行號。有無索引的輸出必須逐位元相同，而 `--physical` 會把
-        // 行號放進輸出。
-        guard idx.noEmbeddedNewlines, idx.records > 0 else { return out }
+        // The seek used to require `no_embedded_newlines`, because a grid point
+        // was a byte offset alone and a resume could not say which physical
+        // LINE it had landed on -- and `--physical` puts that line in the
+        // output, which must be byte-identical with and without an index.
+        //
+        // One record spanning lines in 450,000 then cost the whole file: a
+        // `.csv` with a single quoted newline read 15 MB where a `.csv2` of the
+        // same shape read 7 kB, and a blind round reported that as the two
+        // formats behaving differently. It was never the format. Since v4 each
+        // grid point carries its line, so the property is no longer needed
+        // here -- the parallel path still uses it, where it means something
+        // else.
+        // 這個 seek 原本要求 `no_embedded_newlines`，因為一個格點只有位元組偏移量，恢復解析
+        // 說不出「落在第幾實體行」——而 `--physical` 會把那個行號放進輸出，且有無索引的輸出
+        // 必須逐位元相同。
+        // 於是 45 萬筆裡有一筆跨行，就要付上整個檔案的代價：一個含單一引號換行的 `.csv` 讀了
+        // 15 MB，而同樣形狀的 `.csv2` 只讀 7 kB——有一個盲測回合把那回報成「兩種格式行為不同」。
+        // 那從來就不是格式的問題。自 v4 起每個格點都帶著自己的行號，因此這裡不再需要那個性質；
+        // 平行路徑仍然用它，而它在那裡的意思是另一回事。
+        guard idx.records > 0 else { return out }
         var startRecord = lower
         if let n = o.tail {
             let total = Int(idx.records)
@@ -119,6 +129,7 @@ func planIndex(_ o: Options, plan: InputPlan, lower: Int, upper: Int) -> IndexPl
         guard let gp = idx.gridPoint(forRecord: startRecord) else { return out }
         out.resumeOffset = gp.offset
         out.resumeRecord = gp.recordNumber
+        out.resumeLine = Int(gp.line)
         Logger.shared.debug("index hit: record \(startRecord) via grid point \(gp.recordNumber) at byte \(gp.offset)")
         return out
     }
@@ -200,7 +211,7 @@ func runBuildIndex(_ o: Options) throws {
             // `rec`：那個比較永遠不可能為真。--build-index 寫出的每一份索引都宣稱
             // 沒有內嵌換行，於是對一份引號內含散文的普通 CSV，平行路徑把行當成紀錄來數，
             // 回報了它所找到那一筆的「下一筆」，rc=0，而 --verify-index 說 OK。
-            builder.add(record: r.number, at: UInt64(r.offset),
+            builder.add(record: r.number, at: UInt64(r.offset), line: UInt64(r.line),
                         spansLines: recordSpansLines(r, format: plan.format))
             return true
         } catch {
@@ -539,11 +550,12 @@ func runSelect(_ o: Options) throws {
     if resuming { try headersComplete() }
 
     let firstRecord = resuming ? ip.resumeRecord + plan.headerRows : 1
-    // With no embedded newlines a record number IS a line number offset by the
-    // header rows, which is why the seek is only taken in that case.
-    // 沒有內嵌換行時，紀錄號就是行號減去標頭列數——這正是只在該情況下才走 seek
-    // 的原因。
-    let firstLine = resuming ? ip.resumeRecord + plan.headerRows : 1
+    // Taken from the grid point, not derived from the record number. Deriving
+    // it assumed one record per line, which is exactly the assumption that
+    // kept the seek away from every file with an embedded newline.
+    // 取自那個格點，而不是由紀錄號推導。推導的前提是「一筆一行」，而那正是「讓 seek 遠離
+    // 每一個含內嵌換行的檔案」的那個假設。
+    let firstLine = resuming ? ip.resumeLine : 1
 
     let parser = RecordParser(format: plan.format,
                               firstRecordNumber: firstRecord,
@@ -572,7 +584,7 @@ func runSelect(_ o: Options) throws {
             // the next -contains on the file acts on it.
             // 不是 `false`。這是 -tail 順手建出來的那份索引，而一份在這個性質上說謊的
             // sidecar 比沒有更糟——檔案上的下一次 -contains 會照著它做。
-            builder?.add(record: r.number, at: UInt64(r.offset),
+            builder?.add(record: r.number, at: UInt64(r.offset), line: UInt64(r.line),
                          spansLines: recordSpansLines(r, format: plan.format))
             try applyTransform(transform, to: &r, header: headers[0])
 
@@ -898,6 +910,15 @@ func runEdit(_ o: Options) throws {
     // 掃描，這正是「在此建索引幾乎免費、而為讀取建索引則不然」的原因。
     var outOffset = 0
     var outRecords = 0
+    /// The physical line the NEXT record written will start on. The index
+    /// stores a line per grid point now, and the output's lines are not the
+    /// input's: a record is re-serialised on the way out, and a value holding
+    /// newlines makes the two diverge from the first such record onwards.
+    /// Counted from what is actually written.
+    /// 「下一筆要寫出的紀錄」會落在第幾實體行。索引現在每個格點存一個行號，而輸出的行號
+    /// 不是輸入的行號：紀錄在寫出時會重新序列化，而一個含換行的值會讓兩者從第一筆這樣的
+    /// 紀錄起就分家。因此由「實際寫出去的東西」去數。
+    var outLine = 1
     var builder: IndexBuilder? = nil
     if !o.noIndex, let outPath = o.output, Format.declaresFormat(path: outPath),
        let inPath = o.input, let st = FileStamp.of(path: inPath),
@@ -925,10 +946,11 @@ func runEdit(_ o: Options) throws {
         // being possible again.
         // 與另外兩個呼叫點由同一個函式回答。這裡本來是對的、那裡是錯的；
         // 「只有一個函式」才是讓那件事不可能再發生的東西。
-        builder?.add(record: outRecords, at: UInt64(outOffset),
+        builder?.add(record: outRecords, at: UInt64(outOffset), line: UInt64(outLine),
                      spansLines: recordSpansLines(r, format: plan.format))
         sink.write(bytes)
         outOffset += bytes.count
+        outLine += bytes.filter { $0 == BYTE_LF }.count
     }
 
     let parser = RecordParser(format: plan.format, truncatePartial: o.truncatePartial) { rec in
@@ -1021,6 +1043,24 @@ func runEdit(_ o: Options) throws {
                                 "-delete -col would remove all \(expectedFields) columns; a file with no columns is not a CSV file",
                                 "-delete -col 會移除全部 \(expectedFields) 欄；沒有任何欄位的檔案不是 CSV 檔")
                         }
+                        // The columns, by name, once for the run. The README
+                        // has promised this entry since 2026-08-21 and there
+                        // was none: a run that removed a whole column left an
+                        // audit trail naming no column at all. Round 59 read
+                        // the table and looked for it.
+                        //
+                        // Values are NOT recorded: they are the entire column,
+                        // and one entry per record would make the log larger
+                        // than the file it describes. The README says that too.
+                        // 那些欄位的名字，整次執行記一則。README 從 2026-08-21 起就承諾了這則
+                        // 紀錄，而它並不存在：一次移除了整個欄位的執行，留下的稽核軌跡沒有指名
+                        // 任何欄位。第 59 回合讀了那張表，然後去找它。
+                        // 不記各筆的值：那些值就是整個欄位，一筆一則會讓 log 比它描述的檔案還大。
+                        // README 也是這樣寫的。
+                        let goneNames = drop.sorted().map {
+                            Logger.shared.nameForLog(baseName(headerName(headers[0].fields[$0])))
+                        }.joined(separator: ", ")
+                        Logger.shared.info("delete column \(goneNames) from every record and both header rows")
                         // An edit aimed at a column that is being removed does
                         // nothing, and reports that it did. Refusing is the
                         // whole point: the alternative is a log line saying the
@@ -1147,7 +1187,15 @@ func runEdit(_ o: Options) throws {
                     // 那一個，記錄得最少。
                     let gone = r.fields[c].value
                     r.fields[c].set([])
-                    Logger.shared.info("blank \(r.number):\(name): \(Logger.shared.redact(column: name, value: gone)) -> ")
+                    // `-> ""`, not a bare `->`. The grammar the log promises is
+                    // old and new each wrapped in quotes, and an absent new
+                    // value broke it for the one verb whose new value is always
+                    // empty. A parser reading `-> ` cannot tell an empty value
+                    // from a truncated line.
+                    // 用 `-> ""`，不是光禿禿的 `->`。log 承諾的文法是「新舊值各自加引號」，
+                    // 而「新值缺席」在唯一一個「新值永遠是空的」動詞上打破了它。一個讀到
+                    // `-> ` 的解析器，分不出「空的值」與「被截斷的一行」。
+                    Logger.shared.info("blank \(r.number):\(name): \(Logger.shared.redact(column: name, value: gone)) -> \"\"")
                 }
             }
             try applyTransform(transform, to: &r, header: headers[0])
@@ -1572,10 +1620,32 @@ func runAppendFast(_ o: Options) throws {
             Logger.shared.info(
                 "append: a record spans lines, so the index beside \(path) no longer claims one record per line")
         }
+        // Each appended record's starting line, from the bytes actually
+        // written. The index carries a line per grid point since v4, and the
+        // append path is the one place that extends an index instead of
+        // rebuilding it -- so it is the one place that can put a wrong line in
+        // one, which is the same door the record COUNT came through in T79.
+        // 每一筆被追加紀錄的起始行號，由「實際寫出去的位元組」算出。自 v4 起索引每個格點都帶
+        // 一個行號，而追加是唯一一條「延續索引」而非「重建索引」的路徑——因此它也是唯一一個
+        // 能把錯的行號放進索引的地方，而那正是 T79 當初讓「筆數」出錯的同一扇門。
+        var line = Int(idx.lastLine) + prefix.count   // the prefix is at most one LF
         var n = Int(idx.records)
+        var cursor = prefix.count
         for off in appendOffsets {
             n += 1
-            idx.noteAppend(record: n, at: off)
+            // Lines consumed by the records already written in this payload.
+            // 這一批 payload 中「已經寫出的那些紀錄」用掉的行數。
+            let start = cursor
+            var end = start
+            var seen = 0
+            while end < payload.count {
+                if payload[end] == BYTE_LF { seen += 1 }
+                end += 1
+                if seen == 1 && end > start { break }
+            }
+            idx.noteAppend(record: n, at: off, line: UInt64(line))
+            line += payload[start..<end].filter { $0 == BYTE_LF }.count
+            cursor = end
         }
         // No index means do NOT build one here: an O(n) scan to serve an O(1)
         // operation cancels out the whole point of the fast path.
