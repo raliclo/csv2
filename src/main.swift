@@ -1092,6 +1092,40 @@ func validate(_ o: inout Options) throws {
         // 就走紀錄形狀的輸出，與 grep 相同。
         o.filter = true
     }
+    // The destination is not the only OTHER file a run touches. This guard
+    // compared -i against -o and nothing else, and the document described that
+    // comparison in detail -- spellings, symlinks, (device, inode), a
+    // POSIX-only caveat -- while never saying which files it does not cover.
+    // Three of them destroy data at rc=0 with both streams empty:
+    //
+    //   -o naming the KEYFILE           the ciphertext is written over the only
+    //                                   copy of the key that decrypts it, and
+    //                                   nothing is left to report it with
+    //   -o naming the -log file         the audit trail for that very run is
+    //                                   renamed away by the run it records
+    //   -log naming the INPUT           the invocation line is appended into
+    //                                   the file being read, which then fails
+    //                                   its own field-count check for ever
+    //
+    // Each is a run that "did what it was told". The remedy is the comparison
+    // that already exists, asked three more times.
+    //
+    // 目的地不是一次執行會碰到的唯一「另一個檔案」。這道守衛只比對 -i 與 -o，而文件把那次
+    // 比對描述得非常仔細——拼法、symlink、(device, inode)、僅限 POSIX 的但書——卻從未說出它
+    // 「沒有涵蓋」哪些檔案。其中三種會以 rc=0、兩條輸出流皆空的方式毀掉資料：`-o` 指向金鑰檔
+    // （密文蓋掉唯一能解開它的那把金鑰）、`-o` 指向 -log 檔（那次執行把自己的稽核軌跡改名蓋掉）、
+    // `-log` 指向輸入（呼叫紀錄被追加進正在被讀的那個檔案，於是它從此過不了自己的欄數檢查）。
+    // 補救方式，就是把那個已經存在的比對再問三次。
+    if let out = o.output, let kf = o.keyfile, sameFile(out, kf) {
+        throw usageError(
+            "-o \(out) is the keyfile; writing there destroys the only key that can decrypt what is being written",
+            "-o \(out) 就是那個金鑰檔；寫到那裡會毀掉「唯一能解開正在被寫出的東西」的那把金鑰")
+    }
+    if let inp = o.input, let kf = o.keyfile, sameFile(inp, kf), o.inPlace {
+        throw usageError(
+            "-keyfile \(kf) is the input, and this run edits it in place; the key would be rewritten as CSV",
+            "-keyfile \(kf) 就是輸入檔，而這次執行會就地編輯它；那把金鑰會被當成 CSV 重寫")
+    }
     if let inp = o.input, let out = o.output, sameFile(inp, out), !o.inPlace {
         // Compared after resolving, not as typed. `-o ./data.csv` and
         // `-o link-to-data.csv` name the same file as `-i data.csv` and used to
@@ -1689,7 +1723,26 @@ func resolveColumn(_ token: String, header: Record) throws -> Int {
     // 這裡的後果是——一個字面叫做 `na\nme` 的欄位，與一個名字裡含換行的欄位，產生的錯誤行
     // 逐位元組相同，而同一次執行的 INFO 行分得出來。把 README 自己那份解碼步驟套到任何一則
     // 上，得到的都是一個帶著真換行的名字：替那個從來沒有換行的名字發明了一個字元，rc=0。
-    let names = header.fields.map { "\"\(reportEscape(baseName(headerName($0))))\"" }.joined(separator: ", ")
+    // The list of names is bounded. It was every column, in full, so a file
+    // whose first column name is 50,000 characters long put a 50 KB line on
+    // stderr -- on the line carrying the diagnosis, in a message whose
+    // documented example is `no column named "caf<U+FFFD>"`. The locating
+    // report cuts a value at 200 characters for this exact reason and says so;
+    // a diagnostic listing what IS available had no such rule.
+    // 那份名字清單有上界。原本是「每一欄、完整印出」，於是一個「第一欄名字有 50,000 個字元」
+    // 的檔案，會在 stderr 上放一行 50 KB——就放在承載診斷的那一行上，而這則訊息在文件裡的
+    // 範例是 `no column named "caf<U+FFFD>"`。定位報告正是為了同一個理由把值切在 200 個字元，
+    // 而且說了出來；一個「列出有哪些可用」的診斷卻沒有這條規則。
+    func shortName(_ n: String) -> String {
+        guard n.count > 60 else { return n }
+        return String(n.prefix(60)) + "…[+\(n.count - 60) more chars]"
+    }
+    let allNames = header.fields.map { "\"\(reportEscape(shortName(baseName(headerName($0)))))\"" }
+    let shown = allNames.prefix(12)
+    var names = shown.joined(separator: ", ")
+    if allNames.count > shown.count {
+        names += ", … and \(allNames.count - shown.count) more"
+    }
     let asked = reportEscape(token)
     throw fault("no column named \"\(asked)\"; the columns are: \(names)",
               "沒有名為「\(asked)」的欄位；本檔案的欄位是：\(names)")
@@ -1765,6 +1818,24 @@ struct InputPlan {
     var headerRows: Int
     var source: ByteSource
     var describedPath: String
+}
+
+/// The `-log` path against the other files this run names. Called before the
+/// log is opened, because opening it is what would do the damage.
+/// `-log` 的路徑，對上這次執行指名的其他檔案。在 log 被開啟之前呼叫——因為「開啟它」正是
+/// 會造成損害的那一步。
+func refuseLogAliases(_ o: Options) throws {
+    guard let lg = o.logPath else { return }
+    if let inp = o.input, sameFile(inp, lg) {
+        throw usageError(
+            "-log \(lg) is the input; appending the log into the file being read leaves a file csv2 cannot parse",
+            "-log \(lg) 就是輸入檔；把 log 追加進「正在被讀的那個檔案」，會留下一個 csv2 解析不了的檔案")
+    }
+    if let out = o.output, sameFile(out, lg) {
+        throw usageError(
+            "-o \(out) is the -log file; the run would rename its own audit trail away",
+            "-o \(out) 就是 -log 檔；那次執行會把自己的稽核軌跡改名蓋掉")
+    }
 }
 
 func openInput(_ o: Options) throws -> InputPlan {
@@ -2092,6 +2163,17 @@ func main() -> Int32 {
     do {
         var o = try parseArgs(Array(CommandLine.arguments.dropFirst()))
         if o.debug { Logger.shared.threshold = o.trace ? .trace : .debug }
+        // Before openLog, not in validate(). The log is opened first so that a
+        // refusal reaches the audit trail -- which means a refusal ABOUT the
+        // log has already been appended to whatever the log names by the time
+        // validate() runs. Checked in validate() first, `-log` naming the
+        // input left the input with an ERROR line appended: the message was
+        // right, the file was still damaged, and the damage was the message.
+        // 放在 openLog 之前，而不是放在 validate() 裡。log 之所以先被開啟，是為了讓「拒絕」
+        // 也能進到稽核軌跡——而那表示：等到 validate() 執行時，一則「關於 log 本身」的拒絕
+        // 已經被追加進 log 所指的那個檔案了。先寫在 validate() 裡時，`-log` 指向輸入會讓那個
+        // 輸入多出一行 ERROR：訊息是對的，檔案照樣被弄壞了，而弄壞它的正是那則訊息。
+        try refuseLogAliases(o)
         if let p = o.logPath { Logger.shared.openLog(path: p) }
         // Before validate(&o), because a bad knob is not a usage error about
         // the flags the caller typed -- it is the environment they are running

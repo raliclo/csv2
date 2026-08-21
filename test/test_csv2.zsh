@@ -10250,6 +10250,120 @@ _t194_r=$("$CSV2" -mid 7,3 -i "$TMP/t194.csv" -debug 2>&1 >/dev/null | grep -c "
 assert_eq "$_t194_r" "0" \
     "T194b while a refusal prints none / 而一次拒絕不印"
 
+
+# ---------------------------------------------------------------------
+# T195 -- the other files a run touches.
+#
+# Round 71. The same-file guard compared `-i` against `-o` and nothing else,
+# and the document describes THAT comparison in detail -- spellings, symlinks,
+# (device, inode), a POSIX-only caveat -- while never saying which files it
+# does not cover. Three of them destroy something at rc=0 with both streams
+# empty:
+#
+#   -o naming the keyfile     the ciphertext lands on the only key that
+#                             decrypts it, and nothing is left to report it
+#   -o naming the -log file   the run renames away its own audit trail
+#   -log naming the input     the invocation line is appended into the file
+#                             being read, which then fails its own field-count
+#                             check for ever
+#
+# Each is a run that did what it was told. The remedy is the comparison that
+# already exists, asked three more times.
+#
+# T195 —— 一次執行會碰到的其他檔案。
+# 第 71 回合。那道同檔案守衛只比對 `-i` 與 `-o`，而文件把那次比對描述得非常仔細，卻從未說出
+# 它「沒有涵蓋」哪些檔案。其中三種會以 rc=0、兩條輸出流皆空的方式毀掉東西。
+# ---------------------------------------------------------------------
+echo
+echo "--- T195: -o, -log and -keyfile as each other / T195：-o、-log 與 -keyfile 互相指向 ---"
+
+printf 'id,secret\n1,alpha\n2,beta\n' > "$TMP/t195.csv"
+head -c 32 /dev/urandom > "$TMP/t195key.bin" 2>/dev/null || \
+    printf 'kJ3#a91Zq7!vB2xLm5PdR8sTn0WyE4Uc' > "$TMP/t195key.bin"
+cp "$TMP/t195key.bin" "$TMP/t195key.keep"
+
+assert_fails "T195a -o naming the keyfile is refused / -o 指向金鑰檔會被拒絕" -- \
+    "$CSV2" -encrypt secret -keyfile "$TMP/t195key.bin" -i "$TMP/t195.csv" -o "$TMP/t195key.bin" -t
+assert_same "$TMP/t195key.bin" "$TMP/t195key.keep" \
+    "T195b and the key is untouched / 而那把金鑰完好無損"
+
+printf 'pkg,note\na,1\n' > "$TMP/t195b.csv"
+assert_fails "T195c -o naming the -log file is refused / -o 指向 -log 檔會被拒絕" -- \
+    "$CSV2" -update 1:2 X -i "$TMP/t195b.csv" -o "$TMP/t195c.log" -log "$TMP/t195c.log"
+
+printf 'pkg,note\na,1\n' > "$TMP/t195d.csv"
+cp "$TMP/t195d.csv" "$TMP/t195d.keep"
+assert_fails "T195d -log naming the input is refused / -log 指向輸入檔會被拒絕" -- \
+    "$CSV2" -contains a -i "$TMP/t195d.csv" -log "$TMP/t195d.csv"
+assert_same "$TMP/t195d.csv" "$TMP/t195d.keep" \
+    "T195e and the input is still what it was / 而那個輸入還是原來的樣子"
+
+# The ordinary shapes must keep working: the guard is about ALIASES, not about
+# using a keyfile and a log at all.
+# 一般的用法必須照樣可行：這道守衛管的是「別名」，不是「不准用金鑰檔或 log」。
+assert_succeeds "T195f -keyfile with a separate -o still works / -keyfile 搭配另一個 -o 仍然可用" -- \
+    "$CSV2" -encrypt secret -keyfile "$TMP/t195key.bin" -i "$TMP/t195.csv" -o "$TMP/t195enc.csv" -t
+assert_succeeds "T195g -log to its own file still works / -log 寫到它自己的檔案仍然可用" -- \
+    "$CSV2" -update 1:2 Y -i "$TMP/t195b.csv" -o "$TMP/t195out.csv" -log "$TMP/t195ok.log"
+
+# ---------------------------------------------------------------------
+# T196 -- a diagnostic that dumps the whole header.
+#
+# Round 71: a file whose first column name is 50,000 characters long put a
+# 50 KB line on stderr -- on the line carrying the diagnosis, from a message
+# whose documented example is `no column named "caf<U+FFFD>"`. The locating
+# report cuts a value at 200 characters for exactly this reason and says so; a
+# diagnostic listing what IS available had no such rule.
+#
+# T196 —— 一則把整列標頭倒出來的診斷。
+# 第 71 回合：一個「第一欄名字有 50,000 個字元」的檔案，會在 stderr 上放一行 50 KB。
+# ---------------------------------------------------------------------
+echo
+echo "--- T196: how long a refusal may be / T196：一條拒絕可以多長 ---"
+
+# A 20,000-character column name, built in the shell so this case does not
+# depend on python3 -- the guest has none, and wrapping a heredoc in
+# `cmd || { ... }` is a zsh parse error that took the whole rest of the suite
+# with it when this case was first written.
+# 一個 20,000 字元的欄名，用 shell 造出來，好讓這個案例不依賴 python3——guest 上沒有它；
+# 而把一個 heredoc 包進 `cmd || { ... }` 是一個 zsh 語法錯誤，這個案例第一次寫成時，
+# 那個錯誤把整份測試的其餘部分一起帶走了。
+_t196_name=""
+_i=0
+while (( _i < 500 )); do
+    _t196_name="${_t196_name}NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN"
+    _i=$((_i+1))
+done
+printf '%s,b\n1,2\n' "$_t196_name" > "$TMP/t196.csv"
+
+_t196=$("$CSV2" -hash NOSUCH -i "$TMP/t196.csv" -o "$TMP/t196o.csv" -t 2>&1 | head -1)
+_t196_len=${#_t196}
+if (( _t196_len < 400 )); then
+    ok "T196a the refusal is $_t196_len characters, not the header / 那條拒絕是 $_t196_len 個字元，不是整列標頭"
+else
+    bad "T196a the refusal is $_t196_len characters long / 那條拒絕有 $_t196_len 個字元"
+fi
+assert_contains "$_t196" "more chars" \
+    "T196b and it says the name was cut / 而它說出那個名字被切掉了"
+
+# A wide file gets a bounded LIST as well, not one entry per column.
+# 欄位很多的檔案，得到的也是一份有上界的「清單」，而不是一欄一項。
+{
+    _hdr="c1"; _i=2
+    while (( _i <= 40 )); do _hdr="$_hdr,c$_i"; _i=$((_i+1)); done
+    print -r -- "$_hdr"
+    _row="v"; _i=2
+    while (( _i <= 40 )); do _row="$_row,v"; _i=$((_i+1)); done
+    print -r -- "$_row"
+} > "$TMP/t196w.csv"
+# 40 columns: twelve are named and the remaining 28 are counted. The number in
+# the message is what the file has minus what was shown, so it is checked
+# against the file rather than against a number typed here.
+# 40 欄：列出十二個，其餘 28 個用數的。訊息裡的那個數字是「檔案有幾欄」減去「印出了幾個」，
+# 因此拿它去對檔案，而不是去對一個在這裡打出來的數字。
+assert_contains "$("$CSV2" -hash NOPE -i "$TMP/t196w.csv" -o "$TMP/t196wo.csv" -t 2>&1)" "and 28 more" \
+    "T196c a 40-column file lists twelve and counts the rest / 40 欄的檔案列出十二個，其餘用數的"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

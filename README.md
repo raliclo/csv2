@@ -286,6 +286,11 @@ OUTPUT SHAPE / 輸出形狀
                         cell -- `pkg<br>套件` -- because Markdown has one
                         header row and the data has two; --en or --zh gives
                         one clean row instead.
+                        **There is no 200-character cut here.** That belongs
+                        to the locating report, which is a preview; -md renders
+                        the data, so a 400,000-character cell is a
+                        400,000-character line. If the width matters, slice
+                        with -mid first.
                         In DATA cells `|` becomes `\|`, `\` becomes `\\`
                         and an embedded newline becomes <br>. **Control
                         characters are escaped the way the locating report
@@ -460,8 +465,13 @@ INDEX / 索引
                         added, and the cost of the entry above is a grid point
                         per 256 records on a scan that was happening anyway.
                         The build-index cost is the SCAN: 505 ms on 17.7 MB /
-                        450,000 records, against 4 ms for the -mid window it
-                        makes possible -- about 130 windows to break even
+                        450,000 records. What it BUYS is the difference between
+                        an indexed window and an unindexed one -- about 4 ms
+                        against 179 ms measured here -- so it pays for itself
+                        in about three windows, not the 130 this entry said
+                        until 2026-08-22. That number divided the cost by the
+                        cheap operation instead of by the saving, in a
+                        paragraph whose point is that the index is expensive
   --verify-index        O(n) full check of all four of the index's claims --
                         the grid offsets, the line each grid point names, the
                         record count, and whether any record spans lines.
@@ -1046,6 +1056,7 @@ will not record:
 | a deleted **record** | its contents, column by column: `delete record 2: "a"="4", "b"="5", "c"="6"`. The largest thing this tool destroys, so the entry says what was in it. **The column names are quoted too** — a name can contain a comma or an `=` — and this example showed them bare until 2026-08-22, which is enough to mis-split the line in a parser written from it |
 | a deleted **column** | the column name, not its values — one entry for the run rather than one per record, because the values are the whole column |
 | `-hash` and `-encrypt` | which columns, and which key. Unkeyed hashing says so in as many words: `hashing columns notes with NO key (unsalted SHA-256)` |
+| a sidecar this run wrote | `wrote index /path/to/f.csv.index: N records, stride 256, M entries` — the only log line carrying an absolute path, and the only one about a file other than the input |
 | the outcome of the run | `wrote N records, M fields, atomic rename OK` — the line that says the write completed, and the one to look for when asking whether an edit landed. **`M` is the row WIDTH, not the number of fields written**: a 3-record 3-column file says `3 records, 3 fields`, and a 22×7 one says `22 records, 7 fields` |
 
 **One entry is one line, and every line is escaped to keep it that way.** A
@@ -1641,7 +1652,12 @@ administrative actions, not the normal path, but if you pipe them anywhere
 those lines are in your stream. `--build-index` prints one line.
 `--verify-index` prints one on success and **one per claim that failed** on a
 mismatch, which can be more than one line per grid point -- a point whose byte
-offset AND line are both wrong prints two: a large index that has
+offset AND line are both wrong prints two. In practice one edit often moves
+both by the same amount and only the offset is reported: splitting one record
+into two shifts every later record number by one AND every later line by one,
+so the line each grid point names still matches and only the byte claim fires.
+Two claims for one point is what a corrupted SIDECAR produces, not what a
+changed FILE usually does: a large index that has
 shifted can print thousands. Neither can be combined with a verb — the flag
 replaces the operation, and asking for both is refused rather than silently
 dropping the verb (T160).
@@ -1660,8 +1676,13 @@ that teaches `\n` has to read as `\n` — `undefined escape sequence \q` is a
 sentence, not a value. Values interpolated INTO a message are escaped where
 they are interpolated, backslash and all, so `no column named "…"` tells a
 column literally named `na\nme` from one containing a newline. A message
-quoting a PATH is left alone: a Windows path is full of backslashes and
-doubling them would misname the file. A message
+quoting a PATH keeps its BACKSLASHES -- a Windows path is full of them and
+doubling them would misname the file -- and everything else in it is escaped
+like any other line, so a filename containing a newline arrives as `no\nsuch.csv`
+and one containing an ESC as `x\x1B[2Ky.csv`. That is what keeps a refusal two
+lines and a log entry one. It also means the path in a message is not always
+the string you would pass back to `open`: this sentence said paths were "left
+alone" until 2026-08-22, generalised from the backslash it was written for. A message
 quoting an input value that contained a newline used to print four, and a script
 reading the pair took the injected line for part of the error. Asserted by T102.
 With `-log FILE` the same failure is also appended there with a timestamp;
@@ -1760,6 +1781,7 @@ here rather than to grow the table into something nobody reads.
 | `-o /dev/stdout` | output is written to a temp file beside the target and renamed, which needs a regular file. Use `-so` |
 | `-update`/`-delete -cell` on a column the file marks `:enc:`, `:hmac:` or `:hash` | a raw value written there cannot be read back, and for an encrypted column `-decrypt` stops at that cell — so records the edit never touched are lost with it |
 | `-insert`/`-append` into a file that has such a column | every field of the literal row is raw, including that one, and no value you could supply would be right: the transform needs the key, and the header carries only its fingerprint |
+| `-o` naming the `-keyfile`, or the `-log` file; `-log` naming the input; `-keyfile` being the input of an `--in-place` run | the same-file comparison that guards `-i` against `-o`, asked of the other files a run touches. Each of these exited 0 with both streams empty and destroyed something: the only key that decrypts what was just written, the audit trail of the run writing it, or the input itself -- csv2 appends the invocation line into the file it is reading, which then fails its own field-count check for ever |
 | a SELECTION with `--in-place` | `-head`, `-tail`, `-mid`, `-contains` and a bare `-r` all select; `--in-place` is where an EDIT goes. Writing a selection back over its own input discards every record it did not name, and until 2026-08-21 it did exactly that at rc=0 with nothing said and nothing logged. Crop with `-o NEW.csv` |
 | `-insert N ROW` whose field count differs from the header | the same check `-append` gets, and it names the count both ways: `-insert 2 has 2 fields but the header has 4`. It was missing from this table until 2026-08-21, and a table that presents itself as complete is read as one |
 | `-append` onto a file whose last record is incomplete | a short final record, or one left open by an unclosed quote. Checked for `-o` and for `--in-place` alike — the fast path used to skip it and produce a file csv2 then refused to read |
