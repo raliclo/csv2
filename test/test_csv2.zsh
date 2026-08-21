@@ -7945,8 +7945,15 @@ assert_succeeds "T158d and -r reads the file / 而 -r 讀得了這個檔案" -- 
 
 # Valid UTF-8 still goes through --json, including astral characters.
 # 合法的 UTF-8 照樣通過 --json，包含星光平面的字元。
+# Compared in --json-ascii, whose output is pure ASCII by definition. The
+# needle was `café🚀` and Windows failed on it while its own output showed the
+# value present -- a case that measured the platform's handling of a non-ASCII
+# literal in this file, not the tool.
+# 以 --json-ascii 比對，它的輸出依定義就是純 ASCII。原本的比對字串是 `café🚀`，Windows 在
+# 那裡失敗，而它自己的輸出裡那個值明明就在——那個案例量的是「這個檔案裡一個非 ASCII 字面值
+# 在該平台上如何被處理」，不是這個工具。
 printf 'a,b\n1,caf\xc3\xa9\xf0\x9f\x9a\x80\n' > "$TMP/t158_ok.csv"
-assert_contains "$("$CSV2" -r -t --json -i "$TMP/t158_ok.csv" | sed -n 2p)" 'café🚀' \
+assert_contains "$("$CSV2" -r -t --json-ascii -i "$TMP/t158_ok.csv" | sed -n 2p)" 'caf\u00e9\ud83d\ude80' \
     "T158e while valid UTF-8 is carried as it always was / 而合法的 UTF-8 一如既往地被載著走"
 
 # ---------------------------------------------------------------------
