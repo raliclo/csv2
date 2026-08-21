@@ -9614,7 +9614,17 @@ assert_succeeds "T180g a quoted CR in a header is a name / 標頭裡加了引號
 echo
 echo "--- T181: -i on a FIFO / T181：-i 指向一個 FIFO ---"
 
-if (( $+commands[mkfifo] )); then
+# Windows is excluded by NAME here, which this file otherwise avoids: MSYS2
+# ships an mkfifo that creates something, and a reader on it never meets its
+# writer, so the case does not fail -- it HANGS, and a suite that hangs reports
+# nothing at all. The first Windows run of this case sat for twenty minutes.
+# 這裡以「平台名字」排除 Windows，而這個檔案在其他地方避免這樣做：MSYS2 帶了一個 mkfifo，
+# 它建得出東西，但在它上面的讀取端永遠遇不到寫入端——於是這個案例不是失敗，而是「卡住」，
+# 而一個卡住的測試什麼也回報不了。這個案例在 Windows 上的第一次執行坐了二十分鐘。
+if (( IS_WINDOWS )); then
+    skipt "T181a a FIFO on Windows never connects its two ends / Windows 上的 FIFO 兩端接不起來"
+    T181A_SKIPPED=1
+elif (( $+commands[mkfifo] )); then
     rm -f "$TMP/t181.fifo.csv"
     if mkfifo "$TMP/t181.fifo.csv" 2>/dev/null; then
         { sleep 0.2; printf 'a,b\n1,x\n2,y\n' > "$TMP/t181.fifo.csv" } &
