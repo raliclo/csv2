@@ -173,7 +173,9 @@ values are written `\n`, carriage returns `\r` and backslashes `\\`.
 
 ```
 SELECTING / 選取
-  -r                    read
+  -r                    read. This is what happens with no verb at all, so
+                        `csv2 -i f.csv` and `csv2 -r -i f.csv` are the same
+                        command
   -get r:c              print ONE cell's value, raw -- the read that matches
                         -update r:c VAL. This is the verb to build scripts on:
                         what composes is the ADDRESS, and this is how a value
@@ -368,10 +370,12 @@ INDEX / 索引
   --no-index            never read or write a .index sidecar. The sidecar is
                         the whole filename plus ".index": packages.csv ->
                         packages.csv.index, pkgs.csv2 -> pkgs.csv2.index
-  --build-index         build the sidecar now. Otherwise one only appears as a
-                        SIDE EFFECT: a write builds one, and -tail builds one
-                        because it must read the whole file anyway -- so -mid
-                        alone would never produce one
+  --build-index         build the sidecar now, at any file size. Otherwise one
+                        only appears as a SIDE EFFECT, and only at or above
+                        CSV2_INDEX_MIN_BYTES: a write builds one, and -tail
+                        builds one because it must read the whole file anyway
+                        -- so -mid alone never produces one, and nothing
+                        produces one for a small file unless you ask
   --verify-index        O(n) full check of all three of the index's claims --
                         the grid offsets, the record count, and whether any
                         record spans lines. The O(1) check on the normal path
@@ -626,7 +630,11 @@ the thing the suffix rule exists to prevent. Asserted by T97.
 ### A UTF-8 BOM is stripped; a UTF-16 one is refused
 
 A file that opens with a **UTF-8** BOM — anything exported by Excel, typically —
-has it removed on read and not written back.
+has it removed on read and not written back. **Exactly one is removed**: a
+second BOM is a zero-width no-break space in the first column's name, which is
+data, so it stays in the output. It is stripped from the name used for
+ADDRESSING, though, which is why `-get 1:a` still works on such a file while
+the header written out still carries it.
 
 **A UTF-16 BOM is a different file and gets a different answer: refused, with
 the conversion named.** `FF FE` and `FE FF` cannot begin a UTF-8 file, so this
@@ -636,10 +644,12 @@ promises bytes round-trip, and useless to the person holding it, because every
 second byte is NUL, the column names carry them, and the whole thing parses at
 rc=0 into records that mean nothing.
 
-**The guard is the BOM and only the BOM.** A UTF-16 file saved without one is
-exactly the case in the paragraph above: it parses at rc=0 into records that
-mean nothing, and csv2 has nothing to detect it by that would not also
-misfire on legitimate data. If you are handed UTF-16, convert it; do not rely
+**The guard is the BOM and only the BOM.** A UTF-16 file saved without one may
+parse at rc=0 into records that mean nothing, and csv2 has nothing to detect it
+by that would not also misfire on legitimate data. It may equally fail with a
+message about field counts — the NUL bytes make the columns come out uneven —
+which is an accident, not a check: do not read that error as csv2 having
+noticed the encoding. If you are handed UTF-16, convert it; do not rely
 on being told.
 
 **A blank line anywhere is refused**, including the one a file ending in two
