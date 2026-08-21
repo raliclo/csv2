@@ -6699,3 +6699,38 @@ GPL-3.0^H^H^H^H^H^H^HMIT
   這是我在第 69 回合寫下的,而我沒有量過「幾則警告」。
 - **「每一個錯掉的格點一行」**:一個格點的偏移量與行號都錯時,`--verify-index` 會印**兩行**。
   兩份 README 都說一行,而同一句話正在警告「可能印出好幾千行」——那個數字因此也偏低。
+
+---
+
+## IF. Windows 的建置失敗了,而那台節點拿舊的二進位檔跑了新的測試(2026-08-22 修正,測試前置檢查)
+
+第 70 回合的修正推到節點之後,Windows 回報了 11 個失敗——其中五個是
+`[-update 1:2 Z --in-place] printed 0 metrics lines`,而那一行 metrics 就在旁邊的原始碼裡。
+
+實情:
+
+```
+error: 'fileDescriptor' is unavailable
+  |            `- note: 'fileDescriptor' has been explicitly marked unavailable here
+```
+
+第 69 回合那個 `O_APPEND` 修正用了 `ah.fileDescriptor`,而 `FileHandle.fileDescriptor`
+在 Windows 上被標記為不可用。**建置失敗,那台節點保留了它原本就有的二進位檔,而套件拿「新的
+測試」去跑「舊的程式」。** 於是失敗看起來像是程式有缺陷,而不是像「一次從未跑起來的建置」。
+
+**升級腳本印過 `build: FAILED`。是我盯著它的那個指令,把那一行濾掉了**——我只 grep 了
+`pull:` 與 `^PASS`。
+
+三個修正:
+
+1. **程式**:改用 `Platform.openAppendFD(path:)`,在兩個平台上都直接取得描述子——Windows 那半
+   本來就在 `openForAppend` 裡(`CreateFileW` + `_open_osfhandle`),只是被包進了一個
+   `FileHandle`,而那個包裝正好擋住了唯一能拿到 fd 的路。
+2. **測試**:套件現在在做任何事之前,先問「有沒有任何 `src/*.swift` 比這個二進位檔新」。有的話
+   就以「STALE BINARY」中止,並指名是哪些檔案。**一個比原始碼舊的二進位檔,是這套測試會拿到的
+   最糟的東西**:每個案例照樣執行、多數照樣通過,而失敗的那些會指向錯的地方。
+   （只在 `src/` 存在時檢查——一台只拿到二進位檔的節點也是合法的執行方式。）
+3. **我自己**:監看遠端執行時,不要只 grep 自己預期的那幾行。
+
+**形狀:一個「看起來像被測物的缺陷」的失敗,其實是工具鏈的失敗。** 這與 DP（`git -C` 落在
+幽靈目錄,連續四次回報成功）是同一族——那一次也是「每一行都是真的，只是講的不是同一個東西」。

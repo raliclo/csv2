@@ -631,6 +631,41 @@ enum Platform {
     /// `.other` 涵蓋它實際會有的東西。
     enum FileKind { case regular, directory, fifo, other }
 
+    /// The append descriptor itself, for a caller that wants `writeAll`'s error
+    /// handling rather than `FileHandle.write`'s `try!`.
+    ///
+    /// `FileHandle.fileDescriptor` cannot be used to get here: it is marked
+    /// UNAVAILABLE on Windows, and reaching for it broke the Windows build --
+    /// which the node then survived by keeping its old binary and running the
+    /// new tests against it, so the suite reported five failures that looked
+    /// like a defect in the metrics line and were a build that never ran.
+    /// 追加用的描述子本身，給「想要 writeAll 的錯誤處理、而不是 FileHandle.write 的 try!」
+    /// 的呼叫端。
+    ///
+    /// 不能用 `FileHandle.fileDescriptor` 來取得它：那在 Windows 上被標記為「不可用」，
+    /// 而伸手去拿它弄壞了 Windows 的建置——那台節點於是保留了舊的二進位檔、拿新的測試去跑它，
+    /// 於是測試回報了五個「看起來像 metrics 那一行有缺陷」的失敗，而真相是一次從未跑起來的建置。
+    static func openAppendFD(path: String) -> Int32? {
+        #if canImport(ucrt)
+        let handle: HANDLE = path.withCString(encodedAs: UTF16.self) { wpath in
+            CreateFileW(wpath,
+                        DWORD(FILE_APPEND_DATA),
+                        DWORD(FILE_SHARE_READ | FILE_SHARE_WRITE),
+                        nil,
+                        DWORD(OPEN_ALWAYS),
+                        DWORD(FILE_ATTRIBUTE_NORMAL),
+                        nil)
+        }
+        guard handle != INVALID_HANDLE_VALUE else { return nil }
+        let fd = _open_osfhandle(intptr_t(bitPattern: handle), _O_APPEND)
+        guard fd >= 0 else { CloseHandle(handle); return nil }
+        return fd
+        #else
+        let fd = open(path, O_WRONLY | O_APPEND)
+        return fd >= 0 ? fd : nil
+        #endif
+    }
+
     /// Device and inode: the pair that says two names are ONE file, which a
     /// path comparison cannot. `-i x -o y` where the two are hard links to the
     /// same inode passed every spelling check -- `./`, `../`, absolute,

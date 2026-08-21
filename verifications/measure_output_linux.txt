@@ -1,5 +1,5 @@
 # csv2 measurements
-date    : 2026-08-21T10:03:20Z
+date    : 2026-08-21T10:41:05Z
 host    : Linux aarch64
 binary  : csv2 0.1.0
 
@@ -7,8 +7,8 @@ corpus bytes : 2604235
 corpus records: 20000
 
 ## 1. full RFC 4180 parse throughput / 完整解析吞吐量
-single-threaded : 0.095 s   26 MiB/s
-parallel        : 0.105 s   24 MiB/s   speedup 0.90x on 4 workers
+single-threaded : 0.093 s   27 MiB/s
+parallel        : 0.104 s   24 MiB/s   speedup 0.89x on 4 workers
 efficiency      : 22% of linear
                   the boundary-finding pass is single-threaded, so this is
                   expected to be well under 100%; record it rather than
@@ -17,11 +17,11 @@ efficiency      : 22% of linear
                   把它記下來，不要把「平行」讀成「快 P 倍」。
 
 ## 2. durable-write floor / 落地寫入的下限
-smallest edit   : 0.0041 s   (process start + parse + flush + rename)
+smallest edit   : 0.0043 s   (process start + parse + flush + rename)
                   一次最小編輯的總時間，含行程啟動、解析、flush 與 rename
 
 ## 3. write throughput / 寫入吞吐量
-rewrite whole   : 0.117 s   21 MiB/s
+rewrite whole   : 0.122 s   20 MiB/s
                   NOTE: at RECORDS=20000 the fixed costs above
                   (process start, parse, flush) are a large share of
                   this, so the MiB/s figure understates the steady
@@ -31,12 +31,12 @@ rewrite whole   : 0.117 s   21 MiB/s
                   只能與相同 RECORDS 的執行相比。
 
 ## what this says about the thresholds / 對門檻的意涵
-16 MiB at the measured parse rate : 0.609 s
+16 MiB at the measured parse rate : 0.602 s
   the index and parallel thresholds are both 16 MiB. That is the point at
   which a full scan costs the above; judge whether it is worth a sidecar.
   索引與平行的門檻都是 16 MiB。那是「全掃描要花上述時間」的那個點；
   是否值得為此維護一個 sidecar，據此判斷。
 
-1 GiB rewrite at the measured write rate : 48.2 s
+1 GiB rewrite at the measured write rate : 50.2 s
   plan/plan.md predicted 26 s from a 39 MiB/s figure.
   plan/plan.md 依 39 MiB/s 推得 26 秒。

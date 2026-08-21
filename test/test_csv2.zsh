@@ -80,6 +80,45 @@ if [[ ! -x "$CSV2" ]]; then
     "$ROOT/compile_csv2.zsh" >/dev/null || { echo "build failed / 建置失敗" >&2; exit 1 }
 fi
 
+# A binary older than the sources is the worst thing this suite can be handed:
+# every case still runs, most still pass, and the ones that fail look like
+# defects in the program rather than like a build that never happened.
+#
+# On 2026-08-22 the Windows node did exactly that. A change used
+# `FileHandle.fileDescriptor`, which is marked unavailable there, so the build
+# failed -- and the node kept the binary it already had and ran the NEW tests
+# against it. Five cases failed, all of them pointing at a metrics line that
+# was correct in the source sitting right there. The upgrade helper had printed
+# `build: FAILED`; the command watching it filtered for other lines.
+#
+# So the suite asks the question itself, before anything else, and only when
+# the sources are present -- a node given a binary and no tree is a legitimate
+# way to run this.
+#
+# 一個比原始碼還舊的二進位檔，是這套測試會拿到的最糟的東西：每個案例照樣執行、多數照樣通過，
+# 而失敗的那些看起來像是「程式有缺陷」，而不是「有一次建置根本沒有跑起來」。
+#
+# 2026-08-22 的 Windows 節點就是這樣。某個改動用了 `FileHandle.fileDescriptor`，而它在那裡
+# 被標記為不可用，於是建置失敗——那台節點保留了它原本就有的二進位檔，拿「新的測試」去跑它。
+# 五個案例失敗，全都指向一行 metrics，而那一行在旁邊的原始碼裡是對的。升級腳本印過
+# `build: FAILED`；盯著它的那個指令，把那一行濾掉了。
+#
+# 因此這套測試自己問這個問題，在其他一切之前——而且只在「原始碼在場」時問：一台只拿到
+# 二進位檔、沒有整棵樹的節點，也是合法的執行方式。
+if [[ -d "$ROOT/src" ]]; then
+    _stale=""
+    for _srcfile in "$ROOT/src"/*.swift; do
+        [[ -e "$_srcfile" ]] || continue
+        [[ "$_srcfile" -nt "$CSV2" ]] && _stale="$_stale ${_srcfile:t}"
+    done
+    if [[ -n "$_stale" ]]; then
+        echo "STALE BINARY / 二進位檔過期：$CSV2" >&2
+        echo "  newer than it:$_stale" >&2
+        echo "  build it before testing, or the failures below are about a program that was never built / 請先建置，否則下面的失敗講的是一個從未被建置出來的程式" >&2
+        exit 1
+    fi
+fi
+
 LOG="$HERE/test_csv2.log"
 exec > >(tee "$LOG") 2>&1
 

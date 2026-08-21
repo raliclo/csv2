@@ -1706,11 +1706,11 @@ func runAppendFast(_ o: Options) throws {
     //
     // README 對並行寫入者的最壞情況是「有一次編輯會遺失」。這裡是兩次編輯都遺失、一筆紀錄
     // 被憑空造出來，或者一個檔案被毀掉。
-    guard let ah = Platform.openForAppend(path: path) else {
+    guard let afd = Platform.openAppendFD(path: path) else {
         throw fault("cannot open \(path) for appending", "無法開啟 \(path) 以追加")
     }
-    let werr = Platform.writeAll(fd: ah.fileDescriptor, payload)
-    try? ah.close()
+    let werr = Platform.writeAll(fd: afd, payload)
+    Platform.closeFD(afd)
     if werr != 0 {
         throw fault("cannot write to \(path): \(Platform.errorText(werr))",
                     "無法寫入 \(path)：\(Platform.errorText(werr))")
