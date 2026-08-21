@@ -10003,12 +10003,19 @@ else
     chmod 644 "$TMP/t191_src.csv"
     rm -f "$TMP/t191_new.csv"
     ( umask 022; "$CSV2" -r -t -i "$TMP/t191_src.csv" -o "$TMP/t191_new.csv" )
-    assert_eq "$(stat_mode "$TMP/t191_new.csv")" "600" \
+    # file_mode, not stat_mode: the guest's busybox has no `stat` applet, and
+    # stat_mode is documented to return EMPTY there -- so this compared '' with
+    # '600' and failed for a reason that has nothing to do with the mode. The
+    # ls fallback exists for exactly this and T129 already uses it.
+    # 用 file_mode 而不是 stat_mode：guest 的 busybox 沒有 `stat` applet，而 stat_mode 在那裡
+    # 依定義回傳「空的」——於是這裡拿 '' 去比 '600'，因為一個與權限無關的理由而失敗。
+    # 那個 ls 後備正是為此而存在，T129 早就在用它了。
+    assert_eq "$(file_mode "$TMP/t191_new.csv")" "600" \
         "T191a a destination csv2 creates is 0600 / csv2 新建的目的地是 0600"
     printf 'x,y\n9,9\n' > "$TMP/t191_over.csv"
     chmod 644 "$TMP/t191_over.csv"
     "$CSV2" -r -t -i "$TMP/t191_src.csv" -o "$TMP/t191_over.csv"
-    assert_eq "$(stat_mode "$TMP/t191_over.csv")" "644" \
+    assert_eq "$(file_mode "$TMP/t191_over.csv")" "644" \
         "T191b while replacing a 0644 file keeps 0644 / 而覆蓋一個 0644 檔案時保留 0644"
 fi
 
