@@ -34,6 +34,10 @@ struct Options {
     var normalize = false
 
     var after = 0
+    /// Whether a context flag was GIVEN, regardless of its value. The output
+    /// shape follows the flag, not the number -- see the parse site.
+    /// 是否「給了」上下文旗標，與它的值無關。輸出形狀跟著旗標走，不跟著數字走——見解析處。
+    var contextGiven = false
     var before = 0
 
     var head: Int?
@@ -420,11 +424,22 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "filter": o.filter = true
         case "include-headers": o.includeHeaders = true
         case "normalize": o.normalize = true
-        case "A": o.after = try nonNegativeInt(arg, try need(arg))
-        case "B": o.before = try nonNegativeInt(arg, try need(arg))
+        // `contextGiven` rather than `after > 0 || before > 0`: the output SHAPE
+        // must not depend on the NUMBER. `-A 0` left the locating report in
+        // place while `-A 1` switched to records, so a script writing
+        // `-A "$N"` got one of two incompatible formats depending on a
+        // variable -- TAB-separated report against CSV, at rc=0, with nothing
+        // said. That is the mistake the README opens with, reached through a
+        // flag interaction.
+        // 用 `contextGiven`，而不是 `after > 0 || before > 0`：輸出的「形狀」不該取決於那個
+        // 「數字」。`-A 0` 會讓定位報告留著，而 `-A 1` 會切成紀錄形狀，於是一支寫
+        // `-A "$N"` 的腳本，會依一個變數拿到兩種不相容的格式——TAB 分隔的報告對上 CSV，
+        // rc=0，什麼也不說。那正是 README 開頭那個錯誤，只是經由一次旗標互動抵達。
+        case "A": o.after = try nonNegativeInt(arg, try need(arg)); o.contextGiven = true
+        case "B": o.before = try nonNegativeInt(arg, try need(arg)); o.contextGiven = true
         case "C":
             let n = try nonNegativeInt(arg, try need(arg))
-            o.after = n; o.before = n
+            o.after = n; o.before = n; o.contextGiven = true
         case "head": try once("-head"); o.head = try positiveInt(arg, try need(arg))
         case "tail": try once("-tail"); o.tail = try positiveInt(arg, try need(arg))
         case "mid": try once("-mid"); o.mid = try parseMid(try need(arg))
@@ -1009,7 +1024,7 @@ func validate(_ o: inout Options) throws {
                              "編輯需要明確的目的地：-o FILE、-so 或 --in-place")
         }
     }
-    if o.after > 0 || o.before > 0 {
+    if o.contextGiven {
         guard o.contains != nil else {
             throw usageError("-A/-B/-C need -contains", "-A/-B/-C 需要搭配 -contains")
         }

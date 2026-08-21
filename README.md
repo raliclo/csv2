@@ -184,7 +184,11 @@ SELECTING / 選取
   --filter              with -contains, emit the matching records instead
   --include-headers     search the header rows too (reported as record 0a / 0b)
   --normalize           compare in NFC; what is stored is never normalised
-  -A N  -B N  -C N      context in RECORDS, as in grep; blocks separated by --
+  -A N  -B N  -C N      context in RECORDS, as in grep; blocks separated by --.
+                        Giving any of them switches the output to records, at
+                        any value including 0 -- the shape follows the flag,
+                        not the number. Repeats: the last one wins, and -C sets
+                        both sides, so `-C 1 -A 3` and `-A 3 -C 1` differ
   -head N               first N records          (records, not lines)
   -tail N               last N records
   -mid a,b              records a through b, inclusive; `a,` and `,b` are

@@ -8251,6 +8251,52 @@ assert_fails "T162f while two columns make it a blank line again / 而兩欄時�
     "$CSV2" -r -t -i "$TMP/t162_two.csv"
 
 # ---------------------------------------------------------------------
+# T163 -- the output shape follows the flag, not the number.
+#
+# Round 62 ran roughly sixty flag pairs the refusals table does not list.
+# `-A 0` left the locating report in place while `-A 1` switched to records, so
+# `csv2 -contains X -A "$N"` returned one of two incompatible formats depending
+# on a variable -- a TAB-separated report against CSV, rc=0, nothing said. The
+# README says -A/-B/-C imply --filter, unconditionally, and the implication was
+# written as `after > 0 || before > 0`.
+#
+# T163 —— 輸出形狀跟著旗標走，不跟著數字走。
+# ---------------------------------------------------------------------
+echo
+echo "--- T163: a context flag of zero / T163：值為零的上下文旗標 ---"
+
+{
+    print -r -- 'a,b'
+    for i in {1..9}; do
+        if (( i == 6 )); then print -r -- "$i,HIT"; else print -r -- "$i,n"; fi
+    done
+} > "$TMP/t163.csv"
+
+# With no context flag at all: the locating report.
+# 完全不給上下文旗標時：定位報告。
+assert_contains "$("$CSV2" -contains HIT -i "$TMP/t163.csv" | head -1)" "6:2" \
+    "T163a with no context flag the output is the locating report / 不給上下文旗標時，輸出是定位報告"
+
+# With one, at any value: records.
+# 給了，不論值是多少：紀錄形狀。
+for _t163_n in 0 1 2; do
+    assert_eq "$("$CSV2" -contains HIT -A $_t163_n -i "$TMP/t163.csv" | head -1)" "6,HIT" \
+        "T163b -A $_t163_n gives records, the same shape as any other value / -A $_t163_n 給的是紀錄形狀，與其他任何值相同"
+done
+assert_eq "$("$CSV2" -contains HIT -B 0 -i "$TMP/t163.csv" | head -1)" "6,HIT" \
+    "T163c and so does -B 0 / -B 0 也是"
+assert_eq "$("$CSV2" -contains HIT -C 0 -i "$TMP/t163.csv" | head -1)" "6,HIT" \
+    "T163d and -C 0 / -C 0 也是"
+
+# The count still follows the number -- the fix must not have made -A 0 mean
+# -A 1.
+# 筆數仍然跟著數字走——這個修正不能讓 -A 0 變成 -A 1。
+assert_eq "$("$CSV2" -contains HIT -A 0 -i "$TMP/t163.csv" | wc -l | tr -d ' ')" "1" \
+    "T163e while -A 0 still selects one record / 而 -A 0 仍然只選出一筆"
+assert_eq "$("$CSV2" -contains HIT -A 2 -i "$TMP/t163.csv" | wc -l | tr -d ' ')" "3" \
+    "T163f and -A 2 selects three / 而 -A 2 選出三筆"
+
+# ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
 #
 # Every other case here was written because someone thought of it. This one
