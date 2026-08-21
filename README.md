@@ -529,11 +529,17 @@ stale sidecar is left where it is and `--verify-index` still exits 1 — the
 evidence survives on small files and not on large ones. Either way: verify
 BEFORE the edit, not after.
 
-**Only `-contains` reads the sidecar.** `-get` and the edit verbs scan, so a
-stale index does not make them miscount — it makes the ADDRESS you carry over
-from the report wrong, and the verb you hand it to then works perfectly on the
-wrong record. The two halves of the recipe disagree and each is behaving
-correctly. See
+**`-contains`, `-mid` and `-tail` read the sidecar; `-get` and the edit verbs
+scan.** So a stale index can make either half of the recipe wrong, and which
+one depends on how you found the address: the search's record number can be
+off, and a `-mid` window can start on the wrong record, while the `-get` or
+`-update` you hand the address to works perfectly on whatever record that
+address now names. Each command is behaving correctly and the pair disagrees.
+
+*(This paragraph said "only `-contains`" until 2026-08-21. It was written from
+a blind round's report and never measured; the next round measured it and found
+`-mid` taking an index hit. The lesson is the one this file keeps recording:
+a sentence about behaviour, taken from a report and not run, is a guess.)* See
 **The index sidecar** below for what the stamp can and cannot notice.
 
 Matching is **case-sensitive** and there is no flag to change that. **The way

@@ -756,13 +756,41 @@ func validate(_ o: inout Options) throws {
     // `--build-index` 是「取代」動詞而不是「加在旁邊」，因此兩者同時給出時，索引被建立了、
     // 而編輯被靜默丟棄——rc=0，搭配 `--in-place` 時甚至什麼都不印，而呼叫端以為某一格改了。
     // `--build-index --no-index` 早就被當成矛盾拒絕；這一對同樣不可能兩全，卻沒有。
-    if o.buildIndex && !o.edits.isEmpty {
-        throw usageError("--build-index and an edit verb cannot both run: --build-index replaces the operation rather than joining it, so the edit would be silently dropped",
-                         "--build-index 與編輯動詞不能同時執行：--build-index 是「取代」該操作而不是「加在旁邊」，因此那個編輯會被靜默丟棄")
-    }
-    if o.verifyIndex && !o.edits.isEmpty {
-        throw usageError("--verify-index and an edit verb cannot both run",
-                         "--verify-index 與編輯動詞不能同時執行")
+    // A READ verb is dropped the same way an edit is, and that refusal covered
+    // only edits -- the same rule applied to half of where it holds, which is
+    // this project's most frequent defect and was mine to make here.
+    //
+    // `--build-index -contains X` exited 0 having searched nothing, which is
+    // indistinguishable from "found nothing"; the README documents that as
+    // rc=0 too. `--build-index -get 1:1` put `index built: 5 records ...` on
+    // stdout, so the README's own `val=$(csv2 -get ...)` recipe writes that
+    // sentence into a data cell, at rc=0.
+    //
+    // `-r` is excluded because it is also the default: refusing it would refuse
+    // the ordinary `csv2 --build-index -i f.csv`, which is the whole point of
+    // the flag. Nothing is dropped in that case -- there is no verb to drop.
+    // 讀取動詞被丟棄的方式與編輯完全相同，而那條拒絕只涵蓋了編輯——同一條規則只套用到它成立
+    // 之處的一半，那是本專案最常見的缺陷形狀，而這一次是我犯的。
+    // `--build-index -contains X` 以 0 結束、什麼也沒搜尋，那與「什麼也沒找到」無法區分，
+    // 而 README 記載後者同樣是 rc=0。`--build-index -get 1:1` 會把「index built: …」印到
+    // stdout，於是 README 自己那句 `val=$(csv2 -get …)` 會把那句話寫進一個資料儲存格，rc=0。
+    // `-r` 不列入，因為它同時也是預設值：拒絕它等於拒絕 `csv2 --build-index -i f.csv`
+    // 這個最平常的用法，而那正是這個旗標的用途。那種情況下沒有任何東西被丟棄——沒有動詞可丟。
+    let selectionVerb: String? =
+        o.contains != nil ? "-contains" :
+        o.getCell != nil ? "-get" :
+        o.head != nil ? "-head" :
+        o.tail != nil ? "-tail" :
+        o.mid != nil ? "-mid" : nil
+    for (flag, on) in [("--build-index", o.buildIndex), ("--verify-index", o.verifyIndex)] where on {
+        if !o.edits.isEmpty {
+            throw usageError("\(flag) and an edit verb cannot both run: \(flag) replaces the operation rather than joining it, so the edit would be silently dropped",
+                             "\(flag) 與編輯動詞不能同時執行：\(flag) 是「取代」該操作而不是「加在旁邊」，因此那個編輯會被靜默丟棄")
+        }
+        if let verb = selectionVerb {
+            throw usageError("\(flag) and \(verb) cannot both run: \(flag) replaces the operation rather than joining it, so \(verb) would produce nothing while the run still exited 0",
+                             "\(flag) 與 \(verb) 不能同時執行：\(flag) 是「取代」該操作而不是「加在旁邊」，因此 \(verb) 什麼也不會產出，而那次執行仍然以 0 結束")
+        }
     }
     // `-get` prints ONE cell. A transform's output depends on a marker in the
     // file's header -- the salt for `:enc:`, the fingerprint for `:hmac:` --

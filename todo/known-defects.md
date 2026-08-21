@@ -4921,3 +4921,51 @@ Python 的 `csv` 裡是換行**——同一個檔案,一邊兩筆、一邊三列
 **其餘**:`--headers` 在「路徑不以 .csv／.csv2 結尾」時是必要的,而那個檢查區分大小寫
 (`.CSV` 也要);`CSV2_INDEX_MIN_BYTES` 那一列說「不讀也不寫」,而 `--build-index` 是明確的
 要求,任何大小都會寫。
+
+---
+
+## FG. `--build-index` 與讀取動詞併用:讀取被靜默丟棄(2026-08-21 修正,T160)
+
+第 60 回合:
+
+```
+$ csv2 --build-index -contains v3 -i f.csv ; echo rc=$?
+index built: 500 records, stride 256, 2 grid points
+rc=0                                   ← 沒有搜尋，而「什麼也沒找到」也是 rc=0
+$ csv2 --build-index -get 1:2 -i f.csv
+index built: 500 records, stride 256, 2 grid points   ← 於是 val=$(csv2 -get …) 會把這句話寫進儲存格
+$ csv2 --build-index -update 1:2 Z -i f.csv --in-place
+csv2: --build-index and an edit verb cannot both run …   ← 編輯會被拒絕
+```
+
+**那條拒絕是我 2026-08-20 加的(DN),而它只涵蓋了編輯動詞。** 讀取動詞被丟棄的方式完全相同,
+而 `-get` 那一條更糟:那句 `index built: …` 會經由 README 自己的 `val=$(csv2 -get …)` 配方
+寫進一個資料儲存格,rc=0。
+
+同一條規則,只套用到它成立之處的一半——本專案最常見的缺陷形狀,而這一次是我犯的。
+
+`-r` 不列入拒絕:它同時也是預設值,拒絕它等於拒絕 `csv2 --build-index -i f.csv` 這個最平常
+的用法,而那種情況下沒有任何東西被丟棄。
+
+## FH. 「只有 `-contains` 會讀 sidecar」——我寫下、而沒有量過(2026-08-21 修正,T143f/g)
+
+第 56 回合說「只有 `-contains` 使用 sidecar」,我照抄進了兩份 README。第 60 回合量了:
+
+```
+$ csv2 -mid 100,110 -i f.csv -debug
+DEBUG index hit: record 100 via grid point 1 at byte 4        ← -mid 也讀
+$ csv2 -tail 5 -i f.csv -debug
+DEBUG index hit: record 496 via grid point 257 at byte 2092   ← -tail 也讀
+$ csv2 -get 100:2 -i f.csv -debug
+（沒有任何一行提到索引）                                      ← 只有 -get 不讀
+```
+
+而那一段正是「告訴讀者何時需要 `--verify-index`」的地方——**他拿到的是錯的那一組**。
+
+兩份 README 已更正,並在原地寫下它為什麼會錯:一句關於行為、取自報告而沒有執行過的話,
+是一個猜測。T143f/g 現在把「哪些動詞會讀」逐一量出來。
+
+**寫那個測試時,同一種錯誤又發生了一次**:第一版只探測 `index hit` 這一句,而平行搜尋說的是
+`trusting index`——於是它得出「`-contains` 不讀 sidecar」的結論。第二版改對了字串,卻仍然失敗,
+因為在這個檔案的 `exec > >(tee …)` 之下,`cmd 2>&1 >/dev/null | grep` 沒有把 stderr 交給那個
+grep;改成先捕獲再比對才對。**一個探測,量到的可能是自己的管線。**

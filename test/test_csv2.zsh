@@ -7054,6 +7054,44 @@ else
         assert_eq "$("$CSV2" -get 200:2 -i "$TMP/t143.csv")" \
                   "$("$CSV2" -get 200:2 --no-index -i "$TMP/t143.csv")" \
             "T143c while -get gives the same answer with the sidecar and without it / 而 -get 在「有 sidecar」與「沒有 sidecar」下給的是同一個答案"
+        # WHICH verbs read the sidecar, measured rather than asserted from a
+        # report. The READMEs said "only -contains" for a day, taken from a
+        # blind round and never run; -mid takes an index hit too, and a reader
+        # deciding when they need --verify-index was being told the wrong set.
+        # 哪些動詞會讀 sidecar，用量的、不是從報告抄的。兩份 README 有一天寫著「只有
+        # -contains」，那句話取自一份盲測報告、從來沒有被執行過；`-mid` 同樣會走索引，
+        # 而一個「在判斷自己何時需要 --verify-index」的讀者，拿到的是錯的那一組。
+        for _t143_verb in "-contains v000200" "-mid 100,110" "-tail 5"; do
+            # Two different messages for two different consumers: the seek
+            # says "index hit", the parallel search says "trusting index". A
+            # probe for one of them concluded the other verb does not read the
+            # sidecar -- the same overgeneralisation this case exists to
+            # correct, made while correcting it.
+            # 兩個不同的消費端有兩種不同的訊息：seek 說「index hit」，平行搜尋說「trusting
+            # index」。只探測其中一種，就會得出「另一個動詞不讀 sidecar」的結論——正是這個
+            # 案例要糾正的那種以偏概全，而它是在糾正的過程中犯的。
+            # Captured, not piped. Under this file's `exec > >(tee ...)` the
+            # form `cmd 2>&1 >/dev/null | grep` did not deliver stderr to the
+            # grep -- three cases reported "does not read the sidecar" about
+            # output that plainly said it did. A probe printing the same
+            # capture showed the text; the difference was the plumbing.
+            # 用捕獲，不用管線。在這個檔案的 `exec > >(tee …)` 之下，
+            # `cmd 2>&1 >/dev/null | grep` 這個寫法沒有把 stderr 交給那個 grep——於是三個
+            # 案例對著「明明說了自己讀了 sidecar」的輸出，回報「它不讀」。把同一份捕獲印出來
+            # 就看得到那段文字；差別在管線本身。
+            _t143_out=$("$CSV2" ${=_t143_verb} -i "$TMP/t143.csv" -debug 2>&1 >/dev/null)
+            if [[ $_t143_out == *"index hit"* || $_t143_out == *"trusting index"* ]]; then
+                ok "T143f $_t143_verb reads the sidecar / $_t143_verb 會讀 sidecar"
+            else
+                bad "T143f $_t143_verb did not / $_t143_verb 沒有讀"
+            fi
+        done
+        _t143_get=$("$CSV2" -get 200:2 -i "$TMP/t143.csv" -debug 2>&1 >/dev/null)
+        if [[ $_t143_get == *"index hit"* || $_t143_get == *"trusting index"* ]]; then
+            bad "T143g -get took an index hit, which the READMEs say it does not / -get 走了索引，而兩份 README 說它不會"
+        else
+            ok "T143g while -get does not / 而 -get 不會"
+        fi
     else
         bad "T143a the hazard did not reproduce (both said $_t143_indexed); if that is now impossible, the README's description of the O(1) check must change / 那個風險沒有重現（兩邊都是 $_t143_indexed）；若它確實已不可能發生，README 對 O(1) 檢查的描述就必須修改"
     fi
@@ -8010,6 +8048,52 @@ printf 'a,b\n1,x\x00y\n' > "$TMP/t159_nul.csv"
 assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t159_nul.csv" | od -A n -c | tr -s ' ')" \
           "$(printf 'x\x00y\n' | od -A n -c | tr -s ' ')" \
     "T159e a NUL byte is data and comes back unchanged / NUL 是資料，而且原樣回來"
+
+# ---------------------------------------------------------------------
+# T160 -- an administrative flag beside a verb, and the half of that rule
+# that was never written.
+#
+# Round 60: `csv2 --build-index -contains X -i f.csv` exited 0 having searched
+# nothing -- indistinguishable from "found nothing", which the README documents
+# as rc=0 as well. `--build-index -get 1:1` put `index built: 5 records ...`
+# on stdout, so the README's own `val=$(csv2 -get ...)` recipe writes that
+# sentence into a data cell.
+#
+# csv2 already refused this for EDIT verbs, with a message explaining that the
+# flag REPLACES the operation. The same rule, half its domain -- this project's
+# most frequent defect, and mine to have made here.
+#
+# T160 —— 一個管理用旗標與一個動詞並排，以及那條規則沒有被寫下來的另一半。
+# ---------------------------------------------------------------------
+echo
+echo "--- T160: --build-index / --verify-index replace the operation / T160：--build-index／--verify-index 是取代那個操作 ---"
+
+print -r -- 'a,b'  > "$TMP/t160.csv"
+print -r -- '1,x' >> "$TMP/t160.csv"
+print -r -- '2,y' >> "$TMP/t160.csv"
+
+for _t160_admin in --build-index --verify-index; do
+    for _t160_verb in "-contains x" "-get 1:2" "-head 1" "-tail 1" "-mid 1,1"; do
+        _t160_out=$("$CSV2" $_t160_admin ${=_t160_verb} -i "$TMP/t160.csv" 2>&1)
+        _t160_rc=$?
+        if (( _t160_rc == 1 )) && [[ $_t160_out == *"cannot both run"* ]]; then
+            ok "T160a $_t160_admin with $_t160_verb is refused / $_t160_admin 與 $_t160_verb 併用會被拒絕"
+        else
+            bad "T160a $_t160_admin $_t160_verb exited $_t160_rc: $(print -r -- $_t160_out | head -1) / 結果如上"
+        fi
+    done
+done
+
+# The flag alone is the ordinary use and must still work -- including with -r,
+# which is also the default, so refusing it would refuse the plain form.
+# 單獨使用那個旗標是最平常的用法，必須照舊可用——包含搭配 -r，因為 -r 同時也是預設值，
+# 拒絕它等於拒絕那個最單純的寫法。
+assert_succeeds "T160b --build-index alone still works / 單獨的 --build-index 照舊可用" -- \
+    "$CSV2" --build-index -i "$TMP/t160.csv"
+assert_succeeds "T160c and with -r, which is the default anyway / 搭配 -r 也是——它本來就是預設值" -- \
+    "$CSV2" --build-index -r -i "$TMP/t160.csv"
+assert_succeeds "T160d and --verify-index alone / 單獨的 --verify-index 也是" -- \
+    "$CSV2" --verify-index -i "$TMP/t160.csv"
 
 # ---------------------------------------------------------------------
 # T139 -- combinations nobody enumerated.
