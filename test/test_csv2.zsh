@@ -863,7 +863,12 @@ assert_same "$PKG" "$TMP/dec.csv" "T34a encrypt then decrypt restores every byte
 # 在加密的儲存格「內部」改一個字元。改行尾會落在 license 欄，對 AEAD 什麼都
 # 證明不了。
 ct=$(cell "$TMP/enc.csv" 1 6)
-flip=$(print -r -- "$ct" | sed 's/^A/B/; t; s/^./A/')
+# BSD sed treats the text after a semicolon as part of an unlabeled `t`
+# command. Use an explicit label so this mutation is portable to macOS and
+# Linux, and so a sed diagnostic cannot make the tamper setup ambiguous.
+# BSD sed 會把分號後的文字當成無標籤 `t` 指令的一部分。使用明確標籤，讓這個
+# 竄改在 macOS 與 Linux 都一致，也不會讓 sed 診斷使測試準備結果變得含糊。
+flip=$(print -r -- "$ct" | sed -e 's/^A/B/' -e 't flipped' -e 's/^./A/' -e ':flipped')
 "$CSV2" -update '1:6' "$flip" -i "$TMP/enc.csv" -o "$TMP/tamper.csv" 2>/dev/null
 assert_fails "T34b a tampered ciphertext fails to decrypt / 密文被竄改即解密失敗" -- \
     "$CSV2" -decrypt status_notes -keyfile "$KEY" -i "$TMP/tamper.csv" -o "$TMP/x.csv"
@@ -8877,7 +8882,7 @@ assert_eq "$?" "1" \
 if (( IS_WINDOWS )); then
     skipt "T131e a killed edit leaves no temp file beside the target / 被殺死的編輯不會在目標旁留下暫存檔 (POSIX signal handlers; a native Windows binary is not stopped this way / 這是 POSIX 訊號處理，原生 Windows 程式不是這樣被停下的)"
 else
-    rm -f "$TMP"/.t131_out.csv.csv2tmp.* "$TMP/t131_out.csv"
+    rm -f "$TMP"/.t131_out.csv.csv2tmp.*(N) "$TMP/t131_out.csv"
     ( print -r -- 'a,b'; print -r -- '1,x'; sleep 5 ) \
         | "$CSV2" -r -t -si --headers 1 -o "$TMP/t131_out.csv" 2>/dev/null &
     _t131_pid=$!
