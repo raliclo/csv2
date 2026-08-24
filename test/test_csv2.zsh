@@ -862,16 +862,84 @@ assert_same "$PKG" "$TMP/dec.csv" "T34a encrypt then decrypt restores every byte
 # would land in the license column and prove nothing about the AEAD.
 # 在加密的儲存格「內部」改一個字元。改行尾會落在 license 欄，對 AEAD 什麼都
 # 證明不了。
-ct=$(cell "$TMP/enc.csv" 1 6)
-# BSD sed treats the text after a semicolon as part of an unlabeled `t`
-# command. Use an explicit label so this mutation is portable to macOS and
-# Linux, and so a sed diagnostic cannot make the tamper setup ambiguous.
-# BSD sed 會把分號後的文字當成無標籤 `t` 指令的一部分。使用明確標籤，讓這個
-# 竄改在 macOS 與 Linux 都一致，也不會讓 sed 診斷使測試準備結果變得含糊。
-flip=$(print -r -- "$ct" | sed -e 's/^A/B/' -e 't flipped' -e 's/^./A/' -e ':flipped')
-"$CSV2" -update '1:6' "$flip" -i "$TMP/enc.csv" -o "$TMP/tamper.csv" 2>/dev/null
-assert_fails "T34b a tampered ciphertext fails to decrypt / 密文被竄改即解密失敗" -- \
-    "$CSV2" -decrypt status_notes -keyfile "$KEY" -i "$TMP/tamper.csv" -o "$TMP/x.csv"
+# The tamper is done with the SHELL, not with csv2, and the difference is the
+# whole case.
+#
+# It used to be `csv2 -update '1:6' "$flip"`, and that write is REFUSED -- a
+# raw value into a column the file declares transformed, a guard added later
+# and rightly. So `tamper.csv` was never created, `-decrypt` failed with
+# `cannot open input file`, and `assert_fails` reported PASS. The case could
+# not fail: with a real ciphertext, with an empty string, with nothing at all,
+# it passed the same way, and it has been passing that way since the guard
+# landed.
+#
+# On macOS it was worse still. The mutation was
+# `sed 's/^A/B/; t; s/^./A/'`, and BSD sed reads the text after `;` as the
+# label of the unlabeled `t`: every run printed `undefined label` and produced
+# an EMPTY string. Two independent reasons for the same green tick, neither of
+# them the AEAD.
+#
+# So: build the tampered file here, byte for byte, and assert the MESSAGE.
+# `assert_fails` alone cannot tell an authentication failure from a missing
+# file -- which is exactly how this case spent months proving nothing.
+#
+# 這次竄改是用 shell 做的，不是用 csv2，而那個差別就是這整個案例。
+#
+# 原本是 `csv2 -update '1:6' "$flip"`，而那次寫入會被「拒絕」——把原始值寫進一個「檔案宣告為
+# 已轉換」的欄位，那是後來才加上的守衛，而且是對的。於是 `tamper.csv` 從來沒有被建立，
+# `-decrypt` 以「cannot open input file」失敗，而 `assert_fails` 回報 PASS。這個案例不可能失敗：
+# 給它真的密文、給它空字串、什麼都不給，它都以同一種方式通過。
+#
+# 在 macOS 上更糟：那段 `sed 's/^A/B/; t; s/^./A/'` 會被 BSD sed 讀成「分號後面是那個無標籤 `t`
+# 的標籤」，每次都印出 `undefined label` 並產生一個「空字串」。同一個綠勾有兩個各自獨立的理由，
+# 而其中沒有一個是 AEAD。
+#
+# 因此：在這裡逐位元組把被竄改的檔案造出來，並且斷言那則「訊息」。單靠 assert_fails 分不出
+# 「認證失敗」與「檔案不存在」——而那正是這個案例好幾個月什麼也沒有證明的原因。
+# A fixture of its own, whose encrypted column is the LAST one and holds no
+# quoted commas -- so the shell can find the ciphertext without parsing CSV,
+# which is the one thing a shell must never do to a csv2 fixture. On
+# TARGET_PACKAGES.csv the encrypted column is the sixth of seven and its
+# neighbours contain quoted commas: splitting that line on the last comma
+# tampers with `license` and `-decrypt status_notes` then SUCCEEDS, which is
+# the first way this rewrite got it wrong.
+# 這個案例有自己的 fixture：被加密的那一欄是「最後一欄」、而且不含帶引號的逗號——這樣 shell
+# 就能在不解析 CSV 的情況下找到密文，而「用 shell 解析 CSV」正是絕對不該對 csv2 的 fixture
+# 做的事。在 TARGET_PACKAGES.csv 上，被加密的是七欄中的第六欄，而它的鄰居含有帶引號的逗號：
+# 以「最後一個逗號」去切那一行，竄改到的是 `license`，而 `-decrypt status_notes` 會成功
+# ——那是這次改寫第一次弄錯的地方。
+# Its own NAMES too: $TMP/enc.csv belongs to T34a, T35 and T39, and writing
+# the small fixture over it made T35b and T39 fail on a file they never asked
+# for -- a shared name is a shared fixture whether or not anyone meant it to be.
+# 也用自己的「檔名」：$TMP/enc.csv 屬於 T34a、T35 與 T39，把這個小 fixture 寫在它上面，
+# 會讓 T35b 與 T39 對著一個它們從未要求過的檔案失敗——共用的名字就是共用的 fixture，
+# 不論有沒有人打算讓它共用。
+printf 'id,secret\n1,alpha\n2,beta\n' > "$TMP/t34src.csv"
+"$CSV2" -encrypt secret -keyfile "$KEY" -i "$TMP/t34src.csv" -o "$TMP/t34enc.csv" -t 2>/dev/null
+_t34_enc_line=$(sed -n 2p "$TMP/t34enc.csv")
+_t34_pre=${_t34_enc_line%,*}          # everything before the LAST comma
+_t34_ct=${_t34_enc_line##*,}          # secret is the last column in this fixture
+if [[ ${_t34_ct[1]} == A ]]; then
+    _t34_new="B${_t34_ct[2,-1]}"
+else
+    _t34_new="A${_t34_ct[2,-1]}"
+fi
+{
+    head -1 "$TMP/t34enc.csv"
+    print -r -- "${_t34_pre},${_t34_new}"
+    sed -n '3,$p' "$TMP/t34enc.csv"
+} > "$TMP/t34tamper.csv"
+if cmp -s "$TMP/t34enc.csv" "$TMP/t34tamper.csv"; then
+    bad "T34b the tamper changed nothing, so nothing is being tested / 這次竄改什麼也沒改，因此什麼也沒有被測試"
+else
+    _t34_msg=$("$CSV2" -decrypt secret -keyfile "$KEY" -i "$TMP/t34tamper.csv" -o "$TMP/t34x.csv" 2>&1)
+    _t34_rc=$?
+    if (( _t34_rc == 1 )) && [[ $_t34_msg == *"authentication failed"* ]]; then
+        ok "T34b a tampered ciphertext fails AUTHENTICATION, not something else / 被竄改的密文是「認證」失敗，不是別的失敗"
+    else
+        bad "T34b rc=$_t34_rc, message: ${_t34_msg%%$'\n'*} / rc 與訊息如上"
+    fi
+fi
 
 # T35 — encryption must not break the format it is applied to.
 assert_succeeds "T35a an encrypted file is still readable by csv2 / 加密後仍可被讀取" -- \

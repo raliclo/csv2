@@ -6864,3 +6864,59 @@ index MISMATCH: record 257: index says line 261, actual 258
 
 **兩行,同一個格點。** 已在文件裡補上那個「為什麼你多半只會看到一行」的理由——那是一份被竄改的
 sidecar 才會有的樣子,不是一個被改動的檔案通常會有的。
+
+---
+
+## IM. T34b「密文被竄改即解密失敗」——它不可能失敗,而且有兩個各自獨立的理由(2026-08-25 修正,T34b)
+
+不是盲測回合找到的:是使用者在 2026-08-24 的 `859c24c` 修了那段 `sed` 的可攜性之後,
+順著那個修正往下看才發現的。
+
+那個案例原本這樣製造「被竄改的密文」:
+
+```zsh
+ct=$(cell "$TMP/enc.csv" 1 6)
+flip=$(print -r -- "$ct" | sed 's/^A/B/; t; s/^./A/')
+"$CSV2" -update '1:6' "$flip" -i "$TMP/enc.csv" -o "$TMP/tamper.csv" 2>/dev/null
+assert_fails "T34b …" -- "$CSV2" -decrypt status_notes … -i "$TMP/tamper.csv" …
+```
+
+**理由一(所有平台):那次 `-update` 會被拒絕。**
+
+```console
+$ csv2 -update 1:6 "$flip" -i enc.csv -o tamper.csv
+csv2: -update 1:6 targets a column this file declares transformed; a raw value written
+      there cannot be decrypted, and it takes the whole column with it …
+```
+
+那道守衛是後來才加上的,而且是對的。於是 **`tamper.csv` 從來沒有被建立**,而下一行的
+`-decrypt` 失敗的理由是 `cannot open input file: tamper.csv`——`assert_fails` 只看結束狀態,
+於是回報 PASS。**給它真的密文、給它空字串、什麼都不給,它都以同一種方式通過。**
+
+**理由二(macOS):那段 sed 從來沒有跑起來過。**
+
+```console
+$ print -r -- 'AbCd' | sed 's/^A/B/; t; s/^./A/'
+sed: 2: "s/^A/B/; t; s/^./A/": undefined label '; s/^./A/'
+（輸出為空）
+```
+
+BSD sed 把分號之後的文字讀成那個無標籤 `t` 的「標籤」。因此在 macOS 上 `flip` 一直是空字串
+——而那個空字串又被上面那道守衛擋下。**同一個綠勾,兩個獨立的理由,而其中沒有一個是 AEAD。**
+
+**修法有三處,而第三處是這次自己撞到的:**
+
+1. 竄改改用 **shell** 逐位元組造出那個檔案,不經過 csv2——那道守衛是對的,測試不該繞過它,
+   而是不該用它。
+2. 斷言那則**訊息**(`authentication failed`),不只是結束狀態。`assert_fails` 分不出
+   「認證失敗」與「檔案不存在」,而那正是這個案例好幾個月什麼也沒證明的原因。
+3. 給它**自己的 fixture 與自己的檔名**。第一次改寫時我用 `${line##*,}` 去取密文——而
+   `TARGET_PACKAGES.csv` 上被加密的是七欄中的第六欄,鄰居還含有帶引號的逗號,於是我竄改到的是
+   `license`,而 `-decrypt status_notes` **成功了**(rc=0、訊息為空)。改用一個「被加密的欄位就是
+   最後一欄、且不含引號逗號」的小 fixture 之後才對。第二次又撞到:那個小 fixture 寫在
+   `$TMP/enc.csv` 上面,於是 T35b 與 T39 對著一個它們從未要求過的檔案失敗——**共用的名字就是
+   共用的 fixture,不論有沒有人打算讓它共用。**
+
+**形狀:一個後來加上的、正確的守衛,讓一個更早的測試的「準備步驟」失效,而那個測試的斷言太寬,
+察覺不到自己已經什麼都沒在測。** 這與 T43h、T135b、T145e、T151e、T164d 是同一族——
+「一個分不出它當初要分辨的那兩件事的測試」——而這一個是其中活得最久的。
