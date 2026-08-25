@@ -7582,3 +7582,117 @@ $ cd /Volumes/LinuxCS/sos/csv2 && ./install.zsh --dry-run | head -4    # 有 cd
 **形狀:一個被讀成程式輸出的環境產物。** 與這棵樹上其他幾次同族——每周用量上限、
 `/Volumes/LinuxCS` 中途卸載、重裝後的 WSL 缺一把預設金鑰。TOOL BROKEN 是最該先懷疑的那一類,
 而這一次它是空的。
+
+## JI. `--normalize` 會拿走一個命中,而 README 只描述它多加一個(2026-08-26 修正,T207a/b/c)
+
+第 76 回合,經親手重現。README 只說:
+
+> **`--normalize` applies to the search string too**, not only to the cells — so
+> a needle typed in NFC finds a cell stored in NFD.
+
+那是真的,而且是「變寬」。但那個折疊同樣作用在儲存格上:
+
+```console
+$ od -A n -c acc.csv | head -2
+   i  d  ,  w  o  r  d \n  1  ,  c  a  f  e \n  2
+   ,  c  a  f  é ** \n  3  ,  c  a  f  e  ́ ** \n      ← 第 3 筆是 NFD
+
+$ csv2 -contains cafe -i acc.csv
+1:2	word	cafe
+3:2	word	café          ← 找得到，因為 NFD 的位元組確實以 c-a-f-e 開頭
+
+$ csv2 -contains cafe --normalize -i acc.csv
+1:2	word	cafe          ← 那個命中不見了
+```
+
+兩個答案對它們各自被問的問題而言都是對的,而第二個幾乎總是人們想要的那一個。問題在於文件:
+**它把 `--normalize` 描述成只會讓網變寬**,而一支「為了保險而加上它」的腳本,會安靜地找到更少。
+第 76 回合的原話:「This is the one gap I would actually expect to cost someone data.」
+
+反方向的「變寬」仍然成立,因此這個旗標也不是單純比較窄:
+
+```console
+$ csv2 -contains café -i acc.csv               # NFC 的搜尋字串
+2:2	word	café
+$ csv2 -contains café --normalize -i acc.csv
+2:2	word	café
+3:2	word	café                                 ← 多了 NFD 那一格
+```
+
+修法:把「它也可能拿走一個命中」連同上面兩段實測寫進同一節,並明說「請決定你要的是哪一種比較,
+不要把這個旗標當保險加上去」。T207a/b/c。
+
+**形狀:一句只描述了單一方向的說明。** 那個機制是對稱的（兩邊都折疊）,而文字只講了其中一邊。
+
+## JJ. `.csv2` 儲存格裡的原始 tab 沒有被寫出來過(2026-08-26 修正,T207d/e)
+
+同一回合。README 把 `.csv2` 的跳脫列為 `\n`、`\r`、`\\`,並說儲存格不得含原始換行——對「鍵盤上
+緊鄰它們的那個字元」隻字未提。該回合的任務要求把「反斜線、tab、換行、雙引號」四個字元放進同一格,
+於是它只能靠實驗確立:
+
+```console
+$ csv2 -update 1:2 $'A\\B\tC' -i t.csv2 --in-place
+$ od -A n -c t.csv2 | tail -1
+   \  \  B \t  C \n                    ← 反斜線被跳脫成 \\，tab 原樣留著
+$ csv2 -get 1:2 -i t.csv2 | cmp - <(printf 'A\\B\tC'; printf '\n') && echo same
+same
+```
+
+tab 合法、原樣儲存、逐位元取回。會混淆的是:`-contains` 的定位報告**確實**會把 tab 跳脫成 `\t`
+——那是「一個命中要留在一行裡」的報告格式,不是檔案格式,而文件沒有把這兩件事分開講。
+
+修法:在那一段加上「tab 不需要跳脫,會以原始位元組儲存」,並說明為什麼只有那三個要跳脫,以及
+定位報告為何不同。T207d/e。
+
+**形狀:一份「列舉了三項」的清單,讀者需要的是第四項。** 與 JE（install.zsh 列了兩個選項、漏了
+兩個）同族——列出一部分比一個都不列更糟,因為它讀起來像完整的。
+
+## JK. 「管線沒有任何特別之處」——而其實有四件事不一樣(2026-08-26 修正,T207f/g)
+
+同一回合。「在管線裡」那一節的開場白是:
+
+> `-si` and `-so` compose with every verb; **there is nothing special about a
+> pipeline except that stdin has no suffix**
+
+該回合量出至少四件事不一樣,其中兩件用「同樣的位元組」就能顯示:
+
+```console
+$ csv2 -contains xyz -i big.csv -debug          # 檔案，且旁邊有索引
+DEBUG parallel: 8 chunks, 10 workers
+$ cat big.csv | csv2 -si --headers 1 -contains xyz -debug
+DEBUG single-threaded: stdin                     ← 同樣的位元組，另一條路徑
+$ cat big.csv | csv2 -si --headers 1 --build-index
+csv2: --build-index needs -i FILE                exit 1
+```
+
+不一樣的四件事:沒有平行搜尋(分塊要 seek)、索引不讀也不寫、`--build-index` 被拒絕、輸出以
+64 KiB 區塊緩衝而非逐行。最後一項文件本來就在下一段講了,而那正好使開場白更容易被信——它被
+它自己的下一段打臉,而讀者帶進管線的是開場那一句。
+
+修法:刪掉那個宣稱,改成一張列出四項差異的表。T207f/g。
+
+**形狀:一句「總括的否定」,寫在一段其實有四個例外的說明前面。**
+
+## JL. `-log` 的「軌跡沒有記下什麼」表格自稱完整,而它漏了最嚴重的那一項(2026-08-26 修正,README)
+
+同一回合。那張表列了五項,而該回合找到第六項,並指出它比那五項更嚴重:
+
+```console
+$ printf 'k,note\r\n1,alpha\r\n2,beta\r\n' > crlf.csv
+$ csv2 -update 1:2 ALPHA -i crlf.csv --in-place -log t.log
+$ grep update t.log
+INFO  update 1:note: "alpha" -> "ALPHA"          ← 一格
+$ diff <(...) crlf.csv | wc -l
+（每一行都變了——因為一次編輯會把每個紀錄分隔符重寫成 LF）
+```
+
+那五項讓軌跡「少了脈絡」;這一項讓軌跡**低報那次變更**。一個拿著軌跡去和 diff 對帳的人對不起來,
+而軌跡不會給他任何提示。這個行為在四節之外有記載（「對 CRLF 輸入做校驗和或 diff 都是錯的」）,
+但那張「自稱是清單」的表格沒有它。
+
+第二項遺漏,同樣不在表上:**沒有「是誰」**。軌跡裡沒有任何東西說出是哪個帳號執行的。
+
+修法:兩項都加進那張表,並在 CRLF 那一列指回下方那段附註。
+
+**形狀:一張自我宣稱完整的清單。** 一份「不完整但沒有自稱完整」的清單只是缺了東西;一份自稱是
+「第二個讀者還原不出來的全部」的清單漏了一項,會讓人以為自己已經知道全部的風險。

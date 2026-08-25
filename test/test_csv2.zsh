@@ -11233,6 +11233,88 @@ else
     ok "T206e and leaves none behind below the threshold, so it stays expensive / 而且在門檻以下不會留下一份，因此它會一直是貴的"
 fi
 
+# ---------------------------------------------------------------------
+# T207 -- four claims round 76 made the README state, each of which it had to
+# establish by experiment because the document did not say.
+#
+#   a/b  --normalize can REMOVE a hit. The README described it only as
+#        widening the net; the fold applies to the cell too, so a match that
+#        existed only in the stored bytes stops existing. A script adding the
+#        flag defensively finds LESS, silently.
+#   c    a raw tab in a .csv2 cell is legal and stored raw. The escapes were
+#        listed as \n, \r, \\ and the character next to them on the keyboard
+#        went unmentioned.
+#   d    a stream is not a file with a different name: no index is consulted,
+#        and --build-index is refused. The pipeline section used to open
+#        "there is nothing special about a pipeline except that stdin has no
+#        suffix".
+#
+# T207 —— 第 76 回合讓 README 寫出來的四件事，每一件它都得靠實驗確立，因為文件沒有說。
+#   a/b  --normalize 可能「拿走」一個命中。README 只把它描述成「把網撒寬」；而那個折疊同樣
+#        作用在儲存格上，於是一個「只存在於已儲存位元組裡」的相符會就此不存在。一支為了保險
+#        而加上這個旗標的腳本，會安靜地找到更少。
+#   c    .csv2 儲存格裡的原始 tab 是合法的，而且原樣儲存。
+#   d    串流不是「換了個名字的檔案」：索引不會被採用，`--build-index` 會被拒絕。
+# ---------------------------------------------------------------------
+echo
+echo "--- T207: what a stream, a tab and a fold actually do / T207：串流、tab 與折疊實際上做了什麼 ---"
+
+# NFD café: c a f e U+0301. Its bytes literally begin with `cafe`, which is why
+# a byte-wise search finds it and a normalising one does not.
+# NFD 的 café：c a f e U+0301。它的位元組確實以 `cafe` 開頭——這正是逐位元搜尋找得到它、
+# 而正規化的搜尋找不到的原因。
+{
+    print -r -- "id,word"
+    print -r -- "1,cafe"
+    printf '2,caf\xc3\xa9\n'              # NFC
+    printf '3,cafe\xcc\x81\n'             # NFD
+} > "$TMP/t207.csv"
+
+_t207_plain=$("$CSV2" -contains cafe -i "$TMP/t207.csv" | wc -l | tr -d ' ')
+_t207_norm=$("$CSV2" -contains cafe --normalize -i "$TMP/t207.csv" | wc -l | tr -d ' ')
+assert_eq "$_t207_plain" "2" \
+    "T207a a byte-wise search for cafe finds the NFD cell too / 逐位元搜尋 cafe 也會找到那個 NFD 儲存格"
+assert_eq "$_t207_norm" "1" \
+    "T207b and --normalize takes that hit away / 而 --normalize 會把那個命中拿走"
+
+# The widening the README always described still happens, in the other
+# direction -- so the flag is not simply narrower.
+# README 一直在描述的那個「變寬」仍然存在，只是方向相反——因此這個旗標並不是單純比較窄。
+_t207_nfc=$(printf 'caf\xc3\xa9')
+_t207_w1=$("$CSV2" -contains "$_t207_nfc" -i "$TMP/t207.csv" | wc -l | tr -d ' ')
+_t207_w2=$("$CSV2" -contains "$_t207_nfc" --normalize -i "$TMP/t207.csv" | wc -l | tr -d ' ')
+assert_eq "$_t207_w1 $_t207_w2" "1 2" \
+    "T207c an NFC needle finds one cell, and two with --normalize / NFC 的搜尋字串找到一格，加上 --normalize 是兩格"
+
+# A raw tab in a .csv2 cell: legal, stored raw, and byte-identical coming back.
+# .csv2 儲存格裡的原始 tab：合法、原樣儲存，取回時逐位元相同。
+print -r -- "k,v" > "$TMP/t207.csv2"
+print -r -- "鍵,值" >> "$TMP/t207.csv2"
+print -r -- "a,b" >> "$TMP/t207.csv2"
+_t207_val=$'A\\B\tC'
+"$CSV2" -update 1:2 "$_t207_val" -i "$TMP/t207.csv2" --in-place
+if grep -q $'\t' "$TMP/t207.csv2"; then
+    ok "T207d a tab is stored raw in a .csv2 cell, not escaped / .csv2 儲存格裡的 tab 是原樣儲存，不是跳脫的"
+else
+    bad "T207d the tab did not survive as a raw byte / 那個 tab 沒有以原始位元組的形式存活"
+fi
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t207.csv2")" "$_t207_val" \
+    "T207e and the value comes back exactly / 而那個值原樣取回"
+
+# A stream does not use the sidecar beside the file its bytes came from.
+# 串流不會使用「那些位元組來自的那個檔案」旁邊的 sidecar。
+{
+    print -r -- "id,v"
+    for _i in {1..2000}; do printf '%d,v%d\n' $_i $_i; done
+} > "$TMP/t207big.csv"
+CSV2_INDEX_MIN_BYTES=10 "$CSV2" --build-index -i "$TMP/t207big.csv" > /dev/null
+_t207_file=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$TMP/t207big.csv" -debug 2>&1 | grep -c 'index hit')
+_t207_pipe=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -si --headers 1 -mid 1500,1500 -debug < "$TMP/t207big.csv" 2>&1 | grep -c 'index hit')
+assert_eq "$_t207_file $_t207_pipe" "1 0" \
+    "T207f the same bytes use the index as a file and not as a stream / 同樣的位元組，以檔案形式會用索引，以串流形式不會"
+assert_fails "T207g --build-index is refused on a stream / 對串流執行 --build-index 會被拒絕" -- \
+    "$CSV2" -si --headers 1 --build-index < "$TMP/t207big.csv"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

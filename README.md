@@ -249,6 +249,15 @@ Both header rows must have the same field count as the data. A `.csv2` cell may
 not contain a raw newline — one record is always one line — so newlines inside
 values are written `\n`, carriage returns `\r` and backslashes `\\`.
 
+**A tab needs no escape and is stored raw.** Only the three above are escaped,
+because only those three would otherwise end the line or end an escape; a tab
+is an ordinary byte inside a `.csv2` cell and comes back exactly as it went in.
+(The locating report `-contains` prints does escape a tab, as `\t` — that is a
+report keeping one hit on one line, not the file format. Round 76 had to
+establish the file's behaviour by experiment, because this paragraph listed
+three escapes and said nothing about the character next to them on the
+keyboard.)
+
 ## Interface
 
 ```
@@ -853,6 +862,25 @@ a needle typed in NFC finds a cell stored in NFD. Storage is still never
 normalised; only the comparison is.
 `--normalize` affects Unicode normalisation only, not case.
 
+**And it can take a hit away, not only add one.** Because the fold applies to
+the cell as well, a match that existed only in the stored bytes stops existing:
+
+```console
+$ csv2 -contains cafe -i acc.csv          # no --normalize
+1:2  word  cafe
+3:2  word  café                            ← the NFD cell; its bytes literally
+                                             start c-a-f-e, then U+0301
+$ csv2 -contains cafe --normalize -i acc.csv
+1:2  word  cafe                            ← that hit is gone
+```
+
+Both answers are right for the question each was asked, and the second is the
+one you almost always want — an ASCII `cafe` is not the word `café`. But the
+paragraph above describes only the widening, and round 76 pointed out what
+follows from that: a script that adds `--normalize` defensively, expecting it
+to find strictly more, can silently find less. Decide which comparison you
+want; do not add the flag as insurance.
+
 **`--normalize` governs cell VALUES, not column names.** A column name is
 matched by canonical equivalence always: an NFC `café` typed on the command line
 finds a header stored as NFD, with or without the flag, because to everyone
@@ -1288,9 +1316,14 @@ out of it; it is not a reason to put the log somewhere careless.
 | the destination of a write | `wrote N records` names no file, and `-o` onto an OCCUPIED path destroys what was there while the trail reads exactly as it does for a new file |
 | that an index was TRUSTED | the one branch that can be silently wrong (see the sidecar section) says so under `-debug`, on stderr, and nowhere else |
 | what a search found | a `-contains` run logs its invocation only, so the address a later `-update` consumed has no provenance |
+| that every line ending in the file was rewritten | on a CRLF input the trail reads `update 1:note: "alpha" -> "ALPHA"` — one cell — while `diff` reports every line changed, because an edit rewrites each record separator to LF. This is the one that makes the trail UNDERSTATE the change rather than merely omit context, and a second reader reconciling the trail against a diff cannot do it. See the CRLF note further down: a checksum or a `diff` across an edit of a CRLF file is measuring the terminators |
+| who | nothing in the trail says which account ran it. Defensible for a single-host tool, and still the first question anyone asks of an audit trail |
 
 None of these is a defect on its own; together they are the reason the trail
-answers "what did this run do" and not "what happened to this file".
+answers "what did this run do" and not "what happened to this file". The last
+two were added on 2026-08-26; round 76 pointed out that a table presenting
+itself as the list of what a second reader cannot recover had better be
+complete, and that the CRLF one is worse than the five above it.
 
 ### Two numberings, and where they disagree
 
@@ -1511,14 +1544,24 @@ message says so instead of complaining about field counts. Asserted by T74.
 
 ### In a pipeline
 
-`-si` and `-so` compose with every verb; there is nothing special about a
-pipeline except that stdin has no suffix, so `--headers` has to say what the
-format is:
+`-si` and `-so` compose with every verb, and `--headers` has to say what the
+format is, because stdin has no suffix to declare it:
 
 ```console
 $ cat packages.csv | csv2 -si --headers 1 -contains busybox --filter -so
 busybox,1.37.0,"fork raliclo/busybox, branch develop",GPL-2.0
 ```
+
+**Four things ARE different in a pipeline**, and the sentence above used to
+claim otherwise ("there is nothing special about a pipeline except that stdin
+has no suffix"), which round 76 measured and disagreed with:
+
+| | |
+|---|---|
+| no parallel search | chunking needs to seek, so `-contains` on a stream is single-threaded whatever the size. The same bytes as a file with an index say `parallel: 8 chunks, 10 workers`; piped in they say `single-threaded: stdin` |
+| no index, read or written | a sidecar sitting beside the file the bytes came from is not consulted — a stream has no path and cannot seek |
+| `--build-index` is refused | it needs `-i FILE`; there is nothing to build a sidecar beside |
+| output is buffered by block, not by line | the paragraph below |
 
 **It streams, but stdout is buffered in 64 KiB blocks — not by line.** "Without
 buffering the whole file" is a statement about memory, and it is true: on a
