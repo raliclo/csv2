@@ -377,11 +377,17 @@ EDITING / 編輯
                         it arrived, not as it grows. See below -- the same three
                         numbers give a different file if you run them one at a
                         time
-  -append ROW           append at the end, with the record ending the file
-                        already uses -- CRLF into a CRLF file, LF into an LF
-                        one, decided from the file's last TERMINATOR and not
-                        from its last two bytes, which are the end of a VALUE
-                        when the file was cut off mid-record.
+  -append ROW           append at the end. WITH --in-place, and only there,
+                        the new record ends the way the file already does --
+                        CRLF into a CRLF file, LF into an LF one, decided from
+                        the file's last TERMINATOR and not from its last two
+                        bytes, which are the end of a VALUE when the file was
+                        cut off mid-record. With -o there is no append: the
+                        whole file is rewritten through the normal path, which
+                        emits LF, so a CRLF file comes out as LF like it does
+                        after any other edit. This entry promised the CRLF
+                        behaviour unconditionally until 2026-08-25; a blind
+                        round measured -o and got LF.
                         append at the end. O(1) in BYTES WRITTEN, not in time:
                         the whole file is read first, because a file whose last
                         record is incomplete cannot be safely appended to and
@@ -2115,7 +2121,7 @@ cannot be lowered can only be exercised by building a 16 MiB fixture.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `CSV2_INDEX_MIN_BYTES` | 16 MiB | below this, no index is read or written as a SIDE EFFECT. `--build-index` is an explicit request and writes one at any size |
+| `CSV2_INDEX_MIN_BYTES` | 16 MiB | gates WRITING only, and only the side-effect kind: below this, a rewriting edit and `-tail` do not leave a sidecar behind. READING is not gated at all — a sidecar that exists is consulted at any file size, which is what makes `--build-index` on a small file useful. `--build-index` is an explicit request and writes one at any size. The single sentence that used to be here read "no index is read or written as a SIDE EFFECT", which parses two ways and is false under one of them; a blind round measured a 33 KB file consulting its sidecar on 2026-08-25 |
 | `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | set above the file size to force the single-threaded path |
 | `CSV2_PARALLEL_MAX_BYTES` | 1 GiB | ceiling on what the in-flight chunks may hold. It governs the **output** fragments — one batch of them is kept so they can be written in chunk order, which is what makes parallel output byte-identical to single-threaded. The read side needs no ceiling: a worker reads its chunk 64 KiB at a time and never holds more. Lowering this holds fewer chunks in flight and the rest queue; `-debug` says so, with the numbers. **It is not a cap on the process's memory** — under an 8 MiB setting, peak RSS was still 58 MB, because the fixed working set is not part of what it governs |
 | `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | smaller values make a small file yield many chunks, so chunk boundaries are actually exercised |
@@ -2267,6 +2273,18 @@ Each of these is argued in full in [plan/plan.md](./plan/plan.md).
   every byte and writes nothing, because building an index is not free and a
   read was not asked to pay for one; the `--build-index` entry says the same
   thing from the other side. Asserted by T68.
+
+  This holds for the case the stamp CANNOT see too, but it did not until
+  2026-08-25. When the stamp accepts a sidecar whose offsets have drifted, the
+  seek lands somewhere that is not a record boundary — one byte early is enough
+  — and `-mid` then refused a file with no blank line in it, blaming a record
+  number and a line number both computed from the index that was wrong. Before
+  a seek is used, csv2 now parses one record at that byte and requires it to
+  have as many fields as the header; if it does not, the index is dropped and
+  the file is scanned. A mis-seek costs a scan, which is the whole bargain. It
+  can still be fooled — an offset landing at a plausible boundary parses fine,
+  and that is the known hole this heuristic does not close — but being fooled
+  can only ever cost a scan and never an answer. T204.
   **What the checksum is not:** it catches corruption — a flipped bit, a short
   write, a partially overwritten file — and is not a signature. Anyone who can
   rewrite the offsets can rewrite eight more bytes. It also cannot help when the

@@ -7333,3 +7333,130 @@ shell 執行到的其實是 `/opt/homebrew/bin/csv2`。它與剛裝的那份**�
 修法:身分用 `-ef`(同一個 device 與 inode),內容用雜湊,兩者不互相代替。
 
 **形狀:一個在相鄰問題之間被沿用的正確工具。** 這一次沿用的方向,恰好是它不成立的那一邊。
+
+## JB. 一份「戳記接受、偏移量已錯」的索引,會讓 `-mid` 拒絕一個完全正常的檔案,並指控資料(2026-08-25 修正,T204)
+
+第 74 回合盲測回報,經親手重現。README 的契約寫得很清楚,而且不只一處:
+
+> The index is always an optimisation and never a precondition.
+> Stale, truncated, corrupt or a version behind — all discarded in favour of a
+> scan, **none an error**.
+
+當 O(1) 戳記**拒絕**那份 sidecar 時,這條契約成立,實測確認過。問題出在戳記**接受**它、
+而偏移量已經不對的時候:
+
+```console
+$ { printf 'id,value\n'; i=1; while (( i <= 2000 )); do printf '%d,value%06d\n' $i $i; ((i++)); done } > sm.csv
+$ csv2 --build-index -i sm.csv
+index built: 2000 records, stride 256, 8 grid points
+
+$ python3 - <<'PY'                # 大小不變、mtime 還原到奈秒、頭尾 64 位元組不動
+import os
+st=os.stat('sm.csv'); d=open('sm.csv','rb').read()
+d=d.replace(b'\n500,value000500\n', b'\n500,value0005001\n')     # 長一個位元組
+d=d.replace(b'\n1800,value001800\n', b'\n180,value001800\n')     # 短一個位元組
+open('sm.csv','r+b').write(d); os.utime('sm.csv', ns=(st.st_atime_ns, st.st_mtime_ns))
+PY
+
+$ grep -c '^$' sm.csv
+0                                  ← 檔案裡沒有任何空白行
+
+$ csv2 -mid 1500,1500 -i sm.csv
+csv2: record 1281 (line 1282) is a blank line, and a blank line is not a record
+with 2 empty fields; remove it. A file that ends with two newlines has one
+$ echo $?
+1
+
+$ csv2 -mid 1500,1500 --no-index -i sm.csv
+1500,value001500                   ← 同一個檔案、同一個指令，正確且 exit 0
+```
+
+`-tail 1` 同樣:
+
+```console
+$ csv2 -tail 1 -i sm.csv
+csv2: record 1793 (line 1794) is a blank line ...          exit 1
+$ csv2 -tail 1 --no-index -i sm.csv
+2000,value002000                                            exit 0
+```
+
+`-debug` 說出了發生什麼事:
+
+```
+DEBUG index hit: record 1500 via grid point 1281 at byte 20662
+```
+
+那個位元組不是紀錄的開頭,是前一筆的終止符。解析器從一個 `\n` 開始讀,得到一個空白行,
+然後照規矩拒絕它。
+
+**兩件事各自都是缺陷:**
+
+1. **索引成了必要條件。** 一個索引造成的 mis-seek,把一個「有索引時比較快、沒索引時也會對」
+   的操作,變成了一個失敗的操作。契約說這不該發生。
+2. **那則訊息指控的是資料,而它裡面每一個事實都來自那份壞掉的索引。** 「record 1281」與
+   「line 1282」都是從錯誤的格點推導出來的;檔案裡沒有空白行,也沒有第 1281 筆的問題。
+   一個照著這則訊息去做的人,會在檔案裡找一個不存在的空白行——而問題在 sidecar 裡。
+
+`--verify-index` 抓得到,而且說得準確:
+
+```console
+$ csv2 --verify-index -i sm.csv
+index MISMATCH: record 513: index says byte 8093, actual 8094
+index MISMATCH: record 769: index says byte 12189, actual 12190
+```
+
+前提條件（大小相同、mtime 到奈秒相同、頭尾各 64 位元組相同）正是 README 已經記載、且由 T143
+釘住的那個已知缺口。因此這**不是**一個新的缺口,是那個已知缺口的一個「不只是安靜答錯」的
+新後果:README 一貫預測的是「安靜地給出錯一位的紀錄編號、exit 0」,而那個確實也重現得到;
+它從未說過同一種過期還有一個「大聲拒絕一個正常檔案」的形態。
+
+**形狀:一條「絕不成為必要條件」的規則,只在它被檢查出來的那條路徑上成立。** 與 IX、IG/IN
+同族——契約在「戳記拒絕」時被遵守,而在「戳記接受但內容已錯」時沒有。
+
+## JC. 一則拒絕開出的處方,照抄下來會得到另一個錯誤(2026-08-25 修正,T205a)
+
+第 74 回合順帶回報。把一個「長得像旗標」的值存進儲存格時:
+
+```console
+$ csv2 -update 1:2 -append -i t.csv --in-place
+csv2: -update -append: -append is a flag, and this position takes DATA. csv2 will
+not treat a flag as data. If the value really is -append, mark it as data with --:
+-update -- -append
+                    ^^^^^^^^^^^^^^^^^^ 照這樣打
+$ csv2 -update -- -append -i t.csv --in-place
+csv2: -update: expected r:c, got "-append"          ← 得到另一個錯誤
+```
+
+正確的形式是 `csv2 -update 1:2 -- -append`。那個位址在訊息被組出來之前就已經被消耗掉了,
+而訊息用 `\(flag) -- \(v)` 去重建一個指令——對只吃一個引數的動詞(`-encrypt COL`)這是對的,
+對 `-update r:c VALUE` 就少了中間那一個。
+
+修法:不要印一個它組不出來的完整指令。改成指出「把 `--` 放在那個值的正前面」,並只示範
+`-- -append` 那一段——那對每一個動詞都成立。
+
+**形狀:一個從「手邊的動詞」推廣出來的處方。** 與 FH、FN、IV 同族;這一次推廣的是引數的個數。
+
+## JD. `-append` 撞到撕裂的尾巴時,建議一個 `-append` 自己會拒絕的旗標(2026-08-25 修正,T205b)
+
+同一回合。
+
+```console
+$ printf 'a,b\n1,"oops\n' > q.csv
+$ csv2 -append '2,y' -i q.csv --in-place
+csv2: record 1: the input ends inside a quoted field -- the closing quote is
+missing. The record is incomplete; pass --truncate-partial to discard it.
+                                          ^^^^^^^^^^^^^^^^^^ 照這樣做
+$ csv2 -append '2,y' --truncate-partial -i q.csv --in-place
+csv2: --truncate-partial is refused with -append, whatever the file contains: ...
+      If the file does have a torn tail, write a clean copy first
+      (csv2 -r -t --truncate-partial -i FILE -o CLEAN) and append to that
+```
+
+第二則拒絕是對的,而且給了可用的做法,因此沒有資料處於風險中——但第一則把人送進一堵牆。
+那則訊息來自解析器,而解析器不知道自己是被哪一個動詞叫起來的;`--truncate-partial` 對
+`-r` 是對的建議,對 `-append` 不是。
+
+修法:`-append` 的那次前置掃描把這個錯誤接住,換成它自己那一版的處方(先寫乾淨副本,再對它
+追加)。解析器那一則不動——它對其他每一個動詞都是對的。
+
+**形狀:一則對「呼叫它的人是誰」一無所知的訊息,而處方恰好取決於那件事。**

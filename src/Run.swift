@@ -135,6 +135,63 @@ func readHeaderRows(path: String, format: Format, want: Int) throws -> [Record] 
     return headers
 }
 
+/// Does a record actually BEGIN at this byte?
+///
+/// A grid point whose offset has drifted by one lands on the previous record's
+/// terminator, and the parser then reads an empty line and refuses it -- with
+/// a message about a blank line, naming a record number and a line number both
+/// derived from the index that was wrong in the first place. On 2026-08-25 a
+/// file with no blank line in it was refused that way, exit 1, while the same
+/// command with `--no-index` returned the record. Recorded as JB.
+///
+/// The contract this restores is stated twice in the README and is the reason
+/// the index exists at all: it is an OPTIMISATION and never a PRECONDITION. A
+/// seek that cannot be trusted must cost a scan, not an answer.
+///
+/// The test is the cheapest one that is a real test: parse a single record
+/// from that byte and require it to have as many fields as the header. It can
+/// still be fooled -- an offset landing mid-record at a plausible boundary
+/// parses fine -- but it can only ever REJECT the index, so being fooled costs
+/// a scan and never an answer. That asymmetry is why field count is checked
+/// here rather than the cheaper "is the previous byte a newline", which the
+/// drifted-by-one case would also fail: this catches that AND more.
+///
+/// 一筆紀錄是不是真的從這個位元組開始？
+/// 一個偏移量漂了一個位元組的格點，會落在前一筆的終止符上，於是解析器讀到一個空行並拒絕它
+/// ——訊息講的是「空白行」，而它指名的紀錄號與行號，兩個都是從「一開始就錯的那份索引」推導
+/// 出來的。2026-08-25，一個裡面沒有任何空白行的檔案就是這樣被拒絕的（exit 1），而同一個指令
+/// 加上 `--no-index` 會把紀錄給你。記為 JB。
+/// 這裡要恢復的契約，在 README 裡寫了兩次，也正是索引之所以存在的理由：它是**最佳化**，
+/// 永遠不是**必要條件**。一個不能信任的 seek，代價應該是一次掃描，而不是一個答案。
+/// 檢查方式取的是「還算得上是檢查」裡最便宜的那個：從那個位元組解析出一筆紀錄，要求它的欄位
+/// 數與標頭相同。它仍然可能被騙——一個落在紀錄中間、看起來像邊界的偏移量會解析得很順利——但
+/// 它只可能「拒絕」索引，因此被騙的代價是一次掃描，永遠不是一個錯答案。正是這個不對稱，讓
+/// 這裡檢查欄位數而不是更便宜的「前一個位元組是不是換行」：那個漂一位的情況兩者都抓得到，
+/// 而這個還能多抓一些。
+func recordBeginsAt(path: String, offset: UInt64, format: Format,
+                    expectedFields: Int, truncatePartial: Bool) -> Bool {
+    guard expectedFields > 0 else { return true }
+    guard let src = try? ByteSource(path: path, chunkSize: 1 << 16, startAt: offset) else {
+        return true
+    }
+    defer { src.close() }
+    var fields: Int? = nil
+    let parser = RecordParser(format: format, truncatePartial: truncatePartial) { r in
+        fields = r.count
+        return false
+    }
+    // One chunk is enough to hold a record on any file this seek is worth
+    // doing on; if the record is longer than 64 KiB the parser simply has not
+    // finished and `fields` stays nil, which is treated as "cannot tell" --
+    // and "cannot tell" must not reject a working index.
+    // 一個 chunk 足以裝下「值得對它做這個 seek 的檔案」上的一筆紀錄；若一筆長過 64 KiB，
+    // 解析器只是還沒讀完，`fields` 維持 nil，那被當成「判斷不出來」——而「判斷不出來」不該
+    // 去否決一份能用的索引。
+    if let c = src.next() { try? parser.feed(c) }
+    guard let n = fields else { return true }
+    return n == expectedFields
+}
+
 /// Decides whether this call can seek instead of scan. The index only helps
 /// RANDOM access: `-r` and `-contains` read the whole file no matter what, so
 /// they neither use nor create one -- building an index for them is pure waste.
@@ -505,7 +562,15 @@ func runSelect(_ o: Options) throws {
     // 早已離開的寫入端。`csv2 -r -i fifo.csv` 對一條正要送來三行的串流，回報了
     // `expected 1 header row(s), found 0`——那是「空檔案」的訊息。
     var plan = try openInput(o)
-    let ip = planIndex(o, plan: plan, lower: lower, upper: upper)
+    var ip = planIndex(o, plan: plan, lower: lower, upper: upper)
+    // Kept so the index can be given up AFTER the plan has already rewritten
+    // them. `-tail N` becomes a record range using the index's own record
+    // count, and dropping the index without putting these back would leave the
+    // run selecting a window computed from the thing it just stopped trusting.
+    // 留著，是為了「計畫已經改寫過它們之後」還能放棄索引。`-tail N` 會用索引自己的紀錄總數
+    // 變成一個紀錄範圍，而放棄索引時若不把這些放回去，這次執行就會照著「一個由它剛剛決定
+    // 不再信任的東西算出來的視窗」去選取。
+    let preIndexLower = lower, preIndexUpper = upper
     var tailN = o.tail
     if ip.resumeOffset != nil, let l = ip.lower, let u = ip.upper {
         // The index turned `-tail N` into a range, so the ring buffer is no
@@ -520,8 +585,24 @@ func runSelect(_ o: Options) throws {
     var headers: [Record] = []
     if let off = ip.resumeOffset, let path = o.input {
         headers = try readHeaderRows(path: path, format: plan.format, want: plan.headerRows)
-        plan.source.close()
-        plan.source = try ByteSource(path: path, chunkSize: 1 << 16, startAt: off)
+        if recordBeginsAt(path: path, offset: off, format: plan.format,
+                          expectedFields: headers.first?.count ?? 0,
+                          truncatePartial: o.truncatePartial) {
+            plan.source.close()
+            plan.source = try ByteSource(path: path, chunkSize: 1 << 16, startAt: off)
+        } else {
+            // Nothing has been emitted yet, so giving up here costs a scan and
+            // nothing else. Later would be a different matter, which is why
+            // the check is here.
+            // 此時還沒有輸出過任何東西，因此在這裡放棄，代價就只是一次掃描。晚一點放棄就是
+            // 另一回事了——這正是這個檢查放在這裡的原因。
+            Logger.shared.log(.info, "index for \(path) points at byte \(off), which is not the start of a record; ignoring it and scanning")
+            ip = IndexPlan()
+            headers = []
+            lower = preIndexLower
+            upper = preIndexUpper
+            tailN = o.tail
+        }
     }
     defer { plan.source.close() }
 

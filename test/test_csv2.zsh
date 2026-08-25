@@ -10716,6 +10716,23 @@ else
     ok "T202d an LF file gains no CR / LF 檔案不會多出 CR"
 fi
 
+# With -o there is no append: the whole file is rewritten and comes out LF.
+# The flag's own entry promised the CRLF behaviour unconditionally until round
+# 74 measured this and got LF. The behaviour is deliberate -- every other edit
+# rewrites separators the same way -- so what was wrong was the sentence, and
+# this case is what keeps the corrected one honest.
+# 搭配 -o 時沒有「追加」這回事：整個檔案會被重寫，出來是 LF。那個旗標自己的條目把 CRLF 那個
+# 行為寫成無條件成立，直到第 74 回合實測 -o 拿到 LF。這個行為是刻意的——其他每一種編輯都以
+# 同樣方式重寫分隔符——因此錯的是那句話，而這個案例是用來讓改過的那句話保持誠實的。
+printf 'a,b\r\n1,x\r\n' > "$TMP/t202_o.csv"
+"$CSV2" -append '2,y' -i "$TMP/t202_o.csv" -o "$TMP/t202_o.out" -t
+_t202f=$(od -A n -c < "$TMP/t202_o.out" | tr -s ' ')
+if [[ $_t202f == *"\\r"* ]]; then
+    bad "T202f -o kept CR, and the README says it does not / -o 保留了 CR，而 README 說它不會"
+else
+    ok "T202f -o rewrites a CRLF file to LF, as every other edit does / -o 把 CRLF 檔案重寫成 LF，與其他每一種編輯相同"
+fi
+
 # And the index still describes the file afterwards -- the appended record's
 # line accounting has to survive a two-byte terminator.
 # 而索引在那之後仍然與檔案相符——被追加那一筆的行號計算必須撐得住一個兩位元組的終止符。
@@ -10878,6 +10895,195 @@ else
     fi
 fi
 
+# ---------------------------------------------------------------------
+# T204 -- a sidecar the O(1) stamp accepts, whose offsets have drifted, costs
+# a SCAN and not an answer.
+#
+# Round 74, defect JB. The contract is stated twice in the README and is the
+# reason the index exists: it is an optimisation and never a precondition.
+# That held whenever the stamp REJECTED a sidecar. When the stamp accepted one
+# whose offsets were off by a byte, the seek landed on the previous record's
+# terminator, the parser read an empty line, and `-mid` refused a file with no
+# blank line in it -- naming a record number and a line number both computed
+# from the index that was wrong. `--no-index` returned the record. An index had
+# become a precondition.
+#
+# The fixture must defeat the stamp, which is size + mtime to the nanosecond +
+# the first and last 64 bytes. So: lengthen one record and shorten a later one
+# by the same amount, in place, and put the mtime back.
+#
+# T204 —— 一份「戳記接受、偏移量已漂掉」的 sidecar，代價應該是一次掃描，而不是一個答案。
+# 第 74 回合，缺陷 JB。契約在 README 裡寫了兩次，也正是索引存在的理由：它是最佳化，永遠不是
+# 必要條件。而那條契約只在「戳記拒絕」時成立。
+# ---------------------------------------------------------------------
+echo
+echo "--- T204: a drifted index costs a scan, not an answer / T204：漂掉的索引代價是一次掃描，不是一個答案 ---"
+
+_t204=$TMP/t204.csv
+{
+    print -r -- "id,value"
+    for _i in {1..2000}; do printf '%d,value%06d\n' $_i $_i; done
+} > "$_t204"
+CSV2_INDEX_MIN_BYTES=10 "$CSV2" --build-index -i "$_t204" > /dev/null
+
+# The drift, and the mtime put back to the nanosecond. python3 is how the
+# suite already writes byte-exact fixtures; `touch -r` does not carry
+# nanoseconds everywhere, and where it does not this case would test the
+# stamp's mtime arm instead of its offsets.
+# 製造偏移，並把 mtime 還原到奈秒。這棵樹本來就用 python3 產生位元組精確的 fixture；
+# `touch -r` 不是每個平台都帶奈秒，而在不帶的平台上，這個案例會變成在測戳記的 mtime 那一支
+# 而不是它的偏移量。
+if command -v python3 > /dev/null 2>&1; then
+    python3 - "$_t204" <<'PYEOF'
+import os, sys
+p = sys.argv[1]
+st = os.stat(p)
+d = open(p, 'rb').read()
+a = (b'\n500,value000500\n',   b'\n500,value0005001\n')
+b = (b'\n1800,value001800\n', b'\n180,value001800\n')
+assert d.count(a[0]) == 1 and d.count(b[0]) == 1
+d = d.replace(a[0], a[1]).replace(b[0], b[1])
+f = open(p, 'r+b'); f.write(d); f.close()
+os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
+PYEOF
+
+    # The fixture is only a fixture if the stamp ACCEPTS it. If the stamp
+    # rejects it the case still passes -- and proves nothing, because the
+    # already-working path is the one it took. Say so rather than count it.
+    # 這個 fixture 只有在「戳記接受它」時才算數。若戳記拒絕它，這個案例仍然會通過——而且什麼
+    # 都沒證明，因為它走的是本來就正常的那條路。把這件事說出來，而不是把它算成一分。
+    _t204_hit=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$_t204" -debug 2>&1 | grep -c 'index hit')
+    if [[ $_t204_hit == 0 ]]; then
+        skipt "T204 the stamp rejected the drifted fixture, so the seek never happened / 戳記拒絕了這份 fixture，於是那個 seek 根本沒發生"
+        T204_SKIPPED=1
+    else
+        assert_eq "$(grep -c '^$' "$_t204")" "0" \
+            "T204a the fixture has no blank line to complain about / 這份 fixture 裡沒有任何可供指控的空白行"
+
+        _t204_got=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$_t204" 2>&1); _t204_rc=$?
+        _t204_want=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 --no-index -i "$_t204" 2>&1)
+        assert_eq "$_t204_got" "$_t204_want" \
+            "T204b -mid gives the same answer with the drifted index as without / -mid 有沒有那份漂掉的索引，答案相同"
+        assert_eq "$_t204_rc" "0" \
+            "T204c and does not turn a working file into a failure / 而且不會把一個正常的檔案變成一次失敗"
+
+        _t204_tail=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -tail 1 -i "$_t204" 2>&1)
+        _t204_tailw=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -tail 1 --no-index -i "$_t204" 2>&1)
+        assert_eq "$_t204_tail" "$_t204_tailw" \
+            "T204d -tail too, which reaches the index by a different route / -tail 也是，它是以另一條路徑走到索引的"
+
+        # And it says why, at INFO. A fallback nobody can see is a fallback
+        # nobody can tell from the index having worked.
+        # 而且它會在 INFO 說出原因。一次沒有人看得見的退路，與「索引本來就正常」分辨不出來。
+        _t204_said=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$_t204" -debug 2>&1)
+        case $_t204_said in
+            *"is not the start of a record"*)
+                ok "T204e and says which byte it gave up on / 並說出它是在哪個位元組放棄的" ;;
+            *) bad "T204e the fallback was silent: $_t204_said / 那次退路是無聲的" ;;
+        esac
+    fi
+else
+    skipt "T204 needs python3 to write the drifted fixture / 需要 python3 來產生這份 fixture"
+    T204_SKIPPED=1
+fi
+
+# A GOOD index must still be used -- a fallback that fires every time is not a
+# fallback, it is a deletion of the feature.
+# 一份「好的」索引仍然必須被採用——一個每次都觸發的退路不是退路，是把這個功能刪掉。
+CSV2_INDEX_MIN_BYTES=10 "$CSV2" --build-index -i "$_t204" > /dev/null
+_t204_good=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$_t204" -debug 2>&1 | grep -c 'index hit')
+assert_eq "$_t204_good" "1" \
+    "T204f a good index is still used / 一份好的索引仍然會被採用"
+_t204_fell=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$_t204" -debug 2>&1 | grep -c 'is not the start of a record')
+assert_eq "$_t204_fell" "0" \
+    "T204g and does not fall back when it does not have to / 而且在不必要時不會走退路"
+
+# Reading a sidecar is NOT gated by CSV2_INDEX_MIN_BYTES; only side-effect
+# WRITING is. The env-var table said "no index is read or written as a SIDE
+# EFFECT", which parses two ways and is false under one of them -- round 74
+# measured a 33 KB file consulting its sidecar. Note the absence of any
+# CSV2_INDEX_MIN_BYTES here: this runs at the 16 MiB default, on a 33 KB file.
+# 「讀」sidecar 不受 CSV2_INDEX_MIN_BYTES 管，只有「副作用式的寫」受它管。環境變數那張表原本
+# 寫的是「不會以副作用的方式讀寫索引」，那句話有兩種讀法，其中一種是錯的——第 74 回合實測到一個
+# 33 KB 的檔案採用了它的 sidecar。注意這裡沒有設 CSV2_INDEX_MIN_BYTES：它跑在 16 MiB 的預設值上，
+# 而檔案是 33 KB。
+rm -f "$_t204.index"
+"$CSV2" --build-index -i "$_t204" > /dev/null
+_t204_small=$("$CSV2" -mid 1500,1500 -i "$_t204" -debug 2>&1 | grep -c 'index hit')
+assert_eq "$_t204_small" "1" \
+    "T204h a sidecar is read below CSV2_INDEX_MIN_BYTES / 在 CSV2_INDEX_MIN_BYTES 以下，sidecar 仍然會被讀"
+# And still not WRITTEN as a side effect down there.
+# 而在那個大小以下，仍然不會以副作用的方式「寫」出一份。
+rm -f "$_t204.index"
+"$CSV2" -tail 1 -i "$_t204" > /dev/null
+if [[ -f $_t204.index ]]; then
+    bad "T204i -tail built a sidecar below the threshold / -tail 在門檻以下建了一份 sidecar"
+else
+    ok "T204i and none is written as a side effect below it / 而在門檻以下不會以副作用寫出一份"
+fi
+
+# ---------------------------------------------------------------------
+# T205 -- a refusal's prescription has to be runnable.
+#
+# Round 74, JC and JD. Two refusals told the reader exactly what to do and the
+# instruction did not work: one printed a whole command reconstructed from a
+# verb that takes two arguments as though it took one, and the other suggested
+# a flag that the verb it was refusing rejects outright.
+#
+# What these assert is not the wording. It is that the fix each message
+# prescribes, run verbatim, succeeds.
+#
+# T205 —— 一則拒絕開出的處方，必須是跑得起來的。
+# 第 74 回合，JC 與 JD。兩則拒絕都明確告訴讀者該怎麼做，而那個指示行不通：一則把「吃兩個
+# 引數的動詞」當成吃一個，重建出一整個指令；另一則建議了一個「那個動詞本身會拒絕」的旗標。
+# 這裡斷言的不是措辭，而是「照著它的處方逐字執行會成功」。
+# ---------------------------------------------------------------------
+echo
+echo "--- T205: the fix a refusal prescribes / T205：拒絕所開出的處方 ---"
+
+printf 'a,b\n1,x\n' > "$TMP/t205.csv"
+# The refusal must not print a command that is missing an argument.
+# 那則拒絕不得印出一個「少了一個引數」的指令。
+_t205_msg=$("$CSV2" -update 1:2 -append -i "$TMP/t205.csv" --in-place 2>&1)
+case $_t205_msg in
+    *"-update -- -append"*)
+        bad "T205a prescribes a command with the address dropped / 開出的指令少了那個位址" ;;
+    *"-- -append"*)
+        ok "T205a says where -- goes, not a command it cannot build / 它說的是 -- 放在哪裡，而不是一個它組不出來的指令" ;;
+    *) bad "T205a got: $_t205_msg / 實得如上" ;;
+esac
+# And the form it points at works.
+# 而它所指的那個形式是可用的。
+assert_succeeds "T205b and that form stores the value / 而那個形式存得進去" -- \
+    "$CSV2" -update 1:2 -- -append -i "$TMP/t205.csv" --in-place
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t205.csv")" "-append" \
+    "T205c the cell holds the flag-shaped value / 那一格存的就是那個長得像旗標的值"
+
+# -append onto a torn tail: the recipe must not name a flag -append refuses.
+# -append 撞到撕裂的尾巴：處方不得指名一個 -append 會拒絕的旗標。
+printf 'a,b\n1,"oops\n' > "$TMP/t205torn.csv"
+_t205_torn=$("$CSV2" -append '2,y' -i "$TMP/t205torn.csv" --in-place 2>&1)
+case $_t205_torn in
+    *"write a clean copy first"*)
+        ok "T205d the torn-tail refusal gives -append's own recipe / 撕裂尾巴的拒絕給的是 -append 自己那一版的處方" ;;
+    *"pass --truncate-partial to discard it"*)
+        bad "T205d sent the reader at a flag -append refuses / 把讀者送去用一個 -append 會拒絕的旗標" ;;
+    *) bad "T205d got: $_t205_torn / 實得如上" ;;
+esac
+# Every other verb still gets the parser's own message, which is right for them.
+# 其他每一個動詞仍然拿到解析器自己的那則訊息，那對它們是對的。
+_t205_read=$("$CSV2" -r -t -i "$TMP/t205torn.csv" 2>&1)
+case $_t205_read in
+    *"pass --truncate-partial to discard it"*)
+        ok "T205e and -r still gets the advice that works for -r / 而 -r 仍然拿到「對 -r 有效」的那個建議" ;;
+    *) bad "T205e got: $_t205_read / 實得如上" ;;
+esac
+# The recipe, run verbatim.
+# 把那個處方逐字執行一次。
+"$CSV2" -r -t --truncate-partial -i "$TMP/t205torn.csv" -o "$TMP/t205clean.csv" 2>/dev/null
+assert_succeeds "T205f and appending to the clean copy works / 而對那份乾淨副本追加是可行的" -- \
+    "$CSV2" -append '2,y' -i "$TMP/t205clean.csv" --in-place
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
@@ -10984,6 +11190,7 @@ fi
 (( ${T161_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T203_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T203_BASH_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T204_SKIPPED:-0} )) && (( want_skip += 1 ))
 # T166d needs python3 to rebuild the index checksum after bending a line. The
 # guest's busybox userland has no python3, and that is a property of the image
 # rather than of the platform's name -- so it is recorded by the case, like

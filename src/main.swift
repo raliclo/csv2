@@ -334,8 +334,19 @@ func parseArgs(_ argv: [String]) throws -> Options {
                 // 「不會把一個旗標寫進你的檔案」是為編輯動詞寫的，卻被每一個動詞共用，
                 // 於是 `-contains -r` 用一句關於「寫入」的話去回答一次「搜尋」。兩種情況下
                 // 這條拒絕都是對的；不同的是它在保護什麼，而現在的措辭說的是兩者共通的那一半。
-                "\(flag) \(v): \(v) is a flag, and this position takes DATA. csv2 will not treat a flag as data. If the value really is \(v), mark it as data with --: \(flag) -- \(v)",
-                "\(flag) \(v)：\(v) 是一個旗標，而這個位置要的是「資料」。csv2 不會把一個旗標當成資料。若這個值真的就是 \(v)，請用 -- 把它標成資料：\(flag) -- \(v)")
+                // The prescription used to be a whole command, `\(flag) -- \(v)`,
+                // and it was runnable only for the verbs that take ONE argument.
+                // `-update` takes r:c and then the value, so the address had
+                // already been consumed by the time this ran, and typing the
+                // suggestion back gave `-update: expected r:c, got "-append"`.
+                // It now shows where `--` goes rather than reconstructing a
+                // command it cannot see all of. Round 74, JC.
+                // 這個處方原本是一整個指令 `\(flag) -- \(v)`，而它只有在「吃一個引數」的動詞上
+                // 才跑得起來。`-update` 先吃 r:c、再吃值，因此走到這裡時那個位址早就被消耗掉了，
+                // 把建議照打回去會得到 `-update: expected r:c, got "-append"`。現在它指出 `--`
+                // 該放在哪裡，而不是去重建一個它看不全的指令。第 74 回合，JC。
+                "\(flag) \(v): \(v) is a flag, and this position takes DATA. csv2 will not treat a flag as data. If the value really is \(v), put -- immediately BEFORE it, leaving everything else where it is: ... -- \(v) ...",
+                "\(flag) \(v)：\(v) 是一個旗標，而這個位置要的是「資料」。csv2 不會把一個旗標當成資料。若這個值真的就是 \(v)，請把 -- 放在它的「正前面」，其餘一切位置不變：... -- \(v) ...")
         }
         dataIsLiteral = false
         // argv[0] is the program, and `argv` here is CommandLine.arguments
@@ -1995,7 +2006,24 @@ func validateBeforeAppend(path: String, format: Format, headerRows: Int,
     // run even though nothing else here needs it.
     // finish() 才是回報「檔案結束在引號欄位內」的地方，因此即使此處沒有別的東西需要它，
     // 它也必須被執行。
-    if !parser.stopped { try parser.finish() }
+    // The parser's own message for a file ending inside a quoted field says
+    // "pass --truncate-partial to discard it" -- correct for every verb except
+    // this one, which refuses that flag outright. The parser cannot know who
+    // called it; this does, so it says the thing that works here. Round 74, JD.
+    // 解析器對「檔案結束在引號欄位內」的訊息說「要丟棄它請給 --truncate-partial」——那對每一個
+    // 動詞都對，除了這一個，而這一個會直接拒絕那個旗標。解析器不知道是誰叫它的；這裡知道，
+    // 因此由這裡說出「在這裡行得通」的那句話。第 74 回合，JD。
+    do {
+        if !parser.stopped { try parser.finish() }
+    } catch {
+        let m = "\(error)"
+        if m.contains("ends inside a quoted field") && !truncatePartial {
+            throw fault(
+                "the file ends inside a quoted field -- the closing quote is missing, so its last record is incomplete and -append cannot add after it. --truncate-partial is refused with -append (they contradict each other), so write a clean copy first: csv2 -r -t --truncate-partial -i \(path) -o CLEAN, and append to that.",
+                "這個檔案結束在引號欄位內——缺少收尾的引號，因此它的最後一筆不完整，-append 無法接在它後面。--truncate-partial 與 -append 併用會被拒絕（兩者互相矛盾），所以請先寫出一份乾淨的複本：csv2 -r -t --truncate-partial -i \(path) -o CLEAN，再對那一份追加。")
+        }
+        throw error
+    }
     if let e = pending { throw e }
     lastTerminatorWasCRLF?.pointee = parser.lastTerminatorWasCRLF
     return lineFeeds
