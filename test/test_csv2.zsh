@@ -10437,6 +10437,199 @@ assert_contains "$_t196" "more chars" \
 assert_contains "$("$CSV2" -hash NOPE -i "$TMP/t196w.csv" -o "$TMP/t196wo.csv" -t 2>&1)" "and 28 more" \
     "T196c a 40-column file lists twelve and counts the rest / 40 欄的檔案列出十二個，其餘用數的"
 
+
+# ---------------------------------------------------------------------
+# T197 -- the header rows must agree about protection.
+#
+# Round 72. Every guard that asks "does the file's own header declare this
+# column transformed" asked row 0a. A `.csv2` whose 0b carries `:enc:` and
+# whose 0a does not walked past all of them: `-update` wrote plaintext into an
+# encrypted column, `-insert` was accepted, `--json`'s meta said nothing was
+# protected, and `-hash` did what the README calls the worst thing this tool
+# can do -- hashed the CIPHERTEXT and overwrote the `:enc:` marker together
+# with its salt, at rc=0, on a file whose Chinese header row still said
+# `:enc:`.
+#
+# Reading both rows and taking the union would fix the misses and leave the
+# file incoherent. Refusing is what the rest of this program does when two
+# sources disagree.
+#
+# T197 —— 兩列標頭對「保護」必須說同一件事。
+# 第 72 回合。每一道「這個檔案自己的標頭有沒有宣告這一欄已被轉換」的守衛問的都是 0a 列。
+# 一個 0b 帶著 `:enc:`、0a 沒有的 `.csv2`，從它們全部旁邊走了過去。
+# ---------------------------------------------------------------------
+echo
+echo "--- T197: two header rows, one answer / T197：兩列標頭，一個答案 ---"
+
+printf 'pkg,ver,secret\n套件,版本,機密\nzlib,1.3,s1\nzstd,1.5,s2\n' > "$TMP/t197.csv2"
+"$CSV2" -encrypt secret -keyfile "$KEY" -i "$TMP/t197.csv2" -o "$TMP/t197e.csv2" -t 2>/dev/null
+
+# Strip the marker from row 0a only, leaving 0b declaring the column encrypted.
+# Done with the shell: this is a state a person produces by tidying the English
+# header, and no csv2 command can make it.
+# 只把 0a 那一列的標記拿掉，讓 0b 仍然宣告該欄已加密。用 shell 做：這是一個「有人把英文標頭
+# 整理乾淨」就會產生的狀態，而沒有任何 csv2 指令造得出它。
+{
+    _t197_a=$(head -1 "$TMP/t197e.csv2")
+    print -r -- "${_t197_a%%,*},${${_t197_a#*,}%%,*},secret"
+    sed -n '2,$p' "$TMP/t197e.csv2"
+} > "$TMP/t197bad.csv2"
+
+if head -2 "$TMP/t197bad.csv2" | grep -q ':enc:'; then
+    ok "T197a the fixture really has the marker on one row only / 這個 fixture 確實只有一列帶著標記"
+else
+    bad "T197a the fixture lost the marker entirely, so nothing is being tested / 這個 fixture 把標記整個弄丟了，因此什麼也沒有被測試"
+fi
+
+for _verb in "-r -t" "-update 1:secret NEW" "-insert 1 p,v,raw" "-hash secret --yes"; do
+    assert_fails "T197b [$_verb] refuses a file whose header rows disagree / [$_verb] 拒絕一個兩列標頭互相矛盾的檔案" -- \
+        "$CSV2" ${=_verb} -i "$TMP/t197bad.csv2" -o "$TMP/t197out.csv2" -t
+done
+assert_contains "$("$CSV2" -r -t -i "$TMP/t197bad.csv2" 2>&1)" "disagree about column 3" \
+    "T197c and the message names the column and both rows / 而訊息指出是哪一欄、以及兩列各說了什麼"
+
+# The properly marked file is untouched by all of this.
+# 標記正確的那個檔案完全不受影響。
+assert_succeeds "T197d a file marked on both rows still reads / 兩列都有標記的檔案仍然讀得回來" -- \
+    "$CSV2" -r -t -i "$TMP/t197e.csv2" -so
+assert_succeeds "T197e and still decrypts / 也仍然解得開" -- \
+    "$CSV2" -decrypt all -keyfile "$KEY" -i "$TMP/t197e.csv2" -o "$TMP/t197dec.csv2" -t
+
+# ---------------------------------------------------------------------
+# T198 -- -log naming the keyfile.
+#
+# Round 72, and the worst of the six pairs: the invocation line is appended to
+# the key BEFORE the key is derived, so the run encrypts with "the original
+# bytes plus one log line" -- a value that existed for a few milliseconds and
+# was never written anywhere as such. The file on disk is then one line too
+# long and any backup one line too short, and neither decrypts. rc=0, nothing
+# on either stream.
+#
+# T198 —— `-log` 指向金鑰檔。
+# 第 72 回合，也是六對裡最糟的一對：呼叫紀錄在金鑰被推導「之前」被追加到那把金鑰上。
+# ---------------------------------------------------------------------
+echo
+echo "--- T198: -log onto the key / T198：-log 寫到金鑰上 ---"
+
+printf 'pkg,note\nzlib,first\n' > "$TMP/t198.csv"
+cp "$KEY" "$TMP/t198key.bin"
+cp "$TMP/t198key.bin" "$TMP/t198key.keep"
+
+assert_fails "T198a -log naming the keyfile is refused / -log 指向金鑰檔會被拒絕" -- \
+    "$CSV2" -encrypt note -keyfile "$TMP/t198key.bin" -i "$TMP/t198.csv" -o "$TMP/t198e.csv" -t \
+        -log "$TMP/t198key.bin"
+assert_same "$TMP/t198key.bin" "$TMP/t198key.keep" \
+    "T198b and the key is byte-for-byte what it was / 而那把金鑰逐位元組不變"
+assert_succeeds "T198c while a log of its own still works / 而寫到它自己的 log 檔仍然可用" -- \
+    "$CSV2" -encrypt note -keyfile "$TMP/t198key.bin" -i "$TMP/t198.csv" -o "$TMP/t198e2.csv" -t \
+        -log "$TMP/t198.log"
+
+# ---------------------------------------------------------------------
+# T199 -- a body with CR line endings under a header that ends properly.
+#
+# Round 66 moved the CR test to the header row, which is exact for a file whose
+# lines all end in CR. Round 72 found the file that test cannot see: an LF
+# header over a legacy body, which `(echo a; cat old_mac_body) > f.csv`
+# produces. It read as ONE record at rc=0 with `records:1` -- every count in
+# the file wrong by the number of lines in it.
+#
+# The new test is the last byte: a file that ends on a bare CR is refused, one
+# that ends with a newline is not, whatever its records contain.
+#
+# T199 —— 一個「標頭正常結束、內文以 CR 分行」的檔案。
+# 第 66 回合把 CR 的判斷移到標頭列，那對「每一行都以 CR 結尾」的檔案是精確的。第 72 回合
+# 找到了那個判斷看不見的檔案：LF 標頭配上一段舊式內文。
+# ---------------------------------------------------------------------
+echo
+echo "--- T199: a CR body under an LF header / T199：LF 標頭配 CR 內文 ---"
+
+printf 'a\n1\r2\r3\r' > "$TMP/t199_one.csv"
+printf 'a,b\n1,x\r2,y\r3,z\r' > "$TMP/t199_two.csv"
+printf 'a,b\n1,x\r\r\ry\n' > "$TMP/t199_data.csv"
+printf 'a,b\n1,x' > "$TMP/t199_nonl.csv"
+
+assert_fails "T199a a one-column CR body is refused / 單欄的 CR 內文會被拒絕" -- \
+    "$CSV2" -r -i "$TMP/t199_one.csv"
+assert_fails "T199b and a two-column one / 兩欄的也是" -- \
+    "$CSV2" -r -i "$TMP/t199_two.csv"
+assert_contains "$("$CSV2" -r -i "$TMP/t199_one.csv" 2>&1)" "last byte is a bare carriage return" \
+    "T199c the message names what was seen / 訊息指出看到的是什麼"
+
+# The round-66 false positive must stay legal: CRs INSIDE a record, file ending
+# with a newline.
+# 第 66 回合那個誤判必須繼續合法：CR 在「紀錄裡面」，而檔案以換行結尾。
+assert_succeeds "T199d three CRs inside a record are still data / 一筆紀錄裡的三個 CR 仍然是資料" -- \
+    "$CSV2" -r -t -i "$TMP/t199_data.csv" -o "$TMP/t199_rt.csv"
+assert_same "$TMP/t199_data.csv" "$TMP/t199_rt.csv" \
+    "T199e and round-trip byte for byte / 而且逐位元組往返"
+assert_succeeds "T199f a .csv with no trailing newline is still fine / 沒有結尾換行的 .csv 仍然沒問題" -- \
+    "$CSV2" -r -t -i "$TMP/t199_nonl.csv" -so
+
+# ---------------------------------------------------------------------
+# T200 -- gzip named .csv, and the output suffix that is a promise.
+#
+# Round 72. `1F 8B` cannot begin a UTF-8 CSV any more than `FF FE` can, and a
+# compressed file named `.csv` was read at rc=0 as one record of binary --
+# `-contains` found nothing in it and said so.
+#
+# And the `-t` guard tested the suffix case-sensitively, so `-o sel.csv2` was
+# refused and `-o SEL.CSV2` accepted: same directory, same file on macOS and
+# Windows, and the result read back as two data records eaten as header rows.
+#
+# T200 —— 叫做 .csv 的 gzip，以及「輸出副檔名是一個承諾」。
+# ---------------------------------------------------------------------
+echo
+echo "--- T200: what a name promises / T200：一個名字承諾了什麼 ---"
+
+if (( $+commands[gzip] )); then
+    printf 'a,b\n1,x\n2,y\n' > "$TMP/t200src.csv"
+    gzip -c "$TMP/t200src.csv" > "$TMP/t200gz.csv"
+    assert_fails "T200a a gzip file named .csv is refused / 叫做 .csv 的 gzip 檔會被拒絕" -- \
+        "$CSV2" -r -i "$TMP/t200gz.csv"
+    assert_contains "$("$CSV2" -r -i "$TMP/t200gz.csv" 2>&1)" "gunzip" \
+        "T200b and the message names the way through / 而訊息指出走得通的那條路"
+else
+    skipt "T200a no gzip on this platform / 此平台沒有 gzip"
+    T200A_SKIPPED=1
+    skipt "T200b no gzip on this platform / 此平台沒有 gzip"
+    T200B_SKIPPED=1
+fi
+
+printf 'k,v\n鍵,值\nr1,v1\nr2,v2\n' > "$TMP/t200.csv2"
+assert_fails "T200c -o SEL.CSV2 is refused like -o sel.csv2 / -o SEL.CSV2 與 -o sel.csv2 一樣被拒絕" -- \
+    "$CSV2" -head 1 -i "$TMP/t200.csv2" -o "$TMP/T200SEL.CSV2"
+assert_succeeds "T200d and -t makes both acceptable / 而 -t 讓兩者都可以" -- \
+    "$CSV2" -head 1 -t -i "$TMP/t200.csv2" -o "$TMP/T200SEL2.CSV2"
+assert_contains "$("$CSV2" -r -i "$TMP/t200.csv2" --headers 1 2>&1)" "declares 2 header row" \
+    "T200e while READING still refuses to guess / 而「讀取」仍然拒絕去猜"
+
+# ---------------------------------------------------------------------
+# T201 -- a row you supply is a field csv2 writes.
+#
+# Round 72: `-append 'r2, leading'` wrote ` leading` unquoted while
+# `-update 1:2 ' leading'` quoted the identical value. csv2 reads both back
+# correctly; the spreadsheets and "several parsers" the quoting rule exists for
+# do not, and the README states the rule as covering "a value you supply".
+#
+# T201 —— 你交進來的一列，是 csv2 寫出去的欄位。
+# ---------------------------------------------------------------------
+echo
+echo "--- T201: quoting a supplied row / T201：對「交進來的一列」加引號 ---"
+
+printf 'k,v\nr1,x\n' > "$TMP/t201.csv"
+"$CSV2" -append 'r2, leading' -i "$TMP/t201.csv" -o "$TMP/t201a.csv" -t
+assert_contains "$(tail -1 "$TMP/t201a.csv")" '"' \
+    "T201a an appended value with a leading space is quoted / 被追加的值若以空白開頭會被加引號"
+"$CSV2" -insert 1 'r0,trailing ' -i "$TMP/t201.csv" -o "$TMP/t201b.csv" -t
+assert_contains "$(sed -n 2p "$TMP/t201b.csv")" '"' \
+    "T201b and an inserted one with a trailing space / 被插入的那一列若以空白結尾也是"
+cp "$TMP/t201.csv" "$TMP/t201c.csv"
+"$CSV2" -append 'r3, sp' -i "$TMP/t201c.csv" --in-place
+assert_contains "$(tail -1 "$TMP/t201c.csv")" '"' \
+    "T201c the in-place fast path agrees / 就地追加的快路徑說法一致"
+assert_eq "$("$CSV2" -get 2:2 -i "$TMP/t201a.csv")" " leading" \
+    "T201d and the value read back is the one supplied / 而讀回來的值就是交進去的那一個"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
@@ -10558,6 +10751,8 @@ fi
 (( ${T184A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T184B_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T191A_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T200A_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T200B_SKIPPED:-0} )) && (( want_skip += 1 ))
 if [[ "$skip" == "$want_skip" ]]; then
     ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
 else

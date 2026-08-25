@@ -119,7 +119,19 @@ when it begins or ends with a space or tab. The whitespace case is not required
 by RFC 4180 and is there because that whitespace is data of the kind that
 vanishes silently — spreadsheets and several parsers strip it from an unquoted
 field. So `-update` on a cell holding `"   "` writes `"   "` back, and a value
-you supply ending in a space is quoted when it lands.
+you supply ending in a space is quoted when it lands — through `-update`, and
+through `-insert` and `-append` too, which write a row you typed rather than
+one they read. Until 2026-08-25 those two kept the row's literal bytes, so
+`-append 'r2, leading'` wrote ` leading` unquoted while `-update 1:2 ' leading'`
+quoted the identical value: csv2 read both back correctly and the spreadsheets
+this rule exists for did not.
+
+**One thing this rule does NOT do is defend a spreadsheet from a formula.** A
+value beginning `=`, `+`, `-` or `@` is a formula to Excel, LibreOffice and
+Sheets, and csv2 stores it as the text it is: `=1+1` lands unquoted, exactly as
+typed, because mangling a value to please a downstream reader is the one thing
+this tool will not do. If your output is opened by a spreadsheet and its values
+come from somewhere you do not control, that is yours to handle.
 
 What follows from that: after an edit, an untouched field is byte-identical,
 and an edited one carries csv2's quoting rather than whatever the previous
@@ -914,8 +926,15 @@ new name has to keep a .csv or .csv2 suffix, because the suffix is what
 declares the format
 ```
 
+**A gzip file gets the same treatment.** `1f 8b` cannot begin a UTF-8 CSV any
+more than `ff fe` can, and one named `.csv` was read at rc=0 as a single record
+of binary until 2026-08-25 — `-contains` searched it and reported finding
+nothing, which is the answer this tool exists not to give. The refusal names
+`gunzip -c`.
+
 **CR line endings get the same treatment** — the pre-OS X Mac convention, which
-CSV does not support. **The check is a bare CR in the HEADER row**, and it is
+CSV does not support. **There are two checks, because there are two shapes.**
+The first is a bare CR in the HEADER row, and it is
 exact rather than approximate: a file whose lines end in CR has no LF to end
 its first line, so everything it contains lands in the first record, and the
 column names are where the evidence always is.
@@ -934,8 +953,17 @@ knowing because they say what the rule is not:
   rc=0 as three records under a column named `col␍"L`, the quoted field torn
   down its own newlines, nothing on stderr.
 
+The second is **the file's last byte being a bare CR**, which is what a
+CR-terminated BODY under a normally-terminated header looks like — what
+`(echo a; cat old_mac_body) > f.csv` produces. The header check cannot see that
+file, and until 2026-08-25 it read as ONE record at rc=0 with `records:1` on
+the meta line: every count in it wrong by the number of lines in it, and the
+documented presence test reporting the wrong number confidently.
+
 A bare CR inside a RECORD is still data, still round-trips, and is still left
-alone. A CR that really belongs to a column NAME has to be quoted — one pair of
+alone — a file ending with a newline is never refused, whatever its records
+contain. If a CR really is the last byte of your last value, end the file with
+a newline and it is read as data. A CR that really belongs to a column NAME has to be quoted — one pair of
 quotes, and the intent is explicit. Asserted by T115 and T180. What matters more than either is
 where it does **not** end up: the first column's name is `pkg_name`, never
 `\ufeffpkg_name`.
@@ -1953,11 +1981,27 @@ selection combined with one of them wrote itself back over its own input.
 `-hash`, `-encrypt` and `-decrypt` rewrite the **header** so the file records
 what was done to which column:
 
+A column name ending `:hash`, `:hmac:<fp>` or `:enc:<fp>:<salt>` is therefore
+**reserved**: a plain column called `secret:hash` is treated as protected, and
+csv2 will refuse to edit it — fail-safe, and the message will be describing a
+file it has misread. Name the column something else.
+
 | Marker | Meaning |
 |---|---|
 | `license:hash` | unkeyed SHA-256 |
 | `license:hmac:<fp>` | HMAC-SHA256, `<fp>` identifying the key |
 | `license:enc:<fp>:<salt>` | encrypted; `-decrypt all` finds these |
+
+**Both header rows of a `.csv2` must carry the same marker, and a file whose
+rows disagree is refused** — by every verb, before anything else, naming the
+column and what each row says. Every check for a protected column reads the
+header, and until 2026-08-25 they all read row 0a: a file whose 0b said
+`:enc:` and whose 0a did not walked past all of them, so `-update` wrote
+plaintext into an encrypted column and `-hash` overwrote the `:enc:` marker
+together with its salt, at rc=0, on a file whose Chinese header row still said
+`:enc:`. Reading both rows and taking the union would have fixed the misses and
+left the file incoherent; refusing is what this tool does when two sources
+disagree.
 
 Addressing still uses the plain name: `-update 3:license` works after masking.
 Re-masking an already-marked column is refused rather than layered, **in both

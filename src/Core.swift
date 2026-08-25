@@ -117,10 +117,36 @@ enum Format: String {
 
     /// True when the extension makes a promise about the content, so writing
     /// data rows without a header there would make the file lie about itself.
-    /// 副檔名對內容做出承諾時為真；在那裡寫入不帶標頭的資料列，會讓檔案對
-    /// 自己的格式說謊。
+    ///
+    /// Case-INSENSITIVE, and deliberately not the same test as `from(path:)`.
+    /// Reading asks "what did the caller declare", and csv2 does not guess, so
+    /// `-i S.CSV` still needs `--headers`. Writing asks "what will the next
+    /// reader think this file is", and the next reader may be a spreadsheet,
+    /// or csv2 on a case-insensitive filesystem where `SEL.CSV2` and
+    /// `sel.csv2` are one name for one file.
+    ///
+    /// With the case-sensitive test here, `-o sel.csv2` was refused for
+    /// writing a headerless selection and `-o SEL.CSV2` was accepted -- same
+    /// directory, same filesystem, same file on macOS and Windows -- and the
+    /// result read back as two data records eaten as header rows, at rc=0.
+    /// The other half of the walk-around was `-o sel_nosuffix` followed by a
+    /// rename, which is what a Makefile writing `$@.tmp` does by default; that
+    /// one this cannot catch, and the README says so.
+    ///
+    /// 大小寫「不敏感」，而且刻意與 `from(path:)` 不是同一個判斷。「讀取」問的是「呼叫端
+    /// 宣告了什麼」，而 csv2 不猜，因此 `-i S.CSV` 仍然需要 `--headers`。「寫入」問的是
+    /// 「下一個讀者會認為這個檔案是什麼」，而下一個讀者可能是試算表，也可能是一個在
+    /// 大小寫不敏感的檔案系統上的 csv2——在那裡 `SEL.CSV2` 與 `sel.csv2` 是同一個名字、
+    /// 同一個檔案。
+    ///
+    /// 這裡原本是大小寫敏感的判斷，於是 `-o sel.csv2` 因為「寫入不帶標頭的選取」而被拒絕，
+    /// 而 `-o SEL.CSV2` 被接受——同一個目錄、同一個檔案系統，在 macOS 與 Windows 上還是同一個
+    /// 檔案——而寫出來的結果讀回去時，兩筆資料被當成標頭列吃掉，rc=0。這個繞道的另一半是
+    /// 「先寫成 sel_nosuffix 再改名」，那正是一個寫 `$@.tmp` 的 Makefile 預設會做的事；
+    /// 那一半這裡攔不到，而 README 說了。
     static func declaresFormat(path: String) -> Bool {
-        path.hasSuffix(".csv") || path.hasSuffix(".csv2")
+        let lower = path.lowercased()
+        return lower.hasSuffix(".csv") || lower.hasSuffix(".csv2")
     }
 }
 
@@ -320,6 +346,20 @@ enum FieldEncoder {
 func refuseUTF16BOM(_ head: [UInt8]) throws {
     guard head.count >= 2 else { return }
     let b0 = head[0], b1 = head[1]
+    // Gzip, for the same reason and by the same test. `1F 8B` cannot begin a
+    // UTF-8 CSV any more than `FF FE` can, and a compressed file named
+    // `.csv` was read at rc=0 as one record of binary -- `-contains` found
+    // nothing in it and said so, which is the answer this tool exists not to
+    // give. The guard existed one byte-pattern to the left.
+    // gzip，理由與判斷方式與上面相同。`1F 8B` 與 `FF FE` 一樣，都不可能是一個 UTF-8 CSV 的
+    // 開頭；而一個叫做 `.csv` 的壓縮檔會以 rc=0 被讀成「一筆二進位紀錄」——`-contains` 在
+    // 裡面什麼也沒找到，並且這樣回報，而那正是這個工具存在所要避免的答案。那道守衛，
+    // 就差在左邊一個位元組樣式。
+    if b0 == 0x1F && b1 == 0x8B {
+        throw fault(
+            "this file begins with a gzip magic number (1f 8b); csv2 reads bytes and does not decompress. Expand it first with: gunzip -c file.csv.gz > file.csv -- the new name has to keep a .csv or .csv2 suffix, because the suffix is what declares the format",
+            "本檔案以 gzip 的魔術數字（1f 8b）開頭；csv2 讀的是位元組，不做解壓縮。請先解開：gunzip -c file.csv.gz > file.csv——新檔名必須保留 .csv 或 .csv2 副檔名，因為宣告格式的正是副檔名")
+    }
     guard (b0 == 0xFF && b1 == 0xFE) || (b0 == 0xFE && b1 == 0xFF) else { return }
     let which = b0 == 0xFF ? "UTF-16LE" : "UTF-16BE"
     throw fault(
@@ -765,8 +805,15 @@ final class RecordParser {
     /// Call once at end of input. Emits a trailing record if the file did not
     /// end with a newline, and reports the CR-only case.
     /// 輸入結束時呼叫一次。若檔案未以換行結尾則吐出最後一筆，並回報 CR-only。
+    /// True only while `finish()` is draining what was left over, so the CR
+    /// test above can tell "a CR in the middle" from "the file ended on one".
+    /// 只有在 `finish()` 正在清空殘留內容時為真，好讓上面那個 CR 判斷分得出
+    /// 「中間的一個 CR」與「檔案就結束在一個 CR 上」。
+    private var atEOF = false
+
     func finish() throws {
         if stopped { return }
+        atEOF = true
         if !bomDone && !bomPending.isEmpty {
             let pending = bomPending
             bomPending = []
@@ -782,6 +829,35 @@ final class RecordParser {
             crAsDataCount += 1
             try refuseCRInHeader()
             try appendDataByte(BYTE_CR)
+            // The file ENDS on a bare CR, which is what a CR-terminated body
+            // looks like from here -- and the header test above cannot see it,
+            // because this file's header ended with a proper LF. `(echo a;
+            // cat old_mac_body) > f.csv` is how you get one, and it read as a
+            // SINGLE record at rc=0 with `records:1` on the meta line: every
+            // count in that file wrong by the number of lines in it, and the
+            // documented presence test reporting the wrong number confidently.
+            //
+            // Exact rather than approximate, again: a file whose last byte is
+            // a bare CR is refused, and one that ends with a newline is not,
+            // whatever its records contain. `1,x<CR><CR><CR>y<LF>` -- the
+            // false positive the counting version of this guard produced --
+            // still reads as one record with three CRs in its second field.
+            //
+            // 檔案「結束」在一個裸 CR 上，而那正是一個以 CR 結尾的內文從這裡看過去的樣子
+            // ——上面那個標頭檢查看不到它，因為這個檔案的標頭是以正常的 LF 結束的。
+            // `(echo a; cat old_mac_body) > f.csv` 就會產生一個這樣的檔案，而它會以 rc=0
+            // 被讀成「一筆」紀錄、meta 上寫著 `records:1`：那個檔案裡的每一個計數都錯了，
+            // 錯的倍數就是它的行數，而文件指定的那個「有沒有」的檢查，會很有把握地回報一個
+            // 錯的數字。
+            //
+            // 一樣是「精確」而不是「近似」：最後一個位元組是裸 CR 的檔案會被拒絕，而以換行
+            // 結尾的檔案不會，不論它的紀錄裡裝了什麼。`1,x<CR><CR><CR>y<LF>`——當初那個「用數的」
+            // 版本造成的誤判——仍然會被讀成一筆紀錄，第二欄裡有三個 CR。
+            if atEOF {
+                throw fault(
+                    "this file's last byte is a bare carriage return, which is what a body with CR line endings looks like: everything after the header lands in one record. Convert it first with: tr '\\r' '\\n' < file > converted.csv -- the new name has to keep a .csv or .csv2 suffix. If that CR really is the last byte of the last value, end the file with a newline",
+                    "本檔案的最後一個位元組是一個裸 CR，而那正是「以 CR 作為行尾的內文」的樣子：標頭之後的一切都會落進同一筆紀錄。請先轉換：tr '\\r' '\\n' < file > converted.csv——新檔名必須保留 .csv 或 .csv2 副檔名。若那個 CR 確實是最後一個值的最後一個位元組，請讓檔案以換行結尾")
+            }
         }
         // A CR-only file (pre-OS X Mac) contains no LF at all, so the whole
         // thing parses as ONE record with millions of fields and then hits

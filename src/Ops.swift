@@ -1235,6 +1235,28 @@ func parseRowLiteral(_ text: String, format: Format, expected: Int, what: String
                     "\(what)：這個值跨越了不只一筆紀錄")
     }
     try checkFieldCount(r, expected: expected, what: what)
+    // A supplied row has no RAW to preserve. It was typed on a command line,
+    // not read out of a file, so the bytes it arrived as carry no provenance
+    // worth keeping -- and keeping them is what stopped csv2's own quoting
+    // rule from applying to it.
+    //
+    // `-append 'r2, leading'` wrote ` leading` UNQUOTED, while
+    // `-update 1:2 ' leading'` quoted the identical value, because the edit
+    // path writes with preserveRaw and an inserted row went out through it
+    // with its literal bytes attached. csv2 reads its own output back
+    // correctly either way; the spreadsheets and "several parsers" the
+    // quoting rule exists for do not, and the README states that rule as
+    // covering "a value you supply".
+    //
+    // 一列「被交進來的」紀錄沒有 RAW 可以保留。它是在命令列上打出來的，不是從檔案裡讀出來的，
+    // 因此它抵達時的那些位元組沒有值得保留的來歷——而「保留它們」正是讓 csv2 自己的加引號規則
+    // 對它失效的原因。
+    //
+    // `-append 'r2, leading'` 寫出的 ` leading` 沒有引號，而 `-update 1:2 ' leading'` 對同一個
+    // 值加了引號：編輯路徑是以 preserveRaw 寫出的，而一列被插入的紀錄帶著它的字面位元組走了
+    // 那條路。兩種寫法 csv2 自己都讀得回來；而那條加引號規則所為之存在的試算表與「好幾種
+    // 解析器」不行，何況 README 把那條規則寫成涵蓋「你交進來的值」。
+    for i in r.fields.indices { r.fields[i].raw = nil }
     r.number = 0
     return r
 }

@@ -1836,6 +1836,29 @@ func refuseLogAliases(_ o: Options) throws {
             "-o \(out) is the -log file; the run would rename its own audit trail away",
             "-o \(out) 就是 -log 檔；那次執行會把自己的稽核軌跡改名蓋掉")
     }
+    // The pair the first version of this function did not ask about, and the
+    // worst of the six.
+    //
+    // `-log` naming the KEYFILE appends the invocation line to the key before
+    // the key is derived. The run encrypts with "the original bytes plus one
+    // log line" -- a value that existed for a few milliseconds and was never
+    // written anywhere as such -- and then appends the outcome line, so the
+    // file on disk is one line too long and any backup is one line too short.
+    // Neither decrypts. Exit 0, nothing on either stream, and `-log` is the
+    // flag a careful operator adds when doing something irreversible.
+    //
+    // 這是這個函式的第一版沒有問到的那一對，也是六對裡最糟的。
+    //
+    // `-log` 指向「金鑰檔」時，呼叫紀錄會在金鑰被推導之前被追加到那把金鑰上。於是那次執行
+    // 用「原本的位元組加上一行 log」去加密——那個值只存在了幾毫秒，而且從來沒有以那個樣子被
+    // 寫在任何地方——接著又追加了結果那一行，因此磁碟上的檔案多一行、任何備份少一行，兩者
+    // 都解不開。rc=0，兩條輸出流上什麼也沒有，而 `-log` 正是一個謹慎的操作者在做不可逆的事
+    // 情時會加上的旗標。
+    if let kf = o.keyfile, sameFile(kf, lg) {
+        throw usageError(
+            "-log \(lg) is the keyfile; the log line would be appended to the key before the key is used, so nothing afterwards decrypts what this run writes",
+            "-log \(lg) 就是金鑰檔；那一行 log 會在金鑰被使用之前被追加到它上面，於是事後沒有任何東西解得開這次執行寫出來的東西")
+    }
 }
 
 func openInput(_ o: Options) throws -> InputPlan {

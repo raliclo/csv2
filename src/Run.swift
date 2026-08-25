@@ -54,6 +54,64 @@ func validateHeaders(_ headers: [Record], want: Int, path: String) throws {
             "\(path): header row 0a has \(headers[0].count) fields, row 0b has \(headers[1].count); a .csv2 header must have the same field count on both rows",
             "\(path)：標頭 0a 有 \(headers[0].count) 欄，0b 有 \(headers[1].count) 欄；.csv2 的兩列標頭欄數必須相同")
     }
+    try checkProtectionAgreement(headers, path: path)
+}
+
+/// The two header rows must say the SAME thing about protection.
+///
+/// Every guard in this tool asks "does the file's own header declare this
+/// column transformed", and every one of them asked row 0a. A `.csv2` whose
+/// 0b carries `:enc:` and whose 0a does not therefore walked past all of
+/// them -- `-update` wrote plaintext into an encrypted column, `-insert` was
+/// accepted, `--json`'s `protected` key said nothing was protected, and
+/// `-hash` did the thing this document calls the worst thing it can do: it
+/// hashed the CIPHERTEXT and overwrote the `:enc:` marker together with its
+/// salt, at rc=0, on a file whose Chinese header row still visibly said
+/// `:enc:`.
+///
+/// Reading BOTH rows and taking the union would fix the misses and leave the
+/// file itself incoherent. Refusing is the answer the rest of this program
+/// gives to "two sources disagree": a file whose header rows contradict each
+/// other about a column is not a file csv2 can act on, and no verb should
+/// have to decide which row wins.
+///
+/// The marker is compared, not the name. The two rows are meant to differ --
+/// that is what the second row is FOR -- so only the `:enc:<fp>:<salt>`,
+/// `:hmac:<fp>` and `:hash` parts are matched.
+///
+/// 兩列標頭對「保護」必須說同一件事。
+///
+/// 這個工具裡的每一道守衛都在問「這個檔案自己的標頭有沒有宣告這一欄已被轉換」，而它們每一個
+/// 問的都是第 0a 列。於是一個「0b 帶著 `:enc:`、0a 沒有」的 `.csv2`，從它們全部旁邊走了過去
+/// ——`-update` 把明文寫進加密欄、`-insert` 被接受、`--json` 的 `protected` 說什麼都沒被保護，
+/// 而 `-hash` 做了這份文件稱為「它做得出來最糟的一件事」：把密文單向雜湊掉，並覆寫 `:enc:`
+/// 標記、連同 salt 一起帶走，rc=0，而那個檔案的中文標頭列上，`:enc:` 明明還在。
+///
+/// 「兩列都讀、取聯集」會修好那些漏接，卻留下一個自相矛盾的檔案。而「兩個來源互相矛盾」時，
+/// 這支程式其餘部分給的答案是「拒絕」：一個兩列標頭對某一欄互相矛盾的檔案，不是 csv2 能夠
+/// 作用的檔案，而任何一個動詞都不該去決定哪一列說了算。
+///
+/// 比對的是「標記」，不是「名字」。那兩列本來就該不同——那正是第二列存在的目的——因此只比對
+/// `:enc:<fp>:<salt>`、`:hmac:<fp>` 與 `:hash` 那幾部分。
+func checkProtectionAgreement(_ headers: [Record], path: String) throws {
+    guard headers.count > 1 else { return }
+    func marker(_ f: Field) -> String {
+        let n = headerName(f)
+        if let m = EncMarker.parse(n) { return ":enc:\(m.fingerprint):\(B64.encode(m.salt))" }
+        if let r = n.range(of: ":hmac:", options: .backwards) { return String(n[r.lowerBound...]) }
+        if n.hasSuffix(":hash") { return ":hash" }
+        return ""
+    }
+    for i in 0..<headers[0].count where i < headers[1].count {
+        let a = marker(headers[0].fields[i])
+        let b = marker(headers[1].fields[i])
+        guard a != b else { continue }
+        let sa = a.isEmpty ? "nothing" : a
+        let sb = b.isEmpty ? "nothing" : b
+        throw fault(
+            "\(path): the two header rows disagree about column \(i + 1): row 0a says \(sa), row 0b says \(sb). Every check for a protected column reads the header, and a file whose rows contradict each other has no answer to give -- restore the marker on both rows, or remove it from both",
+            "\(path)：兩列標頭對第 \(i + 1) 欄的說法不一致：0a 說 \(sa)，0b 說 \(sb)。每一項「這一欄是否受保護」的檢查讀的都是標頭，而一個兩列互相矛盾的檔案給不出答案——請讓兩列都帶著那個標記，或兩列都不帶")
+    }
 }
 
 // ---------------------------------------------------------------------
