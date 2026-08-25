@@ -7038,7 +7038,17 @@ print -r -- 'lib,MIT'     >> "$TMP/t142.csv"
 assert_contains "$(head -1 "$TMP/t142_plain.csv")" "license:hash" \
     "T142a -hash without a key marks the column :hash / 沒有金鑰的 -hash 把該欄標記為 :hash"
 
-"$CSV2" -hash license --yes -t -i "$TMP/t142.csv" -o "$TMP/t142_yes.csv"
+# HOME points at the key this suite made, not at the operator's. `--yes` reads
+# the DEFAULT key -- a file in the caller's home directory -- so without this
+# the case passes on a machine that happens to have one and fails on a machine
+# that does not, which is what a freshly reinstalled WSL node demonstrated:
+# four failures that were all one missing file, none of them about csv2.
+# T37 already runs the other half of this, with HOME pointing somewhere empty.
+# HOME 指向這套測試自己造出來的金鑰，而不是操作者的。`--yes` 讀的是「預設金鑰」——呼叫端家
+# 目錄裡的一個檔案——因此少了這一行，這個案例會在「剛好有那個檔案」的機器上通過、在沒有的
+# 機器上失敗，而一台剛重裝過的 WSL 節點正好示範了這件事：四個失敗，全部是同一個缺檔，
+# 沒有一個與 csv2 有關。T37 早就在跑這件事的另一半，它把 HOME 指向一個空的地方。
+HOME="$TMP/home" "$CSV2" -hash license --yes -t -i "$TMP/t142.csv" -o "$TMP/t142_yes.csv"
 assert_contains "$(head -1 "$TMP/t142_yes.csv")" "license:hmac:" \
     "T142b while --yes marks it :hmac:, having selected the default key / 而 --yes 會標記為 :hmac:，因為它選定了預設金鑰"
 
@@ -9450,7 +9460,7 @@ assert_succeeds "T175g -append --in-place still works / -append --in-place 仍�
     "$CSV2" -append '9,q' -i "$TMP/t175.csv" --in-place
 printf 'a,b\n1,x\n' > "$TMP/t175h.csv"
 assert_succeeds "T175h -hash --in-place still works / -hash --in-place 仍然可用" -- \
-    "$CSV2" -hash b --yes -i "$TMP/t175h.csv" --in-place
+    env HOME="$TMP/home" "$CSV2" -hash b --yes -i "$TMP/t175h.csv" --in-place
 
 # ---------------------------------------------------------------------
 # T176 -- a control character in an error message.
@@ -9549,7 +9559,7 @@ for _combo in "-head 1 -hash license --yes" "-tail 1 -hash license --yes" \
               "-mid 2,3 -hash license --yes" "-contains zlib --filter -hash license --yes"; do
     cp "$TMP/t177.csv" "$TMP/t177w.csv"
     assert_fails "T177a $_combo --in-place is refused / $_combo --in-place 被拒絕" -- \
-        "$CSV2" ${=_combo} -i "$TMP/t177w.csv" --in-place
+        env HOME="$TMP/home" "$CSV2" ${=_combo} -i "$TMP/t177w.csv" --in-place
     # cmp, not sha256_of: that helper hashes a STRING, so it was comparing two
     # file NAMES and failing on the copy's different name -- a check that could
     # not have passed, which is the other half of a check that cannot fail.
@@ -9582,7 +9592,7 @@ assert_same "$TMP/t177e.csv" "$TMP/t177e.keep" \
 # 等於修正把功能吃掉了。
 cp "$TMP/t177.csv" "$TMP/t177r.csv"
 assert_succeeds "T177e -r -hash --in-place still works / -r -hash --in-place 仍然可用" -- \
-    "$CSV2" -r -hash license --yes -i "$TMP/t177r.csv" --in-place
+    env HOME="$TMP/home" "$CSV2" -r -hash license --yes -i "$TMP/t177r.csv" --in-place
 assert_eq "$("$CSV2" -r -t --no-index -i "$TMP/t177r.csv" | wc -l | tr -d ' ')" "6" \
     "T177f and every record survived it / 而每一筆都活了下來"
 
@@ -9593,7 +9603,7 @@ assert_eq "$("$CSV2" -r -t --no-index -i "$TMP/t177r.csv" | wc -l | tr -d ' ')" 
 # 那一行「結果」：保護寫入走的是選取路徑，而那條路徑原本沒有這一行。README 指名它是
 # 「想知道編輯有沒有落地時該找的那一行」，於是它獨獨在「無法還原」的那些寫入上不存在。
 rm -f "$TMP/t177.log"
-"$CSV2" -hash license --yes -i "$TMP/t177.csv" -o "$TMP/t177h.csv" -t -log "$TMP/t177.log"
+HOME="$TMP/home" "$CSV2" -hash license --yes -i "$TMP/t177.csv" -o "$TMP/t177h.csv" -t -log "$TMP/t177.log"
 assert_contains "$(cat "$TMP/t177.log")" "wrote 5 records" \
     "T177g a -hash write logs its outcome / 一次 -hash 寫入會記下它的結果"
 rm -f "$TMP/t177b.log"
@@ -10483,7 +10493,7 @@ fi
 
 for _verb in "-r -t" "-update 1:secret NEW" "-insert 1 p,v,raw" "-hash secret --yes"; do
     assert_fails "T197b [$_verb] refuses a file whose header rows disagree / [$_verb] 拒絕一個兩列標頭互相矛盾的檔案" -- \
-        "$CSV2" ${=_verb} -i "$TMP/t197bad.csv2" -o "$TMP/t197out.csv2" -t
+        env HOME="$TMP/home" "$CSV2" ${=_verb} -i "$TMP/t197bad.csv2" -o "$TMP/t197out.csv2" -t
 done
 assert_contains "$("$CSV2" -r -t -i "$TMP/t197bad.csv2" 2>&1)" "disagree about column 3" \
     "T197c and the message names the column and both rows / 而訊息指出是哪一欄、以及兩列各說了什麼"
