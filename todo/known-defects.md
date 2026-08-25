@@ -7154,3 +7154,125 @@ a , b \r \n 1 , x \r \n 2 , y \n 3 , z \n     ← 補上的是裸 LF，追加的
 
 **形狀:一個「用最後兩個位元組去問一個關於整個檔案的問題」的探測。** 與 GW（用數量去問行尾）
 同族,而這次那個近似值只在「檔案結束得整齊」時等於真值。
+
+## IV. install.zsh 挑 rc 檔的依據,是「執行它的那個 shell」而不是「這個帳號的 shell」(2026-08-25 修正,T203a)
+
+WSL 節點在 2026-08-25 重裝後回來,csv2 建好了、裝到 `~/.local/bin` 了,而 `upgrade_nodes_csv2.zsh`
+回報 `reachable: NO -- the shell cannot find csv2 at all`。install.zsh 對這件事印的建議是:
+
+```console
+$ ./install.zsh
+WARNING: /home/lowei/.local/bin is not on your PATH
+  add to ~/.zshrc:  export PATH="/home/lowei/.local/bin:$PATH"
+```
+
+那句話寫死了 `~/.zshrc`。而那個節點的實況是:
+
+```console
+$ getent passwd lowei | awk -F: '{print $NF}'
+/bin/bash
+$ ls -a ~ | grep -E '^\.(bashrc|profile|bash_profile|zshrc)$'
+.zshrc                       ← 家目錄裡唯一存在的 rc 檔
+```
+
+**登入 shell 是 bash,而唯一存在的 rc 檔是 `.zshrc`。** 照著那句建議做,會把完全正確的一行
+寫進一個沒有任何東西會讀的檔案,然後看著 `command not found` 繼續發生。
+
+`~/.zshrc` 是從哪裡來的?從 install.zsh 自己的 `#!/usr/bin/env zsh`——寫那句話的人（我）用
+「這支腳本執行時所在的 shell」代替了「這個人打開終端機會拿到的 shell」。那兩者在開發機上
+一直相等,因為開發機的登入 shell 就是 zsh。
+
+修法:問這個帳號(`getent passwd`,退回 `$SHELL`),再由它決定檔案。並且真的去寫,不只是建議。
+
+**形狀:一個從手邊的例子推廣出來的普遍宣稱。** 與 FH、FN、GN、HL、II 同族——這一次那個
+「手邊的例子」是執行環境本身。
+
+## IW. 對 zsh 而言 `.zshrc` 是錯的檔案,而錯的方式正好蓋住當初壞掉的那件事(2026-08-25 修正,T203b/c)
+
+接續 IV。把檔案改成由帳號決定之後,zsh 那一支我寫的是 `~/.zshrc`——那是「大家都知道」的答案,
+也是 install.zsh 原本那句建議說的。
+
+但 **zsh 只有在 shell 是互動的時候才讀 `.zshrc`**。而在 WSL 上需要 csv2 的是什麼?是
+`record_release.zsh`,它經 multissh 執行,拿到的是一個**非互動、非登入**的 shell。那種 shell
+讀的是 `.zshenv`,而且只有 `.zshenv`。
+
+也就是說:寫進 `.zshrc` 會修好「有人坐在終端機前打 csv2」,而讓「當初唯一真的失敗的那支腳本」
+繼續失敗——同時這支安裝程式會回報成功。
+
+那個節點自己早就知道這件事,它的 `.zshrc` 第一段就寫著:
+
+```
+# The Swift toolchain PATH is in ~/.zshenv, because `zsh -lc` (used by the
+# build harness) does not read this file.
+```
+
+修法:zsh 寫 `~/.zshenv`。bash 沒有對應物(`BASH_ENV` 預設沒設),所以 bash 只能做到
+`.bashrc` 加一個會 source 它的登入檔——而那個差別現在會被說出來,見 IY。
+
+**形狀:一個修法選了「慣例上正確」而不是「對這個用途正確」的位置,而它失敗的方式,恰好是
+原本那個症狀不會顯現的那一面。**
+
+## IX. `--uninstall` 只收回安裝寫過的兩個檔案中的一個(2026-08-25 修正,T203f)
+
+bash 的安裝會寫兩個檔案:`~/.bashrc`(互動)與一個登入檔(讓登入的 bash 去 source 前者)。
+`--uninstall` 迭代的卻是 `rc_files()`——那是「今天要寫哪一個」的清單,只有一個元素。
+
+```console
+$ HOME=$T SHELL=/bin/bash ./install.zsh --prefix $T/bin      # 寫了 .bashrc 與 .profile
+$ HOME=$T SHELL=/bin/bash ./install.zsh --prefix $T/bin --uninstall
+removed the csv2 block from /tmp/.../.bashrc
+removed /tmp/.../bin/csv2
+$ grep -c '>>> csv2' $T/.profile
+1                                    ← 還在，而且上面標著是 csv2 放的
+```
+
+留下的那個區塊不只是垃圾:它標著 `# >>> csv2 install.zsh >>>`,宣稱自己屬於一個已經被移除的
+安裝,而下一個讀到它的人沒有辦法知道該不該動它。
+
+修法:移除時問比較寬的那個問題——`rc_candidates()`,列出「這支腳本曾經可能寫過」的每一個
+檔案。並且在拿掉那個「讓登入 shell 去讀 .bashrc」的區塊時說出代價:`~/.bashrc` 裡其他東西
+會跟著在下次登入時安靜失效。
+
+**形狀:一條規則只套用到它成立範圍的一部分。** 與 GK、IG/IN、IO、IT 同族;這一次是「寫」與
+「收回」用了兩份不同寬度的清單。
+
+## IY. 「全新的 shell 找得到它」這件事,從來沒有被真的問過(2026-08-25 修正,T203g)
+
+install.zsh 的驗證用的是:
+
+```zsh
+RESOLVED=$(zsh -lc 'command -v csv2')
+```
+
+**`zsh -c` 不會重設 PATH。** 它繼承呼叫者匯出的 PATH。所以這一行問的是「csv2 在我已經有的
+那個 PATH 上嗎」,而不是「一個全新的 shell 找得到它嗎」。當初在此親眼看到:
+
+```console
+$ T=$(mktemp -d)
+$ HOME=$T SHELL=/bin/bash ./install.zsh --prefix $T/bin
+verified: a fresh bash runs /opt/homebrew/bin/csv2, and it is the file just installed
+                            ^^^^^^^^^^^^^^^^^^^^^^^^ 不是剛裝的那一個所在的目錄
+```
+
+它「驗證」通過了,而它解析到的是開發機上原本就有的那一支;雜湊比對之所以相符,只是因為那一支
+恰好也是同一次建置。換一台機器,這就是 NN(scoop shim 那次)會再發生一遍的條件。
+
+同一段還有第二個問題:記錄「是哪一種 shell 回答的」那個變數寫在函式裡,而呼叫端是
+`x=$(f)`——**subshell**,於是那個記錄隨它一起消失。一個量對了、卻報告不出來的檢查。
+
+修法:用 `env -i` 加一份白名單變數啟動 shell,並依序問三次——`-c`(經 ssh 的腳本)、`-lc`
+(登入 shell)、`-lic`(互動終端機),回報第一個成功的那一種。結果以全域變數回傳。
+
+這件事一被問對,開發機自己就給出了一個當天沒人知道的答案:
+
+```console
+$ env -i HOME=$HOME zsh -c 'command -v csv2'      # 什麼都沒有
+$ env -i HOME=$HOME zsh -lc 'command -v csv2'
+/opt/homebrew/bin/csv2
+```
+
+`/opt/homebrew/bin` 是 `/etc/zprofile` 的 path_helper 放進去的,而那是**登入**才會讀的檔案。
+因此 `ssh mac 'csv2 --version'` 在這台機器上會失敗——這件事在此之前沒有被寫下來過。
+
+**形狀:一個量到了「與它宣稱的東西相鄰」的檢查。** 與 NN 同族(比對永遠不會變的版本號),
+而這一次相鄰的那個東西是「呼叫者的環境」。

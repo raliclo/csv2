@@ -10725,6 +10725,120 @@ CSV2_INDEX_MIN_BYTES=10 "$CSV2" -append '3,z' -i "$TMP/t202_idx.csv" --in-place
 assert_succeeds "T202e and the index still describes the file / 而索引仍然與檔案相符" -- \
     env CSV2_INDEX_MIN_BYTES=10 "$CSV2" --verify-index -i "$TMP/t202_idx.csv"
 
+# ---------------------------------------------------------------------
+# T203 -- install.zsh puts the PATH line where the ACCOUNT's shell reads it,
+# and proves reachability from a shell started with nothing.
+#
+# 2026-08-25. Four separate faults, all of the same family: a check that
+# measured something adjacent to what it claimed.
+#
+#   * the rc file was chosen from the shell RUNNING install.zsh, which is
+#     always zsh (it is `#!/usr/bin/env zsh`) and says nothing about the
+#     account. The WSL node's login shell was bash and the only rc file in
+#     that home directory was .zshrc -- the right line would have gone into
+#     the one file nothing reads;
+#   * for zsh it went to .zshrc, which only INTERACTIVE shells read, while
+#     the thing that needed csv2 there was a script over ssh, which reads
+#     .zshenv and nothing else;
+#   * `--uninstall` stripped the block from one of the two files the bash
+#     install writes, leaving the other still marked as ours;
+#   * the reachability probe ran `$SHELL -c`, which INHERITS the caller's
+#     PATH, so "a fresh shell finds it" was never actually asked.
+#
+# T203 —— install.zsh 把 PATH 那一行寫到「這個帳號的 shell」會讀的地方，並以一個
+# 「從零開始的 shell」證明可及性。四個各自獨立的問題，同一個家族：一個量到了「與它宣稱
+# 的東西相鄰」的檢查。
+# ---------------------------------------------------------------------
+echo
+echo "--- T203: where install.zsh writes, and what it can prove / T203：install.zsh 寫到哪裡，以及它證明得了什麼 ---"
+
+if (( IS_WINDOWS )); then
+    # install.zsh's Windows target is a scoop shim path and `env -i` drops the
+    # variables an MSYS shell needs to start at all; the case would test the
+    # harness, not the installer.
+    # install.zsh 在 Windows 的目標是一條 scoop shim 路徑，而 `env -i` 會拿掉 MSYS shell
+    # 啟動所必需的變數；這個案例會變成在測試環境而不是測試安裝程式。
+    skipt "T203 install.zsh rc placement -- needs a POSIX home and env -i / 需要 POSIX 家目錄與 env -i"
+    T203_SKIPPED=1
+else
+    _t203_home="$TMP/t203home"; _t203_pfx="$TMP/t203bin"
+    mkdir -p "$_t203_home" "$_t203_pfx"
+    _t203_run() {   # <shell> <extra args...>
+        env HOME="$_t203_home" SHELL="$1" "$ROOT/install.zsh" --prefix "$_t203_pfx" "${@:2}" 2>&1
+    }
+
+    # zsh: .zshenv, because that is the file a non-interactive shell reads.
+    # zsh：寫 .zshenv，因為那才是非互動 shell 會讀的檔案。
+    _t203_out=$(_t203_run "$(command -v zsh)")
+    if [[ -f $_t203_home/.zshenv ]] && ! [[ -f $_t203_home/.zshrc ]]; then
+        ok "T203a a zsh account gets .zshenv, not .zshrc / zsh 帳號拿到的是 .zshenv 而非 .zshrc"
+    else
+        bad "T203a wrote: $(ls -a "$_t203_home" | tr '\n' ' ') / 實際寫出如上"
+    fi
+
+    # And it says so: reachable from every shell, ssh included. That claim is
+    # the one .zshenv buys and .zshrc does not.
+    # 而且它會這樣說：每一種 shell 都找得到，包含 ssh。那個宣稱正是 .zshenv 換來、而 .zshrc
+    # 換不到的東西。
+    case $_t203_out in
+        *"every shell, scripts over ssh included"*)
+            ok "T203b and reports it is reachable from a non-interactive shell / 並回報非互動 shell 也找得到" ;;
+        *) bad "T203b got: $_t203_out / 實得如上" ;;
+    esac
+
+    # Independently of what it reported: a shell started from NOTHING runs it.
+    # 與它的回報無關地驗證一次：一個從零開始的 shell 執行得到它。
+    _t203_which=$(env -i HOME="$_t203_home" TERM=dumb "$(command -v zsh)" -c 'command -v csv2' 2>/dev/null)
+    assert_eq "$_t203_which" "$_t203_pfx/csv2" \
+        "T203c a zsh with an empty environment resolves csv2 to the install / 空環境的 zsh 解析到的就是這次安裝"
+
+    # A second install must not leave two blocks.
+    # 第二次安裝不得留下兩個區塊。
+    _t203_run "$(command -v zsh)" > /dev/null
+    _t203_blocks=$(grep -cF '>>> csv2 install.zsh >>>' "$_t203_home/.zshenv")
+    assert_eq "$_t203_blocks" "1" \
+        "T203d installing twice leaves one block, not two / 裝兩次留下一個區塊而不是兩個"
+
+    # --uninstall takes back every file the install wrote to. bash is the case
+    # that has two of them, so bash is the case this asks about.
+    # --uninstall 要收回安裝寫過的每一個檔案。bash 是「有兩個」的那種情況，因此就問 bash。
+    if command -v bash > /dev/null 2>&1; then
+        _t203_bhome="$TMP/t203bash"; mkdir -p "$_t203_bhome"
+        env HOME="$_t203_bhome" SHELL="$(command -v bash)" \
+            "$ROOT/install.zsh" --prefix "$_t203_pfx" > /dev/null 2>&1
+        _t203_wrote=$(grep -lF '>>> csv2 install.zsh >>>' "$_t203_bhome"/.* 2>/dev/null | wc -l | tr -d ' ')
+        if (( _t203_wrote >= 2 )); then
+            ok "T203e a bash account gets both an interactive and a login file / bash 帳號拿到互動與登入兩個檔案"
+        else
+            bad "T203e bash install wrote $_t203_wrote file(s) carrying the block / bash 安裝只寫了 $_t203_wrote 個帶有區塊的檔案"
+        fi
+        env HOME="$_t203_bhome" SHELL="$(command -v bash)" \
+            "$ROOT/install.zsh" --prefix "$_t203_pfx" --uninstall > /dev/null 2>&1
+        _t203_left=$(grep -lF '>>> csv2 install.zsh >>>' "$_t203_bhome"/.* 2>/dev/null | wc -l | tr -d ' ')
+        assert_eq "$_t203_left" "0" \
+            "T203f and --uninstall takes back every one of them / 而 --uninstall 把它們全部收回"
+    else
+        skipt "T203e/f no bash on this platform / 本平台沒有 bash"
+        T203_BASH_SKIPPED=1
+    fi
+
+    # The probe must not answer out of the caller's PATH. With --no-rc and the
+    # prefix exported into PATH, the OLD code called that a verified install.
+    # 探測不得用「呼叫端的 PATH」來回答。加上 --no-rc 並把 prefix 放進 PATH 之後，舊的程式
+    # 會把那稱為一次「已驗證」的安裝。
+    _t203_home2="$TMP/t203home2"; mkdir -p "$_t203_home2"
+    _t203_out2=$(env HOME="$_t203_home2" SHELL="$(command -v zsh)" PATH="$_t203_pfx:$PATH" \
+        "$ROOT/install.zsh" --prefix "$_t203_pfx" --no-rc 2>&1)
+    case $_t203_out2 in
+        *"a $(command -v zsh):t started from nothing does not have it"*|*"started from nothing does not have it"*)
+            ok "T203g an inherited PATH is not accepted as proof / 繼承來的 PATH 不被當成證據" ;;
+        *"verified"*)
+            bad "T203g called it verified on the strength of the caller's PATH / 憑呼叫端的 PATH 就稱之為已驗證" ;;
+        *) bad "T203g got: $_t203_out2 / 實得如上" ;;
+    esac
+    rm -rf "$_t203_home" "$_t203_home2" "$TMP/t203bash" "$_t203_pfx"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
@@ -10829,6 +10943,8 @@ fi
 # T161 在 Windows 上、以及「寫入跑得比取樣迴圈還快」時會跳過，而後者是這台機器的速度的性質，
 # 不是平台名字的性質。
 (( ${T161_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T203_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T203_BASH_SKIPPED:-0} )) && (( want_skip += 1 ))
 # T166d needs python3 to rebuild the index checksum after bending a line. The
 # guest's busybox userland has no python3, and that is a property of the image
 # rather than of the platform's name -- so it is recorded by the case, like
