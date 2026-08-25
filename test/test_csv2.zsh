@@ -10920,71 +10920,86 @@ echo
 echo "--- T204: a drifted index costs a scan, not an answer / T204：漂掉的索引代價是一次掃描，不是一個答案 ---"
 
 _t204=$TMP/t204.csv
+_t204_ref=$TMP/t204.ref
+
+# The fixture has to defeat the O(1) stamp, which is size + mtime to the
+# nanosecond + the first and last 64 bytes. So: write the file, build the
+# index, then write a SECOND version of the same length with two records
+# changed -- one a byte longer, a later one a byte shorter -- and put the
+# original timestamp back.
+#
+# No python3. The first version of this case generated the drift with a python
+# heredoc, and the guest has no python3, so the one platform where the fix had
+# never run was the one it most needed to run on. Everything here is printf,
+# a redirect and `touch -r`.
+#
+# 這份 fixture 必須擊敗 O(1) 戳記，而戳記是「大小 + 奈秒級 mtime + 頭尾各 64 個位元組」。
+# 因此：先寫出檔案、建索引，再寫出「長度相同、但有兩筆被改過」的第二版——一筆長一個位元組、
+# 後面某一筆短一個位元組——然後把原本的時間戳放回去。
+# 不用 python3。這個案例的第一版用 python heredoc 產生偏移，而 guest 上沒有 python3，於是
+# 「這個修正從未執行過」的那個平台，正好就是它最需要執行的那個。這裡用的全是 printf、一個
+# 重導向與 `touch -r`。
 {
     print -r -- "id,value"
     for _i in {1..2000}; do printf '%d,value%06d\n' $_i $_i; done
 } > "$_t204"
 CSV2_INDEX_MIN_BYTES=10 "$CSV2" --build-index -i "$_t204" > /dev/null
+cp -p "$_t204" "$_t204_ref"
 
-# The drift, and the mtime put back to the nanosecond. python3 is how the
-# suite already writes byte-exact fixtures; `touch -r` does not carry
-# nanoseconds everywhere, and where it does not this case would test the
-# stamp's mtime arm instead of its offsets.
-# 製造偏移，並把 mtime 還原到奈秒。這棵樹本來就用 python3 產生位元組精確的 fixture；
-# `touch -r` 不是每個平台都帶奈秒，而在不帶的平台上，這個案例會變成在測戳記的 mtime 那一支
-# 而不是它的偏移量。
-if command -v python3 > /dev/null 2>&1; then
-    python3 - "$_t204" <<'PYEOF'
-import os, sys
-p = sys.argv[1]
-st = os.stat(p)
-d = open(p, 'rb').read()
-a = (b'\n500,value000500\n',   b'\n500,value0005001\n')
-b = (b'\n1800,value001800\n', b'\n180,value001800\n')
-assert d.count(a[0]) == 1 and d.count(b[0]) == 1
-d = d.replace(a[0], a[1]).replace(b[0], b[1])
-f = open(p, 'r+b'); f.write(d); f.close()
-os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
-PYEOF
-
-    # The fixture is only a fixture if the stamp ACCEPTS it. If the stamp
-    # rejects it the case still passes -- and proves nothing, because the
-    # already-working path is the one it took. Say so rather than count it.
-    # 這個 fixture 只有在「戳記接受它」時才算數。若戳記拒絕它，這個案例仍然會通過——而且什麼
-    # 都沒證明，因為它走的是本來就正常的那條路。把這件事說出來，而不是把它算成一分。
-    _t204_hit=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$_t204" -debug 2>&1 | grep -c 'index hit')
-    if [[ $_t204_hit == 0 ]]; then
-        skipt "T204 the stamp rejected the drifted fixture, so the seek never happened / 戳記拒絕了這份 fixture，於是那個 seek 根本沒發生"
-        T204_SKIPPED=1
-    else
-        assert_eq "$(grep -c '^$' "$_t204")" "0" \
-            "T204a the fixture has no blank line to complain about / 這份 fixture 裡沒有任何可供指控的空白行"
-
-        _t204_got=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$_t204" 2>&1); _t204_rc=$?
-        _t204_want=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 --no-index -i "$_t204" 2>&1)
-        assert_eq "$_t204_got" "$_t204_want" \
-            "T204b -mid gives the same answer with the drifted index as without / -mid 有沒有那份漂掉的索引，答案相同"
-        assert_eq "$_t204_rc" "0" \
-            "T204c and does not turn a working file into a failure / 而且不會把一個正常的檔案變成一次失敗"
-
-        _t204_tail=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -tail 1 -i "$_t204" 2>&1)
-        _t204_tailw=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -tail 1 --no-index -i "$_t204" 2>&1)
-        assert_eq "$_t204_tail" "$_t204_tailw" \
-            "T204d -tail too, which reaches the index by a different route / -tail 也是，它是以另一條路徑走到索引的"
-
-        # And it says why, at INFO. A fallback nobody can see is a fallback
-        # nobody can tell from the index having worked.
-        # 而且它會在 INFO 說出原因。一次沒有人看得見的退路，與「索引本來就正常」分辨不出來。
-        _t204_said=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$_t204" -debug 2>&1)
-        case $_t204_said in
-            *"is not the start of a record"*)
-                ok "T204e and says which byte it gave up on / 並說出它是在哪個位元組放棄的" ;;
-            *) bad "T204e the fallback was silent: $_t204_said / 那次退路是無聲的" ;;
+{
+    print -r -- "id,value"
+    for _i in {1..2000}; do
+        case $_i in
+            500)  printf '500,value0005001\n' ;;    # one byte longer / 長一個位元組
+            1800) printf '180,value001800\n' ;;     # one byte shorter / 短一個位元組
+            *)    printf '%d,value%06d\n' $_i $_i ;;
         esac
-    fi
-else
-    skipt "T204 needs python3 to write the drifted fixture / 需要 python3 來產生這份 fixture"
+    done
+} > "$_t204"
+touch -r "$_t204_ref" "$_t204"
+
+_t204_same_size=0
+[[ $(wc -c < "$_t204") == $(wc -c < "$_t204_ref") ]] && _t204_same_size=1
+assert_eq "$_t204_same_size" "1" \
+    "T204pre the drifted fixture is the same length as the original / 這份偏移過的 fixture 與原檔長度相同"
+
+# The fixture is only a fixture if the stamp ACCEPTS it. Where `touch -r` does
+# not carry nanoseconds -- the same platforms on which T143 skips -- the stamp
+# rejects it on mtime and the seek never happens, so this case would pass
+# through the path that already worked and prove nothing. Say so rather than
+# count it.
+# 這個 fixture 只有在「戳記接受它」時才算數。在 `touch -r` 不帶奈秒的平台上——也就是 T143 會
+# 跳過的那些平台——戳記會因為 mtime 而拒絕它，那個 seek 根本不會發生，於是這個案例會走上一條
+# 本來就正常的路，什麼也證明不了。把這件事說出來，而不是把它算成一分。
+_t204_hit=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$_t204" -debug 2>&1 | grep -c 'index hit')
+if [[ $_t204_hit == 0 ]]; then
+    skipt "T204 the stamp rejected the drifted fixture, so the seek never happened / 戳記拒絕了這份 fixture，於是那個 seek 根本沒發生"
     T204_SKIPPED=1
+else
+        assert_eq "$(grep -c '^$' "$_t204")" "0" \
+        "T204a the fixture has no blank line to complain about / 這份 fixture 裡沒有任何可供指控的空白行"
+
+    _t204_got=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$_t204" 2>&1); _t204_rc=$?
+    _t204_want=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 --no-index -i "$_t204" 2>&1)
+    assert_eq "$_t204_got" "$_t204_want" \
+        "T204b -mid gives the same answer with the drifted index as without / -mid 有沒有那份漂掉的索引，答案相同"
+    assert_eq "$_t204_rc" "0" \
+        "T204c and does not turn a working file into a failure / 而且不會把一個正常的檔案變成一次失敗"
+
+    _t204_tail=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -tail 1 -i "$_t204" 2>&1)
+    _t204_tailw=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -tail 1 --no-index -i "$_t204" 2>&1)
+    assert_eq "$_t204_tail" "$_t204_tailw" \
+        "T204d -tail too, which reaches the index by a different route / -tail 也是，它是以另一條路徑走到索引的"
+
+    # And it says why, at INFO. A fallback nobody can see is a fallback
+    # nobody can tell from the index having worked.
+    # 而且它會在 INFO 說出原因。一次沒有人看得見的退路，與「索引本來就正常」分辨不出來。
+    _t204_said=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$_t204" -debug 2>&1)
+    case $_t204_said in
+        *"is not the start of a record"*)
+            ok "T204e and says which byte it gave up on / 並說出它是在哪個位元組放棄的" ;;
+        *) bad "T204e the fallback was silent: $_t204_said / 那次退路是無聲的" ;;
+    esac
 fi
 
 # A GOOD index must still be used -- a fallback that fires every time is not a
