@@ -39,10 +39,29 @@ described somewhere below; this is the list a reader should see first:
 |---|---|
 | column projection (`-cols`) | `--json` and `jq`, or `-get` per cell |
 | case-insensitive matching | `--json` and one pass of your own — see the note under `-contains` |
-| counting without reading (`-count`) | `records` on the trailing `--json` meta line |
+| counting without reading (`-count`) | `records` on the trailing `--json` meta line — and see the note below the table, because the obvious way to get it reads the whole file |
 | converting between `.csv` and `.csv2` | refused on purpose; write the records out and read them back in |
 | safe concurrent writers | serialise them yourself; two writers silently lose one edit. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one that finishes SECOND warns that it could not update the index |
 | telling refusals apart programmatically | nothing but exit 1 and English prose, in every one of them |
+
+**Counting: the obvious route is the expensive one.** `records` on the trailing
+meta line is the answer, but `csv2 -r --json` reaches it by reading every byte.
+`csv2 -tail 1 --json` reaches the same number **and, when a sidecar exists,
+seeks straight to the end**: measured on a 200,000-record file, 960 bytes read
+against 2,777,795, same answer. Extract it with
+
+```sh
+n=$(csv2 -tail 1 --json -i f.csv | tail -1 | sed -n 's/.*"records":\([0-9]*\).*/\1/p')
+```
+
+The sidecar is the whole trick and it is not automatic: without one, `-tail`
+reads the file to find its end, and below `CSV2_INDEX_MIN_BYTES` it does not
+leave one behind either — the 2.7 MB file above read all 2,777,795 bytes twice
+in a row until `--build-index` was run on it. So this is cheap on a file you
+have indexed on purpose, or on one big enough that something already did.
+Round 75 found the cheap form by deriving it from two separate sections; the
+table used to point only at the expensive one.
+
 
 `install.zsh` puts the binary where each platform's shell actually looks:
 `$(brew --prefix)/bin` where Homebrew is present, `~/.local/bin` as the
@@ -72,6 +91,21 @@ It ends by saying which kinds of shell can reach the binary — every shell
 including scripts over ssh, login shells only, or interactive terminals only.
 Those are different properties and only some of them are usually the one you
 need.
+
+Its options, which were undocumented until round 75 needed one of them and
+could not find it:
+
+| | |
+|---|---|
+| `--dry-run` | say what would happen, write nothing |
+| `--prefix DIR` | install into DIR instead of the chosen location. This is how you install somewhere private — a throwaway directory, a container image, a machine where `$(brew --prefix)/bin` already holds a csv2 you do not want replaced |
+| `--no-rc` | never touch a shell rc file; print the PATH line for you to add |
+| `--uninstall` | remove the binary and every block this script wrote |
+
+Without `--prefix` the destination is chosen for you, and on a Homebrew machine
+that is `$(brew --prefix)/bin` — which will overwrite a csv2 already there. That
+is what installing means and it is the intended behaviour, but a reader trying
+the tool out wants `--prefix` and the document did not offer it.
 
 Progress is tracked as checkboxes at the end of [plan/plan.md](./plan/plan.md),
 and a box is only ticked once the matching case in
@@ -262,8 +296,13 @@ SELECTING / 選取
   -t                    include the header rows (off by default). It applies
                         to SELECTIONS only -- an edit rewrites the whole file
                         and always writes the headers, with or without -t
-  -rownum               prepend a record-number column. It does NOT renumber
-                        anything: see "Two numberings" below. With -o or -so
+  -rownum               prepend a record-number column. It does not change any
+                        ADDRESS -- `1:1` still means the first field of the
+                        first record on a read; see "Two numberings" below.
+                        (This says nothing about what an EDIT does: a -delete
+                        renumbers the records after it, and always has. Round
+                        75 read this line while asking that question and took
+                        it for an answer.) With -o or -so
                         the column is written, header and all, so every
                         address in that FILE is one greater than in the input
                         -- `-get 1:1` on it returns the row number, not the
@@ -1863,6 +1902,19 @@ here rather than to grow the table into something nobody reads.
 | unknown flag | never swallowed as something else |
 
 ### Every edit index refers to the input, and that is visible with `-insert`
+
+**They may also be mixed with one another in a single run** — `-insert 3 X
+-delete 2` is one atomic edit, not two — and the rule below governs all of them
+together, not each verb separately. Round 75 read "can each be given more than
+once" as granting repetition of one verb and ran the mixture as a bet; it works,
+and the sentence did not say so.
+
+**A `-delete` renumbers the records after it.** Afterwards the file is numbered
+1..N with no gap, so an address taken before the edit may name a different
+record after it. The `-insert` example below shows this in its output and the
+document nowhere states it; round 75 had to infer it, and the `-rownum` entry —
+which says it "does not renumber anything" about ADDRESSES on a read — is what a
+reader meets while asking.
 
 `-insert`, `-delete`, `-update` and `-delete -cell` can each be given more than
 once in a run, and **every index counts against the file as it arrived**. The

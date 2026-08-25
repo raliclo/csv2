@@ -7460,3 +7460,125 @@ csv2: --truncate-partial is refused with -append, whatever the file contains: ..
 追加)。解析器那一則不動——它對其他每一個動詞都是對的。
 
 **形狀:一則對「呼叫它的人是誰」一無所知的訊息,而處方恰好取決於那件事。**
+
+## JE. `install.zsh --prefix` 沒有寫在任何地方,而它是「試用一次」唯一安全的做法(2026-08-26 修正,README)
+
+第 75 回合。任務要求把 csv2 裝進一個用完即丟的 HOME 與 prefix,並證明「一個空環境的 shell」
+執行得到它。那個回合做到了,但它明白指出:
+
+> `--prefix` appears nowhere in either file — the only match for the string is
+> `$(brew --prefix)`, a shell command inside a sentence.
+
+README 寫了 `--uninstall` 與 `--no-rc`,沒有寫 `--prefix` 與 `--dry-run`。於是那個省略讀起來
+像「沒有這個選項」。而在一台有 Homebrew 的機器上,唯一有記載的行為就是「裝進
+`$(brew --prefix)/bin`」——該回合查過,那裡已經有一個 621,000 bytes 的 csv2,與當時的建置大小
+不同。**只讀 README 的人照做,會覆蓋掉使用者實際在用的那一份。** 那個回合刻意沒有走那條路,
+而它用的 `--prefix` 是任務給的,不是文件給的。
+
+修法:把四個選項列成一張表,並說明「不給 `--prefix` 時目的地是它替你選的,而那會覆蓋既有的
+那一份」。
+
+**形狀:一份「列了一部分選項」的文件。** 列出兩個而漏掉兩個,比一個都不列更糟——因為它讀起來
+像是完整的。
+
+## JF. 「一次 delete 之後,紀錄編號變成什麼」從未被寫出來(2026-08-26 修正,T206a/b)
+
+同一回合。任務直接問「之後的紀錄編號是什麼」,而 README 只在一個 `-insert` 例子的輸出裡
+「隱含地」回答過。同一個回合也把「不同的編輯動詞能不能在一次執行裡混用」當成一場賭注:
+
+> The README says `-insert`, `-delete`, `-update` and `-delete -cell` "can
+> **each** be given more than once in a run" — that grants repetition of each
+> verb, not mixture of different verbs. It works, but I ran it as a bet.
+
+兩件事都成立,實測確認:
+
+```console
+$ csv2 -insert 3 'NEW,9' -delete 2 -i t.csv --in-place    # 混用，一次原子編輯
+$ csv2 -r -t -rownum -i t.csv
+rownum,pkg,ver
+1,r1,1
+2,NEW,9      ← 兩個索引都是對「送達時的檔案」計數
+3,r3,3
+4,r4,4       ← 刪除之後連續編號，沒有缺口
+5,r5,5
+```
+
+修法:兩句話都寫進批次編輯那一節,並由 T206a/b 釘住。
+
+**形狀:一份文件在一個例子的輸出裡回答了問題,而讀者是在別處問的。**
+
+## JG. 「它不會重新編號任何東西」——講的是位址,而讀者是在問編輯(2026-08-26 修正,README)
+
+同一回合,而這一條是上一條的一半原因。`-rownum` 那個條目開頭是:
+
+> prepend a record-number column. **It does NOT renumber anything**: see
+> "Two numberings" below.
+
+它的意思是「`-rownum` 那一欄不會改變位址」——讀取時 `1:1` 仍然指第一筆的第一欄。但它坐落在
+一個叫「兩套編號」的章節旁邊一個螢幕的距離,而那正是一個人想知道「刪除會不會重新編號」時
+會走到的地方。第 75 回合原話:
+
+> it reads as the opposite of the truth.
+
+修法:把那句話改成「它不會改變任何**位址**」,並加一句括號明說「這句話對編輯做了什麼隻字未提」。
+
+**形狀:一句在它自己的段落裡正確的話,放在讀者帶著另一個問題抵達的位置上。**
+
+## JH. 「不讀檔就計數」的建議,指向的是會讀完整個檔案的那條路(2026-08-26 修正,T206c/d/e)
+
+同一回合。「不提供的功能」那張表對 `-count` 的答覆是「`--json` 結尾那行 meta 的 `records`」,
+而取得它最直覺的方式是 `csv2 -r --json`——那會讀過每一個位元組。該回合自己從兩個不同章節推導出
+便宜的寫法,並量了出來:
+
+```console
+$ csv2 -r      --json -i big.csv -debug     read_bytes=2777795   records:200000
+$ csv2 -tail 1 --json -i big.csv -debug     read_bytes=960       records:200000
+```
+
+**但那個便宜是有前提的,而該回合沒有量到那一半。** 親手補測:
+
+```console
+$ rm -f big.csv.index
+$ csv2 -tail 1 --json -i big.csv -debug
+read_bytes=2777795 file_bytes=2777795        ← 沒有 sidecar 時，它會讀完整個檔案
+$ ls big.csv.index
+no                                            ← 而且在 16 MiB 門檻以下不會留下一份
+```
+
+因此「用 `-tail 1` 計數比較便宜」若寫成無條件成立,會變成下一個回合的 DOC WRONG。
+
+修法:把便宜的寫法連同 `sed` 取值一起寫出來,並把「sidecar 就是這個技巧的全部,而它不是自動的」
+寫在同一段。T206c 釘住便宜的那一半,T206d/e 釘住貴的那一半。
+
+**形狀:一個從「量到的那個案例」推廣出去的效能宣稱。** 與 FH、FN、IV 同族;這一次少掉的前提是
+「有沒有索引」。
+
+## 非缺陷:第 75 回合回報 install.zsh 每次都印出一份 16 行的目錄列表(2026-08-26 查證,不成立)
+
+那個回合把這一項放進 TOOL BROKEN,描述得很具體:
+
+> `install.zsh` prints an unadorned 16-line directory listing of the repo root
+> before its banner, on every invocation — install, re-install, and
+> `--uninstall` alike. It looks like an unquoted glob or a stray `ls`.
+
+**不是 install.zsh。** 那是這台機器的 zsh 有一個 `chpwd` hook,每次 `cd` 都會執行 `ls`;
+那個回合的指令是 `… ./install.zsh …`,於是列表來自它自己那個
+`cd`。逐字證明:
+
+```console
+$ /Volumes/LinuxCS/sos/csv2/install.zsh --dry-run | head -4     # 完全沒有 cd
+csv2 install / 安裝
+  from    : /Volumes/LinuxCS/sos/csv2/release/csv2 (csv2 0.1.0)
+  to      : /opt/homebrew/bin/csv2
+  (dry run — nothing will be written / 預演，不會寫入任何東西)
+
+$ cd /Volumes/LinuxCS/sos/csv2 && ./install.zsh --dry-run | head -4    # 有 cd
+（同樣四行，沒有列表——列表是 cd 印的，不在管線裡）
+```
+
+記在這裡是因為**下一個回合很可能會再報一次**,而那時應該花三十秒否證、而不是三十分鐘去找一個
+不存在的 glob。
+
+**形狀:一個被讀成程式輸出的環境產物。** 與這棵樹上其他幾次同族——每周用量上限、
+`/Volumes/LinuxCS` 中途卸載、重裝後的 WSL 缺一把預設金鑰。TOOL BROKEN 是最該先懷疑的那一類,
+而這一次它是空的。

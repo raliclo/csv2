@@ -11163,6 +11163,76 @@ esac
 assert_succeeds "T205f and appending to the clean copy works / 而對那份乾淨副本追加是可行的" -- \
     "$CSV2" -append '2,y' -i "$TMP/t205clean.csv" --in-place
 
+# ---------------------------------------------------------------------
+# T206 -- three things the README now states that it did not, each of which
+# round 75 either had to guess or had to derive.
+#
+#   a/b  edit verbs mix in one run, and a -delete renumbers what follows.
+#        Both were true and neither was written down; the round ran the
+#        mixture "as a bet" and inferred the renumbering from one example's
+#        output.
+#   c/d  `-tail 1 --json` gives the record count for a seek instead of a full
+#        read -- but ONLY when a sidecar exists. The round measured the cheap
+#        case and the README now says so; d is the half that keeps the new
+#        sentence honest, because below CSV2_INDEX_MIN_BYTES `-tail` reads
+#        every byte and leaves no sidecar behind, so an unconditional claim
+#        would be the next round's DOC WRONG.
+#
+# T206 —— README 現在寫出來、而先前沒有寫的三件事，每一件在第 75 回合都得靠猜或靠推導。
+#   a/b  編輯動詞可以在一次執行裡混用，而一次 -delete 會把後面的紀錄重新編號。兩件事都成立、
+#        而且都沒被寫下來；那個回合說那次混用是它「賭的」，重新編號則是從某個例子的輸出推斷的。
+#   c/d  `-tail 1 --json` 用一次 seek 取代整檔讀取來得到紀錄數——但**只有在有 sidecar 時**。
+#        那個回合量到的是便宜的那一半，而 d 是讓那句新加的話保持誠實的另一半：在
+#        CSV2_INDEX_MIN_BYTES 以下，`-tail` 會讀完每一個位元組、也不會留下 sidecar，
+#        因此一句無條件的宣稱會變成下一個回合的 DOC WRONG。
+# ---------------------------------------------------------------------
+echo
+echo "--- T206: things the README now says / T206：README 現在說出來的那幾件事 ---"
+
+{
+    print -r -- "pkg,ver"
+    for _i in {1..5}; do printf 'r%d,%d\n' $_i $_i; done
+} > "$TMP/t206.csv"
+"$CSV2" -insert 3 'NEW,9' -delete 2 -i "$TMP/t206.csv" --in-place
+assert_eq "$("$CSV2" -r -i "$TMP/t206.csv" | tr '\n' ' ')" "r1,1 NEW,9 r3,3 r4,4 r5,5 " \
+    "T206a -insert and -delete mix in one run, both against the arriving file / -insert 與 -delete 可在一次執行裡混用，且都是對「送達時的檔案」計數"
+# Contiguous afterwards: the deleted record leaves no gap.
+# 之後是連續的：被刪掉的那一筆不會留下缺口。
+assert_eq "$("$CSV2" -r -t -rownum -i "$TMP/t206.csv" | tail -n +2 | cut -d, -f1 | tr '\n' ' ')" "1 2 3 4 5 " \
+    "T206b a delete renumbers what follows it, with no gap / 一次刪除會把它後面的重新編號，且沒有缺口"
+
+# The cheap count, and what makes it cheap.
+# 那個便宜的計數，以及讓它便宜的那個東西。
+{
+    print -r -- "id,v"
+    for _i in {1..20000}; do printf '%d,v%d\n' $_i $_i; done
+} > "$TMP/t206big.csv"
+_t206_size=$(wc -c < "$TMP/t206big.csv" | tr -d ' ')
+_t206_full=$("$CSV2" -r --json -i "$TMP/t206big.csv" | tail -1)
+"$CSV2" --build-index -i "$TMP/t206big.csv" > /dev/null
+_t206_cheap=$("$CSV2" -tail 1 --json -i "$TMP/t206big.csv" | tail -1)
+assert_eq "$_t206_cheap" "$_t206_full" \
+    "T206c -tail 1 --json reports the same record count as -r --json / -tail 1 --json 回報的紀錄數與 -r --json 相同"
+_t206_read=$("$CSV2" -tail 1 --json -i "$TMP/t206big.csv" -debug 2>&1 | sed -n 's/.*read_bytes=\([0-9]*\).*/\1/p' | tail -1)
+if [[ -n $_t206_read ]] && (( _t206_read < _t206_size / 10 )); then
+    ok "T206c2 and reaches it by seeking, not by reading the file / 而且是用 seek 到達的，不是把檔案讀完"
+else
+    bad "T206c2 read $_t206_read of $_t206_size bytes / 讀了 $_t206_read／$_t206_size 個位元組"
+fi
+
+# Without a sidecar the same command reads everything. This is the clause that
+# keeps the README's new sentence from being false.
+# 沒有 sidecar 時，同一個指令會讀完全部。這一條正是讓 README 那句新加的話不至於變成假話的那半句。
+rm -f "$TMP/t206big.csv.index"
+_t206_nosidecar=$("$CSV2" -tail 1 --json -i "$TMP/t206big.csv" -debug 2>&1 | sed -n 's/.*read_bytes=\([0-9]*\).*/\1/p' | tail -1)
+assert_eq "$_t206_nosidecar" "$_t206_size" \
+    "T206d without a sidecar the same command reads every byte / 沒有 sidecar 時，同一個指令會讀完每一個位元組"
+if [[ -f $TMP/t206big.csv.index ]]; then
+    bad "T206e -tail left a sidecar below the threshold / -tail 在門檻以下留下了一份 sidecar"
+else
+    ok "T206e and leaves none behind below the threshold, so it stays expensive / 而且在門檻以下不會留下一份，因此它會一直是貴的"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
