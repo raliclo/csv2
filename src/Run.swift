@@ -1633,10 +1633,14 @@ func runAppendFast(_ o: Options) throws {
     let wantsIndex = existingIndex == nil && !o.noIndex && size >= UInt64(indexMinBytes())
     let builder = wantsIndex ? IndexBuilder(isCSV2: fmt == .csv2) : nil
     var fileLineFeeds = 0
+    var scanSawCRLFLast = false
     if size > 0 {
         do {
-            fileLineFeeds = try validateBeforeAppend(path: path, format: fmt, headerRows: headerRows,
-                                                     truncatePartial: false, builder: builder)
+            fileLineFeeds = try withUnsafeMutablePointer(to: &scanSawCRLFLast) { p in
+                try validateBeforeAppend(path: path, format: fmt, headerRows: headerRows,
+                                         truncatePartial: false, builder: builder,
+                                         lastTerminatorWasCRLF: p)
+            }
         } catch let e as CSV2Error {
             guard o.truncatePartial else { throw e }
             throw fault(
@@ -1656,11 +1660,36 @@ func runAppendFast(_ o: Options) throws {
     // 「用兩種方式寫成」的檔案——csv2 讀得回來（紀錄結尾是逐筆判斷的），而很多別的工具不行。
     // 快路徑寫的是位元組、不是重寫整個檔案，因此「輸出一律用 LF」在這裡無法適用，除非把其他
     // 每一行也一起改掉；配合檔案「已經是的樣子」，是唯一能讓它保持自身一致的答案。
+    // Is the file's last record terminated at all? Asked once, used twice:
+    // here, and below where the missing LF is supplied.
+    // 這個檔案的最後一筆有沒有終止符？只問一次，用兩次：在這裡，以及下面「補上那個缺掉的 LF」
+    // 的地方。
+    var lastByteIsLF = false
+    if size > 0 {
+        h.seek(toFileOffset: size - 1)
+        lastByteIsLF = [UInt8](h.readData(ofLength: 1)).first == BYTE_LF
+    }
     var endsWithCRLF = false
     if size >= 2 {
         h.seek(toFileOffset: size - 2)
         let tail = [UInt8](h.readData(ofLength: 2))
         endsWithCRLF = tail == [BYTE_CR, BYTE_LF]
+    }
+    // The last two bytes answer this only when the file's last record is
+    // TERMINATED. On a CRLF file whose tail is not -- an exporter cut off, a
+    // torn write, anything that ends mid-record -- they are the last two bytes
+    // of a value, so the probe said LF and the append wrote LF into a file
+    // where every other record ends CRLF. The scan above has already read the
+    // whole file and knows what its last terminator was; use that when the
+    // tail has none, which is the same rule stated for the case the probe
+    // handles.
+    // 只有在「檔案最後一筆有終止符」時，那兩個位元組才回答得了這個問題。一個 CRLF 檔案的尾巴
+    // 若沒有終止符——匯出程式被切斷、寫入撕裂、任何停在紀錄中間的情況——那兩個位元組就是某個
+    // 「值」的最後兩個位元組，於是這個探測說「LF」，而追加就把 LF 寫進了一個「其他每一筆都以
+    // CRLF 結尾」的檔案。上面那次掃描已經讀過整個檔案，知道它最後一個終止符是什麼；尾巴沒有
+    // 終止符時就用它——那與這個探測所處理的情況，是同一條規則。
+    if !endsWithCRLF, !lastByteIsLF, scanSawCRLFLast {
+        endsWithCRLF = true
     }
     // The encoder always terminates a record with LF, and it is the same
     // encoder every write path uses -- so the ending is adjusted here, on the
@@ -1675,9 +1704,7 @@ func runAppendFast(_ o: Options) throws {
 
     var prefix: [UInt8] = []
     if size > 0 {
-        h.seek(toFileOffset: size - 1)
-        let last = [UInt8](h.readData(ofLength: 1))
-        if last.first != BYTE_LF {
+        if !lastByteIsLF {
             if fmt == .csv2 {
                 // .csv2 guarantees an LF-terminated line per record, so a
                 // missing final LF is evidence of a torn write, not just an
@@ -1700,7 +1727,12 @@ func runAppendFast(_ o: Options) throws {
             // the tail of the last one and two records become one.
             // .csv 沒有這個承諾——很多工具產生的檔案就是沒有結尾換行。必須補上
             // 一個，否則新紀錄會被接到最後一筆的尾巴上，兩筆變成一筆。
-            prefix = [BYTE_LF]
+            // And the terminator supplied here follows the file too: adding a
+            // bare LF to a CRLF file leaves the record before the appended one
+            // ending differently from every other record in it.
+            // 而在這裡補上的那個終止符同樣跟著檔案走：對一個 CRLF 檔案補上一個裸 LF，
+            // 會讓「被追加那一筆的前一筆」的結尾與檔案裡其他每一筆都不同。
+            prefix = endsWithCRLF ? [BYTE_CR, BYTE_LF] : [BYTE_LF]
         }
     }
 

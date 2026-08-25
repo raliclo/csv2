@@ -1957,7 +1957,8 @@ func checkTornAppend(path: String, format: Format, truncatePartial: Bool) throws
 @discardableResult
 func validateBeforeAppend(path: String, format: Format, headerRows: Int,
                           truncatePartial: Bool,
-                          builder: IndexBuilder? = nil) throws -> Int {
+                          builder: IndexBuilder? = nil,
+                          lastTerminatorWasCRLF: UnsafeMutablePointer<Bool>? = nil) throws -> Int {
     let source = try ByteSource(path: path)
     defer { source.close() }
     var headers: [Record] = []
@@ -1996,6 +1997,7 @@ func validateBeforeAppend(path: String, format: Format, headerRows: Int,
     // 它也必須被執行。
     if !parser.stopped { try parser.finish() }
     if let e = pending { throw e }
+    lastTerminatorWasCRLF?.pointee = parser.lastTerminatorWasCRLF
     return lineFeeds
 }
 

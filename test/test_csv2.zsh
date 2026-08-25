@@ -10601,7 +10601,24 @@ assert_fails "T200c -o SEL.CSV2 is refused like -o sel.csv2 / -o SEL.CSV2 與 -o
 assert_succeeds "T200d and -t makes both acceptable / 而 -t 讓兩者都可以" -- \
     "$CSV2" -head 1 -t -i "$TMP/t200.csv2" -o "$TMP/T200SEL2.CSV2"
 assert_contains "$("$CSV2" -r -i "$TMP/t200.csv2" --headers 1 2>&1)" "declares 2 header row" \
-    "T200e while READING still refuses to guess / 而「讀取」仍然拒絕去猜"
+    "T200e while a --headers that disagrees with the suffix is still refused / 而與副檔名不符的 --headers 仍然被拒絕"
+# ONE suffix rule, both sides. The reading side was case-sensitive and the
+# writing side was not, for one day: `-o x.CSV2` was refused for declaring a
+# format with a header while `-i x.CSV2` was refused for declaring nothing,
+# and the never-convert guard -- which reads the READING side -- let a
+# one-header input be written to `.CSV2`, which on this filesystem is the
+# `.csv2` you read back a record short.
+# 一個副檔名規則，兩側共用。「讀取」那一側曾經區分大小寫、「寫出」那一側不區分，為時一天：
+# `-o x.CSV2` 以「它宣告了一個帶標頭的格式」被拒絕，而 `-i x.CSV2` 以「它什麼都沒宣告」被拒絕；
+# 而「絕不轉換格式」那道守衛讀的是「讀取」那一側，於是一個單列標頭的輸入被寫進了 `.CSV2`
+# ——在這個檔案系統上，那正是你之後讀回來、少了一筆紀錄的那個 `.csv2`。
+printf 'a,b\n1,x\n2,y\n' > "$TMP/t200one.csv"
+assert_fails "T200f a one-header input to .CSV2 is refused like .csv2 / 單列標頭的輸入寫到 .CSV2 與寫到 .csv2 一樣被拒絕" -- \
+    "$CSV2" -r -t -i "$TMP/t200one.csv" -o "$TMP/T200CONV.CSV2"
+assert_succeeds "T200g and an uppercase suffix reads as its format / 而大寫的副檔名會依它的格式被讀入" -- \
+    "$CSV2" -r -t -i "$TMP/t200one.csv" -o "$TMP/T200UP.CSV"
+assert_succeeds "T200h including reading it back with no --headers / 包括不給 --headers 就讀回來" -- \
+    "$CSV2" -r -t -i "$TMP/T200UP.CSV" -so
 
 # ---------------------------------------------------------------------
 # T201 -- a row you supply is a field csv2 writes.
@@ -10629,6 +10646,74 @@ assert_contains "$(tail -1 "$TMP/t201c.csv")" '"' \
     "T201c the in-place fast path agrees / 就地追加的快路徑說法一致"
 assert_eq "$("$CSV2" -get 2:2 -i "$TMP/t201a.csv")" " leading" \
     "T201d and the value read back is the one supplied / 而讀回來的值就是交進去的那一個"
+
+
+# ---------------------------------------------------------------------
+# T202 -- an append follows the file's line endings, including when the
+# file's last record has none.
+#
+# Round 73. The fast path decided CRLF from the file's LAST TWO BYTES, which
+# answers the question only when the last record is terminated. On a CRLF file
+# whose tail is not -- an exporter cut off, a torn write, anything ending
+# mid-record -- those two bytes are the end of a VALUE, so the probe said LF
+# and the append wrote LF into a file where every other record ends CRLF, and
+# supplied a bare LF to close the record before it.
+#
+# The scan the append already performs knows what the file's last terminator
+# was. This is the same rule the probe states, asked of the file rather than
+# of its last two bytes.
+#
+# T202 —— 一次追加會跟隨檔案的行尾，包括「檔案最後一筆沒有終止符」時。
+# 第 73 回合。快路徑是用「檔案的最後兩個位元組」判斷 CRLF 的，而只有在最後一筆有終止符時，
+# 那兩個位元組才回答得了這個問題。
+# ---------------------------------------------------------------------
+echo
+echo "--- T202: which line ending an append writes / T202：一次追加寫的是哪一種行尾 ---"
+
+# CRLF file, last record terminated: the case the probe always handled.
+# CRLF 檔案、最後一筆有終止符：探測一直處理得了的那個情況。
+printf 'a,b\r\n1,x\r\n' > "$TMP/t202_ok.csv"
+"$CSV2" -append '2,y' -i "$TMP/t202_ok.csv" --in-place
+# The last two bytes, read as bytes. Matching `od -c` text was the first
+# attempt and it compared od's SPACING, not the file's contents.
+# 讀「最後兩個位元組」，當成位元組來讀。第一次的寫法是比對 `od -c` 的文字，而那比到的是
+# od 的「排版」，不是檔案的內容。
+_t202_tail() { tail -c 2 "$1" | od -A n -t x1 | tr -s ' ' | sed 's/^ //;s/ $//' }
+assert_eq "$(_t202_tail "$TMP/t202_ok.csv")" "0d 0a" \
+    "T202a a terminated CRLF file gets a CRLF record / 有終止符的 CRLF 檔案得到一筆 CRLF 紀錄"
+
+# CRLF file, last record UNTERMINATED: the case it did not.
+# CRLF 檔案、最後一筆「沒有」終止符：它處理不了的那個情況。
+printf 'a,b\r\n1,x\r\n2,y' > "$TMP/t202_cut.csv"
+"$CSV2" -append '3,z' -i "$TMP/t202_cut.csv" --in-place
+assert_eq "$(_t202_tail "$TMP/t202_cut.csv")" "0d 0a" \
+    "T202b and so does one whose last record was cut off / 最後一筆被切斷的那個也是"
+# Every record in it ends the same way: no bare LF was introduced.
+# 它裡面每一筆的結尾都一樣：沒有多出一個裸 LF。
+_t202_lf=$(od -A n -c < "$TMP/t202_cut.csv" | tr -s ' ' | grep -o '\\n' | wc -l | tr -d ' ')
+_t202_cr=$(od -A n -c < "$TMP/t202_cut.csv" | tr -s ' ' | grep -o '\\r' | wc -l | tr -d ' ')
+assert_eq "$_t202_lf" "$_t202_cr" \
+    "T202c every LF in it is half of a CRLF / 它裡面每一個 LF 都是某個 CRLF 的一半"
+
+# An LF file stays an LF file, terminated or not.
+# LF 檔案仍然是 LF 檔案，有沒有終止符都一樣。
+printf 'a,b\n1,x' > "$TMP/t202_lf.csv"
+"$CSV2" -append '2,y' -i "$TMP/t202_lf.csv" --in-place
+_t202d=$(od -A n -c < "$TMP/t202_lf.csv" | tr -s ' ')
+if [[ $_t202d == *"\\r"* ]]; then
+    bad "T202d a CR appeared in an LF file / 一個 CR 出現在 LF 檔案裡"
+else
+    ok "T202d an LF file gains no CR / LF 檔案不會多出 CR"
+fi
+
+# And the index still describes the file afterwards -- the appended record's
+# line accounting has to survive a two-byte terminator.
+# 而索引在那之後仍然與檔案相符——被追加那一筆的行號計算必須撐得住一個兩位元組的終止符。
+printf 'a,b\r\n1,x\r\n2,y' > "$TMP/t202_idx.csv"
+CSV2_INDEX_MIN_BYTES=10 "$CSV2" --build-index -i "$TMP/t202_idx.csv" > /dev/null
+CSV2_INDEX_MIN_BYTES=10 "$CSV2" -append '3,z' -i "$TMP/t202_idx.csv" --in-place
+assert_succeeds "T202e and the index still describes the file / 而索引仍然與檔案相符" -- \
+    env CSV2_INDEX_MIN_BYTES=10 "$CSV2" --verify-index -i "$TMP/t202_idx.csv"
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"

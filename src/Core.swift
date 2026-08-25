@@ -109,21 +109,52 @@ enum Format: String {
 
     var headerRows: Int { self == .csv2 ? 2 : 1 }
 
+    /// ONE suffix test, case-insensitive, used for reading and for writing.
+    ///
+    /// It was case-sensitive here and case-insensitive in `declaresFormat`
+    /// for one day, and that day produced a message that is false: `-o
+    /// x.CSV2` was refused with "x.CSV2 declares a format with a header"
+    /// while `-i x.CSV2` was refused for declaring NOTHING. Worse, the
+    /// never-convert guard reads THIS function, so `-r -t -i one_header.csv
+    /// -o conv.CSV2` was accepted at rc=0 -- and on a case-insensitive
+    /// filesystem `conv.CSV2` and `conv.csv2` are one inode, so reading it
+    /// back ate a record as header row 0b and the meta line reported the
+    /// smaller count with confidence.
+    ///
+    /// The old rule was "the check is case-sensitive, so a file named .CSV
+    /// needs --headers too". Nothing in "declared, never detected" requires
+    /// that: matching `.CSV` case-insensitively is still reading the name the
+    /// caller gave, not guessing from content. And on the two platforms where
+    /// `S.CSV` and `s.csv` are the same file, treating them as different
+    /// formats is not a rule anyone can act on.
+    ///
+    /// 一個副檔名判斷，大小寫不敏感，讀取與寫入共用。
+    ///
+    /// 它曾經在這裡是大小寫敏感、在 `declaresFormat` 是不敏感，而那一天產生了一則假的訊息：
+    /// `-o x.CSV2` 被以「x.CSV2 宣告了一個帶標頭的格式」拒絕，而 `-i x.CSV2` 被以「它什麼都
+    /// 沒有宣告」拒絕。更糟的是，「絕不轉換格式」那道守衛讀的就是這個函式，於是
+    /// `-r -t -i 單列標頭.csv -o conv.CSV2` 以 rc=0 被接受——而在大小寫不敏感的檔案系統上，
+    /// `conv.CSV2` 與 `conv.csv2` 是同一個 inode，於是讀回去時一筆紀錄被當成標頭列 0b 吃掉，
+    /// 而 meta 那一行很有把握地回報了那個比較小的數字。
+    ///
+    /// 舊規則是「這個檢查區分大小寫，因此名為 .CSV 的檔案也需要 --headers」。而「由宣告決定、
+    /// 絕不偵測」這件事並不要求那樣：以大小寫不敏感的方式匹配 `.CSV`，讀的仍然是呼叫端給的
+    /// 那個名字，不是從內容去猜。而在「`S.CSV` 與 `s.csv` 是同一個檔案」的那兩個平台上，
+    /// 把它們當成兩種格式，不是任何人能夠據以行動的規則。
     static func from(path: String) -> Format? {
-        if path.hasSuffix(".csv2") { return .csv2 }
-        if path.hasSuffix(".csv") { return .csv }
+        let lower = path.lowercased()
+        if lower.hasSuffix(".csv2") { return .csv2 }
+        if lower.hasSuffix(".csv") { return .csv }
         return nil
     }
 
     /// True when the extension makes a promise about the content, so writing
     /// data rows without a header there would make the file lie about itself.
     ///
-    /// Case-INSENSITIVE, and deliberately not the same test as `from(path:)`.
-    /// Reading asks "what did the caller declare", and csv2 does not guess, so
-    /// `-i S.CSV` still needs `--headers`. Writing asks "what will the next
-    /// reader think this file is", and the next reader may be a spreadsheet,
-    /// or csv2 on a case-insensitive filesystem where `SEL.CSV2` and
-    /// `sel.csv2` are one name for one file.
+    /// The same case-insensitive test as `from(path:)`, asked as a yes/no.
+    /// The two were briefly different -- see the note there -- and one day of
+    /// that was enough to produce both a false message and a silent record
+    /// loss.
     ///
     /// With the case-sensitive test here, `-o sel.csv2` was refused for
     /// writing a headerless selection and `-o SEL.CSV2` was accepted -- same
@@ -425,6 +456,14 @@ final class RecordParser {
     private var lfCount = 0
     private var crAsDataCount = 0
     private(set) var sawCRLF = false
+    /// Whether the LAST record terminator seen was CRLF. `sawCRLF` answers
+    /// "did this file ever use one"; the append path needs "what does this
+    /// file end its records with", and on a file whose final record is
+    /// unterminated those two questions have different answers.
+    /// 「最後一個看到的紀錄終止符」是不是 CRLF。`sawCRLF` 回答的是「這個檔案有沒有用過
+    /// CRLF」；而追加路徑要問的是「這個檔案的紀錄是以什麼結尾的」——在一個「最後一筆沒有
+    /// 終止符」的檔案上，那兩個問題的答案不同。
+    private(set) var lastTerminatorWasCRLF = false
     private(set) var strippedBOM = false
     private(set) var recordsEmitted = 0
 
@@ -581,6 +620,7 @@ final class RecordParser {
                 sawLF = true
                 lfCount += 1
                 sawCRLF = true
+                lastTerminatorWasCRLF = true
                 offset += 1
                 line += 1
                 try endRecord()
@@ -606,6 +646,7 @@ final class RecordParser {
             } else if b == BYTE_LF {
                 sawLF = true
                 lfCount += 1
+                lastTerminatorWasCRLF = false
                 line += 1
                 offset += 1
                 try endRecord()
@@ -656,6 +697,7 @@ final class RecordParser {
             try endField()
         } else if b == BYTE_LF {
             sawLF = true
+            lastTerminatorWasCRLF = false
             line += 1
             try endRecord()
         } else if b == BYTE_CR {

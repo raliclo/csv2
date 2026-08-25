@@ -267,8 +267,21 @@ INPUT / OUTPUT
   -si  -so              stdin / stdout, without buffering the whole file
   --headers 1|2         required with -si: stdin has no extension, and
                         required with -i when the path does not end in .csv or
-                        .csv2 -- the check is case-sensitive, so a file named
-                        .CSV needs it too. With -i it
+                        .csv2 -- and the suffix is matched WITHOUT regard to
+                        case, so `DATA.CSV` is read as a `.csv` and needs no
+                        --headers. Until 2026-08-25 that check was
+                        case-sensitive on the reading side and case-insensitive
+                        on the writing side, and the split produced both a
+                        message that was false (`-o x.CSV2` refused for
+                        "declaring a format with a header" while `-i x.CSV2`
+                        was refused for declaring nothing) and a silent record
+                        loss: the never-convert guard reads the reading-side
+                        test, so writing a one-header input to `.CSV2`
+                        succeeded, and on a case-insensitive filesystem that
+                        file IS the `.csv2` you read back with a record eaten
+                        as its second header row. Case-insensitive matching is
+                        still the NAME declaring the format; it is not
+                        detection. With -i it
                         is accepted only when it AGREES with the suffix, and
                         disagreeing is refused -- the suffix declares the
                         format. See the warning above. This entry used to end
@@ -343,7 +356,12 @@ EDITING / 編輯
                         it arrived, not as it grows. See below -- the same three
                         numbers give a different file if you run them one at a
                         time
-  -append ROW           append at the end. O(1) in BYTES WRITTEN, not in time:
+  -append ROW           append at the end, with the record ending the file
+                        already uses -- CRLF into a CRLF file, LF into an LF
+                        one, decided from the file's last TERMINATOR and not
+                        from its last two bytes, which are the end of a VALUE
+                        when the file was cut off mid-record.
+                        append at the end. O(1) in BYTES WRITTEN, not in time:
                         the whole file is read first, because a file whose last
                         record is incomplete cannot be safely appended to and
                         there is no cheap way to know. Measured linear --
