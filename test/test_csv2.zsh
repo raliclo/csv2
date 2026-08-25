@@ -10761,6 +10761,14 @@ if (( IS_WINDOWS )); then
     skipt "T203 install.zsh rc placement -- needs a POSIX home and env -i / 需要 POSIX 家目錄與 env -i"
     T203_SKIPPED=1
 else
+    # Say once that the file is missing, rather than five times that its
+    # absence produced surprising output. In the guest on 2026-08-25 the
+    # payload did not carry install.zsh, and this case reported five failures
+    # whose text was about `env: can't execute` and an empty directory listing
+    # -- true, and about the harness rather than about csv2.
+    # 「檔案不在」只說一次，而不是說五次「它不在所造成的奇怪輸出」。2026-08-25 在 guest 裡，
+    # payload 沒有帶 install.zsh，於是這個案例回報了五個失敗，內容是 `env: can't execute`
+    # 與一個空目錄列表——都是真的，但講的是測試環境而不是 csv2。
     _t203_home="$TMP/t203home"; _t203_pfx="$TMP/t203bin"
     mkdir -p "$_t203_home" "$_t203_pfx"
     _t203_run() {   # <shell> <extra args...>
@@ -10769,6 +10777,9 @@ else
 
     # zsh: .zshenv, because that is the file a non-interactive shell reads.
     # zsh：寫 .zshenv，因為那才是非互動 shell 會讀的檔案。
+    if [[ ! -x $ROOT/install.zsh ]]; then
+        bad "T203 install.zsh is not in this tree at $ROOT -- the payload that carried the suite here left it out / install.zsh 不在這棵樹裡，把測試送到這裡的 payload 沒有帶上它"
+    else
     _t203_out=$(_t203_run "$(command -v zsh)")
     if [[ -f $_t203_home/.zshenv ]] && ! [[ -f $_t203_home/.zshrc ]]; then
         ok "T203a a zsh account gets .zshenv, not .zshrc / zsh 帳號拿到的是 .zshenv 而非 .zshrc"
@@ -10828,15 +10839,43 @@ else
     # 會把那稱為一次「已驗證」的安裝。
     _t203_home2="$TMP/t203home2"; mkdir -p "$_t203_home2"
     _t203_out2=$(env HOME="$_t203_home2" SHELL="$(command -v zsh)" PATH="$_t203_pfx:$PATH" \
-        "$ROOT/install.zsh" --prefix "$_t203_pfx" --no-rc 2>&1)
+        "$ROOT/install.zsh" --prefix "$_t203_pfx" 2>&1)
     case $_t203_out2 in
-        *"a $(command -v zsh):t started from nothing does not have it"*|*"started from nothing does not have it"*)
-            ok "T203g an inherited PATH is not accepted as proof / 繼承來的 PATH 不被當成證據" ;;
-        *"verified"*)
-            bad "T203g called it verified on the strength of the caller's PATH / 憑呼叫端的 PATH 就稱之為已驗證" ;;
-        *) bad "T203g got: $_t203_out2 / 實得如上" ;;
+        *"reachable from: every shell"*)
+            bad "T203g claimed every shell finds it, on the strength of the caller's PATH / 憑呼叫端的 PATH 就宣稱每一種 shell 都找得到" ;;
+        *) ok "T203g an inherited PATH is not reported as a fresh shell's / 繼承來的 PATH 不會被當成全新 shell 的" ;;
     esac
+
+    # And when the caller's PATH really does reach the file just installed,
+    # nothing is written. This is the Windows node: csv2 resolves through a
+    # scoop shim while the install directory is not on PATH at all, and an
+    # installer that edited that machine's rc files would be fixing something
+    # that was not broken.
+    # 而當呼叫端的 PATH 真的通到剛裝好的那個檔案時，什麼都不寫。這就是 Windows 節點的情況：
+    # csv2 經由一個 scoop shim 解析得到，而安裝目錄根本不在 PATH 上；一個會去改那台機器 rc 檔
+    # 的安裝程式，修的是一個沒有壞的東西。
+    _t203_left=$(ls -a "$_t203_home2" | grep -vE '^\.$|^\.\.$' | tr '\n' ' ')
+    assert_eq "$_t203_left" "" \
+        "T203h nothing is written when the shell already runs that very file / shell 已經在執行那個檔案時，什麼都不寫"
+
+    # A byte-identical copy at another path is NOT that file. Both are the same
+    # build, so a hash comparison says yes; the question is which copy the shell
+    # runs, and it is running the other one.
+    # 另一個路徑上的一份「位元組相同」的複本，不是那個檔案。兩者是同一次建置，因此雜湊比對會
+    # 說「是」；而問題是 shell 執行的是哪一份，答案是另外那一份。
+    _t203_home3="$TMP/t203home3"; _t203_decoy="$TMP/t203decoy"
+    mkdir -p "$_t203_home3" "$_t203_decoy" "$_t203_pfx"
+    cp "$CSV2" "$_t203_decoy/csv2"
+    env HOME="$_t203_home3" SHELL="$(command -v zsh)" PATH="$_t203_decoy:$PATH" \
+        "$ROOT/install.zsh" --prefix "$_t203_pfx" > /dev/null 2>&1
+    if [[ -f $_t203_home3/.zshenv ]]; then
+        ok "T203i an identical copy elsewhere is not mistaken for the install / 別處一份相同的複本不會被誤認為這次安裝"
+    else
+        bad "T203i wrote nothing: an identical copy on PATH was taken for the installed file / 什麼都沒寫：PATH 上一份相同的複本被當成了剛裝的那個檔案"
+    fi
+    rm -rf "$_t203_home3" "$_t203_decoy"
     rm -rf "$_t203_home" "$_t203_home2" "$TMP/t203bash" "$_t203_pfx"
+    fi
 fi
 
 echo

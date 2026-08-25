@@ -52,19 +52,26 @@ script writing into scoop's own directory. **Check which csv2 you got by
 comparing the file, not the version**: two builds both say `csv2 0.1.0`, so
 `csv2 --version` cannot tell them apart.
 
-If that directory is not on PATH, `install.zsh` adds it — to the file the
-**account's** login shell reads, which is not necessarily the shell running the
-installer. For zsh that is `~/.zshenv` rather than `~/.zshrc`, because a script
-reached over ssh is not interactive and reads only the former; for bash it is
-`~/.bashrc` plus a login file that sources it. The block is delimited by
-`# >>> csv2 install.zsh >>>` markers, installing twice does not add a second
-one, and `--uninstall` takes every one of them back out. `--no-rc` skips this
-entirely and prints the line for you to add yourself.
+After copying, it asks a shell started from an empty environment whether
+`csv2` now resolves to the file it just placed — not whether the directory
+appears in `$PATH`, which is a different question with a different answer. On
+Windows the install directory is not on PATH at all and `csv2` resolves
+perfectly well through a scoop shim; a directory can equally be on PATH while
+an earlier one supplies a different build.
 
-It then says which kinds of shell can reach the binary — every shell including
-scripts over ssh, login shells only, or interactive terminals only. That
-question is asked of a shell started from an environment built from nothing,
-so the answer does not come from the PATH of whatever ran the installer.
+Only when no shell can run it by name does `install.zsh` write a PATH line, and
+it writes it to the file the **account's** login shell reads, which is not
+necessarily the shell running the installer. For zsh that is `~/.zshenv` rather
+than `~/.zshrc`, because a script reached over ssh is not interactive and reads
+only the former; for bash it is `~/.bashrc` plus a login file that sources it.
+The block is delimited by `# >>> csv2 install.zsh >>>` markers, installing
+twice does not add a second one, and `--uninstall` takes every one of them back
+out. `--no-rc` skips this entirely and prints the line for you to add yourself.
+
+It ends by saying which kinds of shell can reach the binary — every shell
+including scripts over ssh, login shells only, or interactive terminals only.
+Those are different properties and only some of them are usually the one you
+need.
 
 Progress is tracked as checkboxes at the end of [plan/plan.md](./plan/plan.md),
 and a box is only ticked once the matching case in

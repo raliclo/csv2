@@ -405,151 +405,144 @@ if [[ $DEST_DIR == */homebrew/bin || $DEST_DIR == /usr/local/bin || $DEST_DIR ==
 fi
 
 # ---------------------------------------------------------------------
-# A binary in a directory that is not on PATH gives "command not found",
-# which reads as "the install failed" when in fact it succeeded -- and the
-# user then goes looking in the wrong place.
-# 裝到不在 PATH 的目錄會得到 command not found，那看起來像「安裝失敗」，實際上
-# 安裝是成功的——於是使用者會去查錯的方向。
+# Ask whether the shell can run csv2, not whether a string is in PATH.
+#
+# `case ":$PATH:" in *":$DEST_DIR:"*` -- what this used to test -- is the wrong
+# question in both directions. On the Windows node $DEST_DIR is NOT on PATH and
+# `csv2` resolves perfectly well, through a scoop shim in a different
+# directory; that test would have had this script edit that machine's
+# ~/.profile to fix something that was not broken. And a directory CAN be on
+# PATH while the shell still runs a different csv2 out of an earlier one.
+#
+# 問「shell 能不能執行 csv2」，不要問「某個字串在不在 PATH 裡」。
+# `case ":$PATH:" in *":$DEST_DIR:"*`——這裡原本測的東西——在兩個方向上都問錯了。Windows 節點
+# 上 $DEST_DIR **不在** PATH 上，而 `csv2` 解析得好好的，靠的是另一個目錄裡的 scoop shim；
+# 那個測試會讓這支腳本去改那台機器的 ~/.profile，修一個沒有壞的東西。反過來，一個目錄可以
+# 在 PATH 上，而 shell 仍然執行到更前面某個目錄裡的另一支 csv2。
 # ---------------------------------------------------------------------
-on_path=0
-case ":$PATH:" in *":$DEST_DIR:"*) on_path=1 ;; esac
+sum_of() { shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1 || sha256sum "$1" 2>/dev/null | cut -d' ' -f1 }
 
-rc_written=""
-if (( ! on_path )); then
-    say "$DEST_DIR is not on PATH / $DEST_DIR 不在 PATH 上"
-    say "  login shell: $LOGIN_SHELL"
-    if (( ! RC )); then
-        say "  --no-rc given; add this yourself / 已指定 --no-rc，請自行加上："
-        say "      export PATH=\"$DEST_DIR:\$PATH\""
-        say ""
+# Follow a shim rather than hashing it: its own bytes are not the program's.
+# 遇到 shim 要跟著它走，而不是對它算雜湊：shim 自己的位元組不是那支程式的。
+resolved_target() {
+    local r=$1
+    if [[ -f ${r%.exe}.shim ]]; then
+        sed -n 's/^path *= *"\(.*\)"/\1/p' "${r%.exe}.shim" | tr '\\' '/'
     else
-        for f in $(rc_files); do
-            if (( DRY )); then
-                say "  DRY  add the PATH line to $f / 把 PATH 那一行加進 $f"
-            else
-                [[ -f $f ]] || : > $f
-                rc_append $f $DEST_DIR
-                say "  added the PATH line to $f / 已把 PATH 那一行加進 $f"
-            fi
-            rc_written="$rc_written $f"
-        done
-        # bash only: a login shell does not read .bashrc unless a login file
-        # says so. Debian's own ~/.profile does exactly this; without it the
-        # line above is read by `bash` but not by the shell WSL hands you.
-        # 只有 bash 需要：登入 shell 不會讀 .bashrc，除非某個登入檔叫它讀。Debian 自己的
-        # ~/.profile 做的就是這件事；少了它，上面那一行 `bash` 讀得到，而 WSL 給你的那個
-        # shell 讀不到。
-        if [[ $LOGIN_SHELL_NAME == bash ]]; then
-            local_login=$HOME/.bash_profile
-            [[ -f $HOME/.bash_profile || -f $HOME/.bash_login ]] || local_login=$HOME/.profile
-            [[ -f $HOME/.bash_profile ]] && local_login=$HOME/.bash_profile
-            if (( DRY )); then
-                say "  DRY  make $local_login source ~/.bashrc / 讓 $local_login 去 source ~/.bashrc"
-            elif ! grep -q 'bashrc' $local_login 2>/dev/null; then
-                {
-                    print -r -- ""
-                    print -r -- "$RC_BEGIN"
-                    print -r -- "# a login bash does not read ~/.bashrc on its own."
-                    print -r -- "# 登入的 bash 自己不會去讀 ~/.bashrc。"
-                    print -r -- "[ -f \"\$HOME/.bashrc\" ] && . \"\$HOME/.bashrc\""
-                    print -r -- "$RC_END"
-                } >> $local_login
-                say "  made $local_login source ~/.bashrc / 已讓 $local_login 去 source ~/.bashrc"
-            fi
-        fi
-        say "  this shell is unaffected; a new one will have it"
-        say "  目前這個 shell 不受影響，新開的會有"
-        say ""
+        print -r -- $r
     fi
-fi
+}
+
+# Does a shell started from nothing run the file we just installed?
+# 一個從零開始的 shell，執行到的是不是我們剛裝上的那個檔案？
+RESOLVED=""; REACH=""; TARGET=""
+resolves_to_dest() {
+    in_user_shell 'command -v csv2' || return 1
+    RESOLVED=$PROBE_OUT; REACH=$PROBE_KIND
+    TARGET=$(resolved_target $RESOLVED)
+    [[ "$(sum_of "$TARGET")" == "$(sum_of "$DEST")" ]]
+}
 
 if (( DRY )); then
+    say "  DRY  ask a fresh shell whether it runs $DEST, and add a PATH line if not"
+    say "  DRY  問一個全新的 shell 它執行到的是不是 $DEST，不是的話補上 PATH 那一行"
     say "dry run complete / 預演結束"
     exit 0
 fi
 
-# ---------------------------------------------------------------------
-# Verify by RUNNING it in a fresh shell, not by checking the file exists.
-#
-# Whether the file landed proves nothing about which csv2 will actually run:
-# PATH order decides that, silently, with no diagnostic. An installer that
-# verifies the wrong thing is worse than one that verifies nothing, because it
-# reports success.
-# 以「在全新 shell 中執行」來驗證，而非檢查檔案存在。
-# 檔案有沒有放進去，對「實際會執行到哪一支 csv2」毫無證明力：那由 PATH 順序決定，
-# 靜默且沒有任何診斷。一個驗證了錯誤對象的安裝程式，比完全不驗證更糟，因為它會回報成功。
-# ---------------------------------------------------------------------
-if (( on_path )) || [[ -n $rc_written ]]; then
-    in_user_shell 'command -v csv2' && RESOLVED=$PROBE_OUT || RESOLVED=""
-    REACH=$PROBE_KIND
-    in_user_shell 'csv2 --version' && FOUND_VERSION=$PROBE_OUT || FOUND_VERSION=""
-    # Which of the two failures this is decides whether it is fatal.
-    #
-    # If we wrote an rc file and a fresh shell still cannot find csv2, we
-    # failed at the one job we took on -- that is fatal. If we wrote nothing
-    # because $DEST_DIR was already on THIS PATH, then all we have learned is
-    # that the current environment carries it and a fresh one does not. The
-    # copy is installed and works; it is the reachability that is narrower than
-    # it looks, and saying so is more use than exiting non-zero.
-    # 是這兩種失敗中的哪一種，決定它致不致命。
-    # 如果我們寫了 rc 檔而全新的 shell 仍然找不到 csv2，那我們就是把自己接下的那件事做失敗了
-    # ——那是致命的。如果我們什麼都沒寫（因為 $DEST_DIR 已經在**這個** PATH 上），那我們學到的
-    # 只是：目前這個環境帶著它，而一個全新的環境沒有。複本已裝好且能執行；比較窄的是「可及範圍」，
-    # 而把這件事說出來，比以非零結束有用。
-    if [[ -z $FOUND_VERSION ]]; then
-        if [[ -n $rc_written ]]; then
-            die "wrote the PATH line to$rc_written and a fresh $LOGIN_SHELL_NAME still cannot run csv2 / 已把 PATH 那一行寫進$rc_written，而全新的 $LOGIN_SHELL_NAME 仍然無法執行 csv2"
-        fi
-        $DEST --version >/dev/null || die "the installed copy does not run / 安裝的複本無法執行"
-        say "installed to $DEST, and it runs."
-        say "WARNING: $DEST_DIR is on the PATH of the shell that ran this script,"
-        say "  but a $LOGIN_SHELL_NAME started from nothing does not have it -- so a"
-        say "  script reached over ssh will not find csv2 by name."
-        say "警告：$DEST_DIR 在「執行本腳本的那個 shell」的 PATH 上，但一個從零開始的"
-        say "  $LOGIN_SHELL_NAME 沒有它——因此經 ssh 執行的腳本不會以名稱找到 csv2。"
-        say "  to fix that, install again with --no-rc removed, or add the line yourself:"
-        say "  修法：不要加 --no-rc 再裝一次，或自行加上："
-        say "      export PATH=\"$DEST_DIR:\$PATH\""
-        exit 0
-    fi
-    # Compare the FILE, not the version string.
-    #
-    # This check had the right idea and the wrong instrument. Two builds both
-    # say `csv2 0.1.0`, so a version comparison passes while the shell runs
-    # something else entirely -- which is exactly what happened on Windows on
-    # 2026-08-20: the shell resolved through a scoop shim to a binary a year
-    # old, and the check reported success. The number it compared can never
-    # change, and that is precisely why it cannot tell two files apart. Filed
-    # as NN.
-    #
-    # A shim is followed rather than hashed: its own bytes are not the
-    # program's, so hashing the shim would compare the wrong thing and fail for
-    # the wrong reason.
-    #
-    # 比對「檔案」，不是版本字串。
-    # 這條檢查的想法是對的，工具是錯的。兩個建置都會說自己是 `csv2 0.1.0`，因此版本比對會
-    # 通過，而 shell 執行的完全是另一個東西——2026-08-20 在 Windows 上發生的正是這件事：
-    # shell 透過一個 scoop shim 解析到一個一年前的執行檔，而檢查回報成功。它比對的那個數字
-    # 永遠不會變，而那正是它分不出兩個檔案的原因。記為 NN。
-    # 遇到 shim 是「跟著它走」而不是「對它計算雜湊」：shim 自己的位元組不是那支程式的，
-    # 對它算雜湊會比到錯的東西，並以錯的理由失敗。
-    TARGET=$RESOLVED
-    if [[ -f ${RESOLVED%.exe}.shim ]]; then
-        TARGET=$(sed -n 's/^path *= *"\(.*\)"/\1/p' "${RESOLVED%.exe}.shim" | tr '\\' '/')
-        say "note: $RESOLVED is a shim pointing at $TARGET / 該路徑是一個 shim，指向 $TARGET"
-    fi
-    sum_of() { shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1 || sha256sum "$1" 2>/dev/null | cut -d' ' -f1 }
-    if [[ "$(sum_of "$TARGET")" != "$(sum_of "$DEST")" ]]; then
-        die "a fresh shell runs a DIFFERENT csv2: $TARGET is not the file just installed at $DEST. Both may report the same version -- that is why this compares the file. Check PATH order. / 全新的 shell 執行到的是另一支 csv2：$TARGET 不是剛裝到 $DEST 的那個檔案。兩者可能回報相同的版本——那正是這裡比對檔案的原因。請檢查 PATH 順序。"
-    fi
+rc_written=""
+if resolves_to_dest; then
     say "verified: a fresh $LOGIN_SHELL_NAME runs $TARGET, and it is the file just installed"
     say "已驗證：全新的 $LOGIN_SHELL_NAME 執行到 $TARGET，而它就是剛裝上的那個檔案"
     say "  reachable from: $REACH"
-else
-    # Cannot verify by name when the directory is not on PATH; verify the copy
-    # runs at all, and say plainly that this is the weaker check.
-    # 目錄不在 PATH 上時無法以名稱驗證；改為驗證該複本至少能執行，並明說這是較弱的檢查。
-    $DEST --version >/dev/null || die "the installed copy does not run / 安裝的複本無法執行"
-    say "installed, but NOT verified by name: $DEST_DIR is not on PATH"
-    say "已安裝，但未以名稱驗證：$DEST_DIR 不在 PATH 上"
+    exit 0
 fi
+
+# Nothing from nothing. Before writing anything, ask whether THIS environment
+# can already run it -- on Windows the PATH that reaches the scoop shim comes
+# from the Windows process environment, not from any rc file, and `env -i`
+# cannot reproduce it. Editing an rc file there would change nothing and would
+# still leave a block behind.
+# 從零開始的那個問法沒有答案。在寫任何東西之前，先問「**這個**環境」能不能執行它——在 Windows
+# 上，通往 scoop shim 的那個 PATH 來自 Windows 的行程環境而不是任何 rc 檔，`env -i` 重現不了
+# 它。在那裡改 rc 檔不會有任何效果，卻仍然會留下一個區塊。
+# Same FILE, not same bytes. A hash comparison here matched
+# /opt/homebrew/bin/csv2 against an install into a temp prefix -- a different
+# file at a different path with identical contents, because both were the same
+# build -- and concluded that this shell already ran the new install, so no rc
+# file was written and the temp prefix stayed unreachable. Byte equality is the
+# right question for "will the shell run this program" and the wrong one for
+# "is this the copy I just placed". 2026-08-25, seen here.
+# 是同一個「檔案」，不是同樣的位元組。這裡用雜湊比對時，把 /opt/homebrew/bin/csv2 比中了一次
+# 裝進暫存 prefix 的安裝——不同路徑的不同檔案，內容相同，因為兩者是同一次建置——於是結論是
+# 「這個 shell 已經在執行新裝的那個」，沒有寫任何 rc 檔，而那個暫存 prefix 仍然叫不出來。
+# 位元組相等，是「shell 會不會執行到這支程式」的正確問法，卻是「這是不是我剛放的那個複本」
+# 的錯誤問法。2026-08-25 在此見到。
+_inherited=$(command -v csv2 2>/dev/null) || _inherited=""
+if [[ -n $_inherited ]] && [[ "$(resolved_target $_inherited)" -ef "$DEST" ]]; then
+    say "installed to $DEST, and this shell runs it as \`csv2\`."
+    say "已裝到 $DEST，而目前這個 shell 以 \`csv2\` 執行到的就是它。"
+    say "NOTE: a $LOGIN_SHELL_NAME started from an empty environment does not find it."
+    say "  Nothing was written to any rc file, because the PATH that reaches it here"
+    say "  does not come from one. A script run over ssh may or may not inherit it."
+    say "注意：一個以空環境啟動的 $LOGIN_SHELL_NAME 找不到它。這裡沒有寫任何 rc 檔，因為"
+    say "  「在這裡通往它的那個 PATH」不是來自 rc 檔。經 ssh 執行的腳本不一定繼承得到。"
+    exit 0
+fi
+
+# It is genuinely unreachable by name. Now the rc file is worth writing.
+# 它是真的叫不出來。這時候才值得去寫 rc 檔。
+say "a fresh $LOGIN_SHELL_NAME cannot run csv2 by name / 全新的 $LOGIN_SHELL_NAME 無法以名稱執行 csv2"
+say "  login shell: $LOGIN_SHELL"
+if (( ! RC )); then
+    say "  --no-rc given; add this yourself / 已指定 --no-rc，請自行加上："
+    say "      export PATH=\"$DEST_DIR:\$PATH\""
+    $DEST --version >/dev/null || die "the installed copy does not run / 安裝的複本無法執行"
+    exit 0
+fi
+
+for f in $(rc_files); do
+    [[ -f $f ]] || : > $f
+    rc_append $f $DEST_DIR
+    say "  added the PATH line to $f / 已把 PATH 那一行加進 $f"
+    rc_written="$rc_written $f"
+done
+
+# bash only: a login shell does not read .bashrc unless a login file says so.
+# Debian's own ~/.profile does exactly this; without it the line above is read
+# by an interactive `bash` but not by the shell a login hands you.
+# 只有 bash 需要：登入 shell 不會讀 .bashrc，除非某個登入檔叫它讀。Debian 自己的 ~/.profile
+# 做的就是這件事；少了它，上面那一行互動的 `bash` 讀得到，而登入時拿到的那個 shell 讀不到。
+if [[ $LOGIN_SHELL_NAME == bash ]]; then
+    login_file=$HOME/.profile
+    [[ -f $HOME/.bash_login ]]   && login_file=$HOME/.bash_login
+    [[ -f $HOME/.bash_profile ]] && login_file=$HOME/.bash_profile
+    if ! grep -q 'bashrc' $login_file 2>/dev/null; then
+        {
+            print -r -- ""
+            print -r -- "$RC_BEGIN"
+            print -r -- "# a login bash does not read ~/.bashrc on its own."
+            print -r -- "# 登入的 bash 自己不會去讀 ~/.bashrc。"
+            print -r -- "[ -f \"\$HOME/.bashrc\" ] && . \"\$HOME/.bashrc\""
+            print -r -- "$RC_END"
+        } >> $login_file
+        say "  made $login_file source ~/.bashrc / 已讓 $login_file 去 source ~/.bashrc"
+    fi
+fi
+say "  this shell is unaffected; a new one will have it / 目前這個 shell 不受影響，新開的會有"
+say ""
+
+# And now the same question again. Having written the file is not the same as
+# the file working, and only one of those is worth reporting.
+# 然後把同一個問題再問一次。「寫過那個檔案」與「那個檔案有效」不是同一件事，而只有其中一件
+# 值得回報。
+if resolves_to_dest; then
+    say "verified: a fresh $LOGIN_SHELL_NAME runs $TARGET, and it is the file just installed"
+    say "已驗證：全新的 $LOGIN_SHELL_NAME 執行到 $TARGET，而它就是剛裝上的那個檔案"
+    say "  reachable from: $REACH"
+    exit 0
+fi
+if [[ -n $RESOLVED ]]; then
+    die "a fresh shell runs a DIFFERENT csv2: $TARGET is not the file just installed at $DEST. Both may report the same version -- that is why this compares the file. Check PATH order. / 全新的 shell 執行到的是另一支 csv2：$TARGET 不是剛裝到 $DEST 的那個檔案。兩者可能回報相同的版本——那正是這裡比對檔案的原因。請檢查 PATH 順序。"
+fi
+die "wrote the PATH line to$rc_written and a fresh $LOGIN_SHELL_NAME still cannot run csv2 / 已把 PATH 那一行寫進$rc_written，而全新的 $LOGIN_SHELL_NAME 仍然無法執行 csv2"

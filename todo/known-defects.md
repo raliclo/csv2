@@ -7276,3 +7276,60 @@ $ env -i HOME=$HOME zsh -lc 'command -v csv2'
 
 **形狀:一個量到了「與它宣稱的東西相鄰」的檢查。** 與 NN 同族(比對永遠不會變的版本號),
 而這一次相鄰的那個東西是「呼叫者的環境」。
+
+## IZ. 「那個目錄在不在 PATH 上」不是「shell 叫不叫得出 csv2」(2026-08-25 修正,T203h)
+
+修好 IV–IY 之後,install.zsh 決定「要不要寫 rc 檔」的依據仍然是:
+
+```zsh
+case ":$PATH:" in *":$DEST_DIR:"*) on_path=1 ;; esac
+```
+
+這個問法在兩個方向上都答錯:
+
+```console
+$ multissh -F win.conf winnode 'case ":$PATH:" in *":$(cygpath -u "$LOCALAPPDATA")/csv2:"*)
+      echo yes;; *) echo no;; esac'
+no                                   ← 目錄不在 PATH 上
+$ multissh -F win.conf winnode 'command -v csv2'
+/c/Users/lowei/scoop/shims/csv2      ← 而 csv2 叫得出來，經由 shim
+```
+
+於是新的 install.zsh 會在那台機器上判定「不在 PATH 上」,建立 `~/.bashrc`、並往它既有的
+`~/.profile` 附加一段——**去修一個沒有壞的東西**,而且留下一個標著 csv2 的區塊。反方向同樣
+會錯:一個目錄可以在 PATH 上,而更前面某個目錄提供的是另一個建置(那正是 NN)。
+
+修法:不要問字串,問結果。先問「一個從零開始的 shell 執行到的是不是我剛放的那個檔案」;不是的話,
+再問「這個環境呢」;兩者都不是,才寫 rc。Windows 節點因此走第二支,什麼都不寫,並且說出
+「以空環境啟動的 shell 找不到它」。
+
+**形狀:一個以「近似值」代替「所問之事」的判斷。** 與 IU(用最後兩個位元組問整個檔案)、
+GW(用數量問行尾)同族。
+
+## JA. 判斷「這是不是我剛裝的那個檔案」時比對了內容,而不是身分(2026-08-25 修正,T203i)
+
+IZ 的第二支——「這個環境叫得出 csv2 嗎」——我寫成:
+
+```zsh
+[[ "$(sum_of "$(resolved_target $_inherited)")" == "$(sum_of "$DEST")" ]]
+```
+
+當場就答錯了:
+
+```console
+$ T=$(mktemp -d)
+$ HOME=$T SHELL=/bin/zsh ./install.zsh --prefix $T/bin
+已裝到 /tmp/.../bin/csv2，而目前這個 shell 以 `csv2` 執行到的就是它。
+$ ls -a $T
+.  ..  bin                          ← 沒有寫 .zshenv，而那個 prefix 仍然叫不出來
+```
+
+shell 執行到的其實是 `/opt/homebrew/bin/csv2`。它與剛裝的那份**位元組相同**,因為兩者是同一次
+建置——於是雜湊比對說「是同一個」,而它們是不同路徑上的不同檔案。
+
+位元組相等是「shell 會不會執行到這支程式」的正確問法(那正是 NN 要的),卻是「這是不是我剛放的
+那個複本」的錯誤問法。同一個比較,在相鄰的兩個問題上,一個對一個錯。
+
+修法:身分用 `-ef`(同一個 device 與 inode),內容用雜湊,兩者不互相代替。
+
+**形狀:一個在相鄰問題之間被沿用的正確工具。** 這一次沿用的方向,恰好是它不成立的那一邊。
