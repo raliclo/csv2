@@ -9168,17 +9168,80 @@ assert_eq "$(CSV2_INDEX_MIN_BYTES=0 "$CSV2" -mid 257,257 --json -i "$TMP/t166b.c
     "T166c the index built during the append says the same / 追加期間建出的索引說法相同"
 
 # --verify-index has to be able to CATCH a wrong line, or T166a passes for
-# free the next time this regresses. The index is bent by one line and its
-# checksum recomputed in Python -- an independent implementation, which is
-# also what pins the multiplier: `0x1000_0000_01b3`, not the FNV-1a prime the
-# comment beside it used to claim (see GC in todo/known-defects.md).
-# --verify-index 必須「抓得到」一個錯的行號，否則下次退化時 T166a 會白白通過。這裡把索引
-# 的行號扳歪一行，並用 Python 重算檢查碼——一份獨立實作，同時也把那個乘數釘住：
-# `0x1000_0000_01b3`，不是它旁邊那則註解曾經宣稱的 FNV-1a 質數（見 known-defects 的 GC）。
+# free the next time this regresses. So the index is bent by one line and its
+# checksum recomputed -- which means writing a second implementation of that
+# checksum, from the CONSTANT 0x1000_0000_01b3 and not from the name the
+# comment beside it used to give it, which was the FNV-1a prime and wrong (GC).
+#
+# That second implementation is zsh now, and used to be Python. The guest has
+# no python3, so on the one platform nobody watches while it runs, the check
+# that --verify-index can catch anything did not run at all -- the same hole
+# T204 had, and the same answer: build the fixture out of what every platform
+# has. Where python3 does exist the two are compared byte for byte (T166e), so
+# the independence that made Python worth using is kept rather than traded away.
+#
+# zsh cannot write 0xcbf29ce484222325 as a literal: it truncates a hex constant
+# after 15 digits, and says so. The basis is assembled from two halves, and
+# signed 64-bit multiplication wraps to the same bit pattern Python gets with
+# & 0xFFFFFFFFFFFFFFFF. T166e is what holds that claim up.
+#
+# --verify-index 必須「抓得到」一個錯的行號，否則下次退化時 T166a 會白白通過。因此這裡把索引的
+# 行號扳歪一行、重算檢查碼——而那表示要寫出那個檢查碼的第二份實作，照著**常數**
+# 0x1000_0000_01b3 寫，而不是照它旁邊那則註解曾經給它的名字（那個名字是 FNV-1a 質數，是錯的，GC）。
+# 那第二份實作現在是 zsh，以前是 Python。guest 沒有 python3，於是在「它執行時沒有人看著」的那個
+# 平台上，「--verify-index 抓不抓得到東西」這項檢查根本沒有跑——那與 T204 是同一個洞，也是同一個
+# 答案：用每個平台都有的東西做 fixture。有 python3 的地方，兩者會逐位元比對（T166e），因此當初
+# 讓 Python 值得一用的那個獨立性是被保留下來，而不是被換掉。
+# zsh 寫不出 0xcbf29ce484222325 這個字面值：十六進位常數超過 15 位就會被截斷，而且它會說出來。
+# 那個基底是用兩半組出來的，而有號 64 位元乘法的位元樣式，與 Python 用 & 0xFFFF... 得到的相同。
+# 撐住這個宣稱的就是 T166e。
+index_bend_line() {   # <index file> -- bend grid 0's line by one, fix the checksum
+    local f=$1
+    local -a b
+    b=(${=$(od -A n -v -t u1 < $f)})
+    local n=${#b}
+    # An od that does not understand -t u1 hands back something that is not one
+    # number per byte. Saying so beats hashing whatever it did hand back.
+    # 一個不懂 -t u1 的 od，回傳的不是「一個位元組一個數字」。把這件事說出來，比對它回傳的
+    # 東西算雜湊要好。
+    [[ $n == $(wc -c < $f | tr -d ' ') ]] || return 1
+    local -i i ln h byte
+    ln=0; for i in {7..0}; do ln=$(( (ln << 8) | b[105+i] )); done
+    ln=$(( ln + 1 ))
+    for i in {0..7}; do b[105+i]=$(( (ln >> (8*i)) & 255 )); done
+    h=$(( (0xcbf29ce4 << 32) | 0x84222325 ))
+    for (( i = 0; i < n; i++ )); do
+        byte=${b[i+1]}
+        (( i >= 80 && i < 88 )) && byte=0
+        h=$(( (h ^ byte) * 0x1000000001b3 ))
+    done
+    for i in {0..7}; do b[81+i]=$(( (h >> (8*i)) & 255 )); done
+    printf -- "$(printf '\\x%02x' $b)" > $f
+}
+
+cp "$TMP/t166b.csv" "$TMP/t166c.csv"
+CSV2_INDEX_MIN_BYTES=0 "$CSV2" --build-index -i "$TMP/t166c.csv" > /dev/null
+cp "$TMP/t166c.csv.index" "$TMP/t166c.index.orig"
+if index_bend_line "$TMP/t166c.csv.index"; then
+    _t166_v=$(CSV2_INDEX_MIN_BYTES=0 "$CSV2" --verify-index -i "$TMP/t166c.csv" 2>&1)
+    if [[ $_t166_v == *"index says line"* ]]; then
+        ok "T166d --verify-index catches a wrong line, checksum and all / --verify-index 抓得到錯的行號，連檢查碼都對得上"
+    else
+        bad "T166d --verify-index said: $_t166_v / --verify-index 的回答如上"
+    fi
+else
+    skipt "T166d od here does not give one number per byte / 這裡的 od 不會一個位元組給一個數字"
+    T166D_SKIPPED=1
+fi
+
+# Two implementations of one checksum, agreeing on the byte. Where python3 is
+# absent this cannot be asked -- and the case above still runs, which is the
+# whole point of the rewrite.
+# 同一個檢查碼的兩份實作，在位元組上一致。沒有 python3 的地方問不了這件事——而上面那個案例
+# 仍然會跑，那正是這次改寫的全部意義。
 if command -v python3 >/dev/null 2>&1; then
-    cp "$TMP/t166b.csv" "$TMP/t166c.csv"
-    CSV2_INDEX_MIN_BYTES=0 "$CSV2" --build-index -i "$TMP/t166c.csv" > /dev/null
-    python3 - "$TMP/t166c.csv.index" <<'PY'
+    cp "$TMP/t166c.index.orig" "$TMP/t166c.py.index"
+    python3 - "$TMP/t166c.py.index" <<'PYBEND'
 import struct, sys
 p = sys.argv[1]
 b = bytearray(open(p, 'rb').read())
@@ -9190,16 +9253,15 @@ for i, by in enumerate(b):
     h = (h * 0x1000000001b3) & 0xFFFFFFFFFFFFFFFF   # the constant, not the name
 struct.pack_into('<Q', b, 80, h)
 open(p, 'wb').write(bytes(b))
-PY
-    _t166_v=$(CSV2_INDEX_MIN_BYTES=0 "$CSV2" --verify-index -i "$TMP/t166c.csv" 2>&1)
-    if [[ $_t166_v == *"index says line"* ]]; then
-        ok "T166d --verify-index catches a wrong line, checksum and all / --verify-index 抓得到錯的行號，連檢查碼都對得上"
+PYBEND
+    if cmp -s "$TMP/t166c.py.index" "$TMP/t166c.csv.index"; then
+        ok "T166e the zsh and python checksums agree byte for byte / zsh 與 python 的檢查碼逐位元相同"
     else
-        bad "T166d --verify-index said: $_t166_v / --verify-index 的回答如上"
+        bad "T166e two implementations of the same checksum disagree / 同一個檢查碼的兩份實作不一致"
     fi
 else
-    skipt "T166d needs python3 to rebuild the index checksum / 需要 python3 才能重算索引檢查碼"
-    T166D_SKIPPED=1
+    skipt "T166e needs python3 for the second implementation / 需要 python3 才有第二份實作"
+    T166E_XSKIPPED=1
 fi
 
 # ---------------------------------------------------------------------
@@ -11208,6 +11270,7 @@ fi
 (( ${T203_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T203_BASH_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T204_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T166E_XSKIPPED:-0} )) && (( want_skip += 1 ))
 # T166d needs python3 to rebuild the index checksum after bending a line. The
 # guest's busybox userland has no python3, and that is a property of the image
 # rather than of the platform's name -- so it is recorded by the case, like
