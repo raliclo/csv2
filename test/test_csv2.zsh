@@ -10920,32 +10920,36 @@ echo
 echo "--- T204: a drifted index costs a scan, not an answer / T204：漂掉的索引代價是一次掃描，不是一個答案 ---"
 
 _t204=$TMP/t204.csv
-_t204_ref=$TMP/t204.ref
+_t204_drift=$TMP/t204.drift
 
-# The fixture has to defeat the O(1) stamp, which is size + mtime to the
-# nanosecond + the first and last 64 bytes. So: write the file, build the
-# index, then write a SECOND version of the same length with two records
-# changed -- one a byte longer, a later one a byte shorter -- and put the
-# original timestamp back.
+# The fixture has to defeat the O(1) stamp: size + mtime to the NANOSECOND +
+# the first and last 64 bytes. Two earlier versions of this fixture could not,
+# on the platforms that matter.
 #
-# No python3. The first version of this case generated the drift with a python
-# heredoc, and the guest has no python3, so the one platform where the fix had
-# never run was the one it most needed to run on. Everything here is printf,
-# a redirect and `touch -r`.
+#   python3 heredoc     -- the aarch64 guest has no python3, so the fix ran
+#                          nowhere on Linux;
+#   printf + `touch -r` -- `touch -r` does not carry nanoseconds in the guest
+#                          (it is why T143 skips there), so the stamp rejected
+#                          the fixture on mtime and the seek never happened.
 #
-# 這份 fixture 必須擊敗 O(1) 戳記，而戳記是「大小 + 奈秒級 mtime + 頭尾各 64 個位元組」。
-# 因此：先寫出檔案、建索引，再寫出「長度相同、但有兩筆被改過」的第二版——一筆長一個位元組、
-# 後面某一筆短一個位元組——然後把原本的時間戳放回去。
-# 不用 python3。這個案例的第一版用 python heredoc 產生偏移，而 guest 上沒有 python3，於是
-# 「這個修正從未執行過」的那個平台，正好就是它最需要執行的那個。這裡用的全是 printf、一個
-# 重導向與 `touch -r`。
+# The way out is not more precision, it is less: `touch -t` sets a timestamp
+# whose nanoseconds are ZERO, everywhere. Give both files the same one and
+# there is nothing left for a truncating touch to lose. Then `mv` -- a rename,
+# which does not touch mtime at all -- puts the drifted content in place under
+# the stamp the index recorded.
+#
+# 這份 fixture 必須擊敗 O(1) 戳記：大小 + **奈秒級** mtime + 頭尾各 64 個位元組。這份 fixture
+# 先前的兩個版本，在真正要緊的那些平台上都做不到：
+#   python3 heredoc     —— aarch64 guest 沒有 python3，於是這個修正在 Linux 上哪裡都沒跑到；
+#   printf + `touch -r` —— guest 的 `touch -r` 不帶奈秒（那正是 T143 在那裡跳過的原因），
+#                          於是戳記因 mtime 而拒絕這份 fixture，那個 seek 根本不會發生。
+# 出路不是更高的精度，是更低的：`touch -t` 設出來的時間戳，奈秒是 **0**，每個平台都是。讓兩個
+# 檔案拿到同一個，就沒有東西留給一個會截斷的 touch 去弄丟。接著用 `mv`——一次 rename，它完全
+# 不動 mtime——把偏移過的內容放到「索引所記錄的那個戳記」底下。
 {
     print -r -- "id,value"
     for _i in {1..2000}; do printf '%d,value%06d\n' $_i $_i; done
 } > "$_t204"
-CSV2_INDEX_MIN_BYTES=10 "$CSV2" --build-index -i "$_t204" > /dev/null
-cp -p "$_t204" "$_t204_ref"
-
 {
     print -r -- "id,value"
     for _i in {1..2000}; do
@@ -10955,28 +10959,26 @@ cp -p "$_t204" "$_t204_ref"
             *)    printf '%d,value%06d\n' $_i $_i ;;
         esac
     done
-} > "$_t204"
-touch -r "$_t204_ref" "$_t204"
+} > "$_t204_drift"
 
-_t204_same_size=0
-[[ $(wc -c < "$_t204") == $(wc -c < "$_t204_ref") ]] && _t204_same_size=1
-assert_eq "$_t204_same_size" "1" \
+assert_eq "$(wc -c < "$_t204_drift" | tr -d ' ')" "$(wc -c < "$_t204" | tr -d ' ')" \
     "T204pre the drifted fixture is the same length as the original / 這份偏移過的 fixture 與原檔長度相同"
 
-# The fixture is only a fixture if the stamp ACCEPTS it. Where `touch -r` does
-# not carry nanoseconds -- the same platforms on which T143 skips -- the stamp
-# rejects it on mtime and the seek never happens, so this case would pass
-# through the path that already worked and prove nothing. Say so rather than
-# count it.
-# 這個 fixture 只有在「戳記接受它」時才算數。在 `touch -r` 不帶奈秒的平台上——也就是 T143 會
-# 跳過的那些平台——戳記會因為 mtime 而拒絕它，那個 seek 根本不會發生，於是這個案例會走上一條
-# 本來就正常的路，什麼也證明不了。把這件事說出來，而不是把它算成一分。
+touch -t 202601010000 "$_t204" "$_t204_drift"
+CSV2_INDEX_MIN_BYTES=10 "$CSV2" --build-index -i "$_t204" > /dev/null
+mv "$_t204_drift" "$_t204"
+
+# The fixture is only a fixture if the stamp ACCEPTS it. If some platform still
+# rejects it, this case would pass through the path that already worked and
+# prove nothing; say so rather than count it.
+# 這個 fixture 只有在「戳記接受它」時才算數。若某個平台仍然拒絕它，這個案例會走上一條本來就
+# 正常的路、什麼也證明不了；把這件事說出來，而不是把它算成一分。
 _t204_hit=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$_t204" -debug 2>&1 | grep -c 'index hit')
 if [[ $_t204_hit == 0 ]]; then
     skipt "T204 the stamp rejected the drifted fixture, so the seek never happened / 戳記拒絕了這份 fixture，於是那個 seek 根本沒發生"
     T204_SKIPPED=1
 else
-        assert_eq "$(grep -c '^$' "$_t204")" "0" \
+assert_eq "$(grep -c '^$' "$_t204")" "0" \
         "T204a the fixture has no blank line to complain about / 這份 fixture 裡沒有任何可供指控的空白行"
 
     _t204_got=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$_t204" 2>&1); _t204_rc=$?
