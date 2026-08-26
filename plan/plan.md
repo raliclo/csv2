@@ -2867,11 +2867,66 @@ documentation says which BEFORE the feature ships.
 而那個 fixture 要含有一個引號逗號、一個內嵌換行、一個 `|`、一個 `<br>`，以及一個前後都有空白的值。
 其中任何一項活不下來，文件要在這個功能出貨**之前**說出是哪一項。
 
-- [ ] decide 1-5 above, in the plan, before writing code / 上面 1–5 在計畫裡定案，然後才寫程式
-- [ ] `-md` write side settles `<br>` and padding / `-md` 寫出去那一側把 `<br>` 與補白定案
-- [ ] read a Markdown table as records / 把一張 Markdown 表讀成紀錄
-- [ ] round-trip test with the hostile fixture / 用那個「刁難的」fixture 做 round-trip 測試
-- [ ] the losses named in both READMEs / 那些損失在兩份 README 裡被指名
+- [x] decide 1-5 above, in the plan, before writing code / 上面 1–5 在計畫裡定案，然後才寫程式
+- [x] `-md` write side settles `<br>` and padding / `-md` 寫出去那一側把 `<br>` 與補白定案
+- [x] read a Markdown table as records / 把一張 Markdown 表讀成紀錄
+- [x] round-trip test with the hostile fixture / 用那個「刁難的」fixture 做 round-trip 測試
+- [x] the losses named in both READMEs / 那些損失在兩份 README 裡被指名
+- [x] `--md-table N`, and the refusal when a file holds more than one table /
+  `--md-table N`，以及「一個檔案裡不只一張表」時的拒絕
+
+**How 1-5 were settled, measured rather than argued:**
+
+1. **What declares it:** the `.md` suffix, and the file must BE a table.
+   Prose is refused naming the line; `--md-table N` is how a document with
+   tables in it is spelled. That question turned out to have a second half
+   nobody asked: a file with TWO tables. The first implementation read them as
+   one and put the second table's header and its `|---|` separator in as DATA,
+   at exit 0 -- `---,---` became a record. Found by the question "so how will
+   you read a .md with two tables?", not by a test, and it is the exact
+   failure this tool exists to refuse.
+2. **How many header rows:** recovered from the table, not asked for. `-md`
+   joins two titles with an unescaped `<br>`, so the header cells say it.
+   `--headers` is refused on a `.md` because a value given there could
+   disagree. Every header cell must agree or the file is refused.
+3. **The separator row:** required, and it is what makes a block of lines a
+   table rather than prose.
+4. **Alignment colons:** read and discarded. Presentation, not data, and said
+   so in both READMEs.
+5. **`--pretty` padding:** solved on the WRITE side, which is why both forms
+   round-trip. A leading or trailing space in a value is escaped `\x20`, the
+   same spelling this renderer already used for control bytes -- otherwise
+   `|  padded  |` is either a value with spaces or a short value in a wide
+   column and nothing in the line says which.
+
+**And one the plan did not anticipate:** `<br>` was doing three jobs and only
+two were distinguishable. It joined header rows, stood for an embedded newline,
+and a value that literally contained `<br>` went through untouched -- so
+`two\nlines` and `lit<br>eral` rendered to the same kind of thing. That was a
+loss on the write side that existed before anything read the format back, and
+T136c had asserted the collision as a fact. A literal `<br>` is escaped now and
+T136c is inverted: the two must DIFFER, because the reader depends on it.
+
+**1–5 是怎麼定案的，用量的而不是用辯的：**
+
+1. **是什麼宣告了它：**`.md` 副檔名，而且那個檔案必須「就是一張表」。散文會被拒絕並指名行號；
+   `--md-table N` 則是「一份裡面有表的文件」的寫法。這個問題結果還有沒人問過的另一半：一個檔案裡
+   有**兩張**表。第一版把它們讀成一張，並把第二張表的標頭與它的 `|---|` 分隔列當成**資料**放了進去，
+   而且 exit 0——`---,---` 成了一筆紀錄。發現它的是一個問題（「那讀一個有兩張表的 .md 你要怎麼做？」），
+   不是一個測試，而它正是這個工具存在所要拒絕的那種失敗。
+2. **幾列標頭：**從那張表還原，不是問來的。`-md` 用一個未跳脫的 `<br>` 把兩個標題接起來，因此標頭
+   儲存格說得出來。`--headers` 在 `.md` 上被拒絕，因為在那裡給的值可能與它不符。每一個標頭儲存格
+   都必須一致，否則拒絕。
+3. **分隔列：**必要，而且正是它讓一疊文字成為一張表而不是散文。
+4. **對齊用的冒號：**讀進來後丟掉。那是呈現不是資料，並在兩份 README 裡說明。
+5. **`--pretty` 的補白：**在**寫出去**那一側解決，那正是兩種形式都能往返的原因。值裡開頭或結尾的
+   空白會被跳脫成 `\x20`，與這個算繪器本來就用在控制位元組上的寫法相同——否則 `|  padded  |`
+   要嘛是「帶空白的值」、要嘛是「寬欄位裡的短值」，而那一行裡沒有東西說是哪一種。
+
+**還有一件計畫沒有預料到的：**`<br>` 同時做三件事，而只有兩件分得出來。它接起標頭列、代表一個內嵌
+換行，而一個值裡本來就含 `<br>` 的儲存格會原樣通過——於是 `two\nlines` 與 `lit<br>eral` 算繪成同一種
+東西。那是「寫出去」那一側的損失，在任何人讀回這個格式之前就存在，而 T136c 曾把那個碰撞當成事實
+斷言下來。現在字面的 `<br>` 會被跳脫，而 T136c 被反過來：兩者必須**不同**，因為讀取端依賴它。
 
 ### 8b. No suffix means one column / 8b. 沒有副檔名就是一欄
 

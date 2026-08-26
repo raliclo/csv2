@@ -638,6 +638,31 @@ enum MarkdownOut {
         var s = String(bytes: bytes, encoding: .utf8) ?? String(decoding: bytes, as: UTF8.self)
         s = s.replacingOccurrences(of: "\\", with: "\\\\")
         s = s.replacingOccurrences(of: "|", with: "\\|")
+        // A literal `<br>` in a VALUE, escaped before the newlines become one.
+        //
+        // `<br>` did three jobs in this output and only two of them were
+        // distinguishable: it joins the two header rows, it stands for an
+        // embedded newline, and a value that literally contained `<br>` went
+        // through untouched. So `two\nlines` and `lit<br>eral` rendered as the
+        // same kind of thing, and nothing could tell them apart afterwards.
+        // That was a loss on the WRITE side, present before anything tried to
+        // read this format back -- which is why phase 8a says the write side
+        // has to settle it first.
+        //
+        // The order is the whole trick: backslashes are already doubled by the
+        // line above, so the backslash introduced here cannot be mistaken for
+        // one that was in the data, and the newline replacements below are the
+        // only thing left that produces an UNESCAPED `<br>`.
+        //
+        // 值裡的字面 `<br>`，在換行變成 `<br>` 之前先跳脫。
+        // `<br>` 在這份輸出裡做三件事，而其中只有兩件分得出來：它接起兩列標頭、它代表一個內嵌
+        // 換行，而一個「值裡本來就有 `<br>`」的儲存格會原樣通過。於是 `two\nlines` 與
+        // `lit<br>eral` 算繪成同一種東西，事後沒有任何東西分得出它們。那是「寫出去」那一側的
+        // 損失，在任何人試著把這個格式讀回來之前就存在——而那正是第 8a 階段說「寫出去那一側必須
+        // 先定案」的原因。
+        // 順序就是全部的訣竅：上一行已經把反斜線加倍了，因此這裡引入的那個反斜線不會被誤認為
+        // 資料裡本來就有的；而下面那幾行換行替換，是唯一還會產生「未跳脫的 `<br>`」的東西。
+        s = s.replacingOccurrences(of: "<br>", with: "\\<br>")
         s = s.replacingOccurrences(of: "\r\n", with: "<br>")
         s = s.replacingOccurrences(of: "\n", with: "<br>")
         s = s.replacingOccurrences(of: "\r", with: "<br>")
@@ -657,6 +682,32 @@ enum MarkdownOut {
                 out.unicodeScalars.append(u)
             }
         }
+        // A leading or trailing space, escaped, because padding is the one
+        // thing a reader cannot tell from data.
+        //
+        // `-md` writes a value's own edge spaces straight into the cell, and
+        // `--pretty` pads every cell to the column width with the same
+        // character. `|  padded  |` is therefore either a value with two
+        // spaces each side, or a short value in a wide column, and nothing in
+        // the line says which. Stripping on the way back loses real data;
+        // not stripping makes --pretty unreadable. Escaping is what lets BOTH
+        // round-trip, and it costs the document nothing except on the values
+        // that actually have edge spaces.
+        //
+        // `\x20` rather than a new spelling: this function already writes
+        // `\xNN` for control bytes, and a second escape convention inside one
+        // format is the drift the comment above argues against.
+        //
+        // 開頭或結尾的空白要跳脫，因為「補白」正是讀取端唯一分不出來的那個東西。
+        // `-md` 會把一個值自己的邊緣空白直接寫進儲存格，而 `--pretty` 用同一個字元把每一格補到
+        // 欄寬。於是 `|  padded  |` 要嘛是「前後各兩個空白的值」，要嘛是「一個短值落在寬欄位裡」，
+        // 而那一行裡沒有任何東西說是哪一種。讀回來時把它剝掉會丟失真實資料；不剝掉則會讓
+        // --pretty 讀不回來。跳脫才是讓「兩者都能 round-trip」的做法，而它對文件的代價，只出現在
+        // 那些真的有邊緣空白的值上。
+        // 用 `\x20` 而不是發明新寫法：這個函式本來就為控制位元組寫 `\xNN`，而在一個格式裡有第二套
+        // 跳脫慣例，正是上面那則註解一直在反對的漂移。
+        if out.hasPrefix(" ") { out = "\\x20" + out.dropFirst() }
+        if out.hasSuffix(" ") { out = out.dropLast() + "\\x20" }
         return out
     }
 }

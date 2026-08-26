@@ -66,6 +66,7 @@ struct Options {
     var pretty = false
     var json = false
     var jsonASCII = false
+    var mdTable: Int? = nil
     var zh = false
     var enOnly = false
     /// How many of `--en`/`--zh` were given, which the two Bools cannot say:
@@ -206,6 +207,7 @@ let KNOWN_FLAGS: Set<String> = [
     "insert",
     "json",
     "json-ascii",
+    "md-table",
     "key",
     "keyfile",
     "log",
@@ -497,6 +499,7 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "pretty": o.pretty = true
         case "json": o.json = true
         case "json-ascii": o.json = true; o.jsonASCII = true
+        case "md-table": try once("--md-table"); o.mdTable = try intVal(arg, try need(arg))
         // Each clears the other so the LAST one wins -- which is what made
         // giving both a silent, order-dependent choice. The pair is refused in
         // validate(), and it can only see that both were given if the parse
@@ -1447,7 +1450,19 @@ func validate(_ o: inout Options) throws {
     //
     // csv2 無法自行轉換：從一列標頭變成兩列，意味著要「發明」一列繁體中文標題，
     // 而發明資料正是這支工具絕不能做的事。
-    if let out = o.output, let outFmt = Format.from(path: out) {
+    if let out = o.output, let outFmt = Format.from(path: out),
+       !(o.input?.lowercased().hasSuffix(".md") ?? false) {
+        // A `.md` input is skipped HERE and checked in openInput instead. This
+        // guard runs at parse time, before any file is opened, and how many
+        // header rows a Markdown table has is a property of its first line --
+        // it cannot be known from the name. Answering 1 by default said "the
+        // input has 1 header row(s)" about a table rendered from a .csv2 that
+        // has two, which is a false sentence in the one place a reader is
+        // being told what their file is.
+        // `.md` 輸入在**這裡**跳過，改在 openInput 檢查。這道守衛在解析參數時執行，那時任何檔案都
+        // 還沒被開啟，而「一張 Markdown 表有幾列標頭」是它第一行的性質——從名字看不出來。預設回答
+        // 1，會對一張「從有兩列標頭的 .csv2 算繪出來」的表說「輸入有 1 列標頭」，而那是一句假話，
+        // 出現在「正要告訴讀者他的檔案是什麼」的那一個地方。
         let inRows: Int
         if let inp = o.input, let inFmt = Format.from(path: inp) {
             inRows = o.headersOverride ?? inFmt.headerRows
@@ -1879,6 +1894,36 @@ func openInput(_ o: Options) throws -> InputPlan {
                          source: ByteSource(stdin: 1 << 16), describedPath: "<stdin>")
     }
     let path = o.input!
+    // A Markdown table, translated into canonical .csv2 before the parser
+    // sees it. Phase 8a: `-md` could write one and nothing could read one.
+    // The header-row count comes back from the translation because it is
+    // RECOVERABLE -- `-md` joins a .csv2's two titles with an unescaped
+    // `<br>` -- so this needs no --headers and cannot be told a wrong one.
+    // 一張 Markdown 表，在解析器看到它之前先翻譯成標準的 `.csv2`。第 8a 階段：`-md` 寫得出一張，
+    // 而沒有任何東西讀得回一張。標頭列數由那次翻譯回傳，因為它是**還原得出來**的——`-md` 用一個
+    // 未跳脫的 `<br>` 把 .csv2 的兩個標題接起來——因此這裡不需要 --headers，也不可能被告知一個
+    // 錯的值。
+    if path.lowercased().hasSuffix(".md") {
+        if o.headersOverride != nil {
+            throw fault(
+                "--headers is refused with a .md input: how many header rows a Markdown table has is recoverable from the table itself, and a value given here could disagree with it",
+                "--headers 與 .md 輸入併用會被拒絕：一張 Markdown 表有幾列標頭，從那張表本身就還原得出來，而在這裡給一個值可能與它不符")
+        }
+        let t = try MarkdownIn.translate(path: path, table: o.mdTable)
+        // The never-convert guard, run here because here is where the answer
+        // exists. Same sentence as the one in validate(), on purpose: two
+        // spellings of one rule is how the two drift apart.
+        // 那道「絕不轉換」的守衛在這裡執行，因為答案在這裡才存在。刻意與 validate() 裡那一句
+        // 完全相同：同一條規則有兩種寫法，正是兩者漂開的方式。
+        if let out = o.output, let outFmt = Format.from(path: out),
+           t.headerRows != outFmt.headerRows {
+            throw usageError(
+                "the input has \(t.headerRows) header row(s) and \(out) declares \(outFmt.headerRows) by its suffix. csv2 will not convert between them: going to two rows would mean inventing a row of titles, and dropping to one would discard them. Choose an output suffix that matches, or write the header rows yourself.",
+                "輸入有 \(t.headerRows) 列標頭，而 \(out) 的副檔名宣告 \(outFmt.headerRows) 列。csv2 不會替你轉換：轉成兩列意味著要發明一列標題，轉成一列則會丟掉它們。請改用相符的輸出副檔名，或自行寫出標頭列。")
+        }
+        return InputPlan(format: t.headerRows == 2 ? .csv2 : .csv, headerRows: t.headerRows,
+                         source: ByteSource(bytes: t.bytes), describedPath: path)
+    }
     guard let fmt = Format.from(path: path) else {
         // The extension is what declares the format. Without one there is
         // nothing to declare it, so --headers has to.
@@ -2094,6 +2139,10 @@ func printHelp() {
                          one record per line, newlines escaped as \\n
       -md [--pretty]     Markdown table; needs -t. --pretty aligns and
                          therefore gives up streaming
+      foo.md             READ a Markdown table back. Header rows are recovered
+                         from the table, so --headers is refused here.
+                         --md-table N takes the Nth table out of a document;
+                         without it the file must BE a table
       --json             JSON Lines; --json-ascii escapes non-ASCII
       --en  --zh         which header row to name columns by
 

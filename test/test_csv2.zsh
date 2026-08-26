@@ -8763,13 +8763,29 @@ fi
 # it: two different values, the same bytes out.
 # 那個碰撞，作為一個「先說出來」的事實，而不是留給依賴它的人去撞見：兩個不同的值，
 # 輸出相同的位元組。
-# Two different files, one rendering. That is what "not reversible" means, and
-# it is stronger than counting <br> in one file's output.
-# 兩個不同的檔案，一份算繪。那才是「不可逆」的意思，也比在同一份輸出裡數 <br> 更有力。
+# Two different files, two renderings -- and this case asserted the opposite
+# until 2026-08-26.
+#
+# It pinned a collision: a literal `<br>` and a real newline rendered to the
+# same bytes, so `-md` could not be read back. That was true, it was stated as
+# a fact rather than left to be discovered, and it was the right thing to
+# assert while nothing read Markdown. Phase 8a made the format reversible, so
+# the collision is gone and the assertion that pinned it is now false. The
+# case stays, inverted: the two must now DIFFER, because that difference is
+# what the reader depends on.
+#
+# 兩個不同的檔案，兩份不同的算繪——而這個案例在 2026-08-26 之前斷言的是相反的事。
+# 它釘住的是一個碰撞：字面的 `<br>` 與真正的換行算繪出相同的位元組，因此 `-md` 讀不回來。
+# 那在當時為真，而且是被「先說出來」的事實而不是留給人去撞見的；在還沒有任何東西讀 Markdown
+# 的時候，那是該斷言的東西。第 8a 階段讓這個格式變成可逆的，於是那個碰撞消失了，而釘住它的那條
+# 斷言現在是假的。這個案例留下來，但反過來：兩者現在必須**不同**，因為讀取端依賴的正是那個不同。
 printf 'a\n"p<br>q"\n' > "$TMP/t136_lit.csv"
 printf 'a\n"p\nq"\n'   > "$TMP/t136_nl.csv"
-assert_eq "$("$CSV2" -md -t -i "$TMP/t136_lit.csv")" "$("$CSV2" -md -t -i "$TMP/t136_nl.csv")" \
-    "T136c a literal <br> and a real newline render to the same bytes, so -md is not reversible / 字面的 <br> 與真正的換行算繪出相同的位元組，因此 -md 不可逆"
+if [[ "$("$CSV2" -md -t -i "$TMP/t136_lit.csv")" != "$("$CSV2" -md -t -i "$TMP/t136_nl.csv")" ]]; then
+    ok "T136c a literal <br> and a real newline render differently, which is what makes -md reversible / 字面的 <br> 與真正的換行算繪得不一樣，而那正是 -md 可逆的原因"
+else
+    bad "T136c the two render to the same bytes again, so -md is not reversible / 兩者又算繪成相同的位元組，因此 -md 不可逆"
+fi
 if [[ "$("$CSV2" -r -t --json -i "$TMP/t136_lit.csv")" != "$("$CSV2" -r -t --json -i "$TMP/t136_nl.csv")" ]]; then
     ok "T136c1 while --json keeps them apart, which is why it is the shape to check against / 而 --json 分得出它們，那正是它才是「用來比對」的那個形狀"
 else
@@ -11591,6 +11607,120 @@ case "$("$CSV2" -contains MIT --json -i "$TMP/t208lic.csv" | tail -1)" in
     *'"matched":2'*)
         ok "T208g and the record count counts records that merely mention it / 而那個紀錄數把「只是提到它」的紀錄也算進去" ;;
     *) bad "T208g got: $("$CSV2" -contains MIT --json -i "$TMP/t208lic.csv" | tail -1) / 實得如上" ;;
+esac
+
+# ---------------------------------------------------------------------
+# T209 -- phase 8a: a Markdown table read back.
+#
+# `-md` could render a table and nothing could read one. The round trip is the
+# whole feature, so the fixture is built to break it: a `|`, an embedded
+# newline, a LITERAL `<br>`, a value with leading and trailing spaces, and two
+# header rows joined with `<br>`.
+#
+# The two that mattered are the last two. A literal `<br>` and a real newline
+# rendered identically until this phase -- T136c asserted that collision as a
+# fact, and it had to be inverted here. And leading spaces are indistinguishable
+# from `--pretty`'s padding unless they are escaped, which is why they are.
+#
+# T209 —— 第 8a 階段：把一張 Markdown 表讀回來。
+# `-md` 算繪得出一張表，而沒有任何東西讀得回一張。那趟往返就是這個功能的全部，因此這份 fixture
+# 是為了弄壞它而造的：一個 `|`、一個內嵌換行、一個**字面的** `<br>`、一個前後帶空白的值，以及
+# 兩列以 `<br>` 接起來的標頭。
+# 要緊的是最後兩個。在這個階段之前，字面的 `<br>` 與真正的換行算繪得一模一樣——T136c 把那個碰撞
+# 當成事實斷言下來，而它在這裡必須被反過來。而開頭的空白，若不跳脫就與 `--pretty` 的補白分不出來，
+# 那正是它們被跳脫的原因。
+# ---------------------------------------------------------------------
+echo
+echo "--- T209: Markdown, both ways / T209：Markdown，雙向 ---"
+
+print -r -- "pkg,note"        > "$TMP/t209.csv2"
+print -r -- "套件,備註"        >> "$TMP/t209.csv2"
+print -r -- "zlib,has | pipe" >> "$TMP/t209.csv2"
+print -r -- 'b,two\nlines'    >> "$TMP/t209.csv2"
+print -r -- "c,lit<br>eral"   >> "$TMP/t209.csv2"
+print -r -- 'd,"  padded  "'  >> "$TMP/t209.csv2"
+
+"$CSV2" -r -t -md -i "$TMP/t209.csv2" > "$TMP/t209.md"
+"$CSV2" -r -t -i "$TMP/t209.md" > "$TMP/t209_back.csv2"
+assert_same "$TMP/t209.csv2" "$TMP/t209_back.csv2" \
+    "T209a a .csv2 rendered and read back is byte-identical / 一個 .csv2 算繪後再讀回來，逐位元相同"
+
+"$CSV2" -r -t -md --pretty -i "$TMP/t209.csv2" > "$TMP/t209p.md"
+"$CSV2" -r -t -i "$TMP/t209p.md" > "$TMP/t209p_back.csv2"
+assert_same "$TMP/t209.csv2" "$TMP/t209p_back.csv2" \
+    "T209b and --pretty's padding survives it too / --pretty 的補白也撐得過去"
+
+# One header row is recovered as one, not as two.
+# 一列標頭要被還原成一列，不是兩列。
+printf 'k,v\n1,x\n' > "$TMP/t209one.csv"
+"$CSV2" -r -t -md -i "$TMP/t209one.csv" > "$TMP/t209one.md"
+"$CSV2" -r -t -i "$TMP/t209one.md" > "$TMP/t209one_back.csv"
+assert_same "$TMP/t209one.csv" "$TMP/t209one_back.csv" \
+    "T209c a .csv round-trips as one header row / .csv 以「一列標頭」往返"
+
+# --headers cannot disagree with the table, so it is refused.
+# --headers 不可能與那張表不一致，因此它被拒絕。
+assert_fails "T209d --headers is refused on a .md / --headers 用在 .md 上會被拒絕" -- \
+    "$CSV2" -r -t --headers 2 -i "$TMP/t209one.md"
+
+# Two tables in one file. Before this refusal existed the second table's header
+# and its |---| separator were read as DATA, at exit 0 -- `---,---` became a
+# record. That is the failure this whole tool exists to refuse, introduced by
+# the commit that added the feature and found by a question rather than a test.
+# 一個檔案裡兩張表。在這條拒絕存在之前，第二張表的標頭與它的 |---| 分隔列會被讀成**資料**，
+# 而且 exit 0——`---,---` 成了一筆紀錄。那正是這整個工具存在所要拒絕的那種失敗，它是被「加入這個
+# 功能」的那個 commit 帶進來的，而發現它的是一個問題，不是一個測試。
+{
+    print -r -- "|a|b|"; print -r -- "|---|---|"; print -r -- "|1|2|"
+    print -r -- ""
+    print -r -- "|c|d|"; print -r -- "|---|---|"; print -r -- "|3|4|"
+} > "$TMP/t209two.md"
+_t209_two=$("$CSV2" -r -t -i "$TMP/t209two.md" 2>&1); _t209_rc=$?
+assert_eq "$_t209_rc" "1" \
+    "T209e two tables in one .md is refused / 一個 .md 裡有兩張表會被拒絕"
+case $_t209_two in
+    *"line 5"*) ok "T209f and the refusal names where the second starts / 而那句拒絕指名第二張從哪裡開始" ;;
+    *) bad "T209f got: $_t209_two / 實得如上" ;;
+esac
+# The same, with no blank line between them: the second table's header sits
+# directly under a data row, which is the case a blank-line split would miss.
+# 同樣的情況，但兩張表之間沒有空行：第二張表的標頭直接接在一列資料下面，而那正是「以空行切分」
+# 會漏掉的情況。
+{
+    print -r -- "|a|b|"; print -r -- "|---|---|"; print -r -- "|1|2|"
+    print -r -- "|c|d|"; print -r -- "|---|---|"; print -r -- "|3|4|"
+} > "$TMP/t209nb.md"
+assert_fails "T209g and so is a file whose two tables have no blank line between them / 兩張表之間沒有空行的檔案也是" -- \
+    "$CSV2" -r -t -i "$TMP/t209nb.md"
+
+assert_eq "$("$CSV2" -r -t --md-table 2 -i "$TMP/t209two.md" | tr '\n' ' ')" "c,d 3,4 " \
+    "T209h --md-table 2 takes the second / --md-table 2 取第二張"
+assert_fails "T209i --md-table past the end is refused / --md-table 超過張數會被拒絕" -- \
+    "$CSV2" -r -t --md-table 3 -i "$TMP/t209two.md"
+
+# Prose around a table: refused without the flag, taken with it.
+# 圍繞著表格的散文：不給旗標時拒絕，給了就取出來。
+{
+    print -r -- "# Notes"; print -r -- ""
+    print -r -- "|k|v|"; print -r -- "|---|---|"; print -r -- "|1|x|"
+    print -r -- ""; print -r -- "That was the table."
+} > "$TMP/t209doc.md"
+assert_fails "T209j a document with prose is refused without --md-table / 含散文的文件在不給 --md-table 時被拒絕" -- \
+    "$CSV2" -r -t -i "$TMP/t209doc.md"
+assert_eq "$("$CSV2" -r -t --md-table 1 -i "$TMP/t209doc.md" | tr '\n' ' ')" "k,v 1,x " \
+    "T209k and --md-table 1 takes the table out of it / 而 --md-table 1 從裡面把那張表取出來"
+
+# The whole point of the feature: edit a rendered table and write it back.
+# 這個功能的全部意義：編輯一張算繪出來的表，再把它寫回去。
+"$CSV2" -update 1:2 'EDITED' -i "$TMP/t209p.md" -o "$TMP/t209edit.csv2" -t
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t209edit.csv2")" "EDITED" \
+    "T209l a Markdown table can be edited and written back / 一張 Markdown 表可以被編輯並寫回去"
+# And the never-convert guard tells the truth about how many header rows it has.
+# 而那道「絕不轉換」的守衛，對「它有幾列標頭」說的是實話。
+_t209_conv=$("$CSV2" -update 1:2 'X' -i "$TMP/t209p.md" -o "$TMP/t209bad.csv" -t 2>&1)
+case $_t209_conv in
+    *"input has 2 header row(s)"*) ok "T209m and a two-header .md is not converted to .csv silently / 而兩列標頭的 .md 不會被安靜地轉成 .csv" ;;
+    *) bad "T209m got: $_t209_conv / 實得如上" ;;
 esac
 
 echo

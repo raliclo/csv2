@@ -41,6 +41,7 @@ described somewhere below; this is the list a reader should see first:
 | case-insensitive matching | `--json` and one pass of your own — see the note under `-contains` |
 | counting without reading (`-count`) | `records` on the trailing `--json` meta line — and see the note below the table, because the obvious way to get it reads the whole file |
 | converting between `.csv` and `.csv2` | refused on purpose; write the records out and read them back in |
+| editing a Markdown table | supported since 2026-08-26 — render with `-md`, edit, read the `.md` back. See the note below the table |
 | safe concurrent writers | serialise them yourself; two writers silently lose one edit. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one that finishes SECOND warns that it could not update the index |
 | telling refusals apart programmatically | nothing but exit 1 and English prose, in every one of them |
 | scoping a search to ONE column | nothing does. `-contains` is a substring search across every column, so counting with it is silently wrong the moment the word appears anywhere else — see below |
@@ -84,6 +85,36 @@ sidecar is the faster pair; `.csv2` earns its keep on searches, on two header
 rows, and on values that would otherwise need quoting. Round 77 measured this;
 in a document that quotes milliseconds in fifteen places, saying nothing read
 as "no difference".
+
+**Markdown goes both ways as of 2026-08-26.** `-md` renders a table; a `.md`
+input reads one back, and a `.csv2` rendered and read back is byte-identical to
+what it started as — including a value holding a `|`, an embedded newline, a
+literal `<br>`, and leading or trailing spaces.
+
+```console
+$ csv2 -r -t -md -i pkgs.csv2 > table.md      # edit table.md by hand
+$ csv2 -update 1:2 'fixed' -i table.md -o pkgs.csv2 -t
+```
+
+Four things are worth knowing before relying on it:
+
+- **How many header rows is recovered, not asked for.** `-md` joins a `.csv2`'s
+  two titles with an unescaped `<br>`, so the header cells say which format the
+  table came from. `--headers` is therefore refused on a `.md`: a value given
+  there could disagree with the table, and one of them would have to be
+  ignored.
+- **The file must BE a table**, or you must say which table. Prose around it is
+  refused, naming the line; so is a file holding two tables, naming the line
+  the second starts on. `--md-table N` takes the Nth table out of a document.
+  csv2 does not pick one for you — before this refusal existed, a second
+  table's header and its `|---|` separator were read as DATA, at exit 0.
+- **Alignment is lost.** `|:---|---:|` is presentation, not data, and it does
+  not survive the round trip. Nothing else does not.
+- **It is read whole, not streamed.** A `.md` is translated into `.csv2` in
+  memory and handed to the ordinary reader, so that a Markdown table obeys
+  every rule that reader already enforces instead of growing a second parser
+  that would drift from it. The bound is `CSV2_MD_MAX_BYTES` (16 MiB), refused
+  above it with the size and the way through.
 
 **Counting: the obvious route is the expensive one.** `records` on the trailing
 meta line is the answer, but `csv2 -r --json` reaches it by reading every byte.
@@ -461,6 +492,12 @@ OUTPUT SHAPE / 輸出形狀
                         modifier and a variation-selector emoji wrong.
                         `-debug` prints the computed column widths, so you can
                         check the alignment instead of counting it by eye
+  --md-table N          read the Nth Markdown table out of a `.md` document,
+                        counting from 1. Without it a `.md` input must BE a
+                        table and nothing else -- prose around it is refused,
+                        naming the line, and so is a file holding two tables.
+                        Nothing here picks one for you. Refused on any input
+                        that is not a `.md`
   --json                JSON Lines; --json-ascii escapes non-ASCII, including
                         characters above U+FFFF, which JSON has no single
                         \uXXXX form for and which become UTF-16 surrogate
@@ -1613,11 +1650,13 @@ the first. csv2 refuses rather than emitting a line that loses data once it is
 parsed. Read it without `--json`, or use `-contains --json`, whose report shape
 gives each hit its own line and is unaffected. Asserted by T75.
 
-`-md` emits a Markdown table and is one-way — csv2 cannot read it back. Writing
-it to a `.csv`/`.csv2` path with `-o` is refused, and if you route around that
-with `-so` and a shell redirect, reading it back is refused too: a one-column
-file whose record is a Markdown separator row is `-md` output, not CSV, and the
-message says so instead of complaining about field counts. Asserted by T74.
+`-md` emits a Markdown table, and since 2026-08-26 csv2 reads one back — from a
+path ending `.md`, which is what declares it. Writing a table to a `.csv`/`.csv2`
+path with `-o` is still refused, because those suffixes declare CSV and the
+bytes would not be; if you route around that with `-so` and a shell redirect,
+reading the result back as CSV is refused too: a one-column file whose record is
+a Markdown separator row is `-md` output, not CSV, and the message says so —
+and now also says to rename it `.md`. Asserted by T74.
 
 ### In a pipeline
 

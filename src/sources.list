@@ -20,6 +20,7 @@ src/Crypto.swift
 src/Platform.swift
 src/Core.swift
 src/Support.swift
+src/Markdown.swift
 src/Width.swift
 src/Index.swift
 src/Parallel.swift

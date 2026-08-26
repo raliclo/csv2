@@ -784,8 +784,8 @@ final class RecordParser {
         r.number = recordsEmitted
         if r.count == 1 && looksLikeMarkdownSeparator(r.fields[0].value) {
             throw fault(
-                "record \(r.number) (line \(r.line)) is a Markdown separator row in a file with one column, so this is -md output rather than CSV; -md is one-way and csv2 cannot read it back",
-                "第 \(r.number) 筆（第 \(r.line) 行）是一列 Markdown 分隔列，且此檔只有一欄，因此這是 -md 的輸出而不是 CSV；-md 是單向的，csv2 讀不回來")
+                "record \(r.number) (line \(r.line)) is a Markdown separator row in a file with one column, so this is -md output rather than CSV. Name it with a .md suffix and csv2 reads it as a table -- until 2026-08-26 this sentence ended \"-md is one-way and csv2 cannot read it back\", which stopped being true when it learned to",
+                "第 \(r.number) 筆（第 \(r.line) 行）是一列 Markdown 分隔列，且此檔只有一欄，因此這是 -md 的輸出而不是 CSV。把它命名為 .md 副檔名，csv2 就會把它當成一張表來讀——在 2026-08-26 之前，這句話的結尾是「-md 是單向的，csv2 讀不回來」，而在它學會讀回來的那一刻，那句話就不再為真")
         }
         fields = []
         recordDirty = false
@@ -1142,6 +1142,34 @@ final class ByteSource {
         self.chunkSize = chunkSize
     }
 
+    /// Bytes that are already in hand. One caller: a `.md` input, which is
+    /// translated into canonical `.csv2` before the parser ever sees it, so
+    /// that reading a Markdown table reuses every rule the .csv2 reader
+    /// already enforces instead of growing a second parser that would drift
+    /// from it.
+    ///
+    /// This one input is NOT streamed, and that is a deliberate trade with a
+    /// bound on it: a Markdown table is a document somebody pasted, and the
+    /// alternative is a second implementation of record parsing whose
+    /// disagreements with the first would be found by users. The size limit
+    /// lives beside the translation, in the shape `--pretty` already uses.
+    ///
+    /// 已經在手上的位元組。只有一個呼叫端：`.md` 輸入，它在解析器看到它之前就被翻譯成標準的
+    /// `.csv2`，如此「讀一張 Markdown 表」就會沿用 .csv2 讀取器已經在執行的每一條規則，而不是
+    /// 長出第二個會與它漂移的解析器。
+    /// 這一個輸入**不是**串流的，那是一次刻意的取捨，而且有上界：一張 Markdown 表是某個人貼上來
+    /// 的文件，而另一條路是「紀錄解析」的第二份實作——它與第一份的分歧會由使用者來發現。那個大小
+    /// 上限就放在翻譯旁邊，形狀與 `--pretty` 已經在用的相同。
+    init(bytes: [UInt8], chunkSize: Int = 1 << 16) {
+        handle = FileHandle.standardInput
+        closeOnDeinit = false
+        self.chunkSize = chunkSize
+        self.memory = bytes
+    }
+
+    private var memory: [UInt8]? = nil
+    private var memoryOffset = 0
+
     /// The pool is the point, not the read. Without it, every `Data` this
     /// returns survives on Darwin until the process exits, so peak RSS grows
     /// with the number of bytes read and `-si` buffers the whole stream --
@@ -1150,6 +1178,14 @@ final class ByteSource {
     /// 活到行程結束，於是 peak RSS 隨「讀了多少位元組」成長、`-si` 等於整條串流都緩衝
     /// 了起來——與 `-si`／`-so` 的承諾正好相反。見 Platform.drainingPool。
     func next() -> [UInt8]? {
+        if let m = memory {
+            guard memoryOffset < m.count else { return nil }
+            let end = min(memoryOffset + chunkSize, m.count)
+            let out = Array(m[memoryOffset ..< end])
+            memoryOffset = end
+            bytesRead += out.count
+            return out
+        }
         return Platform.drainingPool {
             let d = handle.readData(ofLength: chunkSize)
             if d.isEmpty { return nil }
