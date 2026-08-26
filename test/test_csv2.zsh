@@ -11922,6 +11922,19 @@ case $_t211_dev in
         bad "T211p -o /dev/stdout refused for the wrong reason: $_t211_dev / 以錯的理由拒絕" ;;
     *"regular file"*|*FIFO*)
         ok "T211p -o to a non-regular file is refused for what it is / 指向非一般檔案的 -o，以「它是什麼」為理由被拒絕" ;;
+    "")
+        # It SUCCEEDED, and on some systems that is right: with stdout on a
+        # file, /dev/stdout resolves to /dev/fd/1 and a process that may write
+        # beside it -- the guest, running as root -- has nothing to refuse.
+        # T145e says exactly this, twenty lines up, and I wrote this case
+        # without reading to the end of it. The property under test is what the
+        # message says WHEN there is one; where there is none there is nothing
+        # to check rather than something that failed.
+        # 它**成功**了，而在某些系統上那是對的：stdout 落在一個檔案上時，/dev/stdout 解析成
+        # /dev/fd/1，而一個可以在它旁邊寫入的行程（以 root 執行的 guest 就是）沒有東西可以拒絕。
+        # T145e 在上面二十行處講的正是這件事，而我寫這個案例時沒有把它讀完。這裡要驗的性質是
+        # 「**當**有訊息時，那則訊息說了什麼」；沒有訊息時，這裡沒有東西要檢查，而不是有東西失敗了。
+        ok "T211p -o /dev/stdout succeeded here, so there is no refusal to judge / 這裡的 -o /dev/stdout 成功了，因此沒有拒絕可以評斷" ;;
     *) bad "T211p got: $_t211_dev / 實得如上" ;;
 esac
 
