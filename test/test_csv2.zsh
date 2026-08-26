@@ -9201,8 +9201,18 @@ else
     assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t130_dst.csv")" "1" \
         "T130b and the data landed in the file it points at / 而資料落在它所指向的檔案裡"
 
-    assert_eq "$(file_mode "$TMP/t130_dst.csv")" "600" \
-        "T130c and writing there does not widen its permissions / 而寫入那裡不會放寬它的權限"
+    # Modes, not symlinks: the same split T129 needed. The Windows node has real
+    # symlinks and permission bits that are a fiction over an ACL, so T130a/b
+    # run there and this one cannot.
+    # 是模式，不是 symlink：與 T129 需要的是同一個切分。Windows 節點有真正的 symlink，而它的權限
+    # 位元是覆在 ACL 之上的虛構，因此 T130a/b 在那裡跑得起來，而這一個跑不了。
+    if (( HAVE_POSIX_MODES )); then
+        assert_eq "$(file_mode "$TMP/t130_dst.csv")" "600" \
+            "T130c and writing there does not widen its permissions / 而寫入那裡不會放寬它的權限"
+    else
+        skipt "T130c and writing there does not widen its permissions / 而寫入那裡不會放寬它的權限 (chmod does not bite on this filesystem / chmod 在這個檔案系統上咬不住)"
+        T130C_SKIPPED=1
+    fi
 
     # Same file, two spellings: as typed, and through a link to it. Neither used
     # to be refused, and neither is equivalent to --in-place.
@@ -11633,15 +11643,27 @@ skipt "T47 macOS and aarch64 Linux produce byte-identical output / mac 與 Linux
 # 讓這個數字變成自我實現。
 want_skip=1                                   # T47, on every platform / 每個平台都有
 if (( IS_WINDOWS )); then
-    # T61a, T61c and T98a-g are the environment's limits; the rest are
-    # properties that need a POSIX filesystem or POSIX signals to test at all:
-    # symlinks (T43h, T129a-d, T130a-c), a FIFO (T141e), and killing a process
-    # mid-write (T131e). T135c needs a file the user cannot read, and chmod
-    # does not bite here.
-    # T61a、T61c 與 T98a-g 是「環境」的限制；其餘是「非 POSIX 檔案系統或訊號就測不了」的
-    # 性質：symlink（T43h、T129a-d、T130a-c）、FIFO（T141e），以及「寫到一半殺掉行程」
-    # （T131e）。T135c 需要一個使用者讀不到的檔案，而 chmod 在這裡咬不住。
-    (( want_skip += 9 ))
+    # What is left that is genuinely the platform, once the capabilities are
+    # probed instead of assumed: T61a and T61c (a POSIX FIFO is invisible to a
+    # native Windows program), T98a-g (the command line arrives as UTF-16, so
+    # there are no raw argument bytes to refuse), T141e (the same FIFO),
+    # T131e (POSIX signals), T135c (a file the user cannot read, which needs
+    # modes that bite here), T181a, T184a and T184b.
+    #
+    # This was 9 and included the symlinks -- T43h, T129a-d, T130a-c -- which
+    # this machine has and has always had. Their skips are now recorded by the
+    # cases themselves, from a run-time probe, like every other conditional
+    # skip in this file. A number written here instead is a second place to
+    # forget: it went on saying 9 while the reason for three of them had gone.
+    #
+    # 在能力改成「探測」而不是「假設」之後，真正屬於這個平台的還剩下這些：T61a 與 T61c（POSIX
+    # FIFO 對原生 Windows 程式不可見）、T98a-g（命令列以 UTF-16 抵達，沒有原始參數位元組可拒絕）、
+    # T141e（同一個 FIFO）、T131e（POSIX 訊號）、T135c（一個使用者讀不到的檔案，那需要「咬得住」
+    # 的模式）、T181a、T184a 與 T184b。
+    # 這裡原本是 9，而且把 symlink（T43h、T129a-d、T130a-c）算了進去——那是這台機器有、而且一直
+    # 都有的東西。它們的跳過現在由案例自己記錄，來自一次執行期探測，與這個檔案裡其他每一個條件式
+    # 跳過相同。把數字寫在這裡，是多一個會忘記的地方：它一直說著 9，而其中三個的理由早就不在了。
+    (( want_skip += 6 ))
 else
     _t69_probe=$(zstat_mode "$TMP")
     [[ $_t69_probe == <-> ]] || (( want_skip += 1 ))   # T129e
@@ -11699,6 +11721,7 @@ fi
 (( ${T129_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T129_MODE_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T130_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T130C_SKIPPED:-0} )) && (( want_skip += 1 ))
 # T166d needs python3 to rebuild the index checksum after bending a line. The
 # guest's busybox userland has no python3, and that is a property of the image
 # rather than of the platform's name -- so it is recorded by the case, like
