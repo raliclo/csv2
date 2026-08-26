@@ -103,7 +103,7 @@ let LOG_VALUE_WARN_BYTES = 1 << 20
 /// 格式是由副檔名宣告的事實，絕不從內容猜測。沒有任何啟發式能可靠分辨
 /// 「第二列是中文標題」與「第二列是第一筆資料」，而猜錯會把一筆資料當成
 /// 標頭吃掉且不報錯。
-enum Format: String {
+public enum Format: String {
     case csv
     case csv2
     /// A file with no suffix: one column, no header rows, and the line's bytes
@@ -126,7 +126,7 @@ enum Format: String {
     /// 什麼都不解跳脫。
     case lines
 
-    var headerRows: Int {
+    public var headerRows: Int {
         switch self {
         case .csv2:  return 2
         case .csv:   return 1
@@ -217,28 +217,28 @@ enum Format: String {
 /// `raw` 是該欄位在輸入中的原樣（含引號）。保留它才可能做到逐位元相同的
 /// round-trip：本來就被加了引號、實際上不需要引號的欄位會維持原樣，於是
 /// `csv2 -r` 不會改寫一個它只是被要求讀取的檔案。
-struct Field {
-    var raw: [UInt8]?
-    var value: [UInt8]
+public struct Field {
+    public var raw: [UInt8]?
+    public var value: [UInt8]
 
-    init(value: [UInt8], raw: [UInt8]? = nil) {
+    public init(value: [UInt8], raw: [UInt8]? = nil) {
         self.value = value
         self.raw = raw
     }
 
     /// Any edit drops `raw`: the stored bytes no longer describe the value.
     /// 任何修改都會丟掉 `raw`：原樣的位元組已不再描述這個值。
-    mutating func set(_ v: [UInt8]) { value = v; raw = nil }
+    public mutating func set(_ v: [UInt8]) { value = v; raw = nil }
 }
 
-struct Record {
-    var fields: [Field]
+public struct Record {
+    public var fields: [Field]
     /// Byte offset of the record's first byte. / 該筆第一個位元組的偏移量。
-    var offset: Int = 0
+    public var offset: Int = 0
     /// Physical line the record starts on, 1-based. / 該筆起始的物理行號，1-based。
-    var line: Int = 1
+    public var line: Int = 1
     /// 1-based data record number; 0 for header rows. / 1-based 資料紀錄號，標頭為 0。
-    var number: Int = 0
+    public var number: Int = 0
     /// Which header row this is, when it is one: 0 for the English row, 1 for
     /// the Traditional Chinese row. nil for data. The report needs to tell them
     /// apart -- printing `0` for both made two identical lines that no reader
@@ -246,7 +246,7 @@ struct Record {
     /// 這是第幾列標頭（若它是標頭）：0 為英文列、1 為繁體中文列；資料為 nil。
     /// 報告必須能分辨兩者——兩列都印 `0` 會產生兩行完全相同、讀者無從使用的輸出，
     /// 而那正是計畫中 `0a` / `0b` 要解決的。
-    var headerRow: Int? = nil
+    public var headerRow: Int? = nil
 
     var count: Int { fields.count }
 }
@@ -326,13 +326,13 @@ enum CSV2Escape {
 // MARK: - Encoding a field for output / 欄位的輸出編碼
 // ---------------------------------------------------------------------
 
-enum FieldEncoder {
+public enum FieldEncoder {
     /// `preserveRaw` is only safe when the output format equals the input
     /// format. Writing `.csv` bytes into a `.csv2` file would carry a raw
     /// embedded newline across, breaking the one-record-per-line invariant.
     /// `preserveRaw` 只有在輸出格式與輸入格式相同時才安全。把 `.csv` 的原樣
     /// 位元組寫進 `.csv2`，會把原始的內嵌換行帶過去，破壞一筆一行的不變式。
-    static func encode(_ f: Field, format: Format, preserveRaw: Bool) -> [UInt8] {
+    public static func encode(_ f: Field, format: Format, preserveRaw: Bool) -> [UInt8] {
         if preserveRaw, let raw = f.raw { return raw }
         // `.lines` writes the value's bytes and nothing else -- no quoting, no
         // escaping. Quoting here would break the round trip it exists for: a
@@ -381,7 +381,7 @@ enum FieldEncoder {
         return out
     }
 
-    static func encodeRecord(_ r: Record, format: Format, preserveRaw: Bool) -> [UInt8] {
+    public static func encodeRecord(_ r: Record, format: Format, preserveRaw: Bool) -> [UInt8] {
         var out = [UInt8]()
         out.reserveCapacity(64 * max(1, r.fields.count))
         for (i, f) in r.fields.enumerated() {
@@ -440,7 +440,7 @@ func refuseUTF16BOM(_ head: [UInt8]) throws {
 /// guest has.
 /// 採推送式，讓 `-si` 能串流：位元組逐塊進來，紀錄完成一筆吐一筆。此處
 /// 不持有整份輸入，因為本工具必須能處理比 guest 那 2–4 GiB 更大的檔案。
-final class RecordParser {
+public final class RecordParser {
     private enum State {
         case fieldStart
         case unquoted
@@ -525,7 +525,7 @@ final class RecordParser {
     /// `sink` 放在最後，讓每個呼叫端都能使用 trailing closure，其餘參數維持預設值。
     /// Swift 會把 trailing closure 對應到最後一個參數，因此在它之後再放任何參數，
     /// 都會迫使每個呼叫端把 `sink:` 寫出來。
-    init(format: Format,
+    public init(format: Format,
          firstRecordNumber: Int = 1, firstOffset: Int = 0, firstLine: Int = 1,
          truncatePartial: Bool = false,
          sink: @escaping (Record) throws -> Bool) {
@@ -577,7 +577,7 @@ final class RecordParser {
         return "第 \(n - format.headerRows) 筆（第 \(recLine) 行）"
     }
 
-    func feed(_ chunk: [UInt8]) throws {
+    public func feed(_ chunk: [UInt8]) throws {
         var bytes = chunk
         if !bomDone {
             bomPending.append(contentsOf: bytes)
@@ -898,7 +898,7 @@ final class RecordParser {
     /// 「中間的一個 CR」與「檔案就結束在一個 CR 上」。
     private var atEOF = false
 
-    func finish() throws {
+    public func finish() throws {
         if stopped { return }
         atEOF = true
         if !bomDone && !bomPending.isEmpty {
@@ -1129,13 +1129,13 @@ final class RecordParser {
 /// to be bounded by the chunk size, not by the input size.
 /// 以固定大小分塊讀取。絕不「整檔讀入」：記憶體上界必須由區塊大小決定，
 /// 而非由輸入大小決定。
-final class ByteSource {
+public final class ByteSource {
     private let handle: FileHandle
     private let closeOnDeinit: Bool
     let chunkSize: Int
-    private(set) var bytesRead = 0
+    public private(set) var bytesRead = 0
 
-    init(path: String, chunkSize: Int = 1 << 16, startAt: UInt64 = 0) throws {
+    public init(path: String, chunkSize: Int = 1 << 16, startAt: UInt64 = 0) throws {
         // A FIFO is opened with a plain blocking open(2), not through
         // FileHandle. Foundation's opener does not wait for a writer, so
         // `csv2 -r -i fifo.csv` started before the writer arrived read EOF
@@ -1181,7 +1181,7 @@ final class ByteSource {
         self.chunkSize = chunkSize
     }
 
-    init(stdin chunkSize: Int = 1 << 16) {
+    public init(stdin chunkSize: Int = 1 << 16) {
         handle = FileHandle.standardInput
         closeOnDeinit = false
         self.chunkSize = chunkSize
@@ -1205,7 +1205,7 @@ final class ByteSource {
     /// 這一個輸入**不是**串流的，那是一次刻意的取捨，而且有上界：一張 Markdown 表是某個人貼上來
     /// 的文件，而另一條路是「紀錄解析」的第二份實作——它與第一份的分歧會由使用者來發現。那個大小
     /// 上限就放在翻譯旁邊，形狀與 `--pretty` 已經在用的相同。
-    init(bytes: [UInt8], chunkSize: Int = 1 << 16) {
+    public init(bytes: [UInt8], chunkSize: Int = 1 << 16) {
         handle = FileHandle.standardInput
         closeOnDeinit = false
         self.chunkSize = chunkSize
@@ -1222,7 +1222,7 @@ final class ByteSource {
     /// 重點是那個 pool，不是那次讀取。沒有它，這裡回傳的每一個 `Data` 在 Darwin 上都會
     /// 活到行程結束，於是 peak RSS 隨「讀了多少位元組」成長、`-si` 等於整條串流都緩衝
     /// 了起來——與 `-si`／`-so` 的承諾正好相反。見 Platform.drainingPool。
-    func next() -> [UInt8]? {
+    public func next() -> [UInt8]? {
         if let m = memory {
             guard memoryOffset < m.count else { return nil }
             let end = min(memoryOffset + chunkSize, m.count)
@@ -1239,7 +1239,7 @@ final class ByteSource {
         }
     }
 
-    func close() {
+    public func close() {
         if closeOnDeinit { try? handle.close() }
     }
 }
@@ -1253,7 +1253,7 @@ final class ByteSource {
 /// would quietly break that promise on a large file.
 /// 具緩衝，但緩衝區是固定大小、滿了就寫出。`-so` 承諾不在寫出前緩衝整份
 /// 輸出，而一個會長大的緩衝區會在大檔案上安靜地破壞那個承諾。
-final class ByteSink {
+public final class ByteSink {
     private var buf: [UInt8] = []
     private let limit: Int
     /// Set for the stdout and stderr sinks: the two that can meet a reader

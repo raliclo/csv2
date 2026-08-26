@@ -3071,6 +3071,68 @@ shape more than once (a rule applied to only part of where it holds).
 副檔名的集合，而每一則拒絕訊息都在複述它。單獨加入其中任何一個，都會讓那句話變成「一半為真」，
 而那比任何一種完整狀態都糟——這棵樹記錄過不只一次同樣的形狀（一條規則只套用到它成立範圍的一部分）。
 
+## Phase 9: a library surface / 第 9 階段：一個 library 表面
+
+Decided 2026-08-27, by the user, after the SoftPCB session asked and explicitly
+declined to decide it for csv2. Recording who decided what, because that is the
+part no diff can recover.
+
+2026-08-27 由使用者決定，起因是 SoftPCB session 提出需求，並明確表示不替 csv2 做這個決定。
+把「誰決定了什麼」記下來，因為那是任何 diff 都還原不了的部分。
+
+### The measurement that asked for it / 提出需求的那個量測
+
+Spawning csv2 as a subprocess costs **72 ms from a process that has loaded
+AppKit** against **3.4 ms from python** -- same binary, same arguments, 20x.
+The cost is the CALLER's size, not anything csv2 does. On a per-batch logging
+path that dominates, and on the main thread it is a visible freeze.
+
+從一個載入了 AppKit 的行程 spawn csv2 要 **72 ms**，而從 python 只要 **3.4 ms**——同一支執行檔、
+同樣引數，差 20 倍。代價來自**呼叫端**的大小，不是 csv2 做了什麼。在一條「每批一次」的日誌路徑上
+那會主導一切，在主執行緒上則是一次看得見的凍結。
+
+### What is public, and what that costs / 什麼是 public，以及它的代價
+
+`Format`, `Field`, `Record`, `FieldEncoder`, `RecordParser`, `ByteSource`,
+`ByteSink`. Nothing else. `Options`, `InputPlan`, and every operation verb stay
+internal: the CLI's shape is not a promise, and `Core.swift` never mentions
+`Options` at all -- which is why the subset closes.
+
+`Format`、`Field`、`Record`、`FieldEncoder`、`RecordParser`、`ByteSource`、`ByteSink`。別無其他。
+`Options`、`InputPlan` 與每一個操作動詞都維持 internal：CLI 的形狀不是一個承諾，而 `Core.swift`
+一次也沒有提到 `Options`——那正是這個子集能自足的原因。
+
+**The cost is real and worth naming.** A `public` type is a promise, and this
+project is still changing behaviour and messages every blind round -- rounds 74
+through 78 changed output, refusals and the meaning of a suffix. What is
+promised here is deliberately the narrow part: bytes in, records out, records
+back to bytes. None of the seven has been touched by a blind round's findings,
+and the parsing rules they implement are the oldest and most heavily tested
+thing in the tree.
+
+**這個代價是真的，值得說出來。** 一個 `public` 型別就是一個承諾，而這個專案每一輪盲測都還在改行為
+與訊息——第 74 到 78 回合改動了輸出、拒絕與「副檔名的意義」。這裡承諾的是刻意挑過的那個窄面：
+位元組進去、紀錄出來、紀錄再變回位元組。那七個沒有一個被任何一輪盲測的發現碰過，而它們實作的解析
+規則是這棵樹裡最老、也被測得最重的東西。
+
+### How it is verified / 它是怎麼被驗證的
+
+**`public` changes nothing inside a module, so the ordinary build succeeding
+proves nothing.** `verifications/module_api.zsh` builds the six-file subset as
+a real module and compiles a SEPARATE client that imports it, uses all seven
+types, and is then RUN. T212 calls it, and skips with a named reason where
+there is no `swiftc`.
+
+**`public` 在一個 module 內部什麼也不改變，因此一般建置成功什麼也證明不了。**
+`verifications/module_api.zsh` 會把那六個檔案的子集建成一個真正的 module，再編譯一個**獨立的**
+客戶端去 import 它、用到全部七個型別，然後**執行**它。T212 會呼叫它，而在沒有 `swiftc` 的地方以
+具名理由跳過。
+
+- [x] the seven types public, and nothing else / 那七個型別 public，別無其他
+- [x] the subset closes: Platform, Core, Support, Crypto, Markdown, Width / 子集自足
+- [x] verified by importing it from outside and running it / 以「從外面 import 並執行」驗證
+- [ ] the same verification on the other three platforms / 另外三個平台上的同一項驗證
+
 ## 待決問題
 
 1. ~~submodule 掛在哪裡~~ —— 已定：`sos/csv2`。

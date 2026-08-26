@@ -11914,6 +11914,41 @@ case $_t211_dev in
     *) bad "T211p got: $_t211_dev / 實得如上" ;;
 esac
 
+# ---------------------------------------------------------------------
+# T212 -- the library surface, checked the only way that means anything.
+#
+# `public` changes nothing inside a module, so the ordinary build succeeding
+# says nothing about whether a caller can use these types. The check is the one
+# a caller performs: build the subset as a module, import it from a separate
+# file, and RUN the result.
+#
+# The surface exists because spawning csv2 costs 72 ms from a process that has
+# loaded AppKit against 3.4 ms from python -- the caller's size, not csv2's --
+# which on a per-batch path is a visible freeze. Measured by the SoftPCB
+# session; the six-file subset is what it found sufficient.
+#
+# T212 —— 那個 library 表面，用唯一有意義的方式檢查。
+# `public` 在一個 module 內部什麼也不改變，因此一般建置成功，對「呼叫端能不能用這些型別」什麼也
+# 沒說。要做的檢查是呼叫端會做的那個：把子集建成 module、從一個獨立檔案 import 它，並且**執行**
+# 產物。
+# 這個表面之所以存在，是因為從一個載入了 AppKit 的行程 spawn csv2 要 72 ms，而從 python 只要
+# 3.4 ms——那是呼叫端的大小，不是 csv2 的——在一條「每批一次」的路徑上那是一次看得見的凍結。
+# 由 SoftPCB session 量測；那六個檔案的子集是它找出來「足夠」的那一份。
+# ---------------------------------------------------------------------
+echo
+echo "--- T212: the library surface / T212：library 表面 ---"
+
+if (( ! $+commands[swiftc] )); then
+    skipt "T212 no swiftc here to build a module with / 這裡沒有 swiftc 可以拿來建 module"
+    T212_SKIPPED=1
+else
+    if "$ROOT/verifications/module_api.zsh" > "$TMP/t212.log" 2>&1; then
+        ok "T212 the six-file subset builds as a module and a client can use it / 那六個檔案的子集建得成 module，而一個客戶端用得了它"
+    else
+        bad "T212 $(tail -3 "$TMP/t212.log" | tr '\n' ' ') / 實得如上"
+    fi
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
@@ -12034,6 +12069,7 @@ fi
 (( ${T203_BASH_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T204_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T166E_XSKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T212_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode
