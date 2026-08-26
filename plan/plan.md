@@ -3053,11 +3053,11 @@ csv2: record 1 (line 2) has 1 fields but the header has 2
 只完成一半，正是這棵樹記錄過不只一次的那種失敗，因此改為把它寫在這裡。
 
 - [x] decide 1-5 above / 上面 1–5 定案
-- [ ] `--headers 0`, and every message that names the valid values / `--headers 0`，以及每一則指名合法值的訊息
-- [ ] suffix-less input reads as one column / 沒有副檔名的輸入讀成一欄
-- [ ] the content refusals still fire / 那些「關於內容」的拒絕仍然會觸發
-- [ ] measured on a real `find` dump with backslashes in it / 在一次「裡面有反斜線」的真實 `find` 輸出上量過
-- [ ] the sentence "the suffix is what declares the format" corrected everywhere it appears / 「副檔名才是宣告格式的東西」那句話在每一處都更正
+- [x] ~~`--headers 0`~~ — not needed: the suffix declares it, and `--headers` stays as the override / 不需要：由副檔名宣告，而 `--headers` 保留為覆蓋手段
+- [x] suffix-less input reads as one column / 沒有副檔名的輸入讀成一欄
+- [x] the content refusals still fire / 那些「關於內容」的拒絕仍然會觸發
+- [x] measured: commas, quotes and backslashes are all data (T210b/c/d) / 已量：逗號、引號與反斜線全都是資料（T210b/c/d）
+- [x] the sentence "the suffix is what declares the format" corrected everywhere it appears / 「副檔名才是宣告格式的東西」那句話在每一處都更正
 
 ### Why these two are one phase / 為什麼這兩件是同一個階段
 

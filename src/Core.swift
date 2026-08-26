@@ -106,8 +106,33 @@ let LOG_VALUE_WARN_BYTES = 1 << 20
 enum Format: String {
     case csv
     case csv2
+    /// A file with no suffix: one column, no header rows, and the line's bytes
+    /// are the value. Phase 8b.
+    ///
+    /// It is NOT a one-column `.csv2` in its escaping, and that difference is
+    /// the whole of what had to be decided. Measured 2026-08-26: with the
+    /// documented `--headers 1`, the first line of such a file is EATEN as a
+    /// header; a comma in a path turns a `find` dump into a two-column table
+    /// that then fails on the first line without one; and if the escaping were
+    /// `.csv2`'s, a line holding a literal `\n` would change meaning on the
+    /// way in. So: zero header rows, no comma splitting, no quote processing,
+    /// nothing unescaped.
+    ///
+    /// 一個沒有副檔名的檔案：一欄、沒有標頭列，而那一行的位元組就是值。第 8b 階段。
+    /// 它在**跳脫**上不是「一欄的 .csv2」，而那個差別正是必須被定案的全部。2026-08-26 量測：
+    /// 用有記載的 `--headers 1`，這種檔案的第一行會被當成標頭吃掉；路徑裡的一個逗號會把一份
+    /// `find` 輸出變成兩欄的表，接著在第一個沒有逗號的行上失敗；而如果跳脫用 `.csv2` 那一套，
+    /// 一行含字面 `\n` 的內容在讀進來的路上就會改變意思。因此：零列標頭、逗號不切分、不處理引號、
+    /// 什麼都不解跳脫。
+    case lines
 
-    var headerRows: Int { self == .csv2 ? 2 : 1 }
+    var headerRows: Int {
+        switch self {
+        case .csv2:  return 2
+        case .csv:   return 1
+        case .lines: return 0
+        }
+    }
 
     /// ONE suffix test, case-insensitive, used for reading and for writing.
     ///
@@ -309,6 +334,16 @@ enum FieldEncoder {
     /// 位元組寫進 `.csv2`，會把原始的內嵌換行帶過去，破壞一筆一行的不變式。
     static func encode(_ f: Field, format: Format, preserveRaw: Bool) -> [UInt8] {
         if preserveRaw, let raw = f.raw { return raw }
+        // `.lines` writes the value's bytes and nothing else -- no quoting, no
+        // escaping. Quoting here would break the round trip it exists for: a
+        // path containing a comma would come back with quotes that nobody put
+        // in it. A value holding a newline cannot be written at all, and that
+        // is refused where the record is assembled rather than silently
+        // mangled here.
+        // `.lines` 只寫出那個值的位元組，別無其他——不加引號、不做跳脫。在這裡加引號會弄壞它存在
+        // 所要達成的那趟往返：一個含逗號的路徑會帶著「沒有人放進去的引號」回來。一個含換行的值
+        // 根本寫不出去，而那件事是在「組裝紀錄」的地方被拒絕的，不是在這裡被安靜地弄壞。
+        if format == .lines { return f.value }
         let v = format == .csv2 ? CSV2Escape.escape(f.value) : f.value
 
         var needsQuote = false
@@ -637,11 +672,21 @@ final class RecordParser {
 
         switch state {
         case .fieldStart, .unquoted:
-            if b == BYTE_DQUOTE && state == .fieldStart {
+            // In `.lines` a comma and a quote are DATA. The line is the
+            // value, so the only byte with a meaning is the terminator.
+            // Phase 8b: a `find` dump whose paths contain commas is the case
+            // that decided this, and quoting had to go with it -- half of the
+            // rule would have left `"a,b"` parsing as one field with its
+            // quotes eaten, which is a value nobody wrote.
+            // 在 `.lines` 裡，逗號與引號都是**資料**。那一行就是那個值，因此唯一有意義的位元組
+            // 是終止符。第 8b 階段：決定這件事的，是一份「路徑裡含逗號」的 `find` 輸出，而引號
+            // 必須跟著一起走——只做一半的規則，會讓 `"a,b"` 解析成一個「引號被吃掉」的欄位，
+            // 而那是沒有人寫過的值。
+            if b == BYTE_DQUOTE && state == .fieldStart && format != .lines {
                 state = .quoted
                 rawBuf.append(b)
                 recordDirty = true
-            } else if b == BYTE_COMMA {
+            } else if b == BYTE_COMMA && format != .lines {
                 try endField()
             } else if b == BYTE_LF {
                 sawLF = true

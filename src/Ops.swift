@@ -338,11 +338,25 @@ final class CellEmitter: RecordEmitter {
     func begin(_ ctx: EmitContext) throws {}
 
     func emit(_ r: Record, matches: [Int], ctx: EmitContext) throws {
-        guard let header = ctx.headers.first else {
-            throw fault("-get needs a header to resolve the column against",
-                        "-get 需要標頭才能解析欄位")
+        // A NUMBER needs no header. This refused every `-get r:c` on a file
+        // with no header row -- including `1:1` on a suffix-less file, where
+        // the column can only ever be 1. The message was written when every
+        // file had a header and a name was the interesting case; it stayed
+        // true of names and became false of numbers the moment zero-header
+        // files existed. Phase 8b.
+        // 一個「數字」不需要標頭。這裡原本會拒絕「對沒有標頭列的檔案」下的每一次 `-get r:c`
+        // ——包括對一個沒有副檔名的檔案下 `1:1`，而那種檔案的欄位號永遠只可能是 1。這則訊息是在
+        // 「每個檔案都有標頭」的年代寫的，那時「名稱」才是有意思的情況；它對名稱一直為真，而在
+        // 「零標頭列的檔案」存在的那一刻，它對數字就成了假的。第 8b 階段。
+        let c: Int
+        if let header = ctx.headers.first {
+            c = try resolveColumn(column, header: header)
+        } else if let n = Int(column), n >= 1 {
+            c = n - 1
+        } else {
+            throw fault("-get \(column): this file has no header row, so a column can only be addressed by NUMBER here",
+                        "-get \(column)：這個檔案沒有標頭列，因此在這裡只能以「編號」定址欄位")
         }
-        let c = try resolveColumn(column, header: header)
         guard c < r.count else {
             throw fault("record \(r.number) has \(r.count) fields; there is no field \(c + 1)",
                         "第 \(r.number) 筆有 \(r.count) 欄；沒有第 \(c + 1) 欄")

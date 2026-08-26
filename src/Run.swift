@@ -306,6 +306,12 @@ func runBuildIndex(_ o: Options) throws {
             }
             var r = rec
             r.number = rec.number - plan.headerRows
+            // With no header rows the first RECORD sets the width. `.lines`
+            // has none by definition, and a headed file has already set this
+            // from its header, so this is inert there.
+            // 沒有標頭列時，由第一筆**紀錄**決定寬度。`.lines` 依定義沒有標頭，而有標頭的檔案
+            // 早就從它的標頭設過這個值，因此這一行在那裡是惰性的。
+            if expectedFields == 0 { expectedFields = r.count }
             try checkFieldCount(r, expected: expectedFields,
                                 what: "record \(r.number) (line \(r.line))")
             // A record that itself spans lines means a record number is no
@@ -705,7 +711,22 @@ func runSelect(_ o: Options) throws {
 
     func headersComplete() throws {
         try validateHeaders(headers, want: plan.headerRows, path: plan.describedPath)
-        expectedFields = headers[0].count
+        // Zero header rows is a real shape (`.lines`), and everything below
+        // reads row 0. Reaching for it crashed with SIGTRAP and exit 133 -- no
+        // message on either stream, which is the worst way for this tool to
+        // fail and the same trap `/dev/null` produced on 2026-08-21.
+        // 零列標頭是一個真實的形狀（`.lines`），而底下的一切都會去讀第 0 列。伸手去拿它會以
+        // SIGTRAP、exit 133 當掉——兩條輸出流上都沒有訊息，那是這個工具最糟的失敗方式，也與
+        // 2026-08-21 那次 `/dev/null` 造成的 trap 是同一個。
+        // Only the header-DERIVED work is skipped when there is no header row,
+        // not the emitter setup below it. An early `return` here read the file
+        // and printed nothing, at rc=0 -- a silent success, which is worse than
+        // the SIGTRAP it replaced: the trap at least stopped.
+        // 沒有標頭列時，只跳過「由標頭推導」的那些工作，不跳過它下面的 emitter 設定。在這裡直接
+        // `return` 會讓它讀完檔案卻什麼都不印，而且 rc=0——一次無聲的成功，那比它取代掉的 SIGTRAP
+        // 更糟：那個 trap 至少會停下來。
+        if let first = headers.first {
+        expectedFields = first.count
         // Before buildTransform, so a column the file already marks is redacted even
                     // when this run performs no transform at all.
                     // 放在 buildTransform 之前，好讓「檔案已標記的欄位」即使在本次完全沒有
@@ -713,6 +734,7 @@ func runSelect(_ o: Options) throws {
                     redactColumnsDeclaredByHeader(headers[0])
                     transform = try buildTransform(o, headers: headers)
         markHeaders(&headers, transform: transform)
+        }
         ctx = EmitContext(
             format: plan.format, headers: headers, withHeader: o.withHeader,
             rownum: o.rownum, zh: o.zh, physical: o.physical, a1: o.a1,
@@ -739,7 +761,17 @@ func runSelect(_ o: Options) throws {
     }
 
     let resuming = ip.resumeOffset != nil
-    if resuming { try headersComplete() }
+    // ... or when there are no header rows to complete. With headerRows == 0
+    // the callback below never enters its header branch, so headersComplete --
+    // which is also what builds the emit context -- was never called, and the
+    // run read the whole file and emitted nothing at rc=0. The resume path had
+    // the same shape and had already solved it; this is the second caller of
+    // that solution, not a new one.
+    // ……或是在「根本沒有標頭列可以完成」的時候。headerRows == 0 時，底下那個 callback 永遠不會
+    // 進入它的標頭分支，於是 headersComplete——它同時也是建立 emit context 的地方——從未被呼叫，
+    // 而那次執行讀完了整個檔案、什麼都沒輸出，rc=0。恢復解析那條路徑是同樣的形狀，而且早就解決過；
+    // 這裡是那個解法的第二個呼叫端，不是一個新的解法。
+    if resuming || plan.headerRows == 0 { try headersComplete() }
 
     let firstRecord = resuming ? ip.resumeRecord + plan.headerRows : 1
     // Taken from the grid point, not derived from the record number. Deriving
@@ -769,6 +801,12 @@ func runSelect(_ o: Options) throws {
             var r = rec
             r.number = rec.number - plan.headerRows
             seen = r.number
+            // With no header rows the first RECORD sets the width. `.lines`
+            // has none by definition, and a headed file has already set this
+            // from its header, so this is inert there.
+            // 沒有標頭列時，由第一筆**紀錄**決定寬度。`.lines` 依定義沒有標頭，而有標頭的檔案
+            // 早就從它的標頭設過這個值，因此這一行在那裡是惰性的。
+            if expectedFields == 0 { expectedFields = r.count }
             try checkFieldCount(r, expected: expectedFields,
                                 what: "record \(r.number) (line \(r.line))")
             // Not `false`. This is the index -tail builds as a side effect, and
@@ -778,7 +816,7 @@ func runSelect(_ o: Options) throws {
             // sidecar 比沒有更糟——檔案上的下一次 -contains 會照著它做。
             builder?.add(record: r.number, at: UInt64(r.offset), line: UInt64(r.line),
                          spansLines: recordSpansLines(r, format: plan.format))
-            try applyTransform(transform, to: &r, header: headers[0])
+            if let h0 = headers.first { try applyTransform(transform, to: &r, header: h0) }
 
             if r.number < lower {
                 if o.before > 0 {
@@ -1358,20 +1396,45 @@ func runEdit(_ o: Options) throws {
                 // 「某個編號不見了」。逐欄套用遮蔽規則，好讓受保護的欄位不會以明文進到 log；
                 // 也與其他每一行一樣做跳脫，因此一筆紀錄就是一則紀錄。
                 let contents = r.fields.enumerated().map { (i, f) -> String in
-                    let n = i < headers[0].count ? baseName(headerName(headers[0].fields[i])) : "\(i + 1)"
+                    // A file with no header row reaches these too. Phase 8b: `-delete` and
+                    // `-update` on a suffix-less file crashed with SIGTRAP at exit 133,
+                    // nothing on either stream -- these three read row 0 to NAME the
+                    // column in the audit line, which is worth having and is not worth
+                    // crashing for. Without a header the number is the name.
+                    // 沒有標頭列的檔案也會走到這裡。第 8b 階段：對一個沒有副檔名的檔案下 `-delete`
+                    // 與 `-update` 會以 SIGTRAP、exit 133 當掉，兩條輸出流上都沒有東西——這三處讀第 0 列
+                    // 是為了在稽核那一行裡「說出欄位的名字」，那件事值得有，但不值得為它當掉。
+                    // 沒有標頭時，編號就是名字。
+                    let n = (headers.first.map { i < $0.count ? baseName(headerName($0.fields[i])) : "\(i + 1)" }) ?? "\(i + 1)"
                     return "\(Logger.shared.nameForLog(n))=\(Logger.shared.redact(column: n, value: f.value))"
                 }.joined(separator: ", ")
                 Logger.shared.info("delete record \(r.number): \(contents)")
                 return true
             }
+            // With no header rows the first RECORD sets the width. `.lines`
+            // has none by definition, and a headed file has already set this
+            // from its header, so this is inert there.
+            // 沒有標頭列時，由第一筆**紀錄**決定寬度。`.lines` 依定義沒有標頭，而有標頭的檔案
+            // 早就從它的標頭設過這個值，因此這一行在那裡是惰性的。
+            if expectedFields == 0 { expectedFields = r.count }
             try checkFieldCount(r, expected: expectedFields,
                                 what: "record \(r.number) (line \(r.line))")
 
             if let ups = updates[r.number] {
                 touched.insert(r.number)
                 for (colToken, value) in ups {
-                    let c = try resolveColumn(colToken, header: headers[0])
-                    let name = baseName(headerName(headers[0].fields[c]))
+                    let c: Int
+                    let name: String
+                    if let h0 = headers.first {
+                        c = try resolveColumn(colToken, header: h0)
+                        name = baseName(headerName(h0.fields[c]))
+                    } else if let numeric = Int(colToken), numeric >= 1 {
+                        c = numeric - 1
+                        name = colToken
+                    } else {
+                        throw fault("\(colToken): this file has no header row, so a column can only be addressed by NUMBER here",
+                                    "\(colToken)：這個檔案沒有標頭列，因此在這裡只能以「編號」定址欄位")
+                    }
                     let old = r.fields[c].value
                     r.fields[c].set([UInt8](value.utf8))
                     // The log records the value in full, so say so when "in
@@ -1393,8 +1456,18 @@ func runEdit(_ o: Options) throws {
             if let cols = blanks[r.number] {
                 touched.insert(r.number)
                 for colToken in cols {
-                    let c = try resolveColumn(colToken, header: headers[0])
-                    let name = baseName(headerName(headers[0].fields[c]))
+                    let c: Int
+                    let name: String
+                    if let h0 = headers.first {
+                        c = try resolveColumn(colToken, header: h0)
+                        name = baseName(headerName(h0.fields[c]))
+                    } else if let numeric = Int(colToken), numeric >= 1 {
+                        c = numeric - 1
+                        name = colToken
+                    } else {
+                        throw fault("\(colToken): this file has no header row, so a column can only be addressed by NUMBER here",
+                                    "\(colToken)：這個檔案沒有標頭列，因此在這裡只能以「編號」定址欄位")
+                    }
                     // Blanking, never removing. Actually dropping the field
                     // would leave that record one column short and shift every
                     // later field left, so status_notes appears under license
@@ -1425,7 +1498,7 @@ func runEdit(_ o: Options) throws {
                     Logger.shared.info("blank \(r.number):\(name): \(Logger.shared.redact(column: name, value: gone)) -> \"\"")
                 }
             }
-            try applyTransform(transform, to: &r, header: headers[0])
+            if let h0 = headers.first { try applyTransform(transform, to: &r, header: h0) }
             // Last, so that every index above still refers to the input. The
             // field-count check, the column names in the log, and the
             // transform all read the original shape; only what is written out
@@ -1598,7 +1671,14 @@ func canUseAppendFastPath(_ o: Options) -> Bool {
 
 func runAppendFast(_ o: Options) throws {
     let path = o.input!
-    guard let fmt = Format.from(path: path) ?? (o.headersOverride.map { $0 == 2 ? .csv2 : .csv }) else {
+    // A suffix-less path is `.lines` now, not "no format". This guard predates
+    // that and turned `-append` on such a file into "t declares no format" --
+    // a sentence that was true when it was written and became false the moment
+    // the format existed. Phase 8b.
+    // 沒有副檔名的路徑現在是 `.lines`，不是「沒有格式」。這道守衛比那件事早，於是對這種檔案下
+    // `-append` 會得到「t declares no format」——那句話在寫下時為真，而在那個格式存在的那一刻
+    // 就成了假的。第 8b 階段。
+    guard let fmt = Format.from(path: path) ?? (o.headersOverride.map { $0 == 2 ? .csv2 : .csv }) ?? Format.lines as Format? else {
         throw fault("\(path) declares no format", "\(path) 未宣告格式")
     }
     let headerRows = o.headersOverride ?? fmt.headerRows
@@ -1625,7 +1705,14 @@ func runAppendFast(_ o: Options) throws {
     if headers.count < headerRows { try? headParser.finish() }
     head.close()
     try validateHeaders(headers, want: headerRows, path: path)
-    let expected = headers[0].count
+    // With no header row there is nothing to take a width from: one column, by
+    // definition. Reaching for row 0 here and on the line below were the last
+    // of the SIGTRAPs this phase turned up -- four of them, all the same shape:
+    // code written when every file had a header, meeting a file that has none.
+    // 沒有標頭列時，沒有東西可以拿來取寬度：依定義就是一欄。在這裡、以及下面那一行伸手去拿第 0
+    // 列，是這個階段挖出的最後幾個 SIGTRAP——一共四個，形狀完全相同：在「每個檔案都有標頭」的年代
+    // 寫下的程式碼，遇到一個沒有標頭的檔案。
+    let expected = headers.first?.count ?? 1
 
     // The fast path never reaches runEdit, so the refusal has to be repeated
     // here rather than relied on. It is the same function, which is the point:
@@ -1637,7 +1724,8 @@ func runAppendFast(_ o: Options) throws {
     // 函式，那正是重點：這個修正的第一版只住在 runEdit 裡，而 `-append --in-place`——
     // 最可能被用在一個大型受保護檔案上的那條路徑——直接繞過它，以 rc=0 把明文寫進了加密欄。
     // 在這裡做很便宜：標頭本來就已經讀進來了。
-    let protFast = protectedColumns(headers[0])
+    let protFast: (columns: [(Int, String)], anyEncrypted: Bool) =
+        headers.first.map { protectedColumns($0) } ?? (columns: [], anyEncrypted: false)
     if !protFast.columns.isEmpty {
         throw rawRowWriteRefusal(verbs: ["-append"],
                                  columns: protFast.columns.map { $0.1 },

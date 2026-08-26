@@ -11723,6 +11723,97 @@ case $_t209_conv in
     *) bad "T209m got: $_t209_conv / 實得如上" ;;
 esac
 
+# ---------------------------------------------------------------------
+# T210 -- phase 8b: a file with no suffix is one column.
+#
+# One column, ZERO header rows, and the line's bytes verbatim. Each third of
+# that was measured, not chosen: with the documented `--headers 1` the first
+# line is EATEN as a header; a comma in a path turns a find dump into a
+# two-column table that then fails on the first line without one; and .csv2
+# escaping would change the meaning of a line holding a literal \n.
+#
+# Four SIGTRAPs came out of this -- exit 133, nothing on either stream -- all
+# the same shape: code written when every file had a header, meeting one that
+# has none. The cases below are the shapes that found them.
+#
+# T210 —— 第 8b 階段：沒有副檔名的檔案就是一欄。
+# 一欄、**零列**標頭、那一行的位元組原樣。這三分之一都是量出來的，不是挑出來的：用有記載的
+# `--headers 1`，第一行會被當成標頭吃掉；路徑裡的一個逗號會把 find 輸出變成兩欄的表，接著在
+# 第一個沒有逗號的行上失敗；而 .csv2 的跳脫會改變「含字面 \n 的那一行」的意思。
+# 這裡挖出四個 SIGTRAP——exit 133、兩條輸出流上都沒有東西——形狀完全相同：在「每個檔案都有標頭」
+# 的年代寫下的程式碼，遇到一個沒有標頭的檔案。底下的案例就是找到它們的那些形狀。
+# ---------------------------------------------------------------------
+echo
+echo "--- T210: no suffix, one column / T210：沒有副檔名，一欄 ---"
+
+print -r -- "/usr/bin/env"  > "$TMP/t210list"
+print -r -- "/usr/bin/zsh" >> "$TMP/t210list"
+print -r -- "/etc/hosts"   >> "$TMP/t210list"
+assert_eq "$("$CSV2" -r -i "$TMP/t210list" | tr '\n' ' ')" "/usr/bin/env /usr/bin/zsh /etc/hosts " \
+    "T210a every line survives; none is eaten as a header / 每一行都活下來，沒有一行被當成標頭吃掉"
+
+# A comma and a quote are DATA. This is the case that decided the format: a
+# find dump with a comma in a path was a two-column table before.
+# 逗號與引號是**資料**。決定這個格式的正是這個案例：先前一份「路徑裡有逗號」的 find 輸出會變成
+# 一張兩欄的表。
+print -r -- "a,b"            > "$TMP/t210c"
+print -r -- 'plain'         >> "$TMP/t210c"
+print -r -- '"quoted,thing"'>> "$TMP/t210c"
+assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t210c")" "a,b" \
+    "T210b a comma in the line is data, not a separator / 行裡的逗號是資料，不是分隔符"
+assert_eq "$("$CSV2" -get 3:1 -i "$TMP/t210c")" '"quoted,thing"' \
+    "T210c and a quote is data too, kept as written / 引號同樣是資料，原樣保留"
+
+# Round trip: out and back with no suffix on either side.
+# 往返：兩邊都沒有副檔名。
+"$CSV2" -r -i "$TMP/t210c" -o "$TMP/t210out"
+assert_same "$TMP/t210c" "$TMP/t210out" \
+    "T210d a suffix-less file round-trips byte for byte / 沒有副檔名的檔案逐位元往返"
+
+# The four verbs. Each of these crashed with SIGTRAP before the header reads
+# were guarded, which is why they are asserted one by one rather than in a loop.
+# 那四個動詞。在那些「讀標頭」的地方被守衛起來之前，每一個都會以 SIGTRAP 當掉——這正是它們
+# 被一個一個斷言、而不是寫成迴圈的原因。
+cp "$TMP/t210list" "$TMP/t210e"
+assert_succeeds "T210e -delete works with no header row / 沒有標頭列時 -delete 可用" -- \
+    "$CSV2" -delete 2 -i "$TMP/t210e" --in-place
+assert_eq "$("$CSV2" -r -i "$TMP/t210e" | tr '\n' ' ')" "/usr/bin/env /etc/hosts " \
+    "T210f and deletes the record it named / 而且刪掉的是它指名的那一筆"
+
+cp "$TMP/t210list" "$TMP/t210g"
+assert_succeeds "T210g -update by NUMBER works with no header row / 沒有標頭列時，以「編號」定址的 -update 可用" -- \
+    "$CSV2" -update 2:1 CHANGED -i "$TMP/t210g" --in-place
+assert_eq "$("$CSV2" -get 2:1 -i "$TMP/t210g")" "CHANGED" \
+    "T210h and the cell holds the new value / 而那一格存的是新值"
+
+cp "$TMP/t210list" "$TMP/t210i"
+assert_succeeds "T210i -insert works with no header row / 沒有標頭列時 -insert 可用" -- \
+    "$CSV2" -insert 2 inserted -i "$TMP/t210i" --in-place
+cp "$TMP/t210list" "$TMP/t210j"
+assert_succeeds "T210j -append works with no header row / 沒有標頭列時 -append 可用" -- \
+    "$CSV2" -append 'has,comma' -i "$TMP/t210j" --in-place
+assert_eq "$("$CSV2" -get 4:1 -i "$TMP/t210j")" "has,comma" \
+    "T210k and the appended line keeps its comma / 而被追加的那一行留著它的逗號"
+
+# A name cannot be resolved without a header, and the refusal says so instead
+# of the older sentence, which claimed -get needs a header at all.
+# 沒有標頭就解析不了「名稱」，而那句拒絕會這樣說，不是說「-get 一定需要標頭」——那是舊的說法。
+_t210_name=$("$CSV2" -get 1:name -i "$TMP/t210c" 2>&1)
+case $_t210_name in
+    *"only be addressed by NUMBER"*) ok "T210l a column NAME is refused, by number is not / 欄位「名稱」被拒絕，而「編號」不會" ;;
+    *) bad "T210l got: $_t210_name / 實得如上" ;;
+esac
+
+# --headers still overrides: a file called `data` that IS a CSV was readable
+# that way before this phase and has to stay readable.
+# --headers 仍然可以覆蓋：一個叫 `data`、而且確實是 CSV 的檔案，在這個階段之前就是這樣讀的，
+# 現在也必須還能這樣讀。
+print -r -- "k,v"  > "$TMP/t210h1"
+print -r -- "1,x" >> "$TMP/t210h1"
+assert_eq "$("$CSV2" -r --headers 1 --json -i "$TMP/t210h1" | sed -n 2p)" \
+    '{"record":1,"line":2,"fields":{"k":"1","v":"x"}}' \
+    "T210m --headers still reads a suffix-less file as CSV / --headers 仍然能把沒有副檔名的檔案當成 CSV 讀"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

@@ -86,6 +86,35 @@ rows, and on values that would otherwise need quoting. Round 77 measured this;
 in a document that quotes milliseconds in fifteen places, saying nothing read
 as "no difference".
 
+**A file with no suffix is one column, as of 2026-08-26.** A list of paths, a
+`find` dump, a column of package names — a table that happens to have one
+column — is now readable without renaming it:
+
+```console
+$ find . -type f > files
+$ csv2 -contains '.swift' -i files
+$ csv2 -append 'src/new.swift' -i files --in-place
+```
+
+The shape is **one column, ZERO header rows, and the line's bytes verbatim**.
+Each third of that was measured before it was chosen:
+
+- **Zero header rows**, because the documented way through before this —
+  `--headers 1` — ate the first line of every such file as a title. It vanished
+  from the output, at exit 0.
+- **A comma does not split**, because a path may contain one, and a `find` dump
+  with a comma in it became a two-column table that then failed on the first
+  line without one.
+- **Nothing is unescaped**, and a quote is data. A line holding a literal `\n`
+  keeps it; `"a,b"` keeps its quotes. `.csv2` escaping would have changed what
+  such a line means on the way in, so "a one-column `.csv2`" describes the
+  SHAPE correctly and the ESCAPING wrongly.
+
+A column can only be addressed by NUMBER here, and there is only ever column 1;
+`-get 1:name` is refused, naming why. `--headers` still overrides, because a
+file called `data` that really is a CSV was readable that way before this and
+had to stay readable — a new default must not take a working use away.
+
 **Markdown goes both ways as of 2026-08-26.** `-md` renders a table; a `.md`
 input reads one back, and a `.csv2` rendered and read back is byte-identical to
 what it started as — including a value holding a `|`, an embedded newline, a

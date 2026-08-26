@@ -1925,14 +1925,18 @@ func openInput(_ o: Options) throws -> InputPlan {
                          source: ByteSource(bytes: t.bytes), describedPath: path)
     }
     guard let fmt = Format.from(path: path) else {
-        // The extension is what declares the format. Without one there is
-        // nothing to declare it, so --headers has to.
-        // 格式由副檔名宣告。沒有副檔名就沒有東西可以宣告，只能由 --headers 指定。
-        guard let h = o.headersOverride else {
-            throw fault("\(path) has neither a .csv nor a .csv2 extension, so the format is not declared; pass --headers 1 or --headers 2",
-                      "\(path) 既非 .csv 亦非 .csv2，格式未被宣告；請給 --headers 1 或 --headers 2")
+        // No suffix: one column, no header rows, the line's bytes verbatim.
+        // Phase 8b. `--headers` still overrides, because a file called
+        // `data` that IS a CSV was readable that way before this and still
+        // has to be -- the new default must not take a working use away.
+        // 沒有副檔名：一欄、沒有標頭列、那一行的位元組原樣。第 8b 階段。`--headers` 仍然可以覆蓋，
+        // 因為一個叫 `data`、而且**確實是** CSV 的檔案，在這之前就是這樣讀的，現在也必須還能這樣讀
+        // ——新的預設不可以把一個本來可用的用法拿走。
+        if let h = o.headersOverride {
+            return InputPlan(format: h == 2 ? .csv2 : .csv, headerRows: h,
+                             source: try ByteSource(path: path), describedPath: path)
         }
-        return InputPlan(format: h == 2 ? .csv2 : .csv, headerRows: h,
+        return InputPlan(format: .lines, headerRows: 0,
                          source: try ByteSource(path: path), describedPath: path)
     }
     let h = o.headersOverride ?? fmt.headerRows
@@ -2033,6 +2037,14 @@ func validateBeforeAppend(path: String, format: Format, headerRows: Int,
         var r = rec
         r.number = rec.number - headerRows
         do {
+            // With no header row the first RECORD sets the width, the same
+            // way the select and edit paths do. Without it, `-append` on a
+            // suffix-less file compared every record against a header that
+            // does not exist and refused the file it was about to append to.
+            // 沒有標頭列時，由第一筆**紀錄**決定寬度，與選取與編輯那兩條路徑相同。少了它，
+            // 對一個沒有副檔名的檔案下 `-append`，會拿每一筆去和一個不存在的標頭比較，
+            // 並拒絕掉它正要追加的那個檔案。
+            if expected == 0 { expected = r.count }
             try checkFieldCount(r, expected: expected,
                                 what: "record \(r.number) (line \(r.line))")
         } catch {
