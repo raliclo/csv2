@@ -11895,6 +11895,25 @@ assert_succeeds "T211n -insert 1 works, like every other position / -insert 1 �
 assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t211n")" "zero" \
     "T211o and it lands at position 1 / 而且它落在位置 1"
 
+# A destination that is not a regular file declares no format. `/dev/stdout`
+# has no suffix, and the JV fix treated "no suffix" as "zero header rows" --
+# so it refused with the WRONG REASON, one step before the right refusal
+# ("-o needs a regular file; use -so") could speak. macOS reached the right one
+# first and the guest did not, so it showed up only in the guest, on a case
+# macOS skips. Asserted here on the MESSAGE, so both platforms check it.
+# 一個不是一般檔案的目的地，什麼格式也沒宣告。`/dev/stdout` 沒有副檔名，而 JV 的修正把「沒有副
+# 檔名」當成「零列標頭」——於是它以**錯的理由**拒絕，就在對的那句拒絕（「-o 需要一般檔案，請用
+# -so」）說話的前一步。macOS 先走到對的那一句，guest 沒有，於是它只在 guest、而且只在一個 macOS
+# 會跳過的案例上現形。這裡斷言的是**訊息**，因此兩個平台都會檢查它。
+_t211_dev=$("$CSV2" -r -t -i "$TMP/t211h.csv" -o /dev/stdout 2>&1 >/dev/null)
+case $_t211_dev in
+    *"header row(s)"*)
+        bad "T211p -o /dev/stdout refused for the wrong reason: $_t211_dev / 以錯的理由拒絕" ;;
+    *"regular file"*|*FIFO*)
+        ok "T211p -o to a non-regular file is refused for what it is / 指向非一般檔案的 -o，以「它是什麼」為理由被拒絕" ;;
+    *) bad "T211p got: $_t211_dev / 實得如上" ;;
+esac
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

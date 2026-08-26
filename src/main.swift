@@ -1505,8 +1505,21 @@ func validate(_ o: inout Options) throws {
     // 因此拿它去和一個標頭列數比較，是在跟「沒有東西」比較。把它預設成 `.lines`（零列）會讓
     // `-md -i one.csv -o out.md` 被拒絕，而那是「把一張表算繪到檔案」最普通的寫法，一直都可用。
     // 這是靠「重跑一次那個新守衛本來就不該碰的案例」抓到的。
+    // A destination that is not a regular file declares nothing. `/dev/stdout`
+    // has no suffix, so treating "no suffix" as "zero header rows" made this
+    // guard fire on it and refuse with the wrong REASON -- the right refusal
+    // ("-o needs a regular file; use -so") was waiting one step later and
+    // never got to speak. macOS reached that one first and the guest did not,
+    // so the whole thing showed up only in the guest, on a case macOS skips.
+    // Round 78's own lesson, one commit later and by my own hand.
+    // 一個不是一般檔案的目的地，什麼也沒宣告。`/dev/stdout` 沒有副檔名，於是把「沒有副檔名」當成
+    // 「零列標頭」，會讓這道守衛對它觸發，並以**錯的理由**拒絕——而對的那句拒絕（「-o 需要一般
+    // 檔案，請用 -so」）就等在後面一步，卻永遠說不到話。macOS 先走到那一句而 guest 沒有，於是整件
+    // 事只在 guest 上、而且是在一個 macOS 會跳過的案例上現形。第 78 回合自己的教訓，晚一個 commit，
+    // 而且是我自己犯的。
     if let out = o.output, !(o.input?.lowercased().hasSuffix(".md") ?? false),
-       !out.lowercased().hasSuffix(".md") {
+       !out.lowercased().hasSuffix(".md"),
+       Platform.fileKind(path: out).map({ $0 == .regular }) ?? true {
         // The OUTPUT side needed the same correction: a destination with no
         // suffix declares zero header rows, and `Format.from` returning nil
         // meant this whole block was skipped for it.
