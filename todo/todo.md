@@ -329,3 +329,16 @@ Accept `--physical` / `--a1` addresses AND validate the decoration: `@L2` is a
 claim about where that record was, and refusing when it no longer holds is more
 useful than refusing the notation. Needs record-number-to-physical-line, which
 is the same thing csv2view is waiting for.
+
+## `.csv2` 的讀取比 `.csv` 貴 1.8 倍——可能有一條不複製的快路徑（2026-08-26，JO）
+
+第 77 回合量到、我親手重現：45 萬筆相同資料、輸出逐位元相同，`-r` 是 422 ms（`.csv`）對
+767 ms（`.csv2`）。差值在 `-r`、`--json`、`-md` 上都是平的（約 350 ms），因此是「每個值都要付
+的工」。**兩份 fixture 裡一個反斜線都沒有**，所以付的是「找跳脫」的錢，不是「解跳脫」的錢。
+
+未評估的方向：欄位裡沒有 `\` 時走一條不配置、不複製的路徑（memchr 找 `\`，找不到就把原 slice
+交出去）。若那條路徑存在而沒有被走到，這 350 ms 大部分是可以拿掉的。
+
+**在動手之前**：先量「有多少比例的欄位真的含有跳脫」，以及那條路徑現在是不是已經存在——這棵樹
+今天已經有一次「以為知道而沒有量」的紀錄（JM）。已寫進 README 作為使用者要知道的成本；這一條
+是「能不能讓那個成本消失」，不是同一件事。

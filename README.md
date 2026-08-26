@@ -43,6 +43,47 @@ described somewhere below; this is the list a reader should see first:
 | converting between `.csv` and `.csv2` | refused on purpose; write the records out and read them back in |
 | safe concurrent writers | serialise them yourself; two writers silently lose one edit. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one that finishes SECOND warns that it could not update the index |
 | telling refusals apart programmatically | nothing but exit 1 and English prose, in every one of them |
+| scoping a search to ONE column | nothing does. `-contains` is a substring search across every column, so counting with it is silently wrong the moment the word appears anywhere else — see below |
+
+**A search cannot be scoped to a column, and that makes the obvious counting
+idiom wrong.** `-contains` matches a substring in ANY column:
+
+```console
+$ cat lic.csv
+pkg,license,source
+libA,MIT,upstream
+transMITter,BSD,relicensed from MIT in 2019
+
+$ csv2 -contains MIT -i lic.csv
+1:2  license  MIT
+2:1  pkg      transMITter                    ← not a licence
+2:3  source   relicensed from MIT in 2019    ← not a licence either
+$ csv2 -contains MIT --json -i lic.csv | tail -1
+{"meta":{"records":2,"matched":2}}           ← the answer is 1
+```
+
+Nothing narrows it. Use `--json` and one pass of your own, keyed on the column
+you mean — the same answer the table above gives for column projection and for
+case-insensitive matching, and for the same reason. Round 77 reached for the
+csv2-only route, got six commands and a silently wrong number.
+
+**A `.csv2` costs more to READ than the same data as `.csv`.** Measured on
+450,000 identical records, best of 5, byte-identical output:
+
+| | `.csv` | `.csv2` |
+|---|---|---|
+| `-r` | 422 ms | 767 ms |
+| `-r --json` | 1335 ms | 1719 ms |
+
+The gap is roughly flat (~350 ms), so it is per-value work and not output
+volume — and neither fixture contained a single backslash, so it is the cost of
+LOOKING for escapes, not of undoing them. Set against the documented saving:
+`.csv2` guarantees one record per line, so `-contains` parallelises without an
+index and wins ~200 ms on the same data. On a read-heavy workload `.csv` plus a
+sidecar is the faster pair; `.csv2` earns its keep on searches, on two header
+rows, and on values that would otherwise need quoting. Round 77 measured this;
+in a document that quotes milliseconds in fifteen places, saying nothing read
+as "no difference".
 
 **Counting: the obvious route is the expensive one.** `records` on the trailing
 meta line is the answer, but `csv2 -r --json` reaches it by reading every byte.
@@ -265,6 +306,14 @@ SELECTING / 選取
   -r                    read. This is what happens with no verb at all, so
                         `csv2 -i f.csv` and `csv2 -r -i f.csv` are the same
                         command
+  Where `r:c` splits, when a column NAME contains a colon: at the FIRST colon.
+  `-get 1:a:b` on a file with a column called `a:b` returns that column. A
+  colon is overloaded here -- it separates `r:c`, and it separates a protection
+  marker (`license:hash`, `license:hmac:<fp>`, `license:enc:…`) -- and only the
+  second meaning was written down until round 77 asked. "Split at the last
+  colon" is equally defensible and would silently address a different cell, so
+  the rule is stated rather than left to be discovered.
+
   -get r:c              print ONE cell's value, raw -- the read that matches
                         -update r:c VAL. This is the verb to build scripts on:
                         what composes is the ADDRESS, and this is how a value
@@ -635,7 +684,12 @@ DIAGNOSTICS / 診斷
                         23 MB of peak RSS on a 615 MB file in parallel, 9.5 MB
                         single-threaded over the same file. Until 2026-08-20
                         the parallel figure was 608 MB -- one byte resident per
-                        byte of input. See the parallelism section
+                        byte of input. The parallel figure GROWS with the file
+                        and the single-threaded one does not: 17 MB at 192 MB,
+                        23 MB at 615 MB, 57 MB at 2.1 GB, against 9.4 MB
+                        single-threaded at every size. Quote it with the size
+                        it was taken at or it means nothing. See the
+                        parallelism section
   -debug=trace          one level lower: every record's selection decision,
                         including the ones NOT emitted and why, and the point
                         at which the read stops -- so a record with no line is
@@ -1486,12 +1540,35 @@ accepting a wrong guess. The **last** line carries the counts: they cannot be
 in the first line without reading the whole input before emitting anything,
 which is the streaming guarantee.
 
-**On a `.csv2` each object carries a sixth key, `header_zh`**, holding the
-second header row's name for that column — the example above is a `.csv`, which
-has five. `--en` and `--zh` change the middle field of the locating report and
-change nothing here: `--json` always carries both names, because a consumer
-that wanted one of them can pick, and one that wanted the other cannot invent
-it.
+**In the LOCATING REPORT on a `.csv2`, each object carries a sixth key,
+`header_zh`**, holding the second header row's name for that column — the
+example above is a `.csv`, which has five. `--en` and `--zh` change the middle
+field of the plain locating report and change nothing here: both names are
+carried, because a consumer that wanted one of them can pick, and one that
+wanted the other cannot invent it.
+
+**In a SELECTION** — `-r`, `-head`, `-tail`, `-mid` — a record object keys
+`fields` by the first header row, and a JSON object cannot hold two values
+under one key. The second row therefore travels on the **meta line**, as an
+array in column order:
+
+```console
+$ csv2 -r --json -i example.csv2 | head -1
+{"meta":{"format":"csv2","headers":2,"fields":3,"header_zh":["套件","版本","備註"]}}
+```
+
+An array rather than an object because the second row is positional: it may
+legitimately repeat a name, which an object cannot hold. It is on the meta line
+rather than in every record because the names do not vary by record, and
+repeating three strings 450,000 times is the kind of output this tool refuses
+elsewhere.
+
+Until 2026-08-26 this paragraph said "`--json` always carries both names" and
+that was true only of the locating report. On a `.csv2` there was no way to
+obtain the second header row through `--json` at all — a consumer that wanted
+the Chinese titles had to parse the raw header row, which is the thing this
+tool exists to stop people doing. Round 77 measured it; the meta key is the fix,
+not a smaller promise.
 
 **A value that is not valid UTF-8 is refused, not substituted.** JSON is
 defined over text, so those bytes cannot be carried: the decoder would put
@@ -1720,8 +1797,9 @@ malformed one, and **nothing csv2 prints can tell you a read was complete** —
 If a file is being rewritten by something that is not csv2, rename into place
 yourself rather than writing over it.
 
-**The same holds for `--in-place`, where it matters more:** a failed in-place
-edit leaves the original **byte-for-byte unchanged**, and leaves no temp file
+**The same holds for `--in-place`, where it matters more — with one exception,
+`-append`, stated at the end of this paragraph:** a failed in-place edit leaves
+the original **byte-for-byte unchanged**, and leaves no temp file
 beside it — including when the run is killed by `SIGINT`, `SIGTERM` or `SIGHUP`
 part-way through, and the same for every other catchable signal that ends a run
 — `SIGQUIT`, `SIGXFSZ`, `SIGALRM`, `SIGUSR1`, `SIGUSR2` and the rest. **"The rest" is literal**: the handler is installed for every catchable terminating signal, not for a list someone maintains, so a signal not named here behaves like the ones that are. That list started at
@@ -1729,7 +1807,24 @@ three, and a blind round found a hidden multi-megabyte file left by each of the
 others; `SIGXFSZ` is what an `ulimit -f` or a filesystem quota produces, which
 is not exotic (T131e, T131f). `SIGKILL` and a power cut cannot be caught and
 will leave one;
-it is named `.<file>.csv2tmp.<pid>` and is safe to delete. A consequence worth
+it is named `.<file>.csv2tmp.<pid>` and is safe to delete.
+
+**`-append --in-place` is the exception, because it has no temp file to fall
+back to.** It writes onto the end of the file itself and keeps the inode, so
+there is no rename to make the change atomic: a run killed mid-append can leave
+a partial record where every other edit would have left the original untouched.
+Everything else above still holds for it — the handler is installed, the index
+is not corrupted — but "byte-for-byte unchanged" is not among the guarantees.
+`-r -t --truncate-partial` writes a clean copy of a file with a torn tail.
+
+Round 77 read the two passages together, found they could not both be literally
+true, and could not settle it by experiment: the largest record `-append`
+accepts is bounded by `ARG_MAX` and lands in a single write, so a partial append
+could not be manufactured at any size the flag takes. Being hard to reproduce is
+not the same as being impossible — a filesystem is free to split a write — which
+is why the exception is stated rather than left to the reader to derive from two
+sections that contradict each other.
+ A consequence worth
 knowing: rename recreates the destination, so **deleting the file while an edit
 is running brings it back** — the `rm` lands on the old inode and the rename
 puts the new one where the name was. This is the one guarantee with no fallback — with `-o` you still have
@@ -2218,7 +2313,7 @@ cannot be lowered can only be exercised by building a 16 MiB fixture.
 |---|---|---|
 | `CSV2_INDEX_MIN_BYTES` | 16 MiB | gates WRITING only, and only the side-effect kind: below this, a rewriting edit and `-tail` do not leave a sidecar behind. READING is not gated at all — a sidecar that exists is consulted at any file size, which is what makes `--build-index` on a small file useful. `--build-index` is an explicit request and writes one at any size. The single sentence that used to be here read "no index is read or written as a SIDE EFFECT", which parses two ways and is false under one of them; a blind round measured a 33 KB file consulting its sidecar on 2026-08-25 |
 | `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | set above the file size to force the single-threaded path |
-| `CSV2_PARALLEL_MAX_BYTES` | 1 GiB | ceiling on what the in-flight chunks may hold. It governs the **output** fragments — one batch of them is kept so they can be written in chunk order, which is what makes parallel output byte-identical to single-threaded. The read side needs no ceiling: a worker reads its chunk 64 KiB at a time and never holds more. Lowering this holds fewer chunks in flight and the rest queue; `-debug` says so, with the numbers. **It is not a cap on the process's memory** — under an 8 MiB setting, peak RSS was still 58 MB, because the fixed working set is not part of what it governs |
+| `CSV2_PARALLEL_MAX_BYTES` | 1 GiB | ceiling on what the in-flight chunks may hold. It governs the **output** fragments — one batch of them is kept so they can be written in chunk order, which is what makes parallel output byte-identical to single-threaded. The read side needs no ceiling: a worker reads its chunk 64 KiB at a time and never holds more. Lowering this holds fewer chunks in flight and the rest queue; `-debug` says so, with the numbers. **It is not a cap on the process's memory, and it is not the lever that moves it.** Measured on a 192 MB file: 17.07 MB peak RSS at the default, 17.22 MB under an 8 MiB setting, 17.10 MB under 64 MiB — the differences are noise, while single-threaded over the same file is 9.39 MB. What moves peak RSS is the FILE SIZE (17 MB at 192 MB, 23 MB at 615 MB, 57 MB at 2.1 GB), not this ceiling. The row used to say "under an 8 MiB setting, peak RSS was still 58 MB", which is true and was taken at a size the row did not name; read beside the 23 MB headline it says lowering the ceiling RAISES memory by 35 MB, which is not what happens. Round 77 put the two side by side and could not reconcile them |
 | `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | smaller values make a small file yield many chunks, so chunk boundaries are actually exercised |
 | `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `-md --pretty` refuses above this rather than being OOM-killed. **It measures the material being aligned, not the input file** — `--pretty` has to hold the whole table to compute column widths. So a slice of an arbitrarily large file is always fine: `-mid 150000,150004 -t -md --pretty` on a 23 MB file aligns 237 bytes of material and succeeds, while `-r` over the same file refuses. **The limit is not a cap on the process's memory**: aligning 15 MB of material took 81 MB of peak RSS, about 5x, because the table is held as records before it is rendered. Until 2026-08-21 this entry said the slice "holds 9 MB", which is what `csv2 -tail 1` costs too — the process's floor, attached to the one concept this row exists to teach |
 | `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | upper bound on `-tail N` and `-B N`. Asking for more is **refused, not truncated** — a short answer that looks like a whole one is the failure this tool exists to avoid. The message names the request, the limit and the variable -- and it quotes the flag that was TYPED, so `-C 6`, which sets the before side too, is reported as `-C 6` and not as `-B 6`. Until 2026-08-21 the `-B` message named two of the three and `-C` was reported as `-B` |

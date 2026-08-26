@@ -11414,6 +11414,96 @@ assert_eq "$_t207_file $_t207_pipe" "1 0" \
 assert_fails "T207g --build-index is refused on a stream / 對串流執行 --build-index 會被拒絕" -- \
     "$CSV2" -si --headers 1 --build-index < "$TMP/t207big.csv"
 
+# ---------------------------------------------------------------------
+# T208 -- round 77. The document promised something --json could not do, and
+# was silent about three things a reader has to know.
+#
+#   a/b/c  "--json always carries both names" was true only of the locating
+#          report. In a SELECTION the record object keys `fields` by the first
+#          header row, so on a .csv2 the SECOND row had no way out through
+#          --json at all -- not per record, not on the meta line, and --zh
+#          changed nothing and said nothing. A consumer wanting the Chinese
+#          titles had to parse the raw header row, which is the thing this tool
+#          exists to stop. It now travels on the meta line, as an array.
+#   d      where r:c splits when a column NAME contains a colon: at the first.
+#   e      nothing scopes a search to one column, which is what makes the
+#          obvious counting idiom silently wrong.
+#
+# T208 —— 第 77 回合。文件承諾了一件 --json 做不到的事，並對三件讀者必須知道的事保持沉默。
+#   a/b/c  「--json 一律帶著兩個名字」只對定位報告為真。在「選取」裡，紀錄物件是以第一列標頭
+#          為鍵的，於是在 .csv2 上第二列根本沒有出口——不在每一筆裡、不在 meta 行上，而 --zh
+#          什麼也沒改、什麼也沒說。想要中文欄名的消費端只能自己去剖析原始標頭列，而那正是這個
+#          工具存在所要阻止的事。它現在走 meta 行，以陣列形式。
+#   d      欄名含冒號時 r:c 分在哪裡：第一個。
+#   e      沒有任何東西能把搜尋限定在一欄，而那正是最直覺的計數寫法安靜地錯掉的原因。
+# ---------------------------------------------------------------------
+echo
+echo "--- T208: what --json carries, and what nothing scopes / T208：--json 帶得走什麼，以及沒有東西能限定什麼 ---"
+
+print -r -- "pkg,ver" > "$TMP/t208.csv2"
+print -r -- "套件,版本" >> "$TMP/t208.csv2"
+print -r -- "zlib,1.3.2" >> "$TMP/t208.csv2"
+
+_t208_meta=$("$CSV2" -r --json -i "$TMP/t208.csv2" | head -1)
+case $_t208_meta in
+    *'"header_zh":["套件","版本"]'*)
+        ok "T208a a selection carries the second header row on the meta line / 一次選取會在 meta 行帶著第二列標頭" ;;
+    *) bad "T208a got: $_t208_meta / 實得如上" ;;
+esac
+
+# A .csv has one header row and must not grow the key.
+# .csv 只有一列標頭，不得多出那個鍵。
+printf 'pkg,ver\nzlib,1.3.2\n' > "$TMP/t208.csv"
+case "$("$CSV2" -r --json -i "$TMP/t208.csv" | head -1)" in
+    *header_zh*) bad "T208b a .csv grew a header_zh key / .csv 多出了一個 header_zh 鍵" ;;
+    *) ok "T208b and a .csv does not grow one / 而 .csv 不會多出那個鍵" ;;
+esac
+
+# An ARRAY, because the second row is positional and may repeat a name -- which
+# an object cannot hold. This is the case that decides the shape.
+# 用陣列，因為第二列是按位置的、可以重複同一個名字——而那是物件裝不下的。這個案例決定了那個形狀。
+print -r -- "a,b" > "$TMP/t208dup.csv2"
+print -r -- "名,名" >> "$TMP/t208dup.csv2"
+print -r -- "1,2" >> "$TMP/t208dup.csv2"
+case "$("$CSV2" -r --json -i "$TMP/t208dup.csv2" | head -1)" in
+    *'"header_zh":["名","名"]'*)
+        ok "T208c a repeated second-row name survives, which an object could not carry / 第二列裡重複的名字留得下來，而物件載不動它" ;;
+    *) bad "T208c got: $("$CSV2" -r --json -i "$TMP/t208dup.csv2" | head -1) / 實得如上" ;;
+esac
+
+# --json-ascii reaches it, like every other string on the line. Compared with
+# printf, never with echo: zsh's echo decodes \u escapes and makes correctly
+# escaped output look unescaped -- which cost half an hour on 2026-08-26.
+# --json-ascii 也管得到它，與那一行上其他每個字串一樣。用 printf 比對，絕不要用 echo：
+# zsh 的 echo 會解讀 \u 逸出序列，讓「正確跳脫的輸出」看起來沒有跳脫——2026-08-26 為此花了半小時。
+_t208_ascii=$("$CSV2" -r --json --json-ascii -i "$TMP/t208.csv2" | head -1)
+case $_t208_ascii in
+    *'"header_zh":["\u5957\u4ef6","\u7248\u672c"]'*)
+        ok "T208d --json-ascii escapes it too / --json-ascii 同樣會跳脫它" ;;
+    *) bad "T208d got: $_t208_ascii / 實得如上" ;;
+esac
+
+# r:c splits at the FIRST colon, so a column named a:b is reachable.
+# r:c 分在「第一個」冒號，因此一個叫 a:b 的欄位叫得出來。
+printf 'pkg,a:b\nx,y\n' > "$TMP/t208colon.csv"
+assert_eq "$("$CSV2" -get 1:a:b -i "$TMP/t208colon.csv")" "y" \
+    "T208e r:c splits at the first colon, reaching a column named a:b / r:c 分在第一個冒號，取得到叫 a:b 的欄位"
+
+# Nothing scopes a search to one column. Asserted so the README's new warning
+# has something behind it -- and so the day a -col filter appears, this case
+# says the warning is now wrong.
+# 沒有任何東西能把搜尋限定在一欄。在此斷言，讓 README 那段新加的警告有東西撐著——也讓哪天真的
+# 出現了 -col 之類的篩選時，這個案例會說「那段警告現在錯了」。
+printf 'pkg,license,source\nlibA,MIT,upstream\ntransMITter,BSD,relicensed from MIT in 2019\n' > "$TMP/t208lic.csv"
+_t208_hits=$("$CSV2" -contains MIT -i "$TMP/t208lic.csv" | wc -l | tr -d ' ')
+assert_eq "$_t208_hits" "3" \
+    "T208f -contains matches every column, not the one you meant / -contains 比對的是每一欄，不是你指的那一欄"
+case "$("$CSV2" -contains MIT --json -i "$TMP/t208lic.csv" | tail -1)" in
+    *'"matched":2'*)
+        ok "T208g and the record count counts records that merely mention it / 而那個紀錄數把「只是提到它」的紀錄也算進去" ;;
+    *) bad "T208g got: $("$CSV2" -contains MIT --json -i "$TMP/t208lic.csv" | tail -1) / 實得如上" ;;
+esac
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

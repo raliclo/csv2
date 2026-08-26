@@ -528,7 +528,47 @@ final class JSONEmitter: RecordEmitter {
             }
         }
         let prot = protected.isEmpty ? "" : ",\"protected\":{" + protected.joined(separator: ",") + "}"
-        sink.write("{\"meta\":{\"format\":\"\(ctx.format.rawValue)\",\"headers\":\(ctx.headers.count),\"fields\":\(fields)\(prot)}}\n")
+        // The second header row, on the one format that has one.
+        //
+        // A record object keys `fields` by the FIRST header row, so on a
+        // `.csv2` the second row had no way out through --json at all: not per
+        // record, not on this line, and `--zh` changed nothing and said nothing
+        // (rc=0, silently). The document promised otherwise -- "`--json` always
+        // carries both names, because a consumer that wanted one of them can
+        // pick, and one that wanted the other cannot invent it" -- and that was
+        // true only of the locating report, which emits header_en and header_zh
+        // per hit. Round 77, JN.
+        //
+        // It goes on the meta line rather than into every record: the names do
+        // not vary by record, and repeating them 450,000 times to carry three
+        // strings would be the kind of output this tool refuses elsewhere. An
+        // ARRAY, not an object, because the second row is positional -- it can
+        // legitimately repeat a name, which is exactly what an object cannot
+        // hold, and refusing a file for that would be a new refusal invented to
+        // serve a serialisation choice.
+        //
+        // `.csv` is untouched: it has one header row, and the `fields` keys are
+        // already it.
+        //
+        // 第二列標頭，寫在唯一有第二列的那個格式上。
+        // 一筆紀錄的物件是以「第一列標頭」為鍵的，因此在 `.csv2` 上，第二列根本沒有任何出口
+        // 經由 --json 出來：不在每一筆裡、不在這一行上，而 `--zh` 什麼也沒改變、什麼也沒說
+        // （rc=0，安靜）。文件承諾的是另一回事——「`--json` 一律帶著兩個名字，因為只想要其中
+        // 一個的消費端可以自己挑，而想要另一個的那個沒辦法自己發明」——而那只對定位報告為真，
+        // 它每個命中都輸出 header_en 與 header_zh。第 77 回合，JN。
+        // 它放在 meta 行而不是每一筆裡：那些名字不隨紀錄變化，為了三個字串重複 45 萬次，正是
+        // 這個工具在別處會拒絕的那種輸出。用「陣列」而不是物件，因為第二列是按位置的——它可以
+        // 合法地重複同一個名字，而那恰好是物件裝不下的；為了一個序列化的選擇去發明一條新的拒絕，
+        // 不成立。
+        // `.csv` 不受影響：它只有一列標頭，而 `fields` 的鍵已經就是它。
+        var zh = ""
+        if ctx.headers.count > 1 {
+            let names = ctx.headers[1].fields.map {
+                JSONOut.string($0.value, asciiOnly: ctx.jsonASCII)
+            }
+            zh = ",\"header_zh\":[" + names.joined(separator: ",") + "]"
+        }
+        sink.write("{\"meta\":{\"format\":\"\(ctx.format.rawValue)\",\"headers\":\(ctx.headers.count),\"fields\":\(fields)\(zh)\(prot)}}\n")
     }
 
     /// Refused rather than substituted. JSON is text, so a byte sequence that

@@ -7740,3 +7740,140 @@ zstat -H h -- /etc/hostname                 size=12 mode=644 inode=106
 T129e 比的是兩個「讀取器」,因此它只說「它們一致」,不說「其中任何一個是對的」——兩個錯得一樣的
 讀取器一樣會通過。T129f 比的是 `chmod` 設進去的那個值,不牽涉第二個讀取器,而且用 754 而不是 600,
 會運動到 600 用不到的 r-x 與 r--。
+
+## JN. `--json 一律帶著兩個名字`——四條 JSON 路徑裡有三條沒有(2026-08-26,第 77 回合)
+
+README 寫著:
+
+> **On a `.csv2` each object carries a sixth key, `header_zh`** … `--json` always
+> carries both names, because a consumer that wanted one of them can pick, and one
+> that wanted the other cannot invent it.
+
+對定位報告為真:
+
+```console
+$ csv2 -contains zlib --json -i bi.csv2
+{"record":1,"field":1,"header_en":"pkg","header_zh":"套件","value":"zlib","line":3}
+```
+
+對每一種「選取」都是假的——`-r`、`-head`、`-tail`、`-mid`:
+
+```console
+$ csv2 -r --json -i bi.csv2
+{"meta":{"format":"csv2","headers":2,"fields":2}}
+{"record":1,"line":3,"fields":{"pkg":"zlib","ver":"1.3.2"}}
+{"meta":{"records":1,"matched":0}}
+
+$ csv2 -r --json --zh -i bi.csv2      # --zh 什麼也沒改變，rc=0，安靜
+（同上）
+```
+
+**後果比措辭嚴重:在一個 `.csv2` 上，沒有任何辦法經由 `--json` 取得第二列標頭。** 想要中文欄名的
+消費端只能自己去剖析原始標頭列——而那正是這個工具存在所要阻止的事。
+
+「each object」一詞可以被善意地限縮到它上面那個 `-contains` 例子；但緊接著那句
+「`--json` always carries both names」把那條退路關掉了。
+
+## JO. `.csv2` 的讀取比同樣資料的 `.csv` 貴 1.8 倍,而文件沒有提過(2026-08-26,第 77 回合)
+
+同一回合,經親手重現。同樣 45 萬筆、逐位元相同的輸出:
+
+```console
+$ shasum -a 256 <(csv2 -r -i big.csv) <(csv2 -r -i big.csv2)   # 相同
+$ # best of 5
+-r      .csv  : 422 ms      -r      .csv2 : 767 ms      （1.82×，+345 ms）
+--json  .csv  : 1335 ms     --json  .csv2 : 1719 ms     （+384 ms）
+```
+
+差值大致是平的,因此那是「每個值都要付的工」而不是輸出量。兩個 fixture 裡**一個反斜線都沒有**,
+所以付的是「掃描」的錢,不是「解跳脫」的錢。
+
+README 在十幾處引用實測毫秒數,因此**它的沉默讀起來像是在說「沒有差別」**。而這個差別會反轉格式
+的選擇:在這份資料上,`.csv2` 用一次搜尋贏 208 ms,卻在每一次讀取輸掉 345 ms。
+
+（可能的最佳化,尚未評估:在欄位裡沒有反斜線時走一條不複製的快路徑。記在 todo/todo.md,不在此
+回合的範圍內。）
+
+## JP. `r:c` 在欄名含冒號時分在哪裡,沒有寫過(2026-08-26,第 77 回合)
+
+```console
+$ printf 'pkg,a:b\nx,y\n' > colon.csv
+$ csv2 -get 1:a:b -i colon.csv
+y                       ← 分在「第一個」冒號，其餘是欄名
+```
+
+冒號在這個工具裡被重載了兩次:`r:c` 的分隔符,以及 `:hash`／`:hmac:`／`:enc:` 標記的分隔符。
+**只有第二種被寫下來。** 「分在最後一個冒號」同樣說得通,而那會安靜地指到另一格、或是拒絕。
+文件裡沒有任何東西讓讀者知道是哪一種。
+
+## JQ. 沒有任何東西能把搜尋限定在一欄,而「不提供」那張表沒有說(2026-08-26,第 77 回合)
+
+第 77 回合用「這批資料有哪些授權、各幾筆」當作「沒有動詞的問題」。它照 README 的建議走
+`--json` 加一次自己的處理,是對的;而它也試了看起來最自然的 csv2-only 寫法,結果是**安靜地錯**:
+
+```console
+$ printf 'pkg,license,source\nlibA,MIT,upstream\ntransMITter,BSD,relicensed from MIT in 2019\n' > lic.csv
+$ csv2 -contains MIT -i lic.csv
+1:2	license	MIT
+2:1	pkg	transMITter                        ← 不是授權
+2:3	source	relicensed from MIT in 2019      ← 也不是
+$ csv2 -contains MIT --json -i lic.csv | tail -1
+{"meta":{"records":2,"matched":2}}                 ← 答案應該是 1
+```
+
+`-contains` 是「跨每一欄的子字串搜尋」,而**沒有任何旗標能把它限定在一欄**。那張自稱是
+「讀者應該最先看到的清單」的「不提供」表格沒有列出這一項。
+
+## JR. 「可捕捉訊號」的保證涵不涵蓋 `-append --in-place`,兩節說法無法同時成立(2026-08-26,第 77 回合)
+
+一節說:
+
+> A failed in-place edit leaves the original byte-for-byte unchanged, and leaves
+> no temp file — including when the run is killed by SIGINT, SIGTERM or SIGHUP …
+> and the same for every other catchable signal
+
+而 `--in-place` 那個旗標的條目說:append「保留 inode」,且「a crash mid-append can leave a
+partial record」。**一次 append 沒有暫存檔,而且已經寫出了位元組**,因此兩節不可能都照字面成立。
+
+第 77 回合試著用實驗定案而做不到——`-append` 收得下的最大紀錄(受 `ARG_MAX` 限制)是原子寫入的,
+它兩次都只看到「整筆已經落地」。**那正是文件應該把它說清楚的理由。**
+
+## JS. 兩個平行搜尋的峰值 RSS 數字,讀者會把它們拿來比,而比出來是反的(2026-08-26,第 77 回合)
+
+標題那句是「在一個 615 MB 的檔案上平行搜尋,峰值 RSS 23 MB」;而 `CSV2_PARALLEL_MAX_BYTES`
+那一列寫的是「在 8 MiB 的設定下,峰值 RSS 仍有 58 MB」。**兩句放在一起讀,會變成「把上限調低反而
+讓 RSS 高了 35 MB」。**
+
+第 77 回合在 2.1 GB、預設設定下量到 **57.0 MB**——接近那個「8 MiB 設定」的數字,離 23 MB 很遠。
+不論真正的解釋是什麼,那兩個數字都必須說出它們各自屬於哪一組條件。
+
+## 非缺陷:`--json-ascii` 看起來沒有作用,而那是 zsh 的 `echo` 把它解碼回去了(2026-08-26 查證,不成立)
+
+在為 JN 加上 meta 行的 `header_zh` 之後,我檢查它有沒有 honour `--json-ascii`,得到:
+
+```console
+$ echo "meta, ascii : $(csv2 -r --json --json-ascii -i bi.csv2 | head -1)"
+meta, ascii : {"meta":{...,"header_zh":["套件","版本"]}}        ← 看起來沒跳脫
+```
+
+我接著查了紀錄的值、定位報告的 `header_zh`、`protected` 的欄名,全都「沒跳脫」。而 `--json-ascii`
+在 emoji 上「有」作用（`😀`）,於是我一度以為它只對 > 0xFFFF 的字元生效——那是一個
+看起來很合理、而且完全錯誤的假設。
+
+**是 `echo`。zsh 的 `echo` 預設會解讀反斜線逸出序列,包含 `\u`。** 那支工具輸出的是
+`套件`,而 `echo` 把它印成了 `套件`。改用 `printf '%s\n'`:
+
+```console
+$ printf 'meta, ascii : %s\n' "$(csv2 -r --json --json-ascii -i bi.csv2 | head -1)"
+meta, ascii : {"meta":{...,"header_zh":["套件","版本"]}}
+```
+
+紀錄的值、定位報告、`protected` 的欄名一律相同,全部正確。
+
+記在這裡,因為這一個比其他幾個環境產物更毒:它讓**正確跳脫的輸出看起來沒有跳脫**,而
+「`--json-ascii` 壞了」是一個非常容易寫下去的結論。檢查任何含逸出序列的輸出時,在 zsh 裡用
+`printf '%s'`,不要用 `echo`。
+
+**形狀:一個會改寫它所顯示之物的觀測工具。** 這是今天第四個被讀成程式缺陷的環境產物——前三個是
+第 75 回合把自己 shell 的 `chpwd` 目錄列表當成 install.zsh 的輸出、我用一個不存在的 `/etc/hosts`
+去探測 Windows 的 zstat、以及那則「guest 沒有 zsh/stat」的過期註解。
