@@ -2789,6 +2789,170 @@ CC 修好之後我在 README 寫下「錯誤裡的紀錄號是可以直接餵回
 階段 6 只做「能在 Linux 上建置並測試」，不做「隨映像出貨」。兩者的界線是刻意的：
 前者是正確性的必要條件，後者是還沒有需求的功能。
 
+## Phase 8: reading back what we write / 第 8 階段：把我們寫出去的東西讀回來
+
+Requested 2026-08-26. Two features, and they share one root: **the suffix is
+the only thing that declares a format, and there are two shapes csv2 can
+produce or accept that no suffix currently names.**
+
+2026-08-26 提出。兩個功能，而它們共用一個根源：**副檔名是唯一宣告格式的東西，而 csv2 產得出來、
+或是接得下的形狀裡，有兩種目前沒有任何副檔名叫得出它們。**
+
+### 8a. Markdown in, not only out / 8a. Markdown 讀得進來，不只寫得出去
+
+Today the table is one-way:
+
+| direction | today |
+|---|---|
+| CSV → Markdown (`-md --pretty`) | works |
+| Markdown → edit → write back | **cannot be read at all** |
+
+That asymmetry is the whole feature. A Markdown table is the shape a person
+hands you — pasted out of a document, a wiki, a pull request — and csv2 can
+render one and then cannot take it back.
+
+**What must be decided before any code:**
+
+1. **What declares it.** A `.md` suffix is the obvious answer and it is not
+   enough: most `.md` files are prose that HAPPENS to contain a table, or
+   several tables, or none. Options: refuse an `.md` with anything but one
+   table; take the first table and say so; require `--headers` to disambiguate
+   as `-si` does. The rule this tree already holds is that a file whose shape
+   cannot be determined is refused, loudly, naming the record — not guessed at.
+2. **How many header rows.** `-md` renders a `.csv2`'s two header rows joined
+   with `<br>`. Reading that back means splitting on `<br>` — and a cell whose
+   VALUE contains a literal `<br>` is then indistinguishable from a joined
+   header. The write side already escapes `|` and newlines; whatever it does
+   with `<br>` decides whether this round-trips, and it must be decided on the
+   WRITE side first.
+3. **The separator row.** `-md` output already trips csv2's own reader with a
+   named refusal ("record 2 (line 2) is a Markdown separator row"). That
+   refusal becomes the detection: the thing that made reading fail is the thing
+   that says what the file is.
+4. **Alignment colons.** `|:---|---:|` carries alignment. It is presentation,
+   not data, and reading it back discards it. Say so rather than let someone
+   discover a `-md` round-trip is lossy.
+5. **`--pretty` padding.** Rendered cells are space-padded to a column width.
+   Reading back must strip that padding — and then a value that genuinely
+   begins or ends with a space cannot survive a Markdown round-trip at all.
+   That is a real loss and belongs in the docs beside the feature, not in a
+   defect log later.
+
+**The test that decides it is done:** a `.csv2` rendered with `-md -t`, read
+back, and written out again is byte-identical to the original — for a fixture
+that contains a quoted comma, an embedded newline, a `|`, a `<br>`, and a value
+with leading and trailing spaces. If any of those cannot survive, the
+documentation says which BEFORE the feature ships.
+
+**在寫任何程式碼之前必須定案的事：**
+
+1. **是什麼宣告了它。** `.md` 副檔名是顯而易見的答案，而它不夠：大多數 `.md` 是散文，裡面「剛好」
+   有一張表、或好幾張、或一張都沒有。選項：只有一張表時才接受、取第一張並說出來、或像 `-si` 那樣
+   要求 `--headers` 來消除歧義。這棵樹已經在守的規則是：形狀判斷不出來的檔案要「大聲拒絕並指名
+   紀錄」，不是用猜的。
+2. **幾列標頭。** `-md` 會把 `.csv2` 的兩列標頭用 `<br>` 接起來算繪。讀回來就意味著要對 `<br>`
+   做切分——而一個「值」裡本來就含有字面 `<br>` 的儲存格，屆時與一個「被接起來的標頭」無法區分。
+   寫出去那一側已經跳脫了 `|` 與換行；它對 `<br>` 怎麼處理，決定了這件事能不能 round-trip，
+   而那必須**先**在寫出去那一側定案。
+3. **分隔列。** `-md` 的輸出本來就會撞上 csv2 自己的讀取器，並得到一句具名的拒絕（「第 2 筆
+   （第 2 行）是一列 Markdown 分隔列」）。那句拒絕正好成為偵測：讓讀取失敗的那個東西，就是說出
+   「這個檔案是什麼」的那個東西。
+4. **對齊用的冒號。** `|:---|---:|` 帶著對齊資訊。那是呈現、不是資料，讀回來會把它丟掉。要說出來，
+   而不是讓人自己撞到「`-md` 的 round-trip 是有損的」。
+5. **`--pretty` 的補白。** 算繪出來的儲存格會被空白補到欄寬。讀回來必須把那些補白去掉——而一個
+   「本來就以空白開頭或結尾」的值，屆時在 Markdown 的 round-trip 裡根本活不下來。那是真的損失，
+   它該寫在這個功能旁邊的文件裡，而不是日後出現在缺陷紀錄裡。
+
+**判定完成的那個測試：** 一個 `.csv2` 以 `-md -t` 算繪、讀回來、再寫出去，與原檔逐位元相同——
+而那個 fixture 要含有一個引號逗號、一個內嵌換行、一個 `|`、一個 `<br>`，以及一個前後都有空白的值。
+其中任何一項活不下來，文件要在這個功能出貨**之前**說出是哪一項。
+
+- [ ] decide 1-5 above, in the plan, before writing code / 上面 1–5 在計畫裡定案，然後才寫程式
+- [ ] `-md` write side settles `<br>` and padding / `-md` 寫出去那一側把 `<br>` 與補白定案
+- [ ] read a Markdown table as records / 把一張 Markdown 表讀成紀錄
+- [ ] round-trip test with the hostile fixture / 用那個「刁難的」fixture 做 round-trip 測試
+- [ ] the losses named in both READMEs / 那些損失在兩份 README 裡被指名
+
+### 8b. No suffix means one column / 8b. 沒有副檔名就是一欄
+
+Requested in the same breath: **a file with no suffix is treated as a
+one-column `.csv2`.** A plain list of lines — package names, paths, a `find`
+dump — is a table with one column, and today csv2 refuses it because nothing
+declares a format.
+
+同一次提出的：**沒有副檔名的檔案，視為一欄的 `.csv2`。** 一份純粹的行清單——套件名、路徑、一次
+`find` 的輸出——就是一張只有一欄的表，而今天 csv2 會拒絕它，因為沒有東西宣告格式。
+
+This is a smaller change than 8a and a sharper one, because it changes what a
+REFUSAL means. `Format.from(path:)` returns nil for a suffix-less path today,
+and several messages name the rule — the gzip refusal ends "the new name has to
+keep a `.csv` or `.csv2` suffix, because the suffix is what declares the
+format". That sentence stops being true.
+
+這個改動比 8a 小，但更尖銳，因為它改變了一句**拒絕**的意思。`Format.from(path:)` 今天對沒有副檔名
+的路徑回傳 nil，而好幾則訊息說著那條規則——gzip 那句拒絕的結尾是「新的名字必須保留 `.csv` 或
+`.csv2` 副檔名，因為副檔名才是宣告格式的東西」。那句話會不再為真。
+
+**Decisions this needs, and they are not obvious:**
+
+1. **Does a suffix-less file have header rows at all?** `.csv2` means two.
+   A `find` dump has none — its first line is data. Treating line 1 and line 2
+   as titles would silently eat two records from every such file, and that is
+   exactly the class of failure this tool exists to refuse. The likely answer
+   is that it behaves as a `.csv2` in ESCAPING and one-record-per-line, and
+   takes `--headers 0` semantics that do not exist yet.
+2. **Then `--headers 0` has to exist**, and every message that says
+   `--headers 1 or --headers 2` has to learn a third value.
+3. **What does `-o` write?** If the input had no suffix and the output has
+   none either, the same rule applies and it round-trips. If `-o` names a
+   `.csv`, one column becomes one column and nothing is lost. The interesting
+   case is a `.csv2` input written to a suffix-less output with more than one
+   column: refuse, rather than drop columns.
+4. **Escaping.** A one-column `.csv2` still cannot hold a raw newline, so a
+   line containing `\n` in the file is one record with an escaped newline —
+   which means a plain text file whose lines contain literal backslashes
+   changes meaning when read this way. That has to be measured on a real
+   `find` dump before it is called a feature.
+5. **What is still refused.** A directory, a device, a gzip, a UTF-16 file.
+   None of those becomes readable because the suffix went away; the suffix-less
+   rule must not become a way to bypass the refusals that are about CONTENT.
+
+**這需要的決定，而且它們都不顯然：**
+
+1. **沒有副檔名的檔案到底有沒有標頭列？** `.csv2` 的意思是兩列。一次 `find` 的輸出一列都沒有
+   ——它的第一行就是資料。把第 1、2 行當成標題，會從每一個這種檔案裡安靜地吃掉兩筆紀錄，而那正是
+   這個工具存在所要拒絕的那一類失敗。可能的答案是：它在**跳脫**與**一筆一行**上表現得像 `.csv2`，
+   而採用一套「目前還不存在」的 `--headers 0` 語意。
+2. **那麼 `--headers 0` 就必須存在**，而每一則說著「`--headers 1` 或 `--headers 2`」的訊息，都得
+   學會第三個值。
+3. **`-o` 寫出去的是什麼？** 如果輸入沒有副檔名、輸出也沒有，同一條規則適用，它就 round-trip 得起來。
+   若 `-o` 指的是一個 `.csv`，一欄還是一欄，什麼也沒少。有意思的是：一個「多於一欄」的 `.csv2` 輸入
+   要寫到一個沒有副檔名的輸出——那應該**拒絕**，而不是把欄位丟掉。
+4. **跳脫。** 一欄的 `.csv2` 仍然不能含有原始換行，因此檔案裡一行含有 `\n` 的內容，會是「一筆帶著
+   跳脫換行的紀錄」——這表示一個「行裡含有字面反斜線」的純文字檔，用這種方式讀會**改變意思**。
+   那件事必須在一次真實的 `find` 輸出上量過，才能叫做功能。
+5. **有哪些仍然被拒絕。** 目錄、裝置、gzip、UTF-16 檔案。它們不會因為副檔名消失就變得可讀；
+   「沒有副檔名」這條規則不得成為繞過那些「關於內容」的拒絕的一條路。
+
+- [ ] decide 1-5 above / 上面 1–5 定案
+- [ ] `--headers 0`, and every message that names the valid values / `--headers 0`，以及每一則指名合法值的訊息
+- [ ] suffix-less input reads as one column / 沒有副檔名的輸入讀成一欄
+- [ ] the content refusals still fire / 那些「關於內容」的拒絕仍然會觸發
+- [ ] measured on a real `find` dump with backslashes in it / 在一次「裡面有反斜線」的真實 `find` 輸出上量過
+- [ ] the sentence "the suffix is what declares the format" corrected everywhere it appears / 「副檔名才是宣告格式的東西」那句話在每一處都更正
+
+### Why these two are one phase / 為什麼這兩件是同一個階段
+
+Both are the same question asked twice: **what may csv2 read, and what says
+so?** Today the answer is a closed set of two suffixes, and every refusal
+message repeats it. Adding either one alone would leave that sentence half
+true, which is worse than either state — this tree has recorded that exact
+shape more than once (a rule applied to only part of where it holds).
+
+兩者是同一個問題被問了兩次：**csv2 可以讀什麼，而什麼東西說了算？** 今天的答案是一組封閉的、兩個
+副檔名的集合，而每一則拒絕訊息都在複述它。單獨加入其中任何一個，都會讓那句話變成「一半為真」，
+而那比任何一種完整狀態都糟——這棵樹記錄過不只一次同樣的形狀（一條規則只套用到它成立範圍的一部分）。
+
 ## 待決問題
 
 1. ~~submodule 掛在哪裡~~ —— 已定：`sos/csv2`。
