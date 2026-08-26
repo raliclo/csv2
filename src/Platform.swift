@@ -671,16 +671,68 @@ enum Platform {
     /// same inode passed every spelling check -- `./`, `../`, absolute,
     /// symlink -- and then broke the link at rc=0, leaving the caller with one
     /// name holding the edit and the other holding what used to be shared.
-    /// Nil on Windows, where the CRT reports inode 0 for everything and the
-    /// answer would be "every file is every other file".
+    /// On Windows this goes through GetFileInformationByHandle rather than the
+    /// CRT's stat(), which reports inode 0 for everything; nil there only on a
+    /// filesystem that keeps no file index at all.
     /// 裝置號與 inode：這一對才說得出「兩個名字是同一個檔案」，而比對路徑說不出。
     /// `-i x -o y` 在兩者是同一個 inode 的硬連結時，通過了每一種拼法的檢查——`./`、`../`、
     /// 絕對路徑、symlink——然後以 rc=0 把那個連結斷開，留給呼叫端一個「有這次編輯」的名字，
-    /// 和一個「還是原本共用內容」的名字。Windows 上回傳 nil：CRT 對所有檔案都回報 inode 0，
-    /// 那個答案會變成「每個檔案都是彼此」。
+    /// 和一個「還是原本共用內容」的名字。Windows 上改走 GetFileInformationByHandle，而不是
+    /// CRT 的 stat()——後者對所有檔案都回報 inode 0；只有在「完全不保存 file index」的檔案系統上
+    /// 才回傳 nil。
     static func fileNode(path: String) -> (dev: UInt64, ino: UInt64)? {
         #if canImport(ucrt)
-        return nil
+        // The CRT's stat() reports inode 0 for everything, which is why this
+        // returned nil for years -- but that is a limit of the CRT, not of
+        // Windows. GetFileInformationByHandle gives the real answer: a volume
+        // serial number and a 64-bit file index, which is exactly the pair
+        // this function is for. Measured on the Windows node 2026-08-26: `-o`
+        // onto a hard link of `-i` was accepted at rc=0 and silently broke the
+        // link, where macOS refuses it -- and the README states the guarantee
+        // with no Windows exception. JU.
+        //
+        // The return value is checked through the OUTPUT rather than the BOOL.
+        // Swift imports Windows BOOL as WindowsBool, and how it may be tested
+        // in a condition has moved between toolchains; a zeroed struct after a
+        // failed call is unambiguous in every version, and this is the one
+        // platform whose build cannot be checked from here. That caution is
+        // not theoretical: `_O_APPEND` was written the same way, compiled
+        // nowhere, and the node ran an old binary against new tests for a day.
+        //
+        // CRT 的 stat() 對每個檔案都回報 inode 0，那是這個函式多年來回傳 nil 的原因——但那是
+        // CRT 的限制，不是 Windows 的。GetFileInformationByHandle 給得出真正的答案：一個磁碟區
+        // 序號與一個 64 位元的 file index，正好就是這個函式要的那一對。2026-08-26 在 Windows
+        // 節點上實測：`-o` 指向 `-i` 的一個硬連結會以 rc=0 被接受並安靜地斷開那個連結，而 macOS
+        // 會拒絕它——且 README 陳述那條保證時沒有為 Windows 開例外。JU。
+        // 回傳值是透過「輸出」而不是那個 BOOL 來檢查的。Swift 把 Windows 的 BOOL 匯入為
+        // WindowsBool，而「它在條件式裡可以怎麼被測試」在不同的工具鏈之間變動過；一個呼叫失敗後
+        // 保持全零的結構，在每一個版本裡都毫無歧義，而這是唯一一個「無法從這裡檢查建置」的平台。
+        // 那份謹慎不是空談：`_O_APPEND` 就是那樣寫的，哪裡都編不過，而那個節點拿舊的二進位檔跑了
+        // 一整天的新測試。
+        let handle: HANDLE = path.withCString(encodedAs: UTF16.self) { wpath in
+            CreateFileW(wpath,
+                        DWORD(FILE_READ_ATTRIBUTES),
+                        DWORD(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE),
+                        nil,
+                        DWORD(OPEN_EXISTING),
+                        DWORD(FILE_FLAG_BACKUP_SEMANTICS),
+                        nil)
+        }
+        guard handle != INVALID_HANDLE_VALUE else { return nil }
+        defer { CloseHandle(handle) }
+        var info = BY_HANDLE_FILE_INFORMATION()
+        _ = GetFileInformationByHandle(handle, &info)
+        let ino = (UInt64(info.nFileIndexHigh) << 32) | UInt64(info.nFileIndexLow)
+        // A file index of 0 is what a filesystem that does not keep one
+        // reports -- FAT, and some network redirectors. Saying "cannot tell"
+        // there is the same answer this function gave everywhere before, and
+        // it is the safe one: the caller falls back to comparing paths, which
+        // is what it did yesterday.
+        // file index 為 0，是「不保存 file index 的檔案系統」會回報的——FAT，以及某些網路
+        // redirector。在那裡回答「說不出來」，與這個函式先前在每個地方給的答案相同，而且是安全的
+        // 那一個：呼叫端會退回去比對路徑，那正是它昨天在做的事。
+        guard ino != 0 else { return nil }
+        return (UInt64(info.dwVolumeSerialNumber), ino)
         #else
         var st = stat()
         guard stat(path, &st) == 0 else { return nil }

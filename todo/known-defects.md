@@ -7877,3 +7877,86 @@ meta, ascii : {"meta":{...,"header_zh":["套件","版本"]}}
 **形狀:一個會改寫它所顯示之物的觀測工具。** 這是今天第四個被讀成程式缺陷的環境產物——前三個是
 第 75 回合把自己 shell 的 `chpwd` 目錄列表當成 install.zsh 的輸出、我用一個不存在的 `/etc/hosts`
 去探測 Windows 的 zstat、以及那則「guest 沒有 zsh/stat」的過期註解。
+
+## JT. Windows 上八個案例因為「MSYS2 沒有 symlink」而跳過,而那台機器有 symlink(2026-08-26 修正,執行期探測)
+
+測試在 Windows 上以固定的 `IS_WINDOWS` 守衛跳過三組案例,理由寫在跳過訊息裡:
+
+```
+SKIP  T43h  an append through a symlink … (no symlinks under MSYS2)
+SKIP  T129a-d --in-place on a symlink … (no symlinks and no POSIX modes under MSYS2)
+SKIP  T130a-c -o through a symlink … (no symlinks under MSYS2)
+```
+
+那個前提對這台機器不成立,實測:
+
+```console
+$ multissh winnode 'echo MSYS=$MSYS'
+MSYS=winsymlinks:nativestrict                    ← 早就設好了
+$ multissh winnode 'ln -sf real.csv link.csv; ls -l link.csv'
+lrwxrwxrwx 1 lowei lowei 8 Aug 26 14:52 link.csv -> real.csv    ← 真的 symlink
+$ # Developer Mode: AllowDevelopmentWithoutDevLicense = 1
+```
+
+而 csv2（原生 Windows 執行檔）在它上面的行為,正是那些案例所斷言的:
+
+```console
+$ csv2 -update 1:2 Z -i tl.csv --in-place ; echo rc=$?
+rc=0
+$ [ -L tl.csv ] && echo "still a symlink"
+still a symlink                                  ← T129b 斷言的
+$ cat t.csv
+a,b
+1,Z                                              ← T129c 斷言的：編輯落在目標上
+```
+
+**修法不是把守衛刪掉。** T129d/e/f 那一半靠的是 POSIX 權限位元,那在該機器上確實不成立
+（`chmod` 咬不住,見 T191a）。要做的是把「沒有 symlink」與「沒有 POSIX 模式」拆成兩個
+**執行期探測**——這份測試在別處已經這樣做（`_t69_probe`、T143 的 `touch -r`、T204 的戳記探測）
+——而不是用一個平台名字去代表兩件不同的事。
+
+**形狀:一個以「平台名字」代替「實際能力」的守衛。** 與 JM 同族:一句在它所描述的系統之後
+仍然活著的話。差別是這一次載體是一個 `if`,而它比註解更難察覺,因為它不只描述那個限制,
+它還**製造**了那個限制的外觀——那八個案例從未在那裡跑過,所以沒有東西會反駁它。
+
+## JU. Windows 上「同一個檔案」的身分比對不成立,而 README 沒有為它開例外(2026-08-26 修正,GetFileInformationByHandle)
+
+README 說:
+
+> a hard link is not a spelling, so the file's (device, inode) is compared as well
+
+在 macOS 上成立（第 76 回合實測過）。在 Windows 上不成立:
+
+```console
+$ printf 'a,b\n1,x\n2,y\n' > h1.csv; ln h1.csv h2.csv
+$ ls -i h1.csv h2.csv
+7036874418455757 h1.csv
+7036874418455757 h2.csv                          ← shell 看得到，而且兩者相同
+$ csv2 -head 1 -t -i h1.csv -o h2.csv ; echo rc=$?
+rc=0                                             ← 沒有拒絕。macOS 上這裡是 rc=1
+```
+
+「兩種寫法指到同一個路徑」那條仍然會擋（rc=1,走的是路徑比對）;**失效的是身分比對那一條**。
+
+**後果比 POSIX 上輕,但不是沒有:**
+
+```console
+$ ls -i h1.csv h2.csv        # 之後
+7036874418455757 h1.csv
+4222124651446649 h2.csv      ← 硬連結被安靜地斷開了
+$ cat h1.csv                 # 內容仍在
+a,b
+1,x
+2,y
+```
+
+rename 把新檔案放到 `h2` 這個名字上,於是連結斷開、而 `h1` 完好。**沒有資料遺失**,但
+「那兩個名字是同一個檔案」這件事在使用者不知情下消失了,而 README 描述的那條保證沒有生效。
+
+T182a 跳過時說的是「Windows 對每個檔案都回報 inode 0」——那是關於 **csv2 自己的
+`Platform.fileIdentity`** 的宣稱,不是關於作業系統的:上面的 `ls -i` 顯示 shell 拿得到真正的
+file index。Windows 上取得它的方式是 `GetFileInformationByHandle`（`nFileIndexHigh`／`Low`）。
+**因此這可能是可修的,而不是平台限制**——但在動手之前要先量 csv2 現在那條路徑實際回傳什麼,
+不要重複 JM 的錯誤。
+
+若查證後確定修不了,那 README 必須為 Windows 開一個例外,而不是讓那句保證讀起來四個平台通用。

@@ -210,6 +210,37 @@ zstat_mode() {   # path -> octal permission bits, or empty when zsh/stat is abse
     printf '%o\n' $(( h[mode] & 8#777 ))
 }
 
+# Two capabilities that Windows used to lack and this machine has, asked at
+# RUNTIME rather than inferred from the platform's name.
+#
+# Eight cases -- T43h, T129a-d, T130a-c -- skipped on Windows saying "no
+# symlinks under MSYS2". That was true of a default MSYS2. It is not true of
+# the node this suite runs on: MSYS is set to winsymlinks:nativestrict,
+# Developer Mode is on, `ln -s` makes a real symlink, and csv2 edits through
+# one and leaves it a symlink. Measured 2026-08-26, JT.
+#
+# A guard written on a platform NAME is worse than a stale comment, because it
+# manufactures the appearance of the limitation it claims: those eight cases
+# had never run there, so nothing could contradict it. The two capabilities are
+# also independent -- this machine has symlinks and does NOT have POSIX modes
+# -- and one flag cannot say that. Probe each.
+#
+# 兩個「Windows 曾經沒有、而這台機器有」的能力，在**執行期**去問，而不是從平台的名字推論。
+# 八個案例——T43h、T129a-d、T130a-c——在 Windows 上以「MSYS2 下沒有 symlink」跳過。那對一個
+# 預設的 MSYS2 為真，對這份測試實際執行的那個節點不為真：MSYS 設成 winsymlinks:nativestrict、
+# Developer Mode 開著、`ln -s` 產生真正的 symlink，而 csv2 經由它編輯後那個 symlink 還在。
+# 2026-08-26 實測，JT。
+# 一個寫在「平台名字」上的守衛，比一則過期的註解更糟，因為它會製造出它所宣稱的那個限制的外觀：
+# 那八個案例從未在那裡跑過，所以沒有東西能反駁它。而這兩個能力是各自獨立的——這台機器有 symlink、
+# 沒有 POSIX 模式——一個旗標說不出這件事。所以各探測一次。
+_probe=$(mktemp -d "${TMPDIR:-/tmp}/.csv2_probe.XXXXXX")
+: > "$_probe/real"
+HAVE_SYMLINKS=0
+ln -sf "$_probe/real" "$_probe/link" 2>/dev/null && [[ -L "$_probe/link" ]] && HAVE_SYMLINKS=1
+HAVE_POSIX_MODES=0
+chmod 754 "$_probe/real" 2>/dev/null && [[ $(zstat_mode "$_probe/real") == 754 ]] && HAVE_POSIX_MODES=1
+rm -rf "$_probe"
+
 MISSING_LOG="${TMPDIR:-/tmp}/.csv2_missing_commands.$$"
 rm -f "$MISSING_LOG"
 command_not_found_handler() {
@@ -1252,8 +1283,9 @@ fi
 # 經 symlink：快路徑就用給定的路徑開檔，而 O_APPEND 會跟著連結走，因此目標長大、連結
 # 存活。這件事要驗，不能假設——它與 T129 為重寫路徑釘住的是同一個性質，而兩條路徑
 # 抵達那個檔案的方式並不相同。
-if (( IS_WINDOWS )); then
-    skipt "T43h an append through a symlink keeps the link and grows the target / 經 symlink 的追加會保留連結並讓目標長大 (no symlinks under MSYS2 / MSYS2 下沒有 symlink)"
+if (( ! HAVE_SYMLINKS )); then
+    skipt "T43h an append through a symlink keeps the link and grows the target / 經 symlink 的追加會保留連結並讓目標長大 (this filesystem does not make symlinks / 這個檔案系統做不出 symlink)"
+    T43H_SKIPPED=1
 else
     rm -f "$TMP/a6.log" "$TMP/big_sym.csv"
     cp "$TMP/big.csv" "$TMP/big_target.csv"
@@ -6725,8 +6757,9 @@ fi
 # T129 的兩半在 Windows 上都沒有意義。MSYS2 的 `ln -s` 在未設 winsymlinks 時是複製，
 # 沒有連結可保留；它回報的模式位元則是覆在 ACL 之上、形似 POSIX 的虛構。copyMode 在
 # 那裡也基於同一個理由被編譯掉——沒有東西可以搬。
-if (( IS_WINDOWS )); then
-    skipt "T129a-d --in-place on a symlink, and the mode it carries / symlink 上的 --in-place 與它帶過去的模式 (no symlinks and no POSIX modes under MSYS2 / MSYS2 下沒有 symlink，也沒有 POSIX 模式)"
+if (( ! HAVE_SYMLINKS )); then
+    skipt "T129a-d --in-place on a symlink, and the mode it carries / symlink 上的 --in-place 與它帶過去的模式 (this filesystem does not make symlinks / 這個檔案系統做不出 symlink)"
+    T129_SKIPPED=1
 else
     print -r -- 'a,b'  > "$TMP/t129_target.csv"
     print -r -- '1,x' >> "$TMP/t129_target.csv"
@@ -6751,6 +6784,20 @@ else
     # original's an edit silently widens who can read the file.
     # 模式：暫存檔以 umask 的模式建立，因此不把原檔的模式帶過去，一次編輯就會悄悄放寬
     # 「誰讀得到這個檔案」。
+    # The mode half is guarded separately from the symlink half, because the
+    # two capabilities are independent and the Windows node has exactly one of
+    # them: real symlinks, and permission bits that are a POSIX-shaped fiction
+    # over an ACL, so `chmod` does not bite. One platform flag could not say
+    # that, which is half of why these eight cases sat unskipped-but-unrun
+    # there for weeks. JT.
+    # 模式那一半與 symlink 那一半分開守衛，因為那是兩個各自獨立的能力，而 Windows 節點恰好
+    # 只有其中一個：真正的 symlink，以及一組「覆在 ACL 之上、形似 POSIX」的權限位元，因此
+    # `chmod` 咬不住。一個平台旗標說不出這件事，而那正是那八個案例在那裡「沒被跳過、也沒被
+    # 執行過」好幾週的一半原因。JT。
+    if (( ! HAVE_POSIX_MODES )); then
+        skipt "T129d-f the mode an edit carries / 一次編輯帶過去的模式 (chmod does not bite on this filesystem / chmod 在這個檔案系統上咬不住)"
+        T129_MODE_SKIPPED=1
+    else
     print -r -- 'a,b'  > "$TMP/t129_mode.csv"
     print -r -- '1,x' >> "$TMP/t129_mode.csv"
     chmod 600 "$TMP/t129_mode.csv"
@@ -6855,6 +6902,7 @@ else
     # T129e。這個案例仍然值得保留，理由是上面那一段，而那一段不依賴這件事。
     assert_eq "$(mode_from_ls "$TMP/t129_mode.csv")" "754" \
         "T129f and the ls decoder agrees with the chmod that set it / 而 ls 解碼器與設定它的那個 chmod 一致"
+    fi
 fi
 
 # ---------------------------------------------------------------------
@@ -9106,8 +9154,9 @@ fi
 echo
 echo "--- T130: -o, on the right file / -o，而且是對的那個檔案 ---"
 
-if (( IS_WINDOWS )); then
-    skipt "T130a-c -o through a symlink, and the same file spelled two ways / 經 symlink 的 -o，以及同一個檔案的兩種寫法 (no symlinks under MSYS2 / MSYS2 下沒有 symlink)"
+if (( ! HAVE_SYMLINKS )); then
+    skipt "T130a-c -o through a symlink, and the same file spelled two ways / 經 symlink 的 -o，以及同一個檔案的兩種寫法 (this filesystem does not make symlinks / 這個檔案系統做不出 symlink)"
+    T130_SKIPPED=1
     # The path-spelling half needs no symlinks, so it runs everywhere.
     # 「同一個檔案的兩種寫法」那一半不需要 symlink，因此每個平台都跑。
     print -r -- 'a,b'  > "$TMP/t130_f.csv"
@@ -11612,6 +11661,14 @@ fi
 (( ${T203_BASH_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T204_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T166E_XSKIPPED:-0} )) && (( want_skip += 1 ))
+# The symlink and POSIX-mode capabilities, each probed at run time rather than
+# inferred from the platform's name -- see the probe beside zstat_mode. JT.
+# symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode
+# 旁邊那段探測。JT。
+(( ${T43H_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T129_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T129_MODE_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T130_SKIPPED:-0} )) && (( want_skip += 1 ))
 # T166d needs python3 to rebuild the index checksum after bending a line. The
 # guest's busybox userland has no python3, and that is a property of the image
 # rather than of the platform's name -- so it is recorded by the case, like
