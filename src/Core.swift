@@ -474,6 +474,29 @@ func refuseUTF16BOM(_ head: [UInt8]) throws {
 /// guest has.
 /// 採推送式，讓 `-si` 能串流：位元組逐塊進來，紀錄完成一筆吐一筆。此處
 /// 不持有整份輸入，因為本工具必須能處理比 guest 那 2–4 GiB 更大的檔案。
+/// **A header row is a Record too.** The parser hands out every record it
+/// meets, headers included, because it does not know which of them you meant
+/// to treat as titles -- `Format.headerRows` says how many to skip, and the
+/// CLI's `-r` skips them for you. Somebody moving from the CLI to this type
+/// gets one more record than they expect and finds out when the column names
+/// do not line up. Reported by the first caller to make that move, on its
+/// first attempt; the cost of not writing it here is that everyone after makes
+/// it too.
+///
+/// **標頭列也是一筆 Record。** 這個解析器會把它遇到的每一筆都交出去，標頭也不例外，因為它不知道
+/// 你打算把其中哪幾筆當成標題——要跳過幾列請問 `Format.headerRows`，而 CLI 的 `-r` 會替你跳過。
+/// 一個從 CLI 換到這個型別的人，會比預期多拿到一筆，而發現的方式是欄名對不上。這是第一個做出那個
+/// 轉換的呼叫端在它第一次嘗試時回報的；不把這件事寫在這裡的代價，是它之後的每一個人都會再犯一次。
+///
+/// **`Field` is a name a UI will already have.** Qualify it as `CSV2Core.Field`
+/// rather than importing it bare -- the first consumer of this module collided
+/// with its own `struct Field: View` on day one. That collision is also the
+/// concrete reason to import this as a module instead of compiling the sources
+/// into your own target, where the two names cannot both exist.
+/// **`Field` 是任何 UI 都已經會有的名字。** 請用 `CSV2Core.Field` 限定，不要裸著 import
+/// ——這個 module 的第一個消費端在第一天就與自己的 `struct Field: View` 撞名了。那次撞名同時也是
+/// 「把它當成 module 匯入、而不是把原始碼編進你自己的 target」的具體理由：在同一個 target 裡，
+/// 那兩個名字不可能並存。
 public final class RecordParser {
     private enum State {
         case fieldStart

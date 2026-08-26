@@ -115,3 +115,73 @@ out=$($WORK/client) || exit 1
 [[ $out == "client OK" ]] || { print -u2 -- "client said: $out"; exit 1 }
 print -r -- "PASS  the six-file subset builds as a module and a client can use it"
 print -r -- "通過  那六個檔案的子集建得成 module，而一個客戶端用得了它"
+
+# ---------------------------------------------------------------------
+# The same subset through SPM, which is how a real consumer takes it.
+#
+# Everything above uses bare `swiftc`, and a bare compile does not go through
+# SPM's language mode. The first real consumer built it with SwiftPM in Swift 6
+# mode and was stopped by two globals -- `binaryModeSet` and `doomedTemp` --
+# that are `nonisolated global shared mutable state`. It declared
+# `.swiftLanguageMode(.v5)` and moved on, which is a statement about what this
+# module is rather than a workaround.
+#
+# So both modes are checked, and the v6 FAILURE is asserted rather than
+# ignored. If someone makes those two globals safe, this says so instead of
+# staying quiet -- a check that only notices regressions is half a check.
+#
+# 同一個子集，改走 SPM——那才是一個真實消費端取用它的方式。
+# 上面每一步用的都是裸 `swiftc`，而裸編譯不會經過 SPM 的語言模式。第一個真實的消費端以 SwiftPM
+# 在 Swift 6 模式下建置它，被兩個全域變數擋下——`binaryModeSet` 與 `doomedTemp`——它們是
+# `nonisolated global shared mutable state`。它宣告了 `.swiftLanguageMode(.v5)` 然後繼續，
+# 而那是在陳述「這個 module 是什麼」，不是繞過。
+# 因此兩種模式都檢查，而 v6 的**失敗**是被斷言的，不是被忽略的。哪天有人把那兩個全域變數變成安全的，
+# 這裡會說出來，而不是保持沉默——一個只察覺退化的檢查，只是半個檢查。
+# ---------------------------------------------------------------------
+if (( ! $+commands[swift] )); then
+    print -r -- "SKIP  no swift driver here, so the SPM path is unchecked / 這裡沒有 swift driver，SPM 那條路徑未檢查"
+    exit 0
+fi
+
+spm_build() {   # <language mode> -> 0 if it builds
+    local mode=$1
+    local pkg=$WORK/spm_$mode
+    rm -rf $pkg; mkdir -p $pkg/Sources/CSV2Core
+    for f in $SUBSET; do cp $ROOT/src/$f.swift $pkg/Sources/CSV2Core/; done
+    cat > $pkg/Package.swift <<PKG
+// swift-tools-version:6.0
+import PackageDescription
+let package = Package(
+    name: "CSV2Core",
+    products: [.library(name: "CSV2Core", targets: ["CSV2Core"])],
+    targets: [.target(name: "CSV2Core", swiftSettings: [.swiftLanguageMode(.$mode)])]
+)
+PKG
+    # `> log 2>&1`, not `2>&1 > log`. The second binds stderr to the terminal
+    # first and only then moves stdout, so a failing v6 build printed the whole
+    # frontend invocation to the screen -- the classic ordering mistake, made
+    # in a script whose subject is checking things properly.
+    # 是 `> log 2>&1`，不是 `2>&1 > log`。後者會先把 stderr 綁到終端機、之後才移動 stdout，於是
+    # 一次失敗的 v6 建置把整個 frontend 呼叫印到了螢幕上——那個經典的順序錯誤，犯在一支「主題就是
+    # 好好檢查東西」的腳本裡。
+    ( cd $pkg && swift build > $WORK/spm_$mode.log 2>&1 )
+    return $?
+}
+
+if spm_build v5; then
+    print -r -- "PASS  and it builds through SPM in Swift 5 mode, which is how it is consumed / 而它以 Swift 5 模式經 SPM 建得起來，那正是它被取用的方式"
+else
+    print -u2 -r -- "FAIL  the SPM build in Swift 5 mode does not work"
+    tail -5 $WORK/spm_v5.log >&2
+    exit 1
+fi
+
+if spm_build v6; then
+    print -r -- "NOTE  it now builds in Swift 6 mode as well -- the two globals that stopped it"
+    print -r -- "      (binaryModeSet, doomedTemp) must have been made safe. Update this check"
+    print -r -- "      and the note beside them, and tell the consumers that pinned .v5."
+    print -r -- "注意  它現在在 Swift 6 模式下也建得起來了——擋住它的那兩個全域變數應該已經被改成"
+    print -r -- "      安全的了。請更新這項檢查與它們旁邊那則附註，並告訴那些釘了 .v5 的消費端。"
+else
+    print -r -- "PASS  and Swift 6 mode still stops on the two globals, as documented / 而 Swift 6 模式仍然卡在那兩個全域變數上，與記載相符"
+fi
