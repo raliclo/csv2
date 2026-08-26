@@ -241,6 +241,45 @@ HAVE_POSIX_MODES=0
 chmod 754 "$_probe/real" 2>/dev/null && [[ $(zstat_mode "$_probe/real") == 754 ]] && HAVE_POSIX_MODES=1
 rm -rf "$_probe"
 
+# file_mode and mode_from_ls live HERE, not inside the case that first needed
+# them. They were defined inside T129's branch, and when that branch became
+# conditional on a run-time probe they stopped existing on the platform that
+# skipped it -- so T130c, three thousand lines away, called a function that was
+# not there. The suite reported it correctly ("the suite called file_mode,
+# which does not exist here"), which is the only reason it took a minute
+# instead of an afternoon.
+# file_mode 與 mode_from_ls 放在「這裡」，不是放在第一個需要它們的那個案例裡。它們原本定義在
+# T129 的分支內，而當那個分支改成由執行期探測決定之後，它們在「跳過那個分支的平台」上就不存在了
+# ——於是三千行外的 T130c 呼叫了一個不在那裡的函式。測試正確地回報了這件事（「測試呼叫了
+# file_mode，而它在這個平台上不存在」），那是這件事花一分鐘而不是一個下午的唯一原因。
+file_mode() {
+    local m
+    m=$(zstat_mode "$1")
+    [[ $m == <-> ]] || m=$(mode_from_ls "$1")                 # anywhere else
+    print -r -- "$m"
+}
+
+# rwxrwxrwx -> 755. Only the nine permission characters are read; setuid and
+# the sticky bit show up in the same columns as x and are NOT decoded, because
+# nothing here sets them and a half-decoded answer is worse than a missing one.
+# 只讀那九個權限字元。setuid 與 sticky 佔用與 x 相同的欄位，此處刻意不解讀——
+# 這裡沒有任何東西會設定它們，而一個解讀到一半的答案比沒有答案更糟。
+mode_from_ls() {
+    local perm d i n=0 out=""
+    perm=$(ls -ld "$1" 2>/dev/null) || return 1
+    perm=${perm[2,10]}
+    [[ $perm == [-r][-w][-xsS][-r][-w][-xsS][-r][-w][-xtT] ]] || return 1
+    for i in 1 4 7; do
+        n=0
+        [[ ${perm[i]}   == r ]] && (( n += 4 ))
+        [[ ${perm[i+1]} == w ]] && (( n += 2 ))
+        [[ ${perm[i+2]} == [xst] ]] && (( n += 1 ))
+        out="$out$n"
+    done
+    print -r -- "$out"
+}
+
+
 MISSING_LOG="${TMPDIR:-/tmp}/.csv2_missing_commands.$$"
 rm -f "$MISSING_LOG"
 command_not_found_handler() {
@@ -6826,33 +6865,6 @@ else
     # zstat_mode 用的是 zsh 的內建指令，每個平台都一樣，也不必從輸出去猜——而這裡每一個平台都
     # 有它，包含 guest。ls 後備仍然保留：它正是 T129f 拿去和 busybox 的 `ls` 對照的東西，而一個
     # 沒有東西去運動它的後備，在真正需要它的那天沒有人敢信。
-    file_mode() {
-        local m
-        m=$(zstat_mode "$1")
-        [[ $m == <-> ]] || m=$(mode_from_ls "$1")                 # anywhere else
-        print -r -- "$m"
-    }
-
-    # rwxrwxrwx -> 755. Only the nine permission characters are read; setuid and
-    # the sticky bit show up in the same columns as x and are NOT decoded, because
-    # nothing here sets them and a half-decoded answer is worse than a missing one.
-    # 只讀那九個權限字元。setuid 與 sticky 佔用與 x 相同的欄位，此處刻意不解讀——
-    # 這裡沒有任何東西會設定它們，而一個解讀到一半的答案比沒有答案更糟。
-    mode_from_ls() {
-        local perm d i n=0 out=""
-        perm=$(ls -ld "$1" 2>/dev/null) || return 1
-        perm=${perm[2,10]}
-        [[ $perm == [-r][-w][-xsS][-r][-w][-xsS][-r][-w][-xtT] ]] || return 1
-        for i in 1 4 7; do
-            n=0
-            [[ ${perm[i]}   == r ]] && (( n += 4 ))
-            [[ ${perm[i+1]} == w ]] && (( n += 2 ))
-            [[ ${perm[i+2]} == [xst] ]] && (( n += 1 ))
-            out="$out$n"
-        done
-        print -r -- "$out"
-    }
-
     assert_eq "$(file_mode "$TMP/t129_mode.csv")" "600" \
         "T129d and an edit does not widen the file's permissions / 而一次編輯不會放寬這個檔案的權限"
 
@@ -10006,8 +10018,26 @@ rm -f "$TMP/t182_hard.csv"
 # inode 0，因此在那裡去問 (dev, ino) 等於說「每個檔案都是彼此」。csv2 選擇不問，而 MSYS2 的
 # `ln` 仍然會生出東西——於是這個案例會因為一個「不是缺陷」的理由而失敗。把它寫成「兩種結果
 # 都接受」，會造出一個不可能失敗的案例，而那正是這套測試存在所要避免的事。
-if (( IS_WINDOWS )); then
-    skipt "T182a Windows reports inode 0 for every file, so identity cannot be asked / Windows 對每個檔案都回報 inode 0，因此問不出「身分」"
+# Windows used to skip here saying it "reports inode 0 for every file". That
+# was true of the CRT's stat(), which is what Platform.fileNode used, and never
+# true of Windows: GetFileInformationByHandle has the answer, and as of
+# 2026-08-26 that is what csv2 asks. Probed rather than named, because a
+# filesystem that keeps no file index -- FAT, some network redirectors -- still
+# cannot answer, and that is a property of the volume and not of the platform.
+# Windows 原本在這裡跳過，理由是它「對每個檔案都回報 inode 0」。那對 CRT 的 stat() 為真——那正是
+# Platform.fileNode 原本用的——而對 Windows 從來不為真：GetFileInformationByHandle 有那個答案，
+# 而自 2026-08-26 起 csv2 問的就是它。這裡用探測而不是點名平台，因為一個「不保存 file index」的
+# 檔案系統（FAT、某些網路 redirector）仍然答不出來，而那是那個磁碟區的性質，不是平台的。
+_t182_probe=$TMP/t182_probe
+: > "$_t182_probe"
+HAVE_HARDLINKS=0
+if ln "$_t182_probe" "$_t182_probe.ln" 2>/dev/null; then
+    printf 'a,b\n1,x\n' > "$_t182_probe"
+    "$CSV2" -r -t -i "$_t182_probe" -o "$_t182_probe.ln" >/dev/null 2>&1 || HAVE_HARDLINKS=1
+fi
+rm -f "$_t182_probe" "$_t182_probe.ln"
+if (( ! HAVE_HARDLINKS )); then
+    skipt "T182a this filesystem cannot report a file identity two names share / 這個檔案系統回報不出「兩個名字共有的檔案身分」"
     T182A_SKIPPED=1
     skipt "T182b same reason / 同一個理由"
     T182B_SKIPPED=1
