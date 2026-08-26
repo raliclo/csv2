@@ -7696,3 +7696,47 @@ $ diff <(...) crlf.csv | wc -l
 
 **形狀:一張自我宣稱完整的清單。** 一份「不完整但沒有自稱完整」的清單只是缺了東西;一份自稱是
 「第二個讀者還原不出來的全部」的清單漏了一項,會讓人以為自己已經知道全部的風險。
+
+## JM. 一句從註解沿用、從未被量過的話,被抄進了一個「主旨正是『動手前先量』」的 commit(2026-08-26 修正,T129e 在 guest 上執行)
+
+2026-08-26 把 `stat(1)` 換成 `zstat` 時,我在四個平台裡量了三個——macOS、WSL、Windows 的 MSYS
+zsh——然後對第四個寫下:
+
+> Empty on a platform without the module: the aarch64 guest's zsh does not carry
+> zsh/stat, which is why file_mode has an ls fallback at all.
+
+那句話不是量出來的,是從這個檔案裡一則既有註解沿用的:
+
+```
+#   - The aarch64 guest has NO stat at all: this busybox was built without the
+#     applet, and zsh/stat is not in its module set either.
+```
+
+那則註解寫於 busybox 沒有 `stat` applet 的年代,前半句當時為真;後半句沒有任何東西釘住它。
+我把它抄進了兩則新註解、一則 SKIP 訊息、一封給母 session 的訊息,以及一個 commit message
+——**而那個 commit 的主旨正是「動手之前先在每個平台上量」**。
+
+母 session 在準備依此去改 buildroot 的 zsh 模組集之前先對 guest 實測,結果相反:
+
+```
+/usr/lib/zsh/5.9.999.3-test/zsh/stat.so     14272 bytes
+zmodload zsh/stat                           rc=0
+zstat -H h -- /etc/hostname                 size=12 mode=644 inode=106
+```
+
+我們自己的 harness 獨立證實了同一件事:在 `8a13b47` 上的 guest 執行中,**T129e 不在 SKIP 清單裡**
+（7 個 SKIP 是 T143、T145e、T146e、T135c、T166e、T203e/f、T47）——它在 guest 上執行且通過。
+
+修法:四處註解與一則 SKIP 訊息全部更正,並在每一處寫下「這句話原本是哪裡來的、為什麼從未被量」。
+`zstat_mode` 的「回傳空的」保留,因為呼叫端不該被迫假設——但它現在明說那不是對任何一個現有平台的
+描述。
+
+**形狀:一句在註解裡的宣稱,比它所描述的系統活得更久。** 與 2026-08-19 那張「五條全部已不成立」的
+缺陷表同族,也與這棵樹一再記下的那句話同族——一份寫在指令檔裡的清單,會與它所描述的程式反向漂移,
+而沒有任何東西會回報它。差別在於這一次漂移的載體是一則程式碼註解,而它被一次「以嚴謹為題」的
+修改抄了出去。
+
+**副作用（保留）：** 為了繞過那個不存在的限制而寫的 T129f 是有價值的,理由與那個限制無關:
+T129e 比的是兩個「讀取器」,因此它只說「它們一致」,不說「其中任何一個是對的」——兩個錯得一樣的
+讀取器一樣會通過。T129f 比的是 `chmod` 設進去的那個值,不牽涉第二個讀取器,而且用 754 而不是 600,
+會運動到 600 用不到的 r-x 與 r--。

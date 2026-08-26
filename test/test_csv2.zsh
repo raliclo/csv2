@@ -180,9 +180,15 @@ skipt(){ print -r -- "SKIP  $1"; skip=$((skip + 1)) }
 # 0644 file, a plausible number that is wrong. Found while probing for this
 # change, on the first command written.
 #
-# Empty on a platform without the module: the aarch64 guest's zsh does not
-# carry zsh/stat, which is why file_mode has an ls fallback at all (T129e).
-# Returning nothing rather than guessing is what lets the caller choose.
+# Empty on a platform without the module. No platform here is in that position:
+# macOS, WSL, the Windows MSYS zsh AND the aarch64 guest all load zsh/stat --
+# the guest was measured on 2026-08-26 and T129e runs there. This file said the
+# guest did not carry the module, in a comment inherited from the days when it
+# had no `stat` applet either, and that sentence was copied forward into new
+# comments and into a commit message whose whole subject was measuring before
+# changing. It was never measured. The empty return stays because a caller
+# should not have to assume, but it is not a description of any platform we
+# have.
 #
 # 用 zstat，不用 stat(1)。這是這棵樹 2026-08-26 起的規則，而它針對的正是上面那兩行。
 # `stat(1)` 沒有可攜的介面。BSD 與 GNU 都收 -f，意思卻相反，於是腳本得兩種都寫、再猜哪個
@@ -191,9 +197,13 @@ skipt(){ print -r -- "SKIP  $1"; skip=$((skip + 1)) }
 # 遮罩是 `8#777` 而不是 `0777`：zsh 不會把開頭的 0 當成八進位，因此 `h[mode] & 0777` 是與
 # 十進位 777 做 AND——對一個 0644 的檔案會得到 256，一個看起來合理而錯誤的數字。這是在為
 # 這次修改做探測時、在寫下的第一個指令上發現的。
-# 在沒有那個模組的平台上回傳空的：aarch64 guest 的 zsh 沒有帶 zsh/stat，那正是 file_mode
-# 會有 ls 後備的原因（T129e）。回傳「什麼都沒有」而不是去猜，才讓呼叫端能自己決定。
-zstat_mode() {   # path -> octal permission bits, or empty when zsh/stat is absent
+# 在沒有那個模組的平台上回傳空的。而這裡沒有任何一個平台處在那個位置：macOS、WSL、Windows 的
+# MSYS zsh **以及 aarch64 guest** 都載得進 zsh/stat——guest 是 2026-08-26 量到的，T129e 在那裡
+# 會執行。這個檔案原本說 guest 沒有帶那個模組，那則註解是從「它連 `stat` applet 都沒有」的年代
+# 沿用下來的，而那句話被抄進了新的註解、也抄進了一個「主旨正是『動手前先量』」的 commit message。
+# 它從來沒有被量過。那個「回傳空的」保留下來，是因為呼叫端不該被迫去假設；但它並不是對我們手上
+# 任何一個平台的描述。
+zstat_mode() {   # path -> octal permission bits, or empty when zsh/stat is absent (no platform here is)
     zmodload -F zsh/stat b:zstat 2>/dev/null || return
     local -A h
     zstat -H h -- "$1" 2>/dev/null || return
@@ -6727,9 +6737,10 @@ else
     #     branches produced nothing and T129d failed there while passing on
     #     macOS, with the program behaving identically on both.
     # zstat_mode uses the zsh builtin, which is the same everywhere and needs no
-    # guessing from output. The ls fallback stays, because the guest's zsh does
-    # not carry the zsh/stat module -- one platform still cannot answer, but now
-    # it is the only one, and it says so rather than guessing.
+    # guessing from output -- and every platform here has it, the guest
+    # included. The ls fallback stays anyway: it is what T129f checks against
+    # busybox's `ls`, and a fallback nothing exercises is a fallback nobody can
+    # trust the day it is needed.
     # 讀一個檔案的模式，是這份測試裡可攜性最差的一件事，而下面這段歷史正是「現在改成問 zsh、
     # 不問某個指令」的理由：
     #   - BSD 與 GNU 的 stat 都收 -f，意思卻相反：在 macOS 上是模式格式，在 Linux 上是
@@ -6737,9 +6748,9 @@ else
     #     `A || B` 連 B 也跑了，而那次替換把兩者都收了進去。
     #   - aarch64 guest 的 busybox 沒有 `stat` applet，於是兩條分支都給不出東西，T129d 在那裡
     #     失敗、在 macOS 上通過，而程式在兩邊的行為其實一樣。
-    # zstat_mode 用的是 zsh 的內建指令，每個平台都一樣，也不必從輸出去猜。ls 後備保留，因為
-    # guest 的 zsh 沒有帶 zsh/stat 模組——仍然有一個平台答不出來，但現在只剩那一個，而且它會
-    # 說出來，不會用猜的。
+    # zstat_mode 用的是 zsh 的內建指令，每個平台都一樣，也不必從輸出去猜——而這裡每一個平台都
+    # 有它，包含 guest。ls 後備仍然保留：它正是 T129f 拿去和 busybox 的 `ls` 對照的東西，而一個
+    # 沒有東西去運動它的後備，在真正需要它的那天沒有人敢信。
     file_mode() {
         local m
         m=$(zstat_mode "$1")
@@ -6785,6 +6796,37 @@ else
     else
         skipt "T129e the ls fallback reads the same mode zstat does / ls 後備讀到的模式與 zstat 相同 (no zsh/stat module on this platform to compare against / 此平台沒有 zsh/stat 模組可供比對)"
     fi
+
+    # And against the chmod that set it, which needs no second reader at all.
+    #
+    # T129e compares two READERS, so it says they agree -- not that either is
+    # right. Two readers that are wrong the same way pass it. chmod is the
+    # ground truth: it is what SET the bits, every platform has it, and no
+    # second reader is involved.
+    #
+    # 754 rather than 600 on purpose: it exercises r-x and r--, which 600 does
+    # not, so a decoder that mishandled the x column shows up here and not in
+    # T129d.
+    #
+    # It also reaches the ls decoder on the guest, where `ls` is BUSYBOX's and
+    # not the one the other platforms verified the decoder against. That was
+    # written here as the reason this case exists, on the belief that the guest
+    # could not run T129e at all -- a belief taken from a stale comment in this
+    # file and never measured. The guest runs T129e. The case is worth keeping
+    # for the reason above, which does not depend on that.
+    #
+    # 再與「設定它的那個 chmod」比一次，這完全不需要第二個讀取器。
+    # T129e 比的是兩個「讀取器」，因此它說的是「它們一致」，不是「其中任何一個是對的」——兩個
+    # 錯得一樣的讀取器一樣會通過。chmod 才是基準真相：位元就是它設的，每個平台都有它，而且不牽涉
+    # 任何第二個讀取器。
+    # 刻意用 754 而不是 600：它會用到 r-x 與 r--，那是 600 用不到的，因此一個把 x 那一欄處理錯的
+    # 解碼器會在這裡現形，而不是在 T129d。
+    # 它同時也在 guest 上碰到那個 ls 解碼器，而那裡的 `ls` 是 **busybox** 的——不是其他平台用來
+    # 驗證這個解碼器的那個 ls。這一點原本被寫成「這個案例存在的理由」，而那是建立在「guest 根本
+    # 跑不了 T129e」這個信念上的——那個信念取自這個檔案裡一則過期的註解，從未被量過。guest 跑得了
+    # T129e。這個案例仍然值得保留，理由是上面那一段，而那一段不依賴這件事。
+    assert_eq "$(mode_from_ls "$TMP/t129_mode.csv")" "754" \
+        "T129f and the ls decoder agrees with the chmod that set it / 而 ls 解碼器與設定它的那個 chmod 一致"
 fi
 
 # ---------------------------------------------------------------------
@@ -10223,13 +10265,16 @@ else
     chmod 644 "$TMP/t191_src.csv"
     rm -f "$TMP/t191_new.csv"
     ( umask 022; "$CSV2" -r -t -i "$TMP/t191_src.csv" -o "$TMP/t191_new.csv" )
-    # file_mode, not zstat_mode: the guest's zsh has no zsh/stat module, and
-    # zstat_mode is documented to return EMPTY there -- so this compared '' with
-    # '600' and failed for a reason that has nothing to do with the mode. The
-    # ls fallback exists for exactly this and T129 already uses it.
-    # 用 file_mode 而不是 zstat_mode：guest 的 zsh 沒有 zsh/stat 模組，而 zstat_mode 在那裡
-    # 依定義回傳「空的」——於是這裡拿 '' 去比 '600'，因為一個與權限無關的理由而失敗。
-    # 那個 ls 後備正是為此而存在，T129 早就在用它了。
+    # file_mode, not zstat_mode. This dates from when the guest's busybox had no
+    # `stat` applet: the old stat_mode returned EMPTY there, so this compared ''
+    # with '600' and failed for a reason that had nothing to do with the mode.
+    # zstat works on every platform now, so the two are equivalent here -- but
+    # file_mode is the one with a fallback, and a caller that does not need to
+    # care should not have to.
+    # 用 file_mode 而不是 zstat_mode。這要追溯到「guest 的 busybox 沒有 `stat` applet」的時期：
+    # 舊的 stat_mode 在那裡回傳「空的」，於是這裡拿 '' 去比 '600'，因為一個與權限無關的理由而
+    # 失敗。現在 zstat 在每個平台都可用，兩者在這裡是等價的——但 file_mode 才是「有後備」的那一個，
+    # 而一個不需要在意這件事的呼叫端，就不該被迫在意。
     assert_eq "$(file_mode "$TMP/t191_new.csv")" "600" \
         "T191a a destination csv2 creates is 0600 / csv2 新建的目的地是 0600"
     printf 'x,y\n9,9\n' > "$TMP/t191_over.csv"
