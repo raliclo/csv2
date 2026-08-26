@@ -2989,7 +2989,70 @@ format". That sentence stops being true.
 5. **有哪些仍然被拒絕。** 目錄、裝置、gzip、UTF-16 檔案。它們不會因為副檔名消失就變得可讀；
    「沒有副檔名」這條規則不得成為繞過那些「關於內容」的拒絕的一條路。
 
-- [ ] decide 1-5 above / 上面 1–5 定案
+**1-5 decided 2026-08-26, from measurement:**
+
+The shape is **one column, ZERO header rows, and the line's bytes are the value
+verbatim** -- no comma splitting, no quote processing, no backslash unescaping.
+Each of those three came from a measurement, not from taste:
+
+```console
+$ printf '/usr/bin/env\n/usr/bin/zsh\n/etc/hosts\n' > list
+
+$ csv2 -r --headers 1 -i list      # the documented way through, today
+/usr/bin/zsh
+/etc/hosts                          ← /usr/bin/env is GONE: eaten as a header
+
+$ printf 'a,b\nc\n' > l2 ; csv2 -r --headers 1 --json -i l2
+csv2: record 1 (line 2) has 1 fields but the header has 2
+                                    ← a comma in a path made it a 2-column table
+```
+
+So: header rows must be zero or the first line of every such file disappears,
+and commas must not split or a `find` dump breaks on the first path containing
+one. And if the escaping were `.csv2`'s, a line containing a literal `\n` would
+change meaning on the way in -- which is why the value is the line's bytes and
+nothing is unescaped. "A one-column `.csv2`" is the right description of the
+SHAPE; it is not the right description of the ESCAPING, and the difference is
+the whole of what had to be decided.
+
+**Why this is a phase and not a patch, measured too:** `Format` is switched on
+at about sixty sites across five files, and `headerRows == 0` is a concept
+nothing here has. Every shape that keys by column NAME needs an answer -- `--json`
+keys `fields` by header name and there are none; `-t` writes header rows and
+there are none; `-md` requires `-t`; `-get 1:name` cannot resolve. Each of those
+is a refusal with two languages and a test. Starting it with little room left
+and finishing half of it is the failure this tree has recorded more than once,
+so it is written down here instead.
+
+**1–5 於 2026-08-26 定案，出自量測：**
+
+那個形狀是**一欄、標頭列數為零、而那一行的位元組就是值本身**——不以逗號切分、不處理引號、
+不解反斜線跳脫。這三件事各自來自一次量測，不是來自品味：
+
+```console
+$ printf '/usr/bin/env\n/usr/bin/zsh\n/etc/hosts\n' > list
+$ csv2 -r --headers 1 -i list      # 今天「有記載的那條路」
+/usr/bin/zsh
+/etc/hosts                          ← /usr/bin/env 不見了：被當成標頭吃掉
+
+$ printf 'a,b\nc\n' > l2 ; csv2 -r --headers 1 --json -i l2
+csv2: record 1 (line 2) has 1 fields but the header has 2
+                                    ← 路徑裡的一個逗號讓它變成兩欄的表
+```
+
+因此：標頭列數必須是零，否則每一個這種檔案的第一行都會消失；而逗號必須不切分，否則一份 `find`
+輸出會在第一個含逗號的路徑上壞掉。而如果跳脫用的是 `.csv2` 那一套，一行含有字面 `\n` 的內容在
+讀進來的路上就會改變意思——這正是「值就是那一行的位元組、什麼都不解跳脫」的原因。
+「一欄的 `.csv2`」是對那個**形狀**的正確描述；它不是對**跳脫**的正確描述，而那個差別正是必須被
+定案的全部。
+
+**為什麼這是一個階段而不是一個小修補，同樣是量出來的：**`Format` 在五個檔案裡大約六十處被分支，
+而 `headerRows == 0` 是這裡沒有的概念。每一種「以欄位名稱為鍵」的形狀都需要一個答案——`--json`
+以標頭名字作為 `fields` 的鍵，而這裡沒有名字；`-t` 會寫出標頭列，而這裡沒有；`-md` 需要 `-t`；
+`-get 1:name` 解不出來。那每一項都是一條拒絕、兩種語言、加上一個測試。在所剩不多時開始它、然後
+只完成一半，正是這棵樹記錄過不只一次的那種失敗，因此改為把它寫在這裡。
+
+- [x] decide 1-5 above / 上面 1–5 定案
 - [ ] `--headers 0`, and every message that names the valid values / `--headers 0`，以及每一則指名合法值的訊息
 - [ ] suffix-less input reads as one column / 沒有副檔名的輸入讀成一欄
 - [ ] the content refusals still fire / 那些「關於內容」的拒絕仍然會觸發
