@@ -7960,3 +7960,125 @@ file index。Windows 上取得它的方式是 `GetFileInformationByHandle`（`nF
 不要重複 JM 的錯誤。
 
 若查證後確定修不了,那 README 必須為 Windows 開一個例外,而不是讓那句保證讀起來四個平台通用。
+
+## JV. never-convert 那道守衛不認識 `.lines`,於是 csv2 自己寫出了它自己讀不了的檔案(2026-08-27 修正,T211a-e)
+
+第 78 回合,一次找到十個,而這一條是其中四個的根源。那道守衛比較的是
+`Format.from(path:)` 的結果,而 `.lines` 不是從副檔名來的——於是無副檔名的一端被預設當成
+「1 列標頭」。
+
+**零標頭寫進 `.csv`,rc=0,而讀回來少一筆:**
+
+```console
+$ printf 'one\ntwo\n' > l
+$ csv2 -r -t -i l -o out.csv ; echo rc=$?
+rc=0
+$ cat out.csv
+one
+two
+$ csv2 -r -i out.csv
+two                    ← `one` 被當成標頭吃掉了。靜默，rc=0
+```
+
+**一列標頭寫進無副檔名,rc=0,而紀錄數變多:**
+
+```console
+$ printf 'k,v\n1,x\n' > h.csv
+$ csv2 -r -t -i h.csv -o plain ; echo rc=$?
+rc=0
+$ csv2 -r --json -i plain | tail -1
+{"meta":{"records":2,"matched":0}}      ← 原本是 1 筆；標頭變成了資料
+```
+
+**而它拒絕 `.csv2` 時說的數字是錯的:**
+
+```console
+$ csv2 -r -t -i l -o y.csv2
+csv2: the input has 1 header row(s) and y.csv2 declares 2 ...
+                    ^^^^^^^^^^^^^^^ 那個檔案的 headers 是 0，`--json` 自己也這樣說
+```
+
+README 描述「手動改名一個檔案」會造成的損害,並說 csv2 自己不會製造出那種東西。**它會。**
+這正是它存在所要拒絕的那一類:一次 rc=0 的寫入,產物是這個工具自己讀不了、或讀出不同內容的檔案。
+
+## JW. `-md` 把 CR 算繪成 `<br>`,而 `<br>` 讀回來是 LF——一個位元組被靜默改掉(2026-08-27 修正,T211f-h)
+
+```console
+$ printf 'k\n"a\rb"\n' > cr.csv
+$ csv2 -r -t --json -i cr.csv | sed -n 2p
+{"record":1,"line":2,"fields":{"k":"a\rb"}}          ← 存的是 CR
+$ csv2 -r -t -md -i cr.csv
+|k|
+|---|
+|a<br>b|                                              ← 算繪成 <br>
+$ csv2 -r -t -md -i cr.csv | ... 讀回來 | od -c
+   k  \n   a   \   n   b  \n                          ← 回來的是 LF
+```
+
+**README 自己寫下的規則說這不該發生**,而且說了兩次:`-md` 的控制字元「以定位報告的方式跳脫
+——TAB 是 `\t`,其餘 0x20 以下與 DEL 是 `\xNN`」(CR 是 0x0D,應該是 `\x0D`),以及「除了對齊之外
+沒有別的會遺失」。TAB 與 DEL 遵守那條規則,CR 不遵守。
+
+## JX. 五個守衛沒有涵蓋它們自己描述的情況(2026-08-27 修正,T211i-o)
+
+同一回合。每一條都是「那個守衛存在、而且訊息是對的,只是沒有在這個形狀上觸發」:
+
+```console
+$ csv2 -r -t -md -i l            # l 是一個 lines 檔（0 列標頭）
+||
+||                               ← 一列空標頭與一列不是分隔列的分隔列，rc=0
+|one|
+                                 而 `-md needs -t: a Markdown table has no shape
+                                 without a header row` 這句話正好描述了這個檔案
+
+$ csv2 -r --md-table 2 -i h.csv --headers 1
+1,x                              ← rc=0，被安靜地忽略。README 說了兩次「用在不是 .md 的輸入上會被拒絕」
+
+$ csv2 -r -t -i h.csv -o x.md    # CSV 位元組寫進 .md
+rc=0                             ← 產物是 csv2 讀不了的 .md。反方向（-md -o x.csv2）有守衛且正確
+
+$ csv2 -delete -col 1 -i l --in-place
+rc=0，內容不變                    ← 對一欄的 .csv 是 `would remove all 1 columns`，對 lines 什麼都沒說
+
+$ csv2 -insert 1 zero -i l --in-place
+csv2: -insert 1 has 1 fields but the header has 0
+                                 ← 位置 2..N 可用，只有 1 不行；而那則訊息指名了一個不存在的標頭
+```
+
+**形狀:一條規則只套用到它成立範圍的一部分。** 與 GK、IG/IN、IO、IT、JT 同族——而這一次
+是同一天、同一批新程式碼上一次出現五個。共同成因是「這些守衛都以『有標頭』或『副檔名是
+.csv/.csv2』為前提寫成」,而 `.lines` 兩者都不是。
+
+## JY. 「沒有副檔名」其實是「任何不是 .csv/.csv2 的副檔名」(2026-08-27 修正,文件)
+
+README 說的是「a file with no suffix is one column」。實作的規則是
+`Format.from(path:)` 回傳 nil——也就是**任何**不是 `.csv`／`.csv2` 的副檔名:
+
+```console
+$ printf 'k,v\n1,x\n' > data.txt      # 一個真正的 CSV
+$ csv2 -r -i data.txt
+k,v
+1,x                                    ← 被當成一欄讀，rc=0
+```
+
+`.txt`、`.list`、`.log` 當成行清單正是這個功能的用途,因此**行為維持**;錯的是那句只講了
+「沒有副檔名」的文件,而它同時掩蓋了這個危險:一個叫 `data.txt` 的真 CSV 會被靜默地讀成一欄。
+`--headers 1` 仍然是覆蓋手段,而那必須寫在同一段裡。
+
+## JZ. 修 JW 時撞到的:單列標頭的表寫出 `.csv2` 的跳脫,卻被當成 `.csv` 解析(2026-08-27 修正,T211h)
+
+不是第 78 回合找到的,是我在修 JW 時,拿一個「單列標頭、值裡有換行」的 fixture 去驗往返才撞到的。
+第 8a 階段的翻譯層一律以 `.csv2` 編碼寫出中介位元組,而讀取層用的是「還原出來的標頭列數所隱含的
+格式」——單列標頭是 `.csv`。於是 `.csv2` 的跳脫沒有被解開:
+
+```console
+$ printf 'k\n"e\nf"\n' > x.csv          # 一列標頭，值裡有真正的換行
+$ csv2 -r -t -md -i x.csv | csv2 讀回來 | od -c
+   e   \   n   f                          ← 字面的反斜線加 n，不是換行
+```
+
+第 78 回合沒有抓到它,因為它的 `.md` fixture 要嘛是兩列標頭（走 `.csv2`,正確）,要嘛是單列標頭
+但值裡沒有特殊字元。**兩個各自正確的選擇,在它們相接的地方不一致**——而那個接縫上沒有測試。
+
+修法:翻譯時的編碼格式,由「還原出來的標頭列數」決定,與讀取層用的是同一個。T211h 釘住它,而它刻意
+比對的是 `-get` 從 `.md` 與從原檔取出的**位元組**,不是字串。

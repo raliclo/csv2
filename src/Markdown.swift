@@ -266,9 +266,20 @@ extension MarkdownIn {
         }
 
         let headerRows = try headerRowCount(of: chosen.header, path: path)
+        // The bytes are handed to the reader as the format the recovered header
+        // count implies, so the ESCAPING the translation writes has to be that
+        // same format's. Writing .csv2 escapes and then being parsed as .csv
+        // left a value's newline as a literal `\n` in the data -- silent
+        // corruption, found while fixing the CR rendering rather than by the
+        // round that found the CR. One header row is .csv; two is .csv2.
+        // 那些位元組是以「還原出來的標頭列數所隱含的格式」交給讀取器的，因此翻譯時寫出的**跳脫**
+        // 也必須是同一個格式的。寫 .csv2 的跳脫、卻被當成 .csv 解析，會讓一個值裡的換行以字面
+        // `\n` 留在資料裡——靜默的損壞，而它是在修 CR 的算繪時撞到的，不是找到 CR 那個回合抓到的。
+        // 一列標頭是 .csv，兩列是 .csv2。
+        let wire: Format = headerRows == 2 ? .csv2 : .csv
         var out: [UInt8] = []
-        try appendRow(chosen.header, headerRows: headerRows, into: &out)
-        for r in chosen.rows { try appendRow(r.1, headerRows: 1, into: &out) }
+        try appendRow(chosen.header, headerRows: headerRows, format: wire, into: &out)
+        for r in chosen.rows { try appendRow(r.1, headerRows: 1, format: wire, into: &out) }
         return (out, headerRows)
     }
 
@@ -306,7 +317,7 @@ extension MarkdownIn {
     /// two titles were one cell here and are two rows there.
     /// 一列 Markdown 會變成一或兩行 `.csv2`——兩行，是當這一列是「從 `.csv2` 算繪出來的表」的標頭
     /// 時，因為那兩個標題在這裡是一個儲存格，在那裡是兩列。
-    private static func appendRow(_ cells: [String], headerRows: Int, into out: inout [UInt8]) throws {
+    private static func appendRow(_ cells: [String], headerRows: Int, format: Format, into out: inout [UInt8]) throws {
         var columns: [[[UInt8]]] = Array(repeating: [], count: headerRows)
         for c in cells {
             let decoded = try MarkdownIn.unescape(c)
@@ -327,7 +338,7 @@ extension MarkdownIn {
             var line: [UInt8] = []
             for (i, f) in row.enumerated() {
                 if i > 0 { line.append(0x2C) }
-                line.append(contentsOf: FieldEncoder.encode(Field(value: f), format: .csv2, preserveRaw: false))
+                line.append(contentsOf: FieldEncoder.encode(Field(value: f), format: format, preserveRaw: false))
             }
             line.append(0x0A)
             out.append(contentsOf: line)

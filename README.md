@@ -86,7 +86,13 @@ rows, and on values that would otherwise need quoting. Round 77 measured this;
 in a document that quotes milliseconds in fifteen places, saying nothing read
 as "no difference".
 
-**A file with no suffix is one column, as of 2026-08-26.** A list of paths, a
+**A file whose suffix is not `.csv` or `.csv2` is one column, as of
+2026-08-26.** That includes no suffix at all, and it includes `.txt`, `.list`,
+`.log` — anything the tool does not recognise is a list of lines. This
+paragraph said "no suffix" until round 78 measured the rule, and the difference
+is a hazard worth stating: **a genuine CSV named `data.txt` reads as one column
+at exit 0**, because nothing about the name says otherwise. `--headers 1` is
+how you tell it, and it still works exactly as it did.** A list of paths, a
 `find` dump, a column of package names — a table that happens to have one
 column — is now readable without renaming it:
 
@@ -507,13 +513,17 @@ OUTPUT SHAPE / 輸出形狀
                         checker:
                         splitting a rendered row on `|` counts the escaped
                         ones too and reports an alignment fault that is not
-                        there. -md is a RENDERING and is not reversible: a
-                        cell holding the text <br> and a cell holding a real
-                        newline emit the same bytes. Use --json or -get to
-                        recover a value; -md is for reading.
-                        --pretty pads with spaces, so an empty cell and a
-                        cell of spaces look the same; that is display, not
-                        data, and --json still tells them apart.
+                        there. -md IS reversible as of 2026-08-26: read the
+                        table back from a path ending .md. This entry said the
+                        opposite until round 78 -- "a cell holding the text
+                        <br> and a cell holding a real newline emit the same
+                        bytes" was true, and stopped being true when the
+                        literal <br> started being escaped. It also told the
+                        reader not to do the thing the feature exists for.
+                        --pretty pads with spaces, and those pads are escaped
+                        on the way out (\x20) so a value's own edge spaces
+                        survive; an empty cell and a cell of spaces are still
+                        distinguishable, in the file and in --json.
                         --pretty aligns by DISPLAY width and therefore gives
                         up streaming. That width is grapheme clusters with
                         emoji presentation applied, NOT a per-code-point UAX

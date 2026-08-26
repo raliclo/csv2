@@ -994,6 +994,39 @@ func validate(_ o: inout Options) throws {
         throw usageError("-si needs --headers 1 or --headers 2: stdin has no extension to declare the format",
                          "-si 需要 --headers 1 或 --headers 2：stdin 沒有可宣告格式的副檔名")
     }
+    // `--md-table` picks a table out of a Markdown document, and there are no
+    // tables to pick out of anything else. It was ACCEPTED and IGNORED on any
+    // other input at rc=0, while the README said twice that it is refused --
+    // so a reader who mistyped the input path got the whole file and no hint.
+    // Round 78, JX.
+    // `--md-table` 是從一份 Markdown 文件裡挑出一張表，而別的東西裡沒有表可挑。它先前在任何其他
+    // 輸入上都是「被接受並忽略」，rc=0，而 README 說了兩次它會被拒絕——於是一個把輸入路徑打錯的
+    // 讀者，會拿到整個檔案而且沒有任何提示。第 78 回合，JX。
+    // `-delete -col` on a file with no header row was a silent no-op at rc=0:
+    // the whole column-dropping block lives inside "when the header rows are
+    // complete", and with zero header rows it never runs. The refusal it would
+    // have reached -- "would remove all N columns; a file with no columns is
+    // not a CSV file" -- is exactly right for a one-column file, and could not
+    // be reached. A no-op that reports success is worse than either. Round 78.
+    // `-delete -col` 用在一個沒有標頭列的檔案上，是一次 rc=0 的靜默空操作：整個「丟掉欄位」的區塊
+    // 住在「標頭列讀完時」裡面，而零列標頭時它永遠不會執行。它本來會走到的那句拒絕——「會刪掉全部
+    // N 欄；一個沒有欄位的檔案不是 CSV 檔」——對一個只有一欄的檔案完全正確，卻走不到。一次「回報
+    // 成功的空操作」比兩者都糟。第 78 回合。
+    if o.edits.contains(where: { if case .deleteColumn = $0 { return true }; return false }),
+       let inp = o.input, o.headersOverride == nil, Format.from(path: inp) == nil {
+        throw usageError(
+            "-delete -col on \(inp): a file with no .csv/.csv2 suffix is one column of lines, and removing its only column would leave nothing. Read it with --headers 1 if it really is CSV",
+            "-delete -col 用在 \(inp) 上：一個沒有 .csv／.csv2 副檔名的檔案是一欄的行清單，刪掉它唯一的一欄會什麼都不剩。若它確實是 CSV，請以 --headers 1 讀它")
+    }
+
+    if o.mdTable != nil {
+        let isMD = o.input?.lowercased().hasSuffix(".md") ?? false
+        if !isMD {
+            throw usageError(
+                "--md-table takes a table out of a Markdown document, and \(o.input.map { "\($0)" } ?? "this input") is not one; it names no tables to choose between",
+                "--md-table 是從一份 Markdown 文件裡取出一張表，而 \(o.input.map { "\($0)" } ?? "這個輸入") 不是；它裡面沒有可供挑選的表")
+        }
+    }
     if let h = o.headersOverride, h != 1 && h != 2 {
         throw usageError("--headers takes 1 or 2", "--headers 只能是 1 或 2")
     }
@@ -1450,8 +1483,36 @@ func validate(_ o: inout Options) throws {
     //
     // csv2 無法自行轉換：從一列標頭變成兩列，意味著要「發明」一列繁體中文標題，
     // 而發明資料正是這支工具絕不能做的事。
-    if let out = o.output, let outFmt = Format.from(path: out),
-       !(o.input?.lowercased().hasSuffix(".md") ?? false) {
+    // Writing CSV bytes to a `.md` produced a file csv2 refuses to read, at
+    // rc=0. The mirror of this -- `-md -o x.csv2` -- has been refused since
+    // long before Markdown could be read; this direction never had a guard,
+    // and only became reachable when `.md` started declaring a format.
+    // 把 CSV 的位元組寫進一個 `.md`，會產生一個 csv2 自己拒讀的檔案，而且 rc=0。它的鏡像
+    // ——`-md -o x.csv2`——早在 Markdown 還讀不回來之前就已經被拒絕；這個方向從來沒有守衛，
+    // 而它是在 `.md` 開始宣告一種格式之後才變得走得到。
+    if let out = o.output, out.lowercased().hasSuffix(".md"), !o.markdown {
+        throw usageError(
+            "\(out) ends in .md, which declares a Markdown table, and this run writes CSV. Add -md to render one, or choose a .csv/.csv2 destination",
+            "\(out) 以 .md 結尾，那宣告的是一張 Markdown 表，而這次執行寫出的是 CSV。請加上 -md 來算繪一張，或改用 .csv／.csv2 的目的地")
+    }
+    // A `.md` DESTINATION is excluded: how many header rows it will hold is
+    // decided by `-md` and by the input, not by the suffix, so comparing it
+    // against a header count is comparing against nothing. Defaulting it to
+    // `.lines` -- zero rows -- refused `-md -i one.csv -o out.md`, which is
+    // the ordinary way to render a table to a file and had worked all along.
+    // Caught by re-running the case the new guard was supposed to leave alone.
+    // 一個 `.md` **目的地**被排除在外：它會裝幾列標頭是由 `-md` 與輸入決定的，不是由副檔名決定，
+    // 因此拿它去和一個標頭列數比較，是在跟「沒有東西」比較。把它預設成 `.lines`（零列）會讓
+    // `-md -i one.csv -o out.md` 被拒絕，而那是「把一張表算繪到檔案」最普通的寫法，一直都可用。
+    // 這是靠「重跑一次那個新守衛本來就不該碰的案例」抓到的。
+    if let out = o.output, !(o.input?.lowercased().hasSuffix(".md") ?? false),
+       !out.lowercased().hasSuffix(".md") {
+        // The OUTPUT side needed the same correction: a destination with no
+        // suffix declares zero header rows, and `Format.from` returning nil
+        // meant this whole block was skipped for it.
+        // **輸出**那一側需要同樣的更正：一個沒有副檔名的目的地宣告的是零列標頭，而
+        // `Format.from` 回傳 nil 使得整個區塊對它直接跳過。
+        let outFmt = Format.from(path: out) ?? .lines
         // A `.md` input is skipped HERE and checked in openInput instead. This
         // guard runs at parse time, before any file is opened, and how many
         // header rows a Markdown table has is a property of its first line --
@@ -1467,7 +1528,25 @@ func validate(_ o: inout Options) throws {
         if let inp = o.input, let inFmt = Format.from(path: inp) {
             inRows = o.headersOverride ?? inFmt.headerRows
         } else {
-            inRows = o.headersOverride ?? 1
+            // A path with no .csv/.csv2 suffix is `.lines`: ZERO header rows,
+            // not one. Defaulting to 1 here made this guard compare 1 against
+            // a `.csv`'s 1, agree, and let the write through -- so csv2 wrote
+            // files csv2 itself could not read back:
+            //
+            //   0 rows into a .csv   the first line became a header and the
+            //                        read came back one record short, rc=0
+            //   1 row into no suffix the header became a record and `records`
+            //                        went 1 -> 2, rc=0
+            //
+            // The README describes that damage as what happens when somebody
+            // renames a file by hand, and says csv2 will not produce it. It
+            // did. Round 78, JV.
+            // 一個沒有 .csv/.csv2 副檔名的路徑是 `.lines`：**零**列標頭，不是一列。這裡預設成 1，
+            // 會讓這道守衛拿 1 去比一個 `.csv` 的 1、判定相符、放行那次寫入——於是 csv2 寫出了
+            // csv2 自己讀不回來的檔案：0 列寫進 .csv，第一行變成標頭、讀回來少一筆，rc=0；
+            // 1 列寫進無副檔名，標頭變成紀錄、`records` 從 1 變 2，rc=0。README 把那種損害描述成
+            // 「有人手動改名一個檔案」的後果，並說 csv2 自己不會製造它。它製造了。第 78 回合，JV。
+            inRows = o.headersOverride ?? 0
         }
         if inRows != outFmt.headerRows {
             throw usageError(

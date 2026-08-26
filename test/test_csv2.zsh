@@ -11814,6 +11814,87 @@ assert_eq "$("$CSV2" -r --headers 1 --json -i "$TMP/t210h1" | sed -n 2p)" \
     '{"record":1,"line":2,"fields":{"k":"1","v":"x"}}' \
     "T210m --headers still reads a suffix-less file as CSV / --headers 仍然能把沒有副檔名的檔案當成 CSV 讀"
 
+# ---------------------------------------------------------------------
+# T211 -- round 78, on two features that were days old and had been used by
+# nobody. Ten defects, and every one of them in code written in the two days
+# before it ran.
+#
+# The four that matter most are one root: the never-convert guard did not know
+# about `.lines`, so csv2 WROTE FILES CSV2 COULD NOT READ BACK, at rc=0 -- the
+# exact damage the README describes for a hand-renamed file while saying csv2
+# will not itself produce it.
+#
+# T211 —— 第 78 回合，針對兩個「只有幾天大、除了作者以外沒有人用過」的功能。十個缺陷，而每一個
+# 都在它執行前兩天內寫下的程式碼裡。
+# 其中最要緊的四個同一個根源：never-convert 那道守衛不認識 `.lines`，於是 csv2 **寫出了 csv2 自己
+# 讀不回來的檔案**，而且 rc=0——那正是 README 描述「手動改名一個檔案」會造成的損害，同時說 csv2
+# 自己不會製造它。
+# ---------------------------------------------------------------------
+echo
+echo "--- T211: what round 78 found / T211：第 78 回合找到的東西 ---"
+
+print -r -- "one" > "$TMP/t211l"; print -r -- "two" >> "$TMP/t211l"
+printf 'k,v\n1,x\n' > "$TMP/t211h.csv"
+
+# JV: the four writes that produced unreadable files.
+# JV：那四次「產出讀不回來的檔案」的寫入。
+assert_fails "T211a zero header rows into a .csv is refused / 零列標頭寫進 .csv 會被拒絕" -- \
+    "$CSV2" -r -t -i "$TMP/t211l" -o "$TMP/t211a.csv"
+assert_fails "T211b one header row into a suffix-less path is refused / 一列標頭寫進無副檔名的路徑會被拒絕" -- \
+    "$CSV2" -r -t -i "$TMP/t211h.csv" -o "$TMP/t211b"
+_t211_msg=$("$CSV2" -r -t -i "$TMP/t211l" -o "$TMP/t211.csv2" 2>&1)
+case $_t211_msg in
+    *"input has 0 header row(s)"*) ok "T211c and the refusal states the input's real header count / 而那句拒絕說出輸入真正的標頭列數" ;;
+    *) bad "T211c got: $_t211_msg / 實得如上" ;;
+esac
+# The same-shape writes must still work -- a guard that refuses everything is
+# not a guard.
+# 同型的寫入必須仍然可用——一個什麼都拒絕的守衛不是守衛。
+assert_succeeds "T211d lines to lines still writes / lines 寫到 lines 仍然可用" -- \
+    "$CSV2" -r -i "$TMP/t211l" -o "$TMP/t211d"
+assert_succeeds "T211e csv to csv still writes / csv 寫到 csv 仍然可用" -- \
+    "$CSV2" -r -t -i "$TMP/t211h.csv" -o "$TMP/t211e.csv"
+
+# JW: a CR must survive -md, and so must a CRLF -- neither did.
+# JW：CR 必須撐過 -md，CRLF 也是——兩者都沒有。
+print -r -- "k" > "$TMP/t211cr.csv"
+printf '"a\rb"\n"c\r\nd"\n"e\nf"\n' >> "$TMP/t211cr.csv"
+"$CSV2" -r -t -md -i "$TMP/t211cr.csv" > "$TMP/t211cr.md"
+"$CSV2" -r -t -i "$TMP/t211cr.md" > "$TMP/t211cr_back.csv"
+assert_same "$TMP/t211cr.csv" "$TMP/t211cr_back.csv" \
+    "T211f CR, CRLF and LF each survive the -md round trip / CR、CRLF 與 LF 各自撐過 -md 的往返"
+case "$(cat "$TMP/t211cr.md")" in
+    *'a\x0Db'*) ok "T211g and a CR is escaped the way this renderer says it escapes control bytes / 而 CR 是以「這個算繪器自己說的控制位元組寫法」被跳脫的" ;;
+    *) bad "T211g the CR is not \\x0D / 那個 CR 不是 \\x0D" ;;
+esac
+
+# The same-format escaping bug found while fixing JW: a ONE-header table wrote
+# .csv2 escapes and was parsed as .csv, leaving a newline as a literal \n.
+# 修 JW 時撞到的「格式不一致」缺陷：一張**單列標頭**的表寫出 .csv2 的跳脫，卻被當成 .csv 解析，
+# 於是一個換行以字面 \n 留在資料裡。
+assert_eq "$("$CSV2" -get 3:1 -i "$TMP/t211cr.md" | od -A n -c | tr -s ' ')" \
+    "$("$CSV2" -get 3:1 -i "$TMP/t211cr.csv" | od -A n -c | tr -s ' ')" \
+    "T211h a one-header table's newline comes back as a newline / 單列標頭的表，換行回來時仍是換行"
+
+# JX: five guards that existed, were right, and did not fire.
+# JX：五個「存在、正確、卻沒有觸發」的守衛。
+assert_fails "T211i --md-table is refused on input that is not a .md / --md-table 用在不是 .md 的輸入上會被拒絕" -- \
+    "$CSV2" -r --headers 1 --md-table 2 -i "$TMP/t211h.csv"
+assert_fails "T211j a .md destination without -md is refused / 沒有 -md 卻指定 .md 目的地會被拒絕" -- \
+    "$CSV2" -r -t -i "$TMP/t211h.csv" -o "$TMP/t211j.md"
+assert_succeeds "T211k while -md to a .md still works / 而 -md 寫到 .md 仍然可用" -- \
+    "$CSV2" -r -t -md -i "$TMP/t211h.csv" -o "$TMP/t211k.md"
+assert_fails "T211l -md on a file with no header row is refused / 對沒有標頭列的檔案下 -md 會被拒絕" -- \
+    "$CSV2" -r -t -md -i "$TMP/t211l"
+cp "$TMP/t211l" "$TMP/t211m"
+assert_fails "T211m -delete -col on a lines file is refused, not a silent no-op / 對 lines 檔下 -delete -col 會被拒絕，而不是靜默空操作" -- \
+    "$CSV2" -delete -col 1 -i "$TMP/t211m" --in-place
+cp "$TMP/t211l" "$TMP/t211n"
+assert_succeeds "T211n -insert 1 works, like every other position / -insert 1 可用，與其他每一個位置一樣" -- \
+    "$CSV2" -insert 1 zero -i "$TMP/t211n" --in-place
+assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t211n")" "zero" \
+    "T211o and it lands at position 1 / 而且它落在位置 1"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

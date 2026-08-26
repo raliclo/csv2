@@ -714,7 +714,22 @@ final class MarkdownEmitter: RecordEmitter {
                        : ctx.enOnly || (ctx.headers.count < 2) ? "rownum"
                        : "rownum<br>列號")
         }
-        for i in 0..<(ctx.headers.first?.count ?? 0) {
+        // A file with no header row has no table shape, and `-md needs -t` --
+        // the refusal that says exactly this -- did not fire because `-t` WAS
+        // given. The result was `||` for the header and `||` for the
+        // separator: a document csv2 then refuses to read, produced at rc=0.
+        // The guard existed and its sentence was right; it was keyed on the
+        // flag rather than on the thing the flag is a proxy for. Round 78, JX.
+        // 一個沒有標頭列的檔案沒有「表」的形狀，而 `-md needs -t`——那句正好在講這件事的拒絕
+        // ——沒有觸發，因為 `-t` **有給**。結果是標頭 `||`、分隔列 `||`：一份 csv2 自己拒讀的文件，
+        // 而且 rc=0。那個守衛存在、它的句子也是對的；它綁的是那個旗標，而不是那個旗標所代表的東西。
+        // 第 78 回合，JX。
+        guard let hdr = ctx.headers.first, hdr.count > 0 else {
+            throw fault(
+                "-md needs a header row to name the columns, and this file has none. A file with no suffix is one column of lines; give it a destination with a .csv or .csv2 suffix first, or pass --headers 1 to read it as CSV",
+                "-md 需要一列標頭來為欄位命名，而這個檔案沒有。沒有副檔名的檔案是一欄的行清單；請先給它一個 .csv 或 .csv2 副檔名的目的地，或以 --headers 1 把它當成 CSV 讀")
+        }
+        for i in 0..<hdr.count {
             // A Markdown table has ONE header row and .csv2 has two. Merging
             // them into one cell with <br> matches how this project's docs
             // already present both languages side by side.

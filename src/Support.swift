@@ -663,9 +663,26 @@ enum MarkdownOut {
         // 順序就是全部的訣竅：上一行已經把反斜線加倍了，因此這裡引入的那個反斜線不會被誤認為
         // 資料裡本來就有的；而下面那幾行換行替換，是唯一還會產生「未跳脫的 `<br>`」的東西。
         s = s.replacingOccurrences(of: "<br>", with: "\\<br>")
-        s = s.replacingOccurrences(of: "\r\n", with: "<br>")
+        // Only LF becomes `<br>`. A CR is a control byte and goes through the
+        // loop below as `\x0D`, which is what this function's own documented
+        // rule says -- "a TAB as \t, everything else below 0x20 and DEL as
+        // \xNN" -- and which TAB and DEL already obeyed while CR did not.
+        //
+        // Round 78 measured the consequence: a cell holding `a\rb` rendered
+        // `a<br>b` and read back as `a\nb`. One byte changed, rc=0, nothing
+        // said, in the round trip this README calls byte-identical. A CRLF was
+        // worse and the round did not reach it: both bytes became one `<br>`
+        // and came back as a single LF, so the pair could not survive either.
+        // Writing CR as `\x0D` makes a CRLF `\x0D<br>`, which does.
+        //
+        // 只有 LF 會變成 `<br>`。CR 是一個控制位元組，會走下面那個迴圈成為 `\x0D`——那正是這個
+        // 函式自己那條有記載的規則所說的（「TAB 是 \t，其餘 0x20 以下與 DEL 是 \xNN」），而 TAB
+        // 與 DEL 一直遵守著它，只有 CR 沒有。
+        // 第 78 回合量到了後果：一個存著 `a\rb` 的儲存格算繪成 `a<br>b`，讀回來是 `a\nb`。一個
+        // 位元組被改掉、rc=0、什麼都沒說，而那正是這份 README 稱為「逐位元相同」的那趟往返。
+        // CRLF 更糟，而那個回合沒有走到：兩個位元組變成一個 `<br>`，回來時是單一個 LF，於是那一對
+        // 同樣活不下來。把 CR 寫成 `\x0D`，CRLF 就成了 `\x0D<br>`，而那是活得下來的。
         s = s.replacingOccurrences(of: "\n", with: "<br>")
-        s = s.replacingOccurrences(of: "\r", with: "<br>")
         var out = ""
         out.reserveCapacity(s.count)
         for u in s.unicodeScalars {

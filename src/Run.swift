@@ -23,8 +23,16 @@ func makeSink(_ o: Options) throws -> ByteSink {
 func checkOutputPromise(_ o: Options, emitsRecords: Bool) throws {
     guard let path = o.output, Format.declaresFormat(path: path) else { return }
     if o.markdown {
-        throw fault("-md writes Markdown but \(path) declares a CSV format; Markdown cannot be read back by csv2",
-                    "-md 產生 Markdown，但 \(path) 的副檔名宣告的是 CSV 格式；Markdown 無法被 csv2 讀回")
+        // The reason was "Markdown cannot be read back by csv2", which stopped
+        // being true on 2026-08-26 and is a headline feature of the same
+        // README. The refusal is still right -- these bytes are not what that
+        // suffix declares -- so only the reason changed, and it now names the
+        // destination that works. Round 78.
+        // 那個理由原本是「Markdown 無法被 csv2 讀回」，而它在 2026-08-26 就不再為真，而且那是同一份
+        // README 的招牌功能之一。這條拒絕仍然是對的——這些位元組不是那個副檔名所宣告的東西——因此
+        // 只有理由改了，而它現在會指名一個行得通的目的地。第 78 回合。
+        throw fault("-md writes Markdown but \(path) declares a CSV format; give it a .md destination, which csv2 can read back",
+                    "-md 產生 Markdown，但 \(path) 的副檔名宣告的是 CSV 格式；請給它一個 .md 目的地，那個 csv2 讀得回來")
     }
     if o.json {
         throw fault("--json writes JSON Lines but \(path) declares a CSV format",
@@ -1357,6 +1365,17 @@ func runEdit(_ o: Options) throws {
             // 所有索引都指向輸入，且一次套用。逐一套用會讓
             // `-delete 3 -delete 4` 刪掉輸入的第 3 筆，再刪掉遞補到第 4 位的
             // 那一筆——那不是寫下這行的人想的。
+            // The width has to be known BEFORE an insert at position 1 is
+            // checked against it. With no header row it is set by the first
+            // record -- and an insert at 1 is handled while that very record
+            // is in hand, before the line below that sets it. So positions
+            // 2..N worked and 1 alone refused, with a message naming a header
+            // the file does not have. Round 78, JX.
+            // 那個寬度必須在「位置 1 的插入被拿去和它比較」**之前**就已知。沒有標頭列時，它由
+            // 第一筆紀錄決定——而位置 1 的插入，正是在那一筆還在手上時被處理的，也就是在下面
+            // 那行設定它之前。於是位置 2..N 可用，只有 1 被拒絕，而那則訊息指名了一個這個檔案
+            // 沒有的標頭。第 78 回合，JX。
+            if expectedFields == 0 { expectedFields = r.count }
             if let rows = inserts[r.number] {
                 touched.insert(r.number)
                 for row in rows {
