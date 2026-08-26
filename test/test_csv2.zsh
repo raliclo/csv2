@@ -162,24 +162,42 @@ skipt(){ print -r -- "SKIP  $1"; skip=$((skip + 1)) }
 # zsh 是在「子 shell」裡執行這個處理常式的，因此在它裡面做 `fail=$((fail + 1))` 會遺失
 # ——FAIL 那一行印得出來，而計數不動，那是一個「看起來有效」的守衛。改為把名字寫進檔案，
 # 在結算時加回去。
-# `stat` is OPTIONAL here: the aarch64 guest's busybox does not include the
-# applet, which is why file_mode has an ls fallback at all (T129e). Asking
-# whether it exists before calling it matters now that a missing command is a
-# failure -- the guard cannot tell a deliberate probe from a typo, and eight
-# probes made eight failures on the first guest run after it landed. The
-# distinction has to be made HERE, by the code that knows the command is
-# optional.
-# `stat` 在這裡是「可有可無」的：aarch64 guest 的 busybox 沒有把該 applet 編進去，那正是
-# file_mode 會有 ls 後備的原因（T129e）。既然「呼叫不存在的指令」現在算是失敗，就得先問它
-# 在不在——守衛分不出「刻意的探測」與「打錯字」，而在它落地後的第一次 guest 執行裡，八次
-# 探測就成了八個失敗。這個區分必須在「知道那個指令是選用的」這一端做，也就是這裡。
-stat_mode() {   # path -> octal mode, or empty when no stat is available
-    local m=""
-    if (( $+commands[stat] )); then
-        m=$(stat -c '%a' "$1" 2>/dev/null)                       # GNU / busybox
-        [[ $m == <-> ]] || m=$(stat -f '%Lp' "$1" 2>/dev/null)   # BSD / macOS
-    fi
-    [[ $m == <-> ]] && print -r -- "$m"
+# zstat, not stat(1). A rule for this tree as of 2026-08-26, and these two
+# lines were what it was aimed at:
+#
+#     m=$(stat -c '%a' "$1")      # GNU / busybox
+#     [[ $m == <-> ]] || m=$(stat -f '%Lp' "$1")   # BSD / macOS
+#
+# `stat(1)` has no portable interface. BSD and GNU both take -f and mean
+# opposite things by it, so a script has to write both and then guess which
+# answer is real -- and the guess is made by looking at the OUTPUT, which is
+# the shape of check this suite exists to distrust. `zstat` is a zsh builtin,
+# identical on every platform, and it returns into an array instead of a string
+# somebody then has to parse.
+#
+# The mask is `8#777` and not `0777`. zsh does not read a leading zero as
+# octal, so `h[mode] & 0777` is an AND with decimal 777 -- it returns 256 for a
+# 0644 file, a plausible number that is wrong. Found while probing for this
+# change, on the first command written.
+#
+# Empty on a platform without the module: the aarch64 guest's zsh does not
+# carry zsh/stat, which is why file_mode has an ls fallback at all (T129e).
+# Returning nothing rather than guessing is what lets the caller choose.
+#
+# 用 zstat，不用 stat(1)。這是這棵樹 2026-08-26 起的規則，而它針對的正是上面那兩行。
+# `stat(1)` 沒有可攜的介面。BSD 與 GNU 都收 -f，意思卻相反，於是腳本得兩種都寫、再猜哪個
+# 答案是真的——而那個猜法是「看輸出」，那正是這份測試存在所要不信任的那種檢查。`zstat` 是
+# zsh 的內建指令，每個平台都一樣，而且回傳到陣列，不是一個還要有人去剖析的字串。
+# 遮罩是 `8#777` 而不是 `0777`：zsh 不會把開頭的 0 當成八進位，因此 `h[mode] & 0777` 是與
+# 十進位 777 做 AND——對一個 0644 的檔案會得到 256，一個看起來合理而錯誤的數字。這是在為
+# 這次修改做探測時、在寫下的第一個指令上發現的。
+# 在沒有那個模組的平台上回傳空的：aarch64 guest 的 zsh 沒有帶 zsh/stat，那正是 file_mode
+# 會有 ls 後備的原因（T129e）。回傳「什麼都沒有」而不是去猜，才讓呼叫端能自己決定。
+zstat_mode() {   # path -> octal permission bits, or empty when zsh/stat is absent
+    zmodload -F zsh/stat b:zstat 2>/dev/null || return
+    local -A h
+    zstat -H h -- "$1" 2>/dev/null || return
+    printf '%o\n' $(( h[mode] & 8#777 ))
 }
 
 MISSING_LOG="${TMPDIR:-/tmp}/.csv2_missing_commands.$$"
@@ -6699,24 +6717,32 @@ else
     print -r -- '1,x' >> "$TMP/t129_mode.csv"
     chmod 600 "$TMP/t129_mode.csv"
     "$CSV2" -update 1:2 'Z' -i "$TMP/t129_mode.csv" --in-place >/dev/null 2>&1
-    # Reading a file's mode is the least portable thing in this suite.
-    #   - BSD stat and GNU stat both take -f, and they mean opposite things: the
-    #     mode format on macOS, "filesystem status" on Linux. The GNU one prints a
-    #     block of filesystem facts to STDOUT before exiting 1, so `A || B` runs B
-    #     as well and the substitution captures both.
-    #   - The aarch64 guest has NO stat at all: this busybox was built without the
-    #     applet, and zsh/stat is not in its module set either. Both branches then
-    #     produce nothing, which is why T129d failed there while passing on macOS
-    #     with the program behaving identically on both.
-    # So: ask each stat only what it understands, require the answer to look like
-    # a mode, and fall back to the one listing every Unix has.
-    # 讀一個檔案的模式，是這份測試裡可攜性最差的一件事。BSD 與 GNU 的 stat 都收 -f，
-    # 意思卻相反；而 aarch64 guest 上根本沒有 stat——這份 busybox 沒把該 applet 編進去，
-    # zsh/stat 模組也不在。兩條分支都給不出東西，於是 T129d 在那裡失敗、在 macOS 上通過，
-    # 而程式在兩邊的行為其實一樣。
+    # Reading a file's mode is the least portable thing in this suite, and the
+    # history is why this now asks zsh instead of asking a command:
+    #   - BSD stat and GNU stat both take -f and mean opposite things by it: the
+    #     mode format on macOS, "filesystem status" on Linux. The GNU one prints
+    #     a block of filesystem facts to STDOUT before exiting 1, so `A || B`
+    #     ran B as well and the substitution captured both.
+    #   - The aarch64 guest has no `stat` applet in its busybox, so both
+    #     branches produced nothing and T129d failed there while passing on
+    #     macOS, with the program behaving identically on both.
+    # zstat_mode uses the zsh builtin, which is the same everywhere and needs no
+    # guessing from output. The ls fallback stays, because the guest's zsh does
+    # not carry the zsh/stat module -- one platform still cannot answer, but now
+    # it is the only one, and it says so rather than guessing.
+    # 讀一個檔案的模式，是這份測試裡可攜性最差的一件事，而下面這段歷史正是「現在改成問 zsh、
+    # 不問某個指令」的理由：
+    #   - BSD 與 GNU 的 stat 都收 -f，意思卻相反：在 macOS 上是模式格式，在 Linux 上是
+    #     「檔案系統狀態」。GNU 那個會先把一整塊檔案系統資訊印到 STDOUT 再以 1 結束，於是
+    #     `A || B` 連 B 也跑了，而那次替換把兩者都收了進去。
+    #   - aarch64 guest 的 busybox 沒有 `stat` applet，於是兩條分支都給不出東西，T129d 在那裡
+    #     失敗、在 macOS 上通過，而程式在兩邊的行為其實一樣。
+    # zstat_mode 用的是 zsh 的內建指令，每個平台都一樣，也不必從輸出去猜。ls 後備保留，因為
+    # guest 的 zsh 沒有帶 zsh/stat 模組——仍然有一個平台答不出來，但現在只剩那一個，而且它會
+    # 說出來，不會用猜的。
     file_mode() {
         local m
-        m=$(stat_mode "$1")
+        m=$(zstat_mode "$1")
         [[ $m == <-> ]] || m=$(mode_from_ls "$1")                 # anywhere else
         print -r -- "$m"
     }
@@ -6752,12 +6778,12 @@ else
     # 所以在每一個兩者兼具的平台上把它們對起來，免得一個解錯的 rwx 解碼器一路潛伏到
     # 唯一依賴它的那個地方。
     chmod 754 "$TMP/t129_mode.csv"
-    _t129_stat=$(stat_mode "$TMP/t129_mode.csv")
-    if [[ $_t129_stat == <-> ]]; then
-        assert_eq "$(mode_from_ls "$TMP/t129_mode.csv")" "$_t129_stat" \
-            "T129e the ls fallback reads the same mode stat does / ls 後備讀到的模式與 stat 相同"
+    _t129_zstat=$(zstat_mode "$TMP/t129_mode.csv")
+    if [[ $_t129_zstat == <-> ]]; then
+        assert_eq "$(mode_from_ls "$TMP/t129_mode.csv")" "$_t129_zstat" \
+            "T129e the ls fallback reads the same mode zstat does / ls 後備讀到的模式與 zstat 相同"
     else
-        skipt "T129e the ls fallback reads the same mode stat does / ls 後備讀到的模式與 stat 相同 (no stat on this platform to compare against / 此平台沒有 stat 可供比對)"
+        skipt "T129e the ls fallback reads the same mode zstat does / ls 後備讀到的模式與 zstat 相同 (no zsh/stat module on this platform to compare against / 此平台沒有 zsh/stat 模組可供比對)"
     fi
 fi
 
@@ -10197,11 +10223,11 @@ else
     chmod 644 "$TMP/t191_src.csv"
     rm -f "$TMP/t191_new.csv"
     ( umask 022; "$CSV2" -r -t -i "$TMP/t191_src.csv" -o "$TMP/t191_new.csv" )
-    # file_mode, not stat_mode: the guest's busybox has no `stat` applet, and
-    # stat_mode is documented to return EMPTY there -- so this compared '' with
+    # file_mode, not zstat_mode: the guest's zsh has no zsh/stat module, and
+    # zstat_mode is documented to return EMPTY there -- so this compared '' with
     # '600' and failed for a reason that has nothing to do with the mode. The
     # ls fallback exists for exactly this and T129 already uses it.
-    # 用 file_mode 而不是 stat_mode：guest 的 busybox 沒有 `stat` applet，而 stat_mode 在那裡
+    # 用 file_mode 而不是 zstat_mode：guest 的 zsh 沒有 zsh/stat 模組，而 zstat_mode 在那裡
     # 依定義回傳「空的」——於是這裡拿 '' 去比 '600'，因為一個與權限無關的理由而失敗。
     # 那個 ls 後備正是為此而存在，T129 早就在用它了。
     assert_eq "$(file_mode "$TMP/t191_new.csv")" "600" \
@@ -11375,7 +11401,7 @@ if (( IS_WINDOWS )); then
     # （T131e）。T135c 需要一個使用者讀不到的檔案，而 chmod 在這裡咬不住。
     (( want_skip += 9 ))
 else
-    _t69_probe=$(stat_mode "$TMP")
+    _t69_probe=$(zstat_mode "$TMP")
     [[ $_t69_probe == <-> ]] || (( want_skip += 1 ))   # T129e
     # T135c needs a file it cannot read. Root can read anything, so in the
     # guest -- which runs as root -- that case skips and this count has to know
