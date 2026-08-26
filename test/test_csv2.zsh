@@ -6690,6 +6690,34 @@ assert_fails "T128d --include-headers without -contains is refused, as its sibli
 echo
 echo "--- T129: in place, on the right file / 就地，而且是對的那個檔案 ---"
 
+# Pin the claim itself, on every platform, every run.
+#
+# The sentence "the guest's zsh does not carry zsh/stat" was false and sat
+# in this file for weeks. It was not a discipline failure -- it was true of
+# the `stat` APPLET when it was written, and nothing here ever asked
+# whether it was still true of the MODULE. A claim about a platform that
+# only a comment holds will drift, and the drift is silent because the
+# comment sits beside the code and reads as though someone had just checked.
+#
+# So this asks. Four platforms carry zsh/stat today -- macOS, the aarch64
+# guest, WSL and the Windows MSYS zsh, measured 2026-08-26. If one ever
+# stops, this FAILS by name instead of T129e quietly skipping and a comment
+# explaining it away.
+#
+# 把那個宣稱本身釘住，在每個平台、每一次執行。
+# 「guest 的 zsh 沒有帶 zsh/stat」這句話是假的，而它在這個檔案裡待了好幾週。那不是紀律問題
+# ——它被寫下的當時，對 `stat` 這個 **applet** 而言為真，而這裡從來沒有任何東西去問過「它對
+# 那個**模組**是不是仍然為真」。一個只由註解持有的、關於某平台的宣稱一定會漂移，而且漂得無聲，
+# 因為註解就在它所描述的程式碼旁邊，看起來像是有人剛確認過。
+# 所以這裡去問。今天有四個平台帶著 zsh/stat——macOS、aarch64 guest、WSL、Windows 的 MSYS zsh，
+# 2026-08-26 量到。哪天有一個不再有，這裡會指名失敗，而不是 T129e 安靜地跳過、再由一則註解
+# 把它解釋掉。
+if zmodload -F zsh/stat b:zstat 2>/dev/null; then
+    ok "T129g this platform carries the zsh/stat module / 這個平台帶著 zsh/stat 模組"
+else
+    bad "T129g zsh/stat is gone from this platform -- zstat_mode returns empty here and T129e will skip; update the list beside this case / 這個平台上的 zsh/stat 不見了——zstat_mode 在這裡會回傳空的、T129e 會跳過；請更新這個案例旁邊那份清單"
+fi
+
 # Neither half of T129 has a meaning on Windows. MSYS2's `ln -s` copies the
 # file unless winsymlinks is set, so there is no link to preserve; and the mode
 # bits it reports are a POSIX-shaped fiction over an ACL. copyMode is compiled
