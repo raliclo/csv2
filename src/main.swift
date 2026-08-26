@@ -1517,15 +1517,47 @@ func validate(_ o: inout Options) throws {
     // 檔案，請用 -so」）就等在後面一步，卻永遠說不到話。macOS 先走到那一句而 guest 沒有，於是整件
     // 事只在 guest 上、而且是在一個 macOS 會跳過的案例上現形。第 78 回合自己的教訓，晚一個 commit，
     // 而且是我自己犯的。
+    // The OUTPUT side is back to "only when the suffix declares a format", and
+    // the input side is not. That asymmetry is the whole correction.
+    //
+    // Treating a suffix-less DESTINATION as zero header rows refused
+    // `-o /dev/stdout`, and the judgement I reached for -- "skip when it is
+    // not a regular file" -- is the exact wrong answer T145e was written to
+    // catch: with stdout redirected to a file, /dev/stdout resolves to
+    // /dev/fd/1, which IS a regular file. That test's own comment says so, and
+    // it has said so since round 55. It caught me anyway, on the platform
+    // where stdout is a file and not a pipe.
+    //
+    // There is no way to tell `-o plain` (a data file the caller named) from
+    // `-o /dev/stdout` (a stream) by looking at the path, so the guard must
+    // not try. What it still catches is the one that loses DATA: zero header
+    // rows into a .csv, where the first line becomes a header and the read
+    // comes back a record short. Writing a header-ed file to a suffix-less
+    // name loses nothing -- `-t` puts the header in the bytes; only the
+    // interpretation of the name differs, which is the caller's choice and is
+    // documented rather than refused.
+    //
+    // **輸出**那一側回到「只有在副檔名宣告了格式時才比較」，而輸入那一側不回去。那個不對稱正是
+    // 這次更正的全部。
+    // 把一個沒有副檔名的**目的地**當成零列標頭，會拒絕掉 `-o /dev/stdout`；而我伸手去拿的那個
+    // 判準——「不是一般檔案就跳過」——正是 T145e 當初被寫出來要抓的那個錯誤答案：當 stdout 被
+    // 重導向到一個檔案時，/dev/stdout 解析成 /dev/fd/1，而它**是**一般檔案。那個測試自己的註解
+    // 就這樣寫著，而且從第 55 回合起就這樣寫著。它照樣抓到了我——在「stdout 是檔案而不是管線」的
+    // 那個平台上。
+    // 從路徑看不出 `-o plain`（呼叫端指名的一個資料檔）與 `-o /dev/stdout`（一條串流）的差別，
+    // 因此這道守衛不該去試。它仍然抓得住的是「會**遺失資料**」的那一個：零列標頭寫進 `.csv`，
+    // 第一行變成標頭、讀回來少一筆。把一個有標頭的檔案寫到一個沒有副檔名的名字，什麼也不會遺失
+    // ——`-t` 把標頭放進了位元組裡；不同的只是「那個名字被怎麼解讀」，而那是呼叫端的選擇，
+    // 該被記載而不是被拒絕。
     if let out = o.output, !(o.input?.lowercased().hasSuffix(".md") ?? false),
        !out.lowercased().hasSuffix(".md"),
-       Platform.fileKind(path: out).map({ $0 == .regular }) ?? true {
+       Format.from(path: out) != nil {
         // The OUTPUT side needed the same correction: a destination with no
         // suffix declares zero header rows, and `Format.from` returning nil
         // meant this whole block was skipped for it.
         // **輸出**那一側需要同樣的更正：一個沒有副檔名的目的地宣告的是零列標頭，而
         // `Format.from` 回傳 nil 使得整個區塊對它直接跳過。
-        let outFmt = Format.from(path: out) ?? .lines
+        let outFmt = Format.from(path: out)!
         // A `.md` input is skipped HERE and checked in openInput instead. This
         // guard runs at parse time, before any file is opened, and how many
         // header rows a Markdown table has is a property of its first line --

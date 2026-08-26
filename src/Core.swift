@@ -166,7 +166,15 @@ public enum Format: String {
     /// 絕不偵測」這件事並不要求那樣：以大小寫不敏感的方式匹配 `.CSV`，讀的仍然是呼叫端給的
     /// 那個名字，不是從內容去猜。而在「`S.CSV` 與 `s.csv` 是同一個檔案」的那兩個平台上，
     /// 把它們當成兩種格式，不是任何人能夠據以行動的規則。
-    static func from(path: String) -> Format? {
+    /// Public because the alternative is a caller writing its own copy of
+    /// "the suffix declares the format" -- and that copy drifts away from this
+    /// one with nothing to report it. This rule changed on 2026-08-26 (a
+    /// suffix that is neither .csv nor .csv2 became a one-column list) and any
+    /// copy taken before that is now wrong while still compiling.
+    /// 公開它，因為另一條路是呼叫端自己抄一份「副檔名宣告格式」的規則——而那份複製品會與這一份
+    /// 反向漂移，卻沒有任何東西會回報。這條規則在 2026-08-26 改過（既不是 .csv 也不是 .csv2 的
+    /// 副檔名成為「一欄的行清單」），任何在那之前抄走的複製品，現在都是錯的，而且照樣編得過。
+    public static func from(path: String) -> Format? {
         let lower = path.lowercased()
         if lower.hasSuffix(".csv2") { return .csv2 }
         if lower.hasSuffix(".csv") { return .csv }
@@ -325,6 +333,32 @@ enum CSV2Escape {
 // ---------------------------------------------------------------------
 // MARK: - Encoding a field for output / 欄位的輸出編碼
 // ---------------------------------------------------------------------
+
+extension Record {
+    /// The one a WRITER needs. `Field` had a public init and this did not, so
+    /// a caller outside the module could take a Record apart and could not
+    /// build one -- and `FieldEncoder.encodeRecord` takes a Record. Reported
+    /// by the SoftPCB session, which needed exactly this to turn strings into
+    /// a logged row. The other fields keep their defaults on purpose: offset,
+    /// line and number describe where a record CAME FROM, and a record being
+    /// written has not come from anywhere.
+    /// 這是**寫入端**需要的那一個。`Field` 有一個 public init 而這裡沒有，於是 module 外面的呼叫端
+    /// 拆得開一個 Record、卻建不出一個——而 `FieldEncoder.encodeRecord` 收的正是 Record。由
+    /// SoftPCB session 回報，它需要的正是這個，用來把字串變成一列要寫進日誌的紀錄。其餘欄位刻意
+    /// 保留預設值：offset、line、number 描述的是一筆紀錄「從哪裡來」，而一筆正要被寫出去的紀錄
+    /// 哪裡都還沒來過。
+    public init(fields: [Field]) { self.fields = fields }
+    // In an extension, not in the body: writing ANY init inside a struct
+    // suppresses the memberwise one, and `RecordParser` builds every record it
+    // emits with `Record(fields:offset:line:)`. The build named it at once --
+    // "extra arguments at positions #2, #3" -- which is the kind of failure
+    // worth having, because the alternative is an init that silently loses two
+    // fields.
+    // 放在 extension 裡，不放在本體：在一個 struct 內寫**任何** init 都會抑制 memberwise init，
+    // 而 `RecordParser` 送出的每一筆紀錄，正是用 `Record(fields:offset:line:)` 建的。建置立刻
+    // 指名了它——「extra arguments at positions #2, #3」——那是值得擁有的那種失敗，因為另一個
+    // 結局是一個「安靜地少掉兩個欄位」的 init。
+}
 
 public enum FieldEncoder {
     /// `preserveRaw` is only safe when the output format equals the input

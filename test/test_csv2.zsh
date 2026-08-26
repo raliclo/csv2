@@ -11840,7 +11840,18 @@ printf 'k,v\n1,x\n' > "$TMP/t211h.csv"
 # JV：那四次「產出讀不回來的檔案」的寫入。
 assert_fails "T211a zero header rows into a .csv is refused / 零列標頭寫進 .csv 會被拒絕" -- \
     "$CSV2" -r -t -i "$TMP/t211l" -o "$TMP/t211a.csv"
-assert_fails "T211b one header row into a suffix-less path is refused / 一列標頭寫進無副檔名的路徑會被拒絕" -- \
+# Writing a header-ed file to a suffix-less name is ALLOWED, and T145e is why.
+# There is no way to tell `-o plain` from `-o /dev/stdout` by looking at the
+# path, and refusing both to catch the first refused a stream csv2 has always
+# written to. Nothing is lost either: `-t` puts the header in the bytes, and
+# only the reading of the NAME differs. The one that loses data -- zero header
+# rows into a .csv, where the first line becomes a header -- is still refused,
+# above.
+# 把一個「有標頭」的檔案寫到一個沒有副檔名的名字是**允許的**，而理由是 T145e。從路徑看不出
+# `-o plain` 與 `-o /dev/stdout` 的差別，而為了抓住前者去拒絕兩者，會拒絕掉一條 csv2 一直都在
+# 寫的串流。它也什麼都不會遺失：`-t` 把標頭放進了位元組裡，不同的只是那個**名字**被怎麼讀。
+# 會遺失資料的那一個——零列標頭寫進 .csv，第一行變成標頭——仍然被拒絕，就在上面。
+assert_succeeds "T211b one header row into a suffix-less path is allowed; -t keeps the header in the bytes / 一列標頭寫進無副檔名的路徑是允許的；-t 把標頭留在位元組裡" -- \
     "$CSV2" -r -t -i "$TMP/t211h.csv" -o "$TMP/t211b"
 _t211_msg=$("$CSV2" -r -t -i "$TMP/t211l" -o "$TMP/t211.csv2" 2>&1)
 case $_t211_msg in

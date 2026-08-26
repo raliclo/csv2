@@ -82,6 +82,30 @@ guard Format.csv2.headerRows == 2, Format.lines.headerRows == 0 else {
     fatalError("bad headerRows")
 }
 
+// BUILD a record from nothing, which is what a writer does. The first version
+// of this client only ever took records APART -- it never constructed one and
+// never asked a path what format it is -- so it passed while `Record` had no
+// public init and `Format.from(path:)` was internal. Both gaps were found by a
+// caller, not by this file, which is the shape a verification is supposed to
+// prevent.
+// 從零**建**一筆紀錄，那正是寫入端在做的事。這個客戶端的第一版從頭到尾只把紀錄「拆開」——它從未
+// 建構過一筆，也從未問過一個路徑是什麼格式——於是在 `Record` 沒有 public init、
+// `Format.from(path:)` 還是 internal 的情況下，它照樣通過。兩個缺口都是由一個呼叫端找到的，不是
+// 由這個檔案，而那正是「一份驗證」本來就該防止的形狀。
+let built = Record(fields: [Field(value: Array("a,b".utf8)), Field(value: Array("2".utf8))])
+let builtBytes = FieldEncoder.encodeRecord(built, format: .csv, preserveRaw: false)
+guard String(bytes: builtBytes, encoding: .utf8) == "\"a,b\",2\n" else {
+    fatalError("bad built record: \(String(bytes: builtBytes, encoding: .utf8) ?? "?")")
+}
+
+// Ask a PATH what format it is, rather than copying the rule.
+// 問一個**路徑**它是什麼格式，而不是把那條規則抄一份。
+guard Format.from(path: "x.csv2") == .csv2,
+      Format.from(path: "x.CSV") == .csv,
+      Format.from(path: "notes.txt") == nil else {
+    fatalError("bad Format.from")
+}
+
 print("client OK")
 SWIFT
 
