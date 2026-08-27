@@ -213,6 +213,34 @@ PKG
     return $?
 }
 
+# Can this environment build ANY package? Ask with an empty one first.
+#
+# The guest failed here, and "the SPM build does not work" is two different
+# statements: this package is broken, or SwiftPM cannot run here at all. The
+# guest builds from a tar payload with no network and a toolchain assembled for
+# cross-compiling, and an empty package is the cheapest way to tell those
+# apart. Without it, the guest reported a defect in a module that builds fine
+# there through swiftc, three lines above.
+#
+# 這個環境建得起**任何**一個 package 嗎？先用一個空的問。
+# guest 在這裡失敗了，而「SPM 建置不成功」是兩句不同的話：這個 package 壞了，或者 SwiftPM 在這裡
+# 根本跑不起來。guest 是從一個沒有網路的 tar payload 建置的，工具鏈也是為了交叉編譯而組起來的，
+# 而一個空 package 是分辨這兩件事最便宜的方式。少了它，guest 會為一個「在它上面用 swiftc 建得好好
+# 的、就在三行之上」的 module 回報一個缺陷。
+spm_probe=$WORK/spm_probe
+mkdir -p $spm_probe/Sources/Probe
+print -r -- 'public let probe = 1' > $spm_probe/Sources/Probe/Probe.swift
+cat > $spm_probe/Package.swift <<'PKG'
+// swift-tools-version:6.0
+import PackageDescription
+let package = Package(name: "Probe", targets: [.target(name: "Probe")])
+PKG
+if ! ( cd $spm_probe && swift build > $WORK/spm_probe.log 2>&1 ); then
+    print -r -- "SKIP  SwiftPM cannot build even an empty package here, so the SPM path is unchecked / SwiftPM 在這裡連一個空 package 都建不起來，SPM 那條路徑未檢查"
+    print -r -- "      $(tail -1 $WORK/spm_probe.log)"
+    exit 0
+fi
+
 if spm_build; then
     print -r -- "PASS  and it builds through SPM in Swift 6 language mode / 而它以 Swift 6 語言模式經 SPM 建得起來"
 else
