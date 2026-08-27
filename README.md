@@ -8,7 +8,7 @@ and the macOS host it is built from.
 
 ## Status
 
-**Phases 1–6 are implemented and pass their tests. Phase 7 (shipping) is a deliberate deferral.**
+**Phases 1–6 and 8–10 are implemented and pass their tests. Phase 7 (shipping) is a deliberate deferral.** One item in phase 9 is still open: repeating the Swift 6 module verification on macOS and aarch64 Linux, which has so far only been done natively on Windows.
 
 All build entry points require a Swift 6 toolchain and explicitly select Swift
 6 language mode; an installed Swift 6 compiler silently defaulting to Swift 5
@@ -2150,6 +2150,7 @@ here rather than to grow the table into something nobody reads.
 | `-delete -col` with `-add-column` | both number columns against the file as it arrives, so the same number means two different columns depending on which is applied first |
 | `-add-column N` with N past one-after-the-last column | clamping it to the end would exit 0 having silently ignored the number |
 | `-add-column 0` | columns are numbered from 1 here; 0 is the header |
+| `-add-column` on a file with no suffix | that file is one column, bytes verbatim, so a comma in it is DATA — a second column would be read back as part of the first |
 | `--a1` or `--physical` without a locating report | they add a part to the report's address, and `-r`/`--filter`/`-md`/`--json` do not emit one; there would be nothing to add to |
 | `-insert -cell` | inserting a cell mid-record shifts every later field one column along |
 | `-update 99:3` on a 21-record file | out of range is an error, never "grow the file to fit" |

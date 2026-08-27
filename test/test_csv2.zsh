@@ -12175,7 +12175,7 @@ else
 fi
 
 echo
-echo "--- T214: -add-column / T214：-add-column ---"
+echo "--- T215: -add-column / T215：-add-column ---"
 # Phase 10. The counterpart -delete -col never had. Every case here writes in
 # place and reads the file back with csv2 itself: a column added to the data
 # records but not to the header produces a file that csv2's own reader
@@ -12186,54 +12186,54 @@ echo "--- T214: -add-column / T214：-add-column ---"
 # 自己把檔案讀回來：一個「加進了資料列卻沒加進標頭」的欄位，會產生一份 csv2 自己的讀取器
 # 會拒絕的檔案，而第一個能動的版本正是那樣——寫標頭那一行落在 `-delete -col` 的區塊裡，
 # 於是只有在「同時也要刪掉某樣東西」時才會執行。
-_t214_src="$TMP/t214.csv2"
-printf 'pkg,ver\n套件,版本\nzlib,1.3\nlz4,1.9\n' > "$_t214_src"
+_t215_src="$TMP/t215.csv2"
+printf 'pkg,ver\n套件,版本\nzlib,1.3\nlz4,1.9\n' > "$_t215_src"
 
-_t214_run() {   # $1 = case letter+text, rest = flags; leaves $_t214_out set
-    cp "$_t214_src" "$TMP/t214w.csv2"
-    _t214_err=$("$CSV2" "$@" -i "$TMP/t214w.csv2" --in-place 2>&1 >/dev/null)
-    _t214_rc=$?
-    _t214_out=$("$CSV2" -r -i "$TMP/t214w.csv2" 2>&1)
-    _t214_readrc=$?
+_t215_run() {   # $1 = case letter+text, rest = flags; leaves $_t215_out set
+    cp "$_t215_src" "$TMP/t215w.csv2"
+    _t215_err=$("$CSV2" "$@" -i "$TMP/t215w.csv2" --in-place 2>&1 >/dev/null)
+    _t215_rc=$?
+    _t215_out=$("$CSV2" -r -i "$TMP/t215w.csv2" 2>&1)
+    _t215_readrc=$?
 }
 
-_t214_run -add-column 2 'note,備註' 'todo'
-if [[ $_t214_rc == 0 && $_t214_readrc == 0 \
-      && $_t214_out == 'zlib,todo,1.3
+_t215_run -add-column 2 'note,備註' 'todo'
+if [[ $_t215_rc == 0 && $_t215_readrc == 0 \
+      && $_t215_out == 'zlib,todo,1.3
 lz4,todo,1.9' ]]; then
-    ok "T214a a column inserted at 2 with a value reaches every data record / 在第 2 欄插入、帶值，會抵達每一筆資料"
+    ok "T215a a column inserted at 2 with a value reaches every data record / 在第 2 欄插入、帶值，會抵達每一筆資料"
 else
-    bad "T214a rc=$_t214_rc read=$_t214_readrc: $_t214_out / 實得如上"
+    bad "T215a rc=$_t215_rc read=$_t215_readrc: $_t215_out / 實得如上"
 fi
 
 # The header has to grow with the records, in BOTH rows, or the file csv2
 # writes is one csv2 will not read.
 # 標頭必須與紀錄一起變寬，而且是**兩列**都要，否則 csv2 寫出的檔案就是 csv2 讀不進去的那種。
-if [[ $(head -2 "$TMP/t214w.csv2") == 'pkg,note,ver
+if [[ $(head -2 "$TMP/t215w.csv2") == 'pkg,note,ver
 套件,備註,版本' ]]; then
-    ok "T214b and both header rows grow with it / 而兩列標頭都跟著變寬"
+    ok "T215b and both header rows grow with it / 而兩列標頭都跟著變寬"
 else
-    bad "T214b header is: $(head -2 "$TMP/t214w.csv2") / 實得如上"
+    bad "T215b header is: $(head -2 "$TMP/t215w.csv2") / 實得如上"
 fi
 
 # One past the last column is the append. It is the only N above the width
 # that means anything.
 # 「最後一欄再加一」就是附加。它是唯一一個大於寬度、卻仍有意義的 N。
-_t214_run -add-column 3 'note,備註'
-if [[ $_t214_rc == 0 && $(head -2 "$TMP/t214w.csv2") == 'pkg,ver,note
-套件,版本,備註' && $_t214_out == 'zlib,1.3,
+_t215_run -add-column 3 'note,備註'
+if [[ $_t215_rc == 0 && $(head -2 "$TMP/t215w.csv2") == 'pkg,ver,note
+套件,版本,備註' && $_t215_out == 'zlib,1.3,
 lz4,1.9,' ]]; then
-    ok "T214c N one past the last column appends, and an omitted value is empty / N 為最後一欄再加一時會附加，而省略的值是空的"
+    ok "T215c N one past the last column appends, and an omitted value is empty / N 為最後一欄再加一時會附加，而省略的值是空的"
 else
-    bad "T214c rc=$_t214_rc: $(head -2 "$TMP/t214w.csv2") | $_t214_out / 實得如上"
+    bad "T215c rc=$_t215_rc: $(head -2 "$TMP/t215w.csv2") | $_t215_out / 實得如上"
 fi
 
-_t214_run -add-column 1 'id,編號' 'x'
-if [[ $_t214_rc == 0 && $(head -1 "$TMP/t214w.csv2") == 'id,pkg,ver' && $_t214_out == 'x,zlib,1.3
+_t215_run -add-column 1 'id,編號' 'x'
+if [[ $_t215_rc == 0 && $(head -1 "$TMP/t215w.csv2") == 'id,pkg,ver' && $_t215_out == 'x,zlib,1.3
 x,lz4,1.9' ]]; then
-    ok "T214d and 1 is the FIRST column, not the second / 而 1 是第一欄，不是第二欄"
+    ok "T215d and 1 is the FIRST column, not the second / 而 1 是第一欄，不是第二欄"
 else
-    bad "T214d rc=$_t214_rc: $(head -1 "$TMP/t214w.csv2") | $_t214_out / 實得如上"
+    bad "T215d rc=$_t215_rc: $(head -1 "$TMP/t215w.csv2") | $_t215_out / 實得如上"
 fi
 
 # Clamping is the failure this tool is named after: -add-column 9 on a
@@ -12241,50 +12241,50 @@ fi
 # had been ignored.
 # 夾取正是這個工具最在意的那種失敗：兩欄檔案上的 -add-column 9 會落在最後並以 0 結束，
 # 而沒有任何東西說過那個 9 被忽略了。
-_t214_run -add-column 9 'x,y'
-if [[ $_t214_rc != 0 && $_t214_err == *"has 2 columns"* ]] && cmp -s "$_t214_src" "$TMP/t214w.csv2"; then
-    ok "T214e N beyond that is refused, and the file is untouched / 再往後的 N 會被拒絕，而檔案未被動過"
+_t215_run -add-column 9 'x,y'
+if [[ $_t215_rc != 0 && $_t215_err == *"has 2 columns"* ]] && cmp -s "$_t215_src" "$TMP/t215w.csv2"; then
+    ok "T215e N beyond that is refused, and the file is untouched / 再往後的 N 會被拒絕，而檔案未被動過"
 else
-    bad "T214e rc=$_t214_rc: $_t214_err / 實得如上"
+    bad "T215e rc=$_t215_rc: $_t215_err / 實得如上"
 fi
 
-_t214_run -add-column 0 'x,y'
-if [[ $_t214_rc != 0 && $_t214_err == *"numbered from 1"* ]]; then
-    ok "T214f 0 is refused by naming the header, not silently taken as the first column / 0 會被拒絕並指出 0 是標頭，而不是被靜默當成第一欄"
+_t215_run -add-column 0 'x,y'
+if [[ $_t215_rc != 0 && $_t215_err == *"numbered from 1"* ]]; then
+    ok "T215f 0 is refused by naming the header, not silently taken as the first column / 0 會被拒絕並指出 0 是標頭，而不是被靜默當成第一欄"
 else
-    bad "T214f rc=$_t214_rc: $_t214_err / 實得如上"
+    bad "T215f rc=$_t215_rc: $_t215_err / 實得如上"
 fi
 
 # A warning, on stderr, at rc=0 -- the file is still correct csv2. Copying the
 # English title into row 2 would be a translation csv2 invented.
 # 一則警告，走 stderr，rc=0——那個檔案仍然是正確的 csv2。把英文標題複製到第 2 列，
 # 會是一個 csv2 發明出來的翻譯。
-_t214_run -add-column 2 'note'
-if [[ $_t214_rc == 0 && $_t214_err == *"no Chinese title"* \
-      && $(head -2 "$TMP/t214w.csv2") == 'pkg,note,ver
+_t215_run -add-column 2 'note'
+if [[ $_t215_rc == 0 && $_t215_err == *"no Chinese title"* \
+      && $(head -2 "$TMP/t215w.csv2") == 'pkg,note,ver
 套件,,版本' ]]; then
-    ok "T214g a .csv2 without a Chinese title warns and leaves row 2 empty / 沒有中文標題的 .csv2 會警告，並把第 2 列留空"
+    ok "T215g a .csv2 without a Chinese title warns and leaves row 2 empty / 沒有中文標題的 .csv2 會警告，並把第 2 列留空"
 else
-    bad "T214g rc=$_t214_rc err=$_t214_err head=$(head -2 "$TMP/t214w.csv2") / 實得如上"
+    bad "T215g rc=$_t215_rc err=$_t215_err head=$(head -2 "$TMP/t215w.csv2") / 實得如上"
 fi
 
-_t214_run -add-column 2 'note,備註'
-if [[ -z $_t214_err ]]; then
-    ok "T214h while giving both titles says nothing at all / 而兩個標題都給了時，它什麼都不說"
+_t215_run -add-column 2 'note,備註'
+if [[ -z $_t215_err ]]; then
+    ok "T215h while giving both titles says nothing at all / 而兩個標題都給了時，它什麼都不說"
 else
-    bad "T214h said: $_t214_err / 實得如上"
+    bad "T215h said: $_t215_err / 實得如上"
 fi
 
 # A .csv has ONE header row, so one title is all there is to give and the
 # warning must not fire there.
 # `.csv` 只有一列標頭，因此「一個標題」就是全部，那則警告在那裡不得觸發。
-printf 'pkg,ver\nzlib,1.3\n' > "$TMP/t214.csv"
-_t214_csverr=$("$CSV2" -add-column 2 'note' 'todo' -i "$TMP/t214.csv" --in-place 2>&1 >/dev/null)
-if [[ -z $_t214_csverr && $(cat "$TMP/t214.csv") == 'pkg,note,ver
+printf 'pkg,ver\nzlib,1.3\n' > "$TMP/t215.csv"
+_t215_csverr=$("$CSV2" -add-column 2 'note' 'todo' -i "$TMP/t215.csv" --in-place 2>&1 >/dev/null)
+if [[ -z $_t215_csverr && $(cat "$TMP/t215.csv") == 'pkg,note,ver
 zlib,todo,1.3' ]]; then
-    ok "T214i a .csv takes one title and is not warned at / .csv 只收一個標題，而且不會被警告"
+    ok "T215i a .csv takes one title and is not warned at / .csv 只收一個標題，而且不會被警告"
 else
-    bad "T214i err=$_t214_csverr: $(cat "$TMP/t214.csv") / 實得如上"
+    bad "T215i err=$_t215_csverr: $(cat "$TMP/t215.csv") / 實得如上"
 fi
 
 # Both verbs number columns against the file as it ARRIVES, so the same number
@@ -12292,23 +12292,23 @@ fi
 # orders read correctly off the command line.
 # 兩個動詞都是對「送達時」的檔案編號，因此同一個數字會依誰先執行而指向兩個不同的欄
 # ——而兩種順序從命令列上讀起來都對。
-_t214_run -delete -col ver -add-column 2 'x,y'
-if [[ $_t214_rc != 0 && $_t214_err == *"cannot be combined"* ]]; then
-    ok "T214j -delete -col with -add-column is refused rather than ordered / -delete -col 與 -add-column 併用會被拒絕，而不是替它定一個順序"
+_t215_run -delete -col ver -add-column 2 'x,y'
+if [[ $_t215_rc != 0 && $_t215_err == *"cannot be combined"* ]]; then
+    ok "T215j -delete -col with -add-column is refused rather than ordered / -delete -col 與 -add-column 併用會被拒絕，而不是替它定一個順序"
 else
-    bad "T214j rc=$_t214_rc: $_t214_err / 實得如上"
+    bad "T215j rc=$_t215_rc: $_t215_err / 實得如上"
 fi
 
 # The title carries both rows as ONE CSV record, so a title containing a comma
 # is reached the same way any other comma-bearing field is: by quoting it.
 # 那個標題以「一筆 CSV 紀錄」承載兩列，因此含逗號的標題與其他任何含逗號的欄位一樣，
 # 靠加引號來表達。
-_t214_run -add-column 3 '"a,b",中文'
-if [[ $_t214_rc == 0 && $(head -2 "$TMP/t214w.csv2") == 'pkg,ver,"a,b"
+_t215_run -add-column 3 '"a,b",中文'
+if [[ $_t215_rc == 0 && $(head -2 "$TMP/t215w.csv2") == 'pkg,ver,"a,b"
 套件,版本,中文' ]]; then
-    ok "T214k a title containing a comma is quoted, not split / 含逗號的標題靠引號表達，不會被切開"
+    ok "T215k a title containing a comma is quoted, not split / 含逗號的標題靠引號表達，不會被切開"
 else
-    bad "T214k rc=$_t214_rc: $(head -2 "$TMP/t214w.csv2") / 實得如上"
+    bad "T215k rc=$_t215_rc: $(head -2 "$TMP/t215w.csv2") / 實得如上"
 fi
 
 # KB. The batch rule -- "All indexes refer to the INPUT and are applied in one
@@ -12322,33 +12322,33 @@ fi
 # 成立，不只在這個動詞與 -delete -col 之間。第一版把每一次插入套用在「前一次插入已經加寬過」的
 # 檔案上，於是兩欄檔案上的 `-add-column 2 ... -add-column 3 ...` 把第二個放在 ver 之**前**而不是
 # 之後，且 rc=0。擋住了跨動詞那一半、卻漏掉這一半，是同一條規則只被套用到它成立範圍的一部分。
-cp "$_t214_src" "$TMP/t214n.csv2"
-"$CSV2" -add-column 2 'a,甲' 'x' -add-column 3 'b,乙' 'y' -i "$TMP/t214n.csv2" --in-place 2>/dev/null
-if [[ $(head -1 "$TMP/t214n.csv2") == 'pkg,a,ver,b' ]]; then
-    ok "T214n a second -add-column counts against the ARRIVING file, not the widened one / 第二個 -add-column 對的是送達時的檔案，不是被加寬過的那個"
+cp "$_t215_src" "$TMP/t215n.csv2"
+"$CSV2" -add-column 2 'a,甲' 'x' -add-column 3 'b,乙' 'y' -i "$TMP/t215n.csv2" --in-place 2>/dev/null
+if [[ $(head -1 "$TMP/t215n.csv2") == 'pkg,a,ver,b' ]]; then
+    ok "T215n a second -add-column counts against the ARRIVING file, not the widened one / 第二個 -add-column 對的是送達時的檔案，不是被加寬過的那個"
 else
-    bad "T214n got: $(head -1 "$TMP/t214n.csv2") / 實得如上"
+    bad "T215n got: $(head -1 "$TMP/t215n.csv2") / 實得如上"
 fi
 
 # Two at the SAME position keep command-line order rather than reversing.
 # 兩個在**同一個位置**的，維持命令列順序，而不是被顛倒過來。
-cp "$_t214_src" "$TMP/t214n2.csv2"
-"$CSV2" -add-column 2 'a,甲' 'x' -add-column 2 'b,乙' 'y' -i "$TMP/t214n2.csv2" --in-place 2>/dev/null
-if [[ $(head -1 "$TMP/t214n2.csv2") == 'pkg,a,b,ver' ]]; then
-    ok "T214o and two at the same position keep the order they were typed in / 而兩個在同一個位置的，維持它們被打出來的順序"
+cp "$_t215_src" "$TMP/t215n2.csv2"
+"$CSV2" -add-column 2 'a,甲' 'x' -add-column 2 'b,乙' 'y' -i "$TMP/t215n2.csv2" --in-place 2>/dev/null
+if [[ $(head -1 "$TMP/t215n2.csv2") == 'pkg,a,b,ver' ]]; then
+    ok "T215o and two at the same position keep the order they were typed in / 而兩個在同一個位置的，維持它們被打出來的順序"
 else
-    bad "T214o got: $(head -1 "$TMP/t214n2.csv2") / 實得如上"
+    bad "T215o got: $(head -1 "$TMP/t215n2.csv2") / 實得如上"
 fi
 
 # The bounds check must also read the arriving width: an earlier insert must
 # not make a number that was out of range become legal.
 # 越界檢查同樣要讀「送達時」的寬度：前面的一次插入，不得讓一個原本越界的數字變成合法。
-cp "$_t214_src" "$TMP/t214n3.csv2"
-_t214_n3=$("$CSV2" -add-column 2 'a,甲' -add-column 4 'b,乙' -i "$TMP/t214n3.csv2" --in-place 2>&1 >/dev/null)
-if [[ $? != 0 && $_t214_n3 == *"has 2 columns"* ]] && cmp -s "$_t214_src" "$TMP/t214n3.csv2"; then
-    ok "T214p and an earlier insert does not make an out-of-range N legal / 而前面的一次插入，不會讓一個越界的 N 變成合法"
+cp "$_t215_src" "$TMP/t215n3.csv2"
+_t215_n3=$("$CSV2" -add-column 2 'a,甲' -add-column 4 'b,乙' -i "$TMP/t215n3.csv2" --in-place 2>&1 >/dev/null)
+if [[ $? != 0 && $_t215_n3 == *"has 2 columns"* ]] && cmp -s "$_t215_src" "$TMP/t215n3.csv2"; then
+    ok "T215p and an earlier insert does not make an out-of-range N legal / 而前面的一次插入，不會讓一個越界的 N 變成合法"
 else
-    bad "T214p said: $_t214_n3 / 實得如上"
+    bad "T215p said: $_t215_n3 / 實得如上"
 fi
 
 # The plan said to CHECK this rather than assume it: rawRowWriteRefusal stops
@@ -12359,31 +12359,51 @@ fi
 # 計畫要求**查證**而不是假設這一點：rawRowWriteRefusal 會擋住「含受保護欄位的檔案」上的
 # -append，而沒有理由確定它不會也擋住這個。它不會擋，而且那趟往返仍然合得起來——那才是
 # 「萬一壞掉會是無聲的」那一部分，因為一段解不開的密文，看起來與一段密文一模一樣。
-printf 'pkg,ver\n套件,版本\nzlib,1.3\nlz4,1.9\n' > "$TMP/t214p.csv2"
-if "$CSV2" -encrypt ver -keyfile "$KEY" -i "$TMP/t214p.csv2" -o "$TMP/t214e.csv2" 2>/dev/null \
-   && "$CSV2" -add-column 2 'note,備註' 'todo' -i "$TMP/t214e.csv2" --in-place 2>/dev/null \
-   && "$CSV2" -decrypt ver -keyfile "$KEY" -i "$TMP/t214e.csv2" -o "$TMP/t214d.csv2" 2>/dev/null \
-   && [[ $(cat "$TMP/t214d.csv2") == 'pkg,note,ver
+printf 'pkg,ver\n套件,版本\nzlib,1.3\nlz4,1.9\n' > "$TMP/t215p.csv2"
+if "$CSV2" -encrypt ver -keyfile "$KEY" -i "$TMP/t215p.csv2" -o "$TMP/t215e.csv2" 2>/dev/null \
+   && "$CSV2" -add-column 2 'note,備註' 'todo' -i "$TMP/t215e.csv2" --in-place 2>/dev/null \
+   && "$CSV2" -decrypt ver -keyfile "$KEY" -i "$TMP/t215e.csv2" -o "$TMP/t215d.csv2" 2>/dev/null \
+   && [[ $(cat "$TMP/t215d.csv2") == 'pkg,note,ver
 套件,備註,版本
 zlib,todo,1.3
 lz4,todo,1.9' ]]; then
-    ok "T214l a column added beside an encrypted one still decrypts / 在一個加密欄位旁邊新增的欄位，仍然解得開"
+    ok "T215l a column added beside an encrypted one still decrypts / 在一個加密欄位旁邊新增的欄位，仍然解得開"
 else
-    bad "T214l round trip gave: $(cat "$TMP/t214d.csv2" 2>&1) / 實得如上"
+    bad "T215l round trip gave: $(cat "$TMP/t215d.csv2" 2>&1) / 實得如上"
 fi
 
 # A hashed column keeps its marker AND its digest: the add moves the column
 # sideways and must not touch what is in it.
 # 被雜湊的欄位會保住它的標記**與**它的摘要：新增只是把那個欄位往旁邊移，不得動到它裡面的東西。
-"$CSV2" -hash ver -keyfile "$KEY" -i "$TMP/t214p.csv2" -o "$TMP/t214h.csv2" 2>/dev/null
-_t214_before=$("$CSV2" -get 1:ver -i "$TMP/t214h.csv2" 2>/dev/null)
-"$CSV2" -add-column 1 'id,編號' 'x' -i "$TMP/t214h.csv2" --in-place 2>/dev/null
-_t214_after=$("$CSV2" -get 1:ver -i "$TMP/t214h.csv2" 2>/dev/null)
-if [[ -n $_t214_before && $_t214_before == $_t214_after \
-      && $(head -1 "$TMP/t214h.csv2") == 'id,pkg,ver:hmac:'* ]]; then
-    ok "T214m and a hashed column keeps its marker and its digest / 而被雜湊的欄位保住了它的標記與摘要"
+"$CSV2" -hash ver -keyfile "$KEY" -i "$TMP/t215p.csv2" -o "$TMP/t215h.csv2" 2>/dev/null
+_t215_before=$("$CSV2" -get 1:ver -i "$TMP/t215h.csv2" 2>/dev/null)
+"$CSV2" -add-column 1 'id,編號' 'x' -i "$TMP/t215h.csv2" --in-place 2>/dev/null
+_t215_after=$("$CSV2" -get 1:ver -i "$TMP/t215h.csv2" 2>/dev/null)
+if [[ -n $_t215_before && $_t215_before == $_t215_after \
+      && $(head -1 "$TMP/t215h.csv2") == 'id,pkg,ver:hmac:'* ]]; then
+    ok "T215m and a hashed column keeps its marker and its digest / 而被雜湊的欄位保住了它的標記與摘要"
 else
-    bad "T214m before=$_t214_before after=$_t214_after head=$(head -1 "$TMP/t214h.csv2") / 實得如上"
+    bad "T215m before=$_t215_before after=$_t215_after head=$(head -1 "$TMP/t215h.csv2") / 實得如上"
+fi
+
+# KC. A suffix-less file is `.lines`: ONE column, zero header rows, bytes
+# verbatim, so a comma in it is DATA. Adding a column wrote `v,alpha` and
+# reading it back gave ONE field containing a comma -- csv2 writing a file
+# csv2 misreads, at rc=0. Same hole JV came through earlier the same day: a
+# format added in phase 8 is not automatically remembered by a verb added in
+# phase 10.
+# KC。沒有副檔名的檔案是 `.lines`：一欄、零列標頭、位元組原樣，因此裡面的逗號是**資料**。
+# 新增一欄會寫出 `v,alpha`，而讀回來得到的是**一個**含逗號的欄位——csv2 在 rc=0 之下寫出一個
+# csv2 自己會誤讀的檔案。與 JV 同一天稍早走過的是同一個缺口：第 8 階段加的格式，不會自動被
+# 第 10 階段加的動詞想起來。
+printf 'alpha\nbeta\n' > "$TMP/t215plain"
+_t215_lines=$("$CSV2" -add-column 1 'x' 'v' -i "$TMP/t215plain" --in-place 2>&1 >/dev/null)
+_t215_lrc=$?
+if [[ $_t215_lrc != 0 && $_t215_lines == *"no suffix"* && $(cat "$TMP/t215plain") == 'alpha
+beta' ]]; then
+    ok "T215q -add-column on a suffix-less file is refused, not written as a comma / 對沒有副檔名的檔案用 -add-column 會被拒絕，而不是寫出一個逗號"
+else
+    bad "T215q rc=$_t215_lrc said: $_t215_lines file: $(cat "$TMP/t215plain") / 實得如上"
 fi
 
 echo

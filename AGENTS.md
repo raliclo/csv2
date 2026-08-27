@@ -11,7 +11,7 @@ through it; each rule there carries the round number where it was learned.
 [blind-test-flow.md](./blind-test-flow.md)。已經跑過七十九個回合；那裡的每一條規則都帶著
 「它是在哪一回合被學到的」那個編號。
 
-## Status: phases 1–6 done; only phase 7 (shipping) remains / 狀態：第 1–6 階段完成，只剩第 7 階段（出貨）
+## Status: phases 1–6 and 8–10 done; phase 7 (shipping) deferred / 狀態：第 1–6 與 8–10 階段完成；第 7 階段（出貨）暫緩
 
 ```zsh
 ./compile_csv2.zsh      # auto-detects macOS/Linux/Windows / 自動偵測 macOS／Linux／Windows
@@ -32,19 +32,29 @@ the missing file.
 `cannot find 'runParallelSearch' in scope` 失敗——那個訊息指出的是符號，不是缺少的檔案。
 
 Working: the RFC 4180 parser, `-r`, the selection flags, two-row headers,
-`--json`, `-md` including `--pretty` with a UAX #11 width table, all four edit
-verbs, `-hash`/`-encrypt`/`-decrypt`, `-debug`, `-log`, the `-append` O(1) fast
-path, the `.index` sidecar with `--verify-index`, and parallel search.
+`--json`, `-md` including `--pretty` with a UAX #11 width table, reading a
+Markdown table back in (`--md-table N` when a file holds more than one), a
+suffix-less file as one column, all five edit verbs -- `-insert`, `-append`,
+`-delete`, `-update` and `-add-column` -- `-hash`/`-encrypt`/`-decrypt`,
+`-debug`, `-log`, the `-append` O(1) fast path, the `.index` sidecar with
+`--verify-index`, parallel search, and a library surface of seven public types
+importable as a module.
 
 Phase 6 is done: csv2 builds inside the aarch64 Linux guest and its output is
 byte-identical to macOS across 12 compared invocations. Not implemented:
-shipping (phase 7), which is a deliberate deferral rather than a gap.
+shipping (phase 7), which is a deliberate deferral rather than a gap. One item
+in phase 9 is still open: repeating the Swift 6 module verification on macOS
+and aarch64 Linux, which has so far only been done natively on Windows.
 
 可用：RFC 4180 解析器、`-r`、選取旗標、兩列標頭、`--json`、`-md`（含 `--pretty`
-與 UAX #11 寬度表）、四個編輯動詞、`-hash`／`-encrypt`／`-decrypt`、`-debug`、
-`-log`、`-append` 的 O(1) 快路徑、`.index` sidecar 與 `--verify-index`，以及平行搜尋。
+與 UAX #11 寬度表）、把 Markdown 表讀回來（檔案不只一張表時用 `--md-table N`）、
+把沒有副檔名的檔案讀成一欄、**五個**編輯動詞——`-insert`、`-append`、`-delete`、
+`-update` 與 `-add-column`——`-hash`／`-encrypt`／`-decrypt`、`-debug`、`-log`、
+`-append` 的 O(1) 快路徑、`.index` sidecar 與 `--verify-index`、平行搜尋，以及一個
+「可當 module 匯入」的七個 public 型別的 library 表面。
 第 6 階段已完成：csv2 能在 aarch64 Linux guest 內建置，且 12 組比對的輸出與 macOS
-逐位元相同。未實作：出貨（第 7 階段），那是刻意暫緩而非缺口。
+逐位元相同。未實作：出貨（第 7 階段），那是刻意暫緩而非缺口。第 9 階段還有一項未完成：
+在 macOS 與 aarch64 Linux 上重跑那份 Swift 6 module 驗證，目前只在 Windows 上原生做過。
 
 ### Environment knobs / 環境變數
 

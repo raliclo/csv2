@@ -1026,6 +1026,26 @@ func runEdit(_ o: Options) throws {
         try checkTornAppend(path: p, format: plan.format, truncatePartial: o.truncatePartial)
     }
 
+    // A suffix-less file is `.lines`: ONE column, zero header rows, bytes
+    // verbatim -- so a comma there is DATA. Adding a column to it writes a
+    // file whose second field is only a second field until it is read back,
+    // at which point the comma is data again and the record is one field
+    // containing a comma. csv2 would be writing a file csv2 misreads, at
+    // rc=0, which is the same hole JV came through earlier the same day. The
+    // refusal is the one that already stops `.csv` being written as `.csv2`:
+    // the suffix declares the format, and this file's suffix cannot declare
+    // two columns. KC in todo/known-defects.md, T214q.
+    // 沒有副檔名的檔案是 `.lines`：**一欄**、零列標頭、位元組原樣——因此那裡的逗號是**資料**。
+    // 對它新增一欄，寫出的檔案裡「第二個欄位」只在被讀回來之前是第二個欄位；讀回來時那個逗號
+    // 又是資料，那一筆就成了「一個含逗號的欄位」。csv2 會在 rc=0 之下寫出一個 csv2 自己會誤讀的
+    // 檔案，而那是 JV 同一天稍早走過的同一個缺口。這道拒絕與「阻止 `.csv` 被寫成 `.csv2`」是
+    // 同一道：副檔名宣告格式，而這個檔案的副檔名宣告不出兩欄。見 todo/known-defects.md 的 KC、T214q。
+    if plan.format == .lines, o.edits.contains(where: { if case .addColumn = $0 { return true }; return false }) {
+        throw fault(
+            "-add-column on a file with no suffix: that is one column, zero header rows, bytes verbatim, so a comma in it is DATA. A second column would be read back as part of the first. Write it to a file named .csv or .csv2 instead",
+            "-add-column 用在沒有副檔名的檔案上：那是一欄、零列標頭、位元組原樣，因此裡面的逗號是**資料**。第二欄讀回來時會變成第一欄的一部分。請改寫到一個名為 .csv 或 .csv2 的檔案")
+    }
+
     var inserts: [Int: [String]] = [:]
     var appends: [String] = []
     var deletes: [(Int, Int)] = []

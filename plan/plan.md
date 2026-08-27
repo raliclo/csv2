@@ -1,9 +1,14 @@
 # `csv2` —— guest 端的 CSV 解析器與編輯器
 
-狀態：**第 1–6 階段全部完成。** macOS 與 aarch64 Linux guest 兩邊皆 0 失敗，唯一的略過是
+狀態：**第 1–6 與 8–10 階段全部完成。** macOS 與 aarch64 Linux guest 兩邊皆 0 失敗，唯一的略過是
 T47（它比對兩個平台，因此無法從其中一個平台內部執行，由母專案的
-`test_submodules/run_csv2_test.zsh` 驅動）；兩邊 12 組輸出逐位元相同。只剩第 7 階段
-（出貨，刻意暫緩）。
+`test_submodules/run_csv2_test.zsh` 驅動）；兩邊 12 組輸出逐位元相同。第 7 階段（出貨）刻意暫緩；
+第 9 階段還有一項未完成——在 macOS 與 aarch64 Linux 上重跑那份 Swift 6 module 驗證，目前只在
+Windows 上原生做過。
+
+這一行在第 8、9、10 階段完成之後仍寫著「只剩第 7 階段」，直到 2026-08-27 才被更正——與它下面
+那段講的是同一件事，只是換成了階段編號而不是通過數量。**移除一個會衰減的數字，並不會讓句子裡
+其餘部分停止衰減。**
 
 這裡曾經寫著兩個通過數量，而且兩個都是舊的——macOS 寫 112、guest 寫 72，實際早已遠超過。
 **那正是 T69 存在的理由，而它掃不到這個檔案。** 數字不是被更新，是被移除：一個每次提交都會
@@ -3309,11 +3314,11 @@ tested.
   ciphertext that no longer decrypts looks exactly like a ciphertext, so this
   is a failure that would have been silent. rawRowWriteRefusal does not fire,
   the marker and the digest are carried across the move, and the encrypt →
-  add → decrypt round trip closes. T214l and T214m pin both.
+  add → decrypt round trip closes. T215l and T215m pin both.
   **既有欄位裡有受保護欄位：允許，而且查證過。** 計畫寫的是「查證而不是假設」，而那個查證正是
   重點：一段解不開的密文，看起來與一段密文一模一樣，因此這是一個「壞掉也會是無聲的」失敗。
   rawRowWriteRefusal 不會觸發，標記與摘要都在移動中被帶過去，而「加密 → 新增 → 解密」那趟往返
-  合得起來。T214l 與 T214m 各釘住一項。
+  合得起來。T215l 與 T215m 各釘住一項。
 - **The batch rule holds BETWEEN two `-add-column`, not only against
   `-delete -col`.** Refusing the cross-verb case and then letting the second
   `-add-column` count against the file the first had already widened is the
@@ -3323,32 +3328,51 @@ tested.
   The fix is not another refusal: the batch rule already answers this and
   `-insert` already obeys it. Shift each insert by the ones already placed at
   or before it, and check bounds against the ARRIVING width rather than the
-  half-inserted middle. KB, T214n/o/p.
+  half-inserted middle. KB, T215n/o/p.
   **批次規則在兩個 `-add-column` 之間也成立，不只對 `-delete -col` 成立。** 擋住了跨動詞那一個
   情況，卻讓第二個 `-add-column` 算在「第一個已經加寬過」的檔案上，是同一條規則只被套用到它成立
   範圍的一部分——同一個函式、相隔幾行、同一天。兩欄檔案上的 `-add-column 2 A -add-column 3 B`
   把 B 放在舊的第 2 欄之前而不是之後，且 rc=0。修法不是再加一道拒絕：批次規則已經有答案，而
   `-insert` 早就遵守它。把每一次插入依「已經放在它位置或更前面的那幾個」平移，並以**送達時**的
-  寬度而不是插到一半的中間狀態做越界檢查。KB，T214n／o／p。
+  寬度而不是插到一半的中間狀態做越界檢查。KB，T215n／o／p。
+- **A suffix-less file (`.lines`) REFUSES the verb.** That format is one
+  column, zero header rows, bytes verbatim -- a comma in it is DATA. Adding a
+  column wrote `v,alpha`, and reading it back gave one field containing a
+  comma: csv2 writing a file csv2 misreads, at rc=0. The refusal is the one
+  that already stops a `.csv` being written as a `.csv2` -- the suffix
+  declares the format, and this file's suffix cannot declare two columns.
+  **This is the second time `.lines` has cost this tree the same thing**: JV,
+  fixed earlier the same day, was the never-convert guard not knowing about
+  it. A format added in phase 8 is not automatically remembered by a verb
+  designed in phase 10, and the phase 10 list of "which formats does this verb
+  meet" had only `.csv` and `.csv2` on it. KC, T215q.
+  **沒有副檔名的檔案（`.lines`）會拒絕這個動詞。** 那個格式是一欄、零列標頭、位元組原樣——裡面的
+  逗號是**資料**。新增一欄會寫出 `v,alpha`，而讀回來得到的是一個含逗號的欄位：csv2 在 rc=0 之下
+  寫出一個 csv2 自己會誤讀的檔案。這道拒絕與「阻止 `.csv` 被寫成 `.csv2`」是同一道——副檔名宣告
+  格式，而這個檔案的副檔名宣告不出兩欄。**這是 `.lines` 第二次讓這棵樹付同一筆帳**：同一天稍早
+  修掉的 JV，是那道 never-convert 守衛不認識它。第 8 階段加的格式，不會自動被第 10 階段設計的
+  動詞想起來，而第 10 階段那份「這個動詞會遇到哪些格式」的清單上，只有 `.csv` 與 `.csv2`。
+  KC，T215q。
 - **The header write must not live inside the `-delete -col` block.** It did,
   in the first version: every data record grew and the header kept its arriving
   width, so a run that only added a column produced a file csv2's own reader
   then refused -- `record 1 (line 3) has 3 fields but the header has 2`. The
-  write succeeded; the file was wrong; the next read is what said so. T214b is
+  write succeeded; the file was wrong; the next read is what said so. T215b is
   there for exactly this.
   **寫標頭那一行不能住在 `-delete -col` 的區塊裡。** 第一版就是那樣：每一筆資料列都變寬了而
   標頭維持送達時的寬度，於是一次「只加不刪」的執行產生了一份 csv2 自己的讀取器隨後就拒絕的檔案
   ——`record 1 (line 3) has 3 fields but the header has 2`。寫入成功了；檔案是錯的；說出這件事的
-  是下一次讀取。T214b 就是為了這一個而存在。
+  是下一次讀取。T215b 就是為了這一個而存在。
 
 - [x] the decisions above, in this file, before code / 上面那些決定寫在這個檔案裡，然後才寫程式
-- [x] `-add-column N NAME [VALUE]`, 1-based -- T214d, T214f / 1-based——T214d、T214f
-- [x] a `.csv2` missing the Chinese title warns and leaves row 2 empty -- T214g, T214h; a `.csv` is not warned at -- T214i / `.csv2` 缺中文標題時警告並把第 2 列留空——T214g、T214h；`.csv` 不會被警告——T214i
-- [x] one past the last column appends, beyond that is refused -- T214c, T214e / 最後一欄再加一會附加，再往後拒絕——T214c、T214e
-- [x] both header rows grow with the records -- T214b / 兩列標頭與紀錄一起變寬——T214b
-- [x] `-delete -col` in the same run is refused, not ordered -- T214j / 同一次執行裡的 `-delete -col` 是拒絕而非定序——T214j
-- [x] repeatable, and every N counts against the arriving file -- T214n, T214o, T214p / 可重複，而每一個 N 都對送達時的檔案計數——T214n、T214o、T214p
-- [x] a protected column is carried across intact -- T214l, T214m / 受保護欄位被完整帶過去——T214l、T214m
+- [x] `-add-column N NAME [VALUE]`, 1-based -- T215d, T215f / 1-based——T215d、T215f
+- [x] a `.csv2` missing the Chinese title warns and leaves row 2 empty -- T215g, T215h; a `.csv` is not warned at -- T215i / `.csv2` 缺中文標題時警告並把第 2 列留空——T215g、T215h；`.csv` 不會被警告——T215i
+- [x] one past the last column appends, beyond that is refused -- T215c, T215e / 最後一欄再加一會附加，再往後拒絕——T215c、T215e
+- [x] both header rows grow with the records -- T215b / 兩列標頭與紀錄一起變寬——T215b
+- [x] `-delete -col` in the same run is refused, not ordered -- T215j / 同一次執行裡的 `-delete -col` 是拒絕而非定序——T215j
+- [x] a suffix-less file refuses the verb -- T215q / 沒有副檔名的檔案會拒絕這個動詞——T215q
+- [x] repeatable, and every N counts against the arriving file -- T215n, T215o, T215p / 可重複，而每一個 N 都對送達時的檔案計數——T215n、T215o、T215p
+- [x] a protected column is carried across intact -- T215l, T215m / 受保護欄位被完整帶過去——T215l、T215m
 - [x] the "not offered" row changes from "nothing does" to the verb, in BOTH READMEs / 「不提供」那一列從「沒有任何東西做得到」改成那個動詞，**兩份** README 都改
 - [x] `--help` lists it, and T154c/T154e pin that it stays listed / `--help` 列出它，而 T154c／T154e 釘住「它會一直被列著」
 - [ ] four platforms / 四個平台
