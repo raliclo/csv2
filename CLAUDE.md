@@ -77,6 +77,13 @@ in the message; they are the part that cannot be recovered from the code.
   一個只存在於 session 逐字稿裡的缺陷，留給下一個讀者的是一棵乾淨的樹和一份全過的測試；
   而那個檔案有一半的價值在那些重現步驟，它們是日後判斷「修正有沒有退化」的唯一依據。
   2026-08-19 有兩個程式缺陷被直接修進 `plan/plan.md`，後來只能靠記憶補記。
+- The whole procedure lives in [blind-test-flow.md](./blind-test-flow.md), and
+  the rules below are the two that get broken most. Read that file before
+  running a round: every rule in it has a round number beside it, which is
+  where it went wrong before the rule existed.
+  整套流程寫在 [blind-test-flow.md](./blind-test-flow.md)，而底下這兩條是最常被違反的。開始一個
+  回合之前先讀那個檔案：它裡面每一條規則旁邊都有一個回合編號，那就是「在這條規則存在之前，它出錯
+  的地方」。
 - Do not run a blind-testing round from a session that has already been
   running. A subagent inherits its parent session's context, not the disk, and
   every `CLAUDE.md` was read into that context at start-up — so on 2026-08-19

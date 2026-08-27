@@ -73,7 +73,28 @@ esac
 # 在此 unset，把這個決定的範圍限制在這支腳本與它啟動的行程內，並移除一個「沒有人宣告過」的
 # 對呼叫者環境的依賴。
 if (( IS_WINDOWS )); then unset MSYS2_ARG_CONV_EXCL; fi
-: ${CSV2:="$ROOT/release/csv2"}
+# `.exe` on Windows, because that is what the build produces there -- and
+# because `release/` on that node holds BOTH, a `csv2.exe` from the current
+# build beside a `csv2` left by something earlier. Defaulting to the extension-
+# less name meant the STALE BINARY check compared the source files against the
+# OLD file and refused to run the suite at all, naming eleven sources as newer
+# than a binary that was not the one under test.
+#
+# This is the same asymmetry that made install.zsh copy the wrong file this
+# morning: a source and a destination that ask the platform differently. Once
+# one platform has two candidates, every place that names one of them has to
+# say which.
+#
+# Windows 上是 `.exe`，因為那才是那裡的建置產物——而且那個節點的 `release/` 裡**兩個都有**：
+# 這次建置的 `csv2.exe`，旁邊躺著一個更早的什麼東西留下的 `csv2`。預設用那個沒有副檔名的名字，
+# 會讓 STALE BINARY 檢查拿原始檔去和那個**舊**檔案比較，然後根本拒絕執行整份測試，並指名十一個
+# 原始檔「比一個根本不是受測對象的二進位檔還新」。
+# 這與今天早上讓 install.zsh 複製錯檔案的，是同一個不對稱：來源與目的地以不同的方式問了平台。
+# 只要有一個平台會有兩個候選，每一個指名其中之一的地方，就都必須說出是哪一個。
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) : ${CSV2:="$ROOT/release/csv2.exe"} ;;
+    *)                    : ${CSV2:="$ROOT/release/csv2"} ;;
+esac
 
 if [[ ! -x "$CSV2" ]]; then
     echo "building first / 先建置：$ROOT/compile_csv2.zsh"

@@ -3,6 +3,14 @@
 Guidance for coding agents working in this repository.
 供 coding agent 在本 repo 工作時參考。
 
+Blind documentation testing -- how a round is run, and why each rule exists --
+is [blind-test-flow.md](./blind-test-flow.md). Seventy-nine rounds have gone
+through it; each rule there carries the round number where it was learned.
+
+盲測文件——一個回合怎麼跑、每一條規則為什麼存在——寫在
+[blind-test-flow.md](./blind-test-flow.md)。已經跑過七十九個回合；那裡的每一條規則都帶著
+「它是在哪一回合被學到的」那個編號。
+
 ## Status: phases 1–6 done; only phase 7 (shipping) remains / 狀態：第 1–6 階段完成，只剩第 7 階段（出貨）
 
 ```zsh
