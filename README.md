@@ -48,7 +48,21 @@ described somewhere below; this is the list a reader should see first:
 | editing a Markdown table | supported since 2026-08-26 — render with `-md`, edit, read the `.md` back. See the note below the table |
 | safe concurrent writers | serialise them yourself; two writers silently lose one edit. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one that finishes SECOND warns that it could not update the index |
 | telling refusals apart programmatically | nothing but exit 1 and English prose, in every one of them |
+| adding a column | nothing does — `-delete -col` has no counterpart. Write the records out with `--json`, add the field in one pass of your own, and read them back; or write a new `.csv2` beside the old one. On a `.csv2` a new column needs BOTH titles, and inventing the second is the one thing this tool will not do — see the note below |
 | scoping a search to ONE column | nothing does. `-contains` is a substring search across every column, so counting with it is silently wrong the moment the word appears anywhere else — see below |
+
+**A new column on a `.csv2` needs both titles, and csv2 will not invent the
+second one.** That is not a limitation waiting to be lifted; it is the same
+rule that refuses to write a one-header `.csv` into a `.csv2`:
+
+> going to two rows would mean **inventing a row of titles**
+
+A program that refuses to invent a Chinese title there, and invents one here,
+would be contradicting itself inside the same binary. So when adding a column
+arrives it will require both names on a `.csv2` and one on a `.csv`, and refuse
+by naming which one is missing. Until then, `--json` and one pass of your own
+is the way, and you supply both titles yourself -- which is the same
+requirement, just carried out by hand.
 
 **A search cannot be scoped to a column, and that makes the obvious counting
 idiom wrong.** `-contains` matches a substring in ANY column:
