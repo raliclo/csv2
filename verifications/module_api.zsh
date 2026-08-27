@@ -96,9 +96,9 @@ case "$(uname -s)" in
     *)                    LIBNAME=libCSV2Core.so;   RPATH_ARGS=(-Xlinker -rpath -Xlinker $WORK) ;;
 esac
 print -r -- "building module CSV2Core from: ${SUBSET[*]}"
-swiftc -swift-version 6 -O $LINKER_ARGS -emit-module -emit-library \
+swiftc -swift-version 6 -warnings-as-errors -O $LINKER_ARGS -emit-module -emit-library \
        -module-name CSV2Core -emit-module-path $WORK/CSV2Core.swiftmodule \
-       -o $WORK/$LIBNAME $SRCS 2>&1 | tail -20 || exit 1
+       -o $WORK/$LIBNAME $SRCS || exit 1
 [[ -f $WORK/$LIBNAME ]] || { print -u2 -- "no library produced"; exit 1 }
 
 # The client. Every type on the public list is named here, because a surface
@@ -169,9 +169,9 @@ print("client OK")
 SWIFT
 
 print -r -- "compiling a client that imports it"
-swiftc -swift-version 6 -O $LINKER_ARGS -I $WORK -L $WORK -lCSV2Core \
+swiftc -swift-version 6 -warnings-as-errors -O $LINKER_ARGS -I $WORK -L $WORK -lCSV2Core \
        $RPATH_ARGS \
-       -o $WORK/client $WORK/client.swift 2>&1 | tail -20 || exit 1
+       -o $WORK/client $WORK/client.swift || exit 1
 out=$($WORK/client) || exit 1
 out=${out%$'\r'}
 [[ $out == "client OK" ]] || { print -u2 -- "client said: $out"; exit 1 }
@@ -219,7 +219,7 @@ PKG
     # 是 `> log 2>&1`，不是 `2>&1 > log`。後者會先把 stderr 綁到終端機、之後才移動 stdout，於是
     # 一次失敗的 v6 建置把整個 frontend 呼叫印到了螢幕上——那個經典的順序錯誤，犯在一支「主題就是
     # 好好檢查東西」的腳本裡。
-    ( cd $pkg && swift build > $WORK/spm_v6.log 2>&1 )
+    ( cd $pkg && swift build -Xswiftc -warnings-as-errors > $WORK/spm_v6.log 2>&1 )
     return $?
 }
 
@@ -245,13 +245,24 @@ cat > $spm_probe/Package.swift <<'PKG'
 import PackageDescription
 let package = Package(name: "Probe", targets: [.target(name: "Probe")])
 PKG
-if ! ( cd $spm_probe && swift build > $WORK/spm_probe.log 2>&1 ); then
+if ! ( cd $spm_probe && swift build -Xswiftc -warnings-as-errors > $WORK/spm_probe.log 2>&1 ); then
     print -r -- "SKIP  SwiftPM cannot build even an empty package here, so the SPM path is unchecked / SwiftPM 在這裡連一個空 package 都建不起來，SPM 那條路徑未檢查"
     print -r -- "      $(tail -1 $WORK/spm_probe.log)"
     exit 0
 fi
 
+if grep -qi 'warning:' $WORK/spm_probe.log; then
+    print -u2 -r -- "FAIL  the empty SwiftPM probe emitted a warning / 空的 SwiftPM 探測產生了警告"
+    grep -i 'warning:' $WORK/spm_probe.log >&2
+    exit 1
+fi
+
 if spm_build; then
+    if grep -qi 'warning:' $WORK/spm_v6.log; then
+        print -u2 -r -- "FAIL  the SwiftPM module build emitted a warning / SwiftPM module 建置產生了警告"
+        grep -i 'warning:' $WORK/spm_v6.log >&2
+        exit 1
+    fi
     print -r -- "PASS  and it builds through SPM in Swift 6 language mode / 而它以 Swift 6 語言模式經 SPM 建得起來"
 else
     print -u2 -r -- "FAIL  the SPM build in Swift 6 language mode does not work"

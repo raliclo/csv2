@@ -109,7 +109,7 @@ mkdir -p release
 
 echo "Building csv2 for $HOST_KERNEL ($OPT) / 正在為 $HOST_KERNEL 建置 csv2（$OPT）"
 
-swiftc -swift-version 6 $OPT -o release/csv2 $SOURCES
+swiftc -swift-version 6 -warnings-as-errors $OPT -o release/csv2 $SOURCES
 
 # Verify by RUNNING it, not by checking the file exists. Whether the binary
 # landed proves nothing about whether it works; this is the same reasoning as

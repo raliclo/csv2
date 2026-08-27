@@ -12115,6 +12115,51 @@ if [[ $_t213_rc == 1 && $_t213_none == *"-i"* ]]; then
 else
     bad "T213f rc=$_t213_rc, said: $_t213_none / 實得如上"
 fi
+
+# ---------------------------------------------------------------------
+# T214 -- warnings are repaired, not hidden.
+#
+# The Windows Swift 6 build first warned about strerror and strdup. Replacing
+# those exposed a third deprecated API, String(cString:) on an array. All
+# three were repaired. This pins the other half of that decision: every build
+# entry point must make the NEXT warning fail, and none may silence it.
+#
+# T214 —— 警告要修好，不是藏起來。
+# Windows Swift 6 建置先警告 strerror 與 strdup；修掉後又露出第三個棄用
+# API：對陣列使用 String(cString:)。三個都已修正。這裡釘住該決定的另一半：
+# 每個建置入口都必須讓「下一個警告」失敗，而且沒有任何一個可以把它壓掉。
+# ---------------------------------------------------------------------
+echo
+echo "--- T214: warnings fail the build / T214：警告會讓建置失敗 ---"
+
+_t214_files=(
+    "$ROOT/compile_csv2.zsh"
+    "$ROOT/compile_csv2_linux.zsh"
+    "$ROOT/compile_csv2_win.bat"
+    "$ROOT/verifications/module_api.zsh"
+)
+_t214_missing=()
+for _t214_f in $_t214_files; do
+    grep -q -- '-warnings-as-errors' "$_t214_f" || _t214_missing+=("${_t214_f:t}")
+done
+if (( ${#_t214_missing} == 0 )); then
+    ok "T214a every Swift build entry treats warnings as errors / 每個 Swift 建置入口都把警告當成錯誤"
+else
+    bad "T214a missing from: ${_t214_missing[*]} / 下列入口缺少設定"
+fi
+
+# Assemble the first spelling so this test does not accuse its own prose when
+# the search is later widened. The files searched here contain executable
+# build logic, not the plan paragraph that names forbidden examples.
+# 把第一個拼法分段組起來，避免日後擴大搜尋時、本案例指控它自己的說明。
+# 這裡搜的是可執行的建置邏輯，不是那段會指名禁用範例的計畫文字。
+_t214_suppress='-suppress-'warnings
+if grep -E -- "$_t214_suppress|-Wno-|_CRT_SECURE_NO_WARNINGS" $_t214_files >/dev/null; then
+    bad "T214b a build entry suppresses warnings / 有建置入口壓掉了警告"
+else
+    ok "T214b no build entry suppresses warnings / 沒有建置入口壓掉警告"
+fi
+
 echo
 echo "--- T212: the library surface / T212：library 表面 ---"
 

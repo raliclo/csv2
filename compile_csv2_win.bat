@@ -98,7 +98,7 @@ if not defined _sources (
 if not exist release mkdir release
 
 echo Building csv2.exe ^(%_opt%^)
-swiftc -swift-version 6 %_opt% %_sources% -o release\csv2.exe
+swiftc -swift-version 6 -warnings-as-errors %_opt% %_sources% -o release\csv2.exe
 if errorlevel 1 (
     echo [FAIL] swiftc failed.
     exit /b 1

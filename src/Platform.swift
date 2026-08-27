@@ -815,7 +815,21 @@ enum Platform {
     /// The system's text for an errno, as a message can print it.
     /// 一個 errno 對應的系統文字，可直接印在訊息裡。
     static func errorText(_ code: Int32) -> String {
+        #if canImport(ucrt)
+        // UCRT deprecates strerror because it returns shared storage. Use its
+        // bounded form and keep a truthful fallback if even that conversion
+        // fails; suppressing the warning would leave the unsafe call here.
+        // UCRT 把 strerror 標為棄用，因為它回傳共用儲存區。改用有邊界的
+        // 版本；若連轉換都失敗，就誠實回報 errno 數字，而不是壓掉警告。
+        var buffer = [CChar](repeating: 0, count: 256)
+        guard strerror_s(&buffer, buffer.count, code) == 0 else {
+            return "errno \(code)"
+        }
+        let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        return String(decoding: bytes, as: UTF8.self)
+        #else
         String(cString: strerror(code))
+        #endif
     }
 
     // -----------------------------------------------------------------
@@ -854,7 +868,15 @@ enum Platform {
     /// 現在把這件事寫出來了。
     static func rememberTemp(_ path: String) {
         forgetTemp()
+        #if canImport(ucrt)
+        // `_strdup` is UCRT's supported spelling. Its allocation and `free`
+        // contract are the same as the deprecated POSIX alias used elsewhere.
+        // `_strdup` 是 UCRT 支援的拼法；它的配置與 `free` 合約，與其他平台
+        // 使用的那個已棄用 POSIX 別名相同。
+        doomedTemp = _strdup(path)
+        #else
         doomedTemp = strdup(path)
+        #endif
         #if !canImport(ucrt)
         // Every catchable signal whose default action ends the process, not
         // the three that came to mind. A round killed an edit with SIGXFSZ,

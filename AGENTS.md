@@ -97,9 +97,10 @@ do not quietly implement something else.
   測到一個與腳本語法不同的 shell。
 - **Swift style follows swift_tar**: plain `.swift` sources, Foundation +
   Dispatch, built with `swiftc` build scripts in explicit Swift 6 language
-  mode. No SwiftPM, no SwiftNIO.
+  mode, with warnings treated as errors. No SwiftPM, no SwiftNIO.
   Swift 風格比照 swift_tar：純 `.swift` 原始檔，Foundation + Dispatch，
-  以 `swiftc` 建置腳本明確採用 Swift 6 語言模式編譯；不用 SwiftPM、不用 SwiftNIO。
+  以 `swiftc` 建置腳本明確採用 Swift 6 語言模式編譯，並把警告當成錯誤；
+  不用 SwiftPM、不用 SwiftNIO。
 - **Both platforms, always.** Built natively on the macOS host and
   cross-compiled to aarch64 Linux, with the same tests run on each and
   byte-identical output required. Linux Foundation is swift-corelibs-foundation,

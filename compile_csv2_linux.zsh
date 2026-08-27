@@ -74,7 +74,7 @@ done
 mkdir -p release
 
 print -- "Building csv2 for aarch64 Linux ($OPT) / 正在為 aarch64 Linux 建置 csv2（$OPT）"
-"$SWIFTC" -swift-version 6 $OPT -o release/csv2 $SOURCES
+"$SWIFTC" -swift-version 6 -warnings-as-errors $OPT -o release/csv2 $SOURCES
 
 # Verify by RUNNING it, not by checking the file exists -- the same rule the
 # macOS build follows. Here it also proves the Swift runtime resolves: a binary

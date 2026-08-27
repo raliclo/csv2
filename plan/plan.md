@@ -3162,6 +3162,11 @@ Swift 5 語言模式。因此每個建置入口都傳入 `-swift-version 6`，SP
 暫存指標使用 async-signal-safe 程式所需、範圍狹窄的 `nonisolated(unsafe)`；Logger 記錄其
 協調執行緒所有權；平行批次結果則把鎖與值封裝在同一個 Sendable wrapper 中。
 
+2026-08-27 同樣定案：所有正式建置、獨立 module、外部客戶端與 SwiftPM
+驗證都把編譯器警告當成錯誤。不得使用警告抑制旗標；若平台 API 被棄用，
+就改用它支援的 API。Windows UCRT 的 `strerror` 與 `strdup` 因此分別改為
+`strerror_s` 與 `_strdup`，而非以 `_CRT_SECURE_NO_WARNINGS` 遮掉。
+
 - [x] the seven types public, and nothing else / 那七個型別 public，別無其他
 - [x] the subset closes: Platform, Core, Support, Crypto, Markdown, Width / 子集自足
 - [x] verified by importing it from outside and running it / 以「從外面 import 並執行」驗證
