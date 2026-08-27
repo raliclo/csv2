@@ -25,7 +25,7 @@ English: [README.md](./README.md)
 | RFC 4180 解析、引號、內嵌逗號與換行、CRLF、BOM | 隨 rootfs 出貨（第 7 階段） |
 | `-r`、`-contains`、`-A`/`-B`/`-C`、`-head`/`-tail`/`-mid`、`-rownum` | |
 | `.csv2` 兩列標頭、`--json`、`-md`、`--pretty`（顯示寬度） | |
-| `-insert`/`-append`/`-delete`/`-update`、`-delete -cell`、`-delete -col` | |
+| `-insert`/`-append`/`-delete`/`-update`、`-delete -cell`、`-delete -col`、`-add-column` | |
 | `-hash`、`-encrypt`、`-decrypt`、`-keyfile`、`-debug`、`-log` | |
 | `-append` 快路徑——寫入的位元組數是 O(1)，讀取的位元組數是 O(n) | |
 | `.csv.index` / `.csv2.index` sidecar、`--verify-index` | |
@@ -491,7 +491,10 @@ $ csv2 -r --json -i example.csv2 | head -1
                         是空的。不可與 `-delete -col` 在同一次執行中併用：兩者都是對
                         「送達時」的檔案編號，因此同一個欄號會依「誰先套用」而指向兩個
                         不同的欄，而兩種讀法都站得住腳。請分開執行。事後若要設定某一格，
-                        請與既有的 `-update r:c` 組合使用
+                        請與既有的 `-update r:c` 組合使用。可重複：每一個 N 都是對
+                        「送達時」的檔案計數，與 `-insert` 的做法相同，因此兩欄檔案上的
+                        `-add-column 2 A -add-column 3 B` 會把 B 放在舊的第 2 欄
+                        **之後**，而不是之前
   -update r:c VAL       更新一個儲存格
   --truncate-partial    「讀取」時，丟棄因未閉合引號而在 EOF 處未完成的那一筆，
                         而非以錯誤結束。欄數不足的結尾紀錄兩種情況下都是硬錯誤：

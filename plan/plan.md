@@ -3314,6 +3314,22 @@ tested.
   重點：一段解不開的密文，看起來與一段密文一模一樣，因此這是一個「壞掉也會是無聲的」失敗。
   rawRowWriteRefusal 不會觸發，標記與摘要都在移動中被帶過去，而「加密 → 新增 → 解密」那趟往返
   合得起來。T214l 與 T214m 各釘住一項。
+- **The batch rule holds BETWEEN two `-add-column`, not only against
+  `-delete -col`.** Refusing the cross-verb case and then letting the second
+  `-add-column` count against the file the first had already widened is the
+  same rule applied to only part of where it holds -- in the same function, a
+  few lines apart, on the same day. `-add-column 2 A -add-column 3 B` on a
+  two-column file put B before the old column 2 instead of after it, at rc=0.
+  The fix is not another refusal: the batch rule already answers this and
+  `-insert` already obeys it. Shift each insert by the ones already placed at
+  or before it, and check bounds against the ARRIVING width rather than the
+  half-inserted middle. KB, T214n/o/p.
+  **批次規則在兩個 `-add-column` 之間也成立，不只對 `-delete -col` 成立。** 擋住了跨動詞那一個
+  情況，卻讓第二個 `-add-column` 算在「第一個已經加寬過」的檔案上，是同一條規則只被套用到它成立
+  範圍的一部分——同一個函式、相隔幾行、同一天。兩欄檔案上的 `-add-column 2 A -add-column 3 B`
+  把 B 放在舊的第 2 欄之前而不是之後，且 rc=0。修法不是再加一道拒絕：批次規則已經有答案，而
+  `-insert` 早就遵守它。把每一次插入依「已經放在它位置或更前面的那幾個」平移，並以**送達時**的
+  寬度而不是插到一半的中間狀態做越界檢查。KB，T214n／o／p。
 - **The header write must not live inside the `-delete -col` block.** It did,
   in the first version: every data record grew and the header kept its arriving
   width, so a run that only added a column produced a file csv2's own reader
@@ -3331,6 +3347,7 @@ tested.
 - [x] one past the last column appends, beyond that is refused -- T214c, T214e / 最後一欄再加一會附加，再往後拒絕——T214c、T214e
 - [x] both header rows grow with the records -- T214b / 兩列標頭與紀錄一起變寬——T214b
 - [x] `-delete -col` in the same run is refused, not ordered -- T214j / 同一次執行裡的 `-delete -col` 是拒絕而非定序——T214j
+- [x] repeatable, and every N counts against the arriving file -- T214n, T214o, T214p / 可重複，而每一個 N 都對送達時的檔案計數——T214n、T214o、T214p
 - [x] a protected column is carried across intact -- T214l, T214m / 受保護欄位被完整帶過去——T214l、T214m
 - [x] the "not offered" row changes from "nothing does" to the verb, in BOTH READMEs / 「不提供」那一列從「沒有任何東西做得到」改成那個動詞，**兩份** README 都改
 - [x] `--help` lists it, and T154c/T154e pin that it stays listed / `--help` 列出它，而 T154c／T154e 釘住「它會一直被列著」

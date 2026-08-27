@@ -12311,6 +12311,46 @@ else
     bad "T214k rc=$_t214_rc: $(head -2 "$TMP/t214w.csv2") / 實得如上"
 fi
 
+# KB. The batch rule -- "All indexes refer to the INPUT and are applied in one
+# pass" -- has to hold BETWEEN two -add-column too, not only between this verb
+# and -delete -col. The first version applied each insert to the file the
+# previous insert had already widened, so `-add-column 2 ... -add-column 3 ...`
+# on a two-column file put the second one BEFORE ver instead of after it, at
+# rc=0. Refusing the cross-verb case and missing this one is the same rule
+# applied to only part of where it holds.
+# KB。批次規則——「所有索引都指向輸入，並在一遍之內套用」——在**兩個 -add-column 之間**也必須
+# 成立，不只在這個動詞與 -delete -col 之間。第一版把每一次插入套用在「前一次插入已經加寬過」的
+# 檔案上，於是兩欄檔案上的 `-add-column 2 ... -add-column 3 ...` 把第二個放在 ver 之**前**而不是
+# 之後，且 rc=0。擋住了跨動詞那一半、卻漏掉這一半，是同一條規則只被套用到它成立範圍的一部分。
+cp "$_t214_src" "$TMP/t214n.csv2"
+"$CSV2" -add-column 2 'a,甲' 'x' -add-column 3 'b,乙' 'y' -i "$TMP/t214n.csv2" --in-place 2>/dev/null
+if [[ $(head -1 "$TMP/t214n.csv2") == 'pkg,a,ver,b' ]]; then
+    ok "T214n a second -add-column counts against the ARRIVING file, not the widened one / 第二個 -add-column 對的是送達時的檔案，不是被加寬過的那個"
+else
+    bad "T214n got: $(head -1 "$TMP/t214n.csv2") / 實得如上"
+fi
+
+# Two at the SAME position keep command-line order rather than reversing.
+# 兩個在**同一個位置**的，維持命令列順序，而不是被顛倒過來。
+cp "$_t214_src" "$TMP/t214n2.csv2"
+"$CSV2" -add-column 2 'a,甲' 'x' -add-column 2 'b,乙' 'y' -i "$TMP/t214n2.csv2" --in-place 2>/dev/null
+if [[ $(head -1 "$TMP/t214n2.csv2") == 'pkg,a,b,ver' ]]; then
+    ok "T214o and two at the same position keep the order they were typed in / 而兩個在同一個位置的，維持它們被打出來的順序"
+else
+    bad "T214o got: $(head -1 "$TMP/t214n2.csv2") / 實得如上"
+fi
+
+# The bounds check must also read the arriving width: an earlier insert must
+# not make a number that was out of range become legal.
+# 越界檢查同樣要讀「送達時」的寬度：前面的一次插入，不得讓一個原本越界的數字變成合法。
+cp "$_t214_src" "$TMP/t214n3.csv2"
+_t214_n3=$("$CSV2" -add-column 2 'a,甲' -add-column 4 'b,乙' -i "$TMP/t214n3.csv2" --in-place 2>&1 >/dev/null)
+if [[ $? != 0 && $_t214_n3 == *"has 2 columns"* ]] && cmp -s "$_t214_src" "$TMP/t214n3.csv2"; then
+    ok "T214p and an earlier insert does not make an out-of-range N legal / 而前面的一次插入，不會讓一個越界的 N 變成合法"
+else
+    bad "T214p said: $_t214_n3 / 實得如上"
+fi
+
 # The plan said to CHECK this rather than assume it: rawRowWriteRefusal stops
 # -append on a file with a protected column, and there was no reason to be sure
 # it did not also stop this. It does not, and the round trip still closes --

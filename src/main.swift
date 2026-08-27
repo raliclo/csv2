@@ -298,8 +298,8 @@ func parseArgs(_ argv: [String]) throws -> Options {
     func once(_ name: String) throws {
         guard seenFlags.insert(name).inserted else {
             throw usageError(
-                "\(name) is given more than once; it is not repeatable, and taking the last one silently is how -hash note -hash ver leaves note in plaintext at rc=0. The repeatable verbs are -insert, -append, -delete and -update",
-                "\(name) 被給了不只一次；它不可重複，而「靜默採用最後一個」正是 -hash note -hash ver 會在 rc=0 下把 note 留成明文的原因。可重複的動詞是 -insert、-append、-delete 與 -update")
+                "\(name) is given more than once; it is not repeatable, and taking the last one silently is how -hash note -hash ver leaves note in plaintext at rc=0. The repeatable verbs are -insert, -append, -delete, -update and -add-column",
+                "\(name) 被給了不只一次；它不可重複，而「靜默採用最後一個」正是 -hash note -hash ver 會在 rc=0 下把 note 留成明文的原因。可重複的動詞是 -insert、-append、-delete、-update 與 -add-column")
         }
     }
 

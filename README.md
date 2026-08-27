@@ -27,7 +27,7 @@ mode is not considered a Swift 6 build.
 | RFC 4180 parsing, quotes, embedded commas and newlines, CRLF, BOM | shipping in the rootfs (phase 7) |
 | `-r`, `-contains`, `-A`/`-B`/`-C`, `-head`/`-tail`/`-mid`, `-rownum` | |
 | two-row `.csv2` headers, `--json`, `-md`, `--pretty` (display widths) | |
-| `-insert`/`-append`/`-delete`/`-update`, `-delete -cell`, `-delete -col` | |
+| `-insert`/`-append`/`-delete`/`-update`, `-delete -cell`, `-delete -col`, `-add-column` | |
 | `-hash`, `-encrypt`, `-decrypt`, `-keyfile`, `-debug`, `-log` | |
 | the `-append` fast path — O(1) in bytes written, O(n) in bytes read | |
 | `.csv.index` / `.csv2.index` sidecars, `--verify-index` | |
@@ -624,7 +624,11 @@ EDITING / 編輯
                         the file as it ARRIVES, so the same number names two
                         different columns depending on which is applied first,
                         and both readings are defensible. Run them separately.
-                        To set one cell afterwards, compose with `-update r:c`
+                        To set one cell afterwards, compose with `-update r:c`.
+                        Repeatable: every N counts against the file as it
+                        ARRIVED, the way `-insert`'s does, so
+                        `-add-column 2 A -add-column 3 B` on a two-column file
+                        puts B AFTER the old column 2, not before it
   -update r:c VAL       update one cell
   --truncate-partial    when READING, drop a record left unfinished at EOF by
                         an unclosed quote, instead of failing. A trailing

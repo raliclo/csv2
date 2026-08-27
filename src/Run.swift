@@ -1168,7 +1168,19 @@ func runEdit(_ o: Options) throws {
     // 靜默的。
     func addColumns(_ r: inout Record, headerRow: Int?) throws {
         guard !addCols.isEmpty else { return }
-        for a in addCols {
+        // The width BEFORE any of these went in. Both the bounds check and
+        // the position have to be answered against the file as it arrived --
+        // "All indexes refer to the INPUT and are applied in one pass" is the
+        // rule `-insert` has always followed, and the first version of this
+        // broke it for the second and later -add-column in one run: their N
+        // counted against the file the earlier insert had already widened.
+        // See KB in todo/known-defects.md.
+        // 這是「這些欄位都還沒進去之前」的寬度。越界檢查與插入位置都必須以「檔案送達時的樣子」
+        // 來回答——「所有索引都指向輸入，並在一遍之內套用」是 `-insert` 一直遵守的規則，而這個
+        // 函式的第一版對「同一次執行裡第二個以後的 -add-column」違反了它：它們的 N 算在
+        // 前一次插入已經加寬過的檔案上。見 todo/known-defects.md 的 KB。
+        let arrived = r.fields.count
+        for (k, a) in addCols.enumerated() {
             // Clamping put `-add-column 9` on a two-column file at the end and
             // exited zero, which is this tool's own named failure: the caller
             // gets a file back, believes the 9 meant something, and nothing
@@ -1179,12 +1191,15 @@ func runEdit(_ o: Options) throws {
             // 正是這個工具自己命名過的失敗：呼叫端拿回一個檔案、以為那個 9 有意義，而沒有任何
             // 東西說過那個數字被忽略了。「最後一欄再加一」是附加；再往後就是一個描述不了這個
             // 檔案的數字。
-            guard a.at <= r.fields.count + 1 else {
+            guard a.at <= arrived + 1 else {
                 throw fault(
-                    "-add-column \(a.at): this file has \(r.fields.count) columns, so the highest position is \(r.fields.count + 1), which appends",
-                    "-add-column \(a.at)：這個檔案有 \(r.fields.count) 欄，因此最大的位置是 \(r.fields.count + 1)，那會附加在最後")
+                    "-add-column \(a.at): this file has \(arrived) columns, so the highest position is \(arrived + 1), which appends",
+                    "-add-column \(a.at)：這個檔案有 \(arrived) 欄，因此最大的位置是 \(arrived + 1)，那會附加在最後")
             }
-            let idx = a.at - 1
+            // Shift by the ones already placed at or before this position, so
+            // that a.at keeps meaning what it meant on the command line.
+            // 依「已經放在這個位置或更前面的那幾個」平移，好讓 a.at 維持它在命令列上的意思。
+            let idx = a.at - 1 + addCols[..<k].filter { $0.at <= a.at }.count
             let text: String
             if let hr = headerRow {
                 // The name carries both titles the way the header row does:
