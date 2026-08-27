@@ -81,15 +81,25 @@ done
 # `undefined reference to $s8CSV2Core5FieldVMn`（Field 的 metadata）失敗，而同一道指令在 macOS 上
 # 產出了可用的執行檔，因為 Mach-O 解析得了它。whole-archive 也行得通，但每一個 linker 的寫法都不同；
 # 一個共享 library 則完全不需要任何平台專屬旗標。
+# Three platforms, three spellings, and Windows differs in more than the
+# extension: its import library is `CSV2Core.lib` and gets no `lib` prefix, so
+# an output named `libCSV2Core.dll` produces `libCSV2Core.lib` and `-lCSV2Core`
+# then cannot find it. `-rpath` does not exist for lld-link either; a DLL beside
+# the executable is found without one.
+# 三個平台、三種寫法，而 Windows 差的不只是副檔名：它的 import library 是 `CSV2Core.lib`、
+# 沒有 `lib` 前綴，於是一個叫 `libCSV2Core.dll` 的輸出會產生 `libCSV2Core.lib`，而 `-lCSV2Core`
+# 就找不到它。lld-link 也沒有 `-rpath`；一個放在執行檔旁邊的 DLL 不需要它就找得到。
+RPATH_ARGS=()
 case "$(uname -s)" in
-    Darwin) LIBEXT=dylib ;;
-    *)      LIBEXT=so ;;
+    Darwin)               LIBNAME=libCSV2Core.dylib; RPATH_ARGS=(-Xlinker -rpath -Xlinker $WORK) ;;
+    MINGW*|MSYS*|CYGWIN*) LIBNAME=CSV2Core.dll ;;
+    *)                    LIBNAME=libCSV2Core.so;   RPATH_ARGS=(-Xlinker -rpath -Xlinker $WORK) ;;
 esac
 print -r -- "building module CSV2Core from: ${SUBSET[*]}"
 swiftc -swift-version 6 -O $LINKER_ARGS -emit-module -emit-library \
        -module-name CSV2Core -emit-module-path $WORK/CSV2Core.swiftmodule \
-       -o $WORK/libCSV2Core.$LIBEXT $SRCS 2>&1 | tail -20 || exit 1
-[[ -f $WORK/libCSV2Core.$LIBEXT ]] || { print -u2 -- "no library produced"; exit 1 }
+       -o $WORK/$LIBNAME $SRCS 2>&1 | tail -20 || exit 1
+[[ -f $WORK/$LIBNAME ]] || { print -u2 -- "no library produced"; exit 1 }
 
 # The client. Every type on the public list is named here, because a surface
 # that compiles but cannot be USED is the thing this is guarding against.
@@ -160,7 +170,7 @@ SWIFT
 
 print -r -- "compiling a client that imports it"
 swiftc -swift-version 6 -O $LINKER_ARGS -I $WORK -L $WORK -lCSV2Core \
-       -Xlinker -rpath -Xlinker $WORK \
+       $RPATH_ARGS \
        -o $WORK/client $WORK/client.swift 2>&1 | tail -20 || exit 1
 out=$($WORK/client) || exit 1
 out=${out%$'\r'}
