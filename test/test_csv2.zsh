@@ -11096,7 +11096,48 @@ else
     # --uninstall takes back every file the install wrote to. bash is the case
     # that has two of them, so bash is the case this asks about.
     # --uninstall 要收回安裝寫過的每一個檔案。bash 是「有兩個」的那種情況，因此就問 bash。
-    if command -v bash > /dev/null 2>&1; then
+    # `SHELL=` cannot simulate an account. install.zsh asks `getent passwd`
+    # first and falls back to $SHELL only where getent does not exist -- which
+    # is the whole point of JM, and macOS is a platform without getent. So this
+    # case passed on macOS by ACCIDENT: it was exercising the fallback, not the
+    # bash path. On WSL, where getent exists and the login shell was changed to
+    # zsh this morning, the same case wrote .zshenv and the assertion failed.
+    #
+    # Probed rather than assumed: ask install.zsh's own rule what it thinks the
+    # login shell is, and skip by name when it is not bash. A test that can
+    # only pass where a command is missing is not testing what it says.
+    #
+    # `SHELL=` 模擬不了一個帳號。install.zsh 會先問 `getent passwd`，只有在沒有 getent 的地方才
+    # 退回 $SHELL——那正是 JM 的全部重點，而 macOS 是一個沒有 getent 的平台。因此這個案例在 macOS
+    # 上是**碰巧**通過的：它運動到的是那條退路，不是 bash 那條路。在 WSL 上（有 getent，而登入 shell
+    # 今天早上被改成了 zsh），同一個案例寫出了 .zshenv，於是那條斷言失敗。
+    # 改成探測而不是假設：問 install.zsh 自己那條規則「它認為登入 shell 是什麼」，不是 bash 就以
+    # 具名理由跳過。一個「只有在某個指令缺席時才會通過」的測試，測的不是它自己說的東西。
+    # Asked the way install.zsh asks it, INCLUDING the guard: `getent` does not
+    # exist on macOS, and calling a missing command is a failure in this suite
+    # by design -- so the probe for a portability problem tripped the guard
+    # against typos. The same lesson stat_mode learned, in the case written to
+    # apply it.
+    # 以 install.zsh 的問法去問，**連同那道守衛**：macOS 上沒有 `getent`，而在這份測試裡「呼叫一個
+    # 不存在的指令」依設計就是一次失敗——於是一個為了「可攜性問題」而寫的探測，觸發了那道「防打錯字」
+    # 的守衛。與 stat_mode 學到的是同一課，發生在一個「為了套用那一課而寫」的案例裡。
+    _t203_login=""
+    if (( $+commands[getent] )); then
+        _t203_login=$(getent passwd "$(id -un)" 2>/dev/null | awk -F: '{print $NF}')
+    fi
+    # Where there is no getent, install.zsh falls back to $SHELL -- and the case
+    # below SETS that to bash, so bash IS the answer there and the case is
+    # valid. Reading the current $SHELL instead asked what shell is running the
+    # suite, which is a different question and made macOS skip a case it had
+    # been running correctly all along.
+    # 沒有 getent 的地方，install.zsh 會退回 $SHELL——而下面那個案例**會把它設成** bash，因此在那裡
+    # 答案就是 bash，這個案例是有效的。改讀當前的 $SHELL，問的是「是哪個 shell 在跑這份測試」，
+    # 那是另一個問題，而它會讓 macOS 跳過一個它一直正確執行著的案例。
+    [[ -n $_t203_login ]] || _t203_login=$(command -v bash)
+    if [[ ${_t203_login:t} != bash ]]; then
+        skipt "T203e/f this account's login shell is ${_t203_login:t}, and SHELL= cannot simulate one / 這個帳號的登入 shell 是 ${_t203_login:t}，而 SHELL= 模擬不了一個帳號"
+        T203_BASH_SKIPPED=1
+    elif command -v bash > /dev/null 2>&1; then
         _t203_bhome="$TMP/t203bash"; mkdir -p "$_t203_bhome"
         env HOME="$_t203_bhome" SHELL="$(command -v bash)" \
             "$ROOT/install.zsh" --prefix "$_t203_pfx" > /dev/null 2>&1
@@ -11137,9 +11178,18 @@ else
     # 而當呼叫端的 PATH 真的通到剛裝好的那個檔案時，什麼都不寫。這就是 Windows 節點的情況：
     # csv2 經由一個 scoop shim 解析得到，而安裝目錄根本不在 PATH 上；一個會去改那台機器 rc 檔
     # 的安裝程式，修的是一個沒有壞的東西。
-    _t203_left=$(ls -a "$_t203_home2" | grep -vE '^\.$|^\.\.$' | tr '\n' ' ')
-    assert_eq "$_t203_left" "" \
-        "T203h nothing is written when the shell already runs that very file / shell 已經在執行那個檔案時，什麼都不寫"
+    # The rc files install.zsh writes, not "the directory is empty". Starting a
+    # zsh in a fresh HOME leaves a `.zcompdump` behind -- zsh's own completion
+    # cache, written by the probe install.zsh runs, not by install.zsh -- and
+    # asserting an empty directory made that count as a failure. What this case
+    # is about is whether the INSTALLER wrote anything.
+    # 檢查的是 install.zsh 會寫的那些 rc 檔，不是「這個目錄是空的」。在一個全新的 HOME 裡啟動一個
+    # zsh，會留下一個 `.zcompdump`——那是 zsh 自己的補全快取，由 install.zsh 執行的那次探測寫的，
+    # 不是 install.zsh 寫的——而斷言「目錄是空的」會把它算成一次失敗。這個案例要問的是「**安裝程式**
+    # 有沒有寫東西」。
+    _t203_left=$(grep -lF '>>> csv2 install.zsh >>>' "$_t203_home2"/.* 2>/dev/null | wc -l | tr -d ' ')
+    assert_eq "$_t203_left" "0" \
+        "T203h the installer writes no rc file when the shell already runs that very file / shell 已經在執行那個檔案時，安裝程式不寫任何 rc 檔"
 
     # A byte-identical copy at another path is NOT that file. Both are the same
     # build, so a hash comparison says yes; the question is which copy the shell

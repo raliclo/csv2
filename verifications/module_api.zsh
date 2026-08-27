@@ -64,11 +64,32 @@ for f in $SUBSET; do
     SRCS+=($ROOT/src/$f.swift)
 done
 
+# A DYNAMIC library, not a static one, and the reason is a platform difference
+# that made this pass on macOS and fail on Linux.
+#
+# A `.a` only contributes the object files something references, and on Linux
+# a Swift type's metadata is referenced from `.data.rel.ro` in a way the linker
+# does not follow into the archive: the client failed with `undefined reference
+# to $s8CSV2Core5FieldVMn` -- Field's metadata -- while the same command
+# produced a working binary on macOS, where Mach-O resolves it. Whole-archive
+# would also work and is spelled differently by each linker; a shared library
+# needs no per-platform flag at all.
+#
+# 用**動態** library，不是靜態的，而理由是一個「讓這件事在 macOS 上通過、在 Linux 上失敗」的平台
+# 差異。一個 `.a` 只會貢獻「有東西引用到」的目標檔，而在 Linux 上，一個 Swift 型別的 metadata 是從
+# `.data.rel.ro` 被引用的，那種引用 linker 不會追進封存檔裡：客戶端以
+# `undefined reference to $s8CSV2Core5FieldVMn`（Field 的 metadata）失敗，而同一道指令在 macOS 上
+# 產出了可用的執行檔，因為 Mach-O 解析得了它。whole-archive 也行得通，但每一個 linker 的寫法都不同；
+# 一個共享 library 則完全不需要任何平台專屬旗標。
+case "$(uname -s)" in
+    Darwin) LIBEXT=dylib ;;
+    *)      LIBEXT=so ;;
+esac
 print -r -- "building module CSV2Core from: ${SUBSET[*]}"
-swiftc -swift-version 6 -O $LINKER_ARGS -emit-module -emit-library -static \
+swiftc -swift-version 6 -O $LINKER_ARGS -emit-module -emit-library \
        -module-name CSV2Core -emit-module-path $WORK/CSV2Core.swiftmodule \
-       -o $WORK/libCSV2Core.a $SRCS 2>&1 | tail -20 || exit 1
-[[ -f $WORK/libCSV2Core.a ]] || { print -u2 -- "no library produced"; exit 1 }
+       -o $WORK/libCSV2Core.$LIBEXT $SRCS 2>&1 | tail -20 || exit 1
+[[ -f $WORK/libCSV2Core.$LIBEXT ]] || { print -u2 -- "no library produced"; exit 1 }
 
 # The client. Every type on the public list is named here, because a surface
 # that compiles but cannot be USED is the thing this is guarding against.
@@ -138,7 +159,9 @@ print("client OK")
 SWIFT
 
 print -r -- "compiling a client that imports it"
-swiftc -swift-version 6 -O $LINKER_ARGS -I $WORK $WORK/libCSV2Core.a -o $WORK/client $WORK/client.swift 2>&1 | tail -20 || exit 1
+swiftc -swift-version 6 -O $LINKER_ARGS -I $WORK -L $WORK -lCSV2Core \
+       -Xlinker -rpath -Xlinker $WORK \
+       -o $WORK/client $WORK/client.swift 2>&1 | tail -20 || exit 1
 out=$($WORK/client) || exit 1
 out=${out%$'\r'}
 [[ $out == "client OK" ]] || { print -u2 -- "client said: $out"; exit 1 }
