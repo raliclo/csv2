@@ -8167,6 +8167,20 @@ rc=0,沒有任何訊息。**這是 JV 的同一個形狀**——「never-convert
 
 **一個新格式不會自動被後來的每一個動詞想起來。** 這是這棵樹第二次為 `.lines` 付這筆帳。
 
+**修完之後回頭查了其他四個動詞,而結果讓這條教訓更準確。** `-append`、`-insert`、`-update`
+在 `.lines` 上都是對的——那個格式是位元組原樣,因此一列含逗號的字面值寫進去、讀回來都是「一個
+含逗號的欄位」,往返一致。而 `-delete -col` 不但是對的,它還有一句**專門為 `.lines` 寫的拒絕**:
+
+```console
+$ csv2 -delete -col 1 -i plain --in-place
+csv2: -delete -col on plain: a file with no .csv/.csv2 suffix is one column of
+lines, and removing its only column would leave nothing.
+```
+
+所以不是「沒有人想到 `.lines`」。**刪的那一邊想到了,加的那一邊沒有**——同一個維度、相反方向,
+而那句拒絕就寫在原始碼裡,寫 `-add-column` 的時候沒有去讀它。一個新動詞該讀的,是它那個維度上
+**既有的反向動詞**;那裡通常已經有人替它想過一遍了。
+
 修法:拒絕。`.lines` 的定義就是一欄,而加一欄會產生一個「副檔名不再描述它」的檔案——那正是
 `.csv`／`.csv2` 互轉被拒絕的同一條理由(副檔名宣告格式)。要兩欄,就寫成一個有副檔名的檔案。
 釘住的測試是 T215q。

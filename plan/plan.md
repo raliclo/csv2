@@ -3353,6 +3353,24 @@ tested.
   修掉的 JV，是那道 never-convert 守衛不認識它。第 8 階段加的格式，不會自動被第 10 階段設計的
   動詞想起來，而第 10 階段那份「這個動詞會遇到哪些格式」的清單上，只有 `.csv` 與 `.csv2`。
   KC，T215q。
+
+  Checking the other four verbs afterwards sharpened this into a rule worth
+  keeping. `-append`, `-insert` and `-update` are all correct on `.lines`, and
+  `-delete -col` is not merely correct -- it has a refusal written *for*
+  `.lines`, naming it: *"a file with no .csv/.csv2 suffix is one column of
+  lines, and removing its only column would leave nothing."* So it is not that
+  nobody thought about the format. **The deleting side thought about it and
+  the adding side did not** -- the same dimension, the opposite direction,
+  with the answer already in the source. The rule: what a new verb should read
+  first is the EXISTING verb that moves along the same axis the other way.
+  Someone has usually already thought it through there.
+
+  修完之後回頭查了其他四個動詞，而結果把這一條磨成了一條值得帶走的規則。`-append`、`-insert`、
+  `-update` 在 `.lines` 上都是對的，而 `-delete -col` 不只是對的——它有一句**專門為 `.lines`
+  寫、並且指名它**的拒絕：「a file with no .csv/.csv2 suffix is one column of lines, and
+  removing its only column would leave nothing.」所以並不是沒有人想過這個格式。**刪的那一邊想過，
+  加的那一邊沒有**——同一個維度、相反方向，而答案早就在原始碼裡。規則是：一個新動詞最該先讀的，
+  是**同一個維度上既有的反向動詞**；那裡通常已經有人替它想過一遍了。
 - **The header write must not live inside the `-delete -col` block.** It did,
   in the first version: every data record grew and the header kept its arriving
   width, so a run that only added a column produced a file csv2's own reader
