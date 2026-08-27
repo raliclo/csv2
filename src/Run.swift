@@ -1033,6 +1033,15 @@ func runEdit(_ o: Options) throws {
     var blanks: [Int: [String]] = [:]
     var dropTokens: [String] = []
 
+    // Phase 10. Applied to the headers and to every data record, at a 1-based
+    // position that counts against the file AS IT ARRIVED -- the same batch
+    // rule the four other edit verbs obey, so that `-add-column 2 x
+    // -delete -col 2` names the arriving column 2 in both halves rather than
+    // one before and one after.
+    // 第 10 階段。套用在標頭與每一筆資料紀錄上，位置是 1-based，且對「檔案送達時的樣子」計數
+    // ——那是其他四個編輯動詞遵守的同一條批次規則，如此 `-add-column 2 x -delete -col 2` 的兩半
+    // 指的都是「送達時的第 2 欄」，而不是一個在改動前、一個在改動後。
+    var addCols: [(at: Int, name: String, value: String)] = []
     for e in o.edits {
         switch e {
         case .insert(let at, let row): inserts[at, default: []].append(row)
@@ -1041,6 +1050,7 @@ func runEdit(_ o: Options) throws {
         case .update(let r, let c, let v): updates[r, default: []].append((c, v))
         case .deleteCell(let r, let c): blanks[r, default: []].append(c)
         case .deleteColumn(let c): dropTokens.append(c)
+        case .addColumn(let at, let name, let value): addCols.append((at, name, value))
         }
     }
 
@@ -1135,12 +1145,62 @@ func runEdit(_ o: Options) throws {
     // 一個名稱會在先前欄位被移除後指向不同的欄。
     var drop = Set<Int>()
 
+
     /// Removing several columns at once, by rebuilding rather than removing in
     /// place: `remove(at:)` twice would make the second index refer to the row
     /// as it stands after the first removal, which is the same off-by-one the
     /// `-delete 3 -delete 4` comment above describes.
     /// 一次移除多欄時採「重建」而非就地刪除：連續兩次 `remove(at:)` 會讓第二個索引
     /// 指向第一次移除後的那一列，正是上面 `-delete 3 -delete 4` 註解所描述的偏移。
+    // Insert before dropping, and both against the ARRIVING file.
+    //
+    // The two must not see each other's work: `-add-column 2 x -delete -col 2`
+    // has to mean "the arriving column 2, in both", the same way
+    // `-insert 3 -delete 2` counts both against the arriving records. Applying
+    // the add first and then a drop computed on the NEW positions would delete
+    // whatever the add had just pushed sideways -- one line of code apart, and
+    // silent.
+    //
+    // 先插入、後刪除，而兩者都是對「送達時的檔案」計數。
+    // 這兩件事不能看見彼此的成果：`-add-column 2 x -delete -col 2` 必須表示「送達時的第 2 欄，
+    // 兩者皆是」，就像 `-insert 3 -delete 2` 兩者都對送達時的紀錄計數一樣。先套用新增、再用
+    // 「**新的**位置」算出來的刪除，會刪掉那次新增剛剛推到旁邊的東西——兩者相差一行程式碼，而且是
+    // 靜默的。
+    func addColumns(_ r: inout Record, headerRow: Int?) throws {
+        guard !addCols.isEmpty else { return }
+        for a in addCols {
+            // Clamping put `-add-column 9` on a two-column file at the end and
+            // exited zero, which is this tool's own named failure: the caller
+            // gets a file back, believes the 9 meant something, and nothing
+            // ever says the number was ignored. One past the last column is
+            // the append; anything beyond it is a number that does not
+            // describe this file.
+            // 用夾取的方式處理，會讓一個兩欄檔案上的 `-add-column 9` 落在最後並以 0 結束，而那
+            // 正是這個工具自己命名過的失敗：呼叫端拿回一個檔案、以為那個 9 有意義，而沒有任何
+            // 東西說過那個數字被忽略了。「最後一欄再加一」是附加；再往後就是一個描述不了這個
+            // 檔案的數字。
+            guard a.at <= r.fields.count + 1 else {
+                throw fault(
+                    "-add-column \(a.at): this file has \(r.fields.count) columns, so the highest position is \(r.fields.count + 1), which appends",
+                    "-add-column \(a.at)：這個檔案有 \(r.fields.count) 欄，因此最大的位置是 \(r.fields.count + 1)，那會附加在最後")
+            }
+            let idx = a.at - 1
+            let text: String
+            if let hr = headerRow {
+                // The name carries both titles the way the header row does:
+                // one CSV record, so `note,備註` is two fields and a name that
+                // itself contains a comma can be quoted like anything else.
+                // 那個名字以「標頭列的方式」承載兩個標題：一筆 CSV 紀錄，因此 `note,備註` 是兩個
+                // 欄位，而一個「名字本身含逗號」的欄位可以像其他任何東西一樣加引號。
+                let parts = splitHeaderName(a.name)
+                text = hr < parts.count ? parts[hr] : ""
+            } else {
+                text = a.value
+            }
+            r.fields.insert(Field(value: Array(text.utf8)), at: idx)
+        }
+    }
+
     func dropColumns(_ r: inout Record) {
         guard !drop.isEmpty else { return }
         var kept: [Field] = []
@@ -1348,6 +1408,31 @@ func runEdit(_ o: Options) throws {
                     // fragment; this produces a file.
                     // 編輯會重寫整個檔案，因此標頭一定寫出。`-t` 是給選取用的
                     // ——那產生的是片段，而這裡產生的是一個完整檔案。
+                    // Outside the `-delete -col` block above, because a
+                    // run may add a column without deleting one -- inside it,
+                    // the header kept its arriving width while every data
+                    // record grew, and the file that came back out was
+                    // rejected by csv2's own reader on the next read.
+                    // 放在上面 `-delete -col` 區塊之外，因為一次執行可以只加不刪——放在裡面時，
+                    // 標頭維持送達時的寬度而每一筆資料都變寬了，寫回去的檔案在下一次讀取時
+                    // 被 csv2 自己的讀取器拒絕。
+                    // A warning, not a refusal: the file is still correct
+                    // csv2 with an empty Chinese title, and the person adding
+                    // the column may not be the person who can translate it.
+                    // Filling it with the English title would be inventing a
+                    // translation, and a wrong one is harder to find later
+                    // than an empty cell.
+                    // 這是警告而非拒絕：中文標題留空的檔案仍然是正確的 csv2，而「加這一欄的人」
+                    // 未必就是「能翻譯它的人」。拿英文標題去填等於發明一個翻譯，而一個錯的翻譯
+                    // 日後比一個空格更難被發現。
+                    if plan.headerRows >= 2 {
+                        for a in addCols where splitHeaderName(a.name).count < 2 {
+                            Platform.writeStderr(
+                                "csv2: -add-column \(a.at) \(a.name): no Chinese title given, row 2 left empty; supply both as 'english,中文'\n"
+                                + "csv2：-add-column \(a.at) \(a.name)：未提供中文標題，第 2 列留空；請以 'english,中文' 一併給出\n")
+                        }
+                    }
+                    for i in headers.indices { try addColumns(&headers[i], headerRow: i) }
                     for h in headers { emit(h) }
                     builder?.headerEnded(at: UInt64(outOffset))
                 }
@@ -1525,6 +1610,7 @@ func runEdit(_ o: Options) throws {
             // 放在最後，讓上面每一個索引都仍指向輸入。欄位數檢查、日誌裡的欄位名稱、
             // 以及轉換全都依原本的形狀讀取；只有真正寫出去的東西變窄。
             dropColumns(&r)
+            try addColumns(&r, headerRow: nil)
             emitData(r)
             return true
         } catch {

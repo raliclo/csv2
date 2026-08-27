@@ -1248,3 +1248,25 @@ func parseRowLiteral(_ text: String, format: Format, expected: Int, what: String
     r.number = 0
     return r
 }
+
+/// Splits `-add-column`'s NAME into one title per header row.
+///
+/// It is parsed as a CSV record, not split on commas, because a column name
+/// may contain a comma and this tool has refused to lose one anywhere else.
+/// `'note,備註'` is two titles; `'"a,b",備註'` is a column literally called
+/// `a,b` and its Chinese title.
+///
+/// 把 `-add-column` 的 NAME 切成「每一列標頭一個標題」。
+/// 它是以一筆 CSV 紀錄來解析的，不是用逗號切開，因為一個欄位名稱可能含有逗號，而這個工具在其他
+/// 任何地方都拒絕弄丟它。`'note,備註'` 是兩個標題；`'"a,b",備註'` 是一個「名字就叫 a,b」的欄位
+/// 加上它的中文標題。
+func splitHeaderName(_ s: String) -> [String] {
+    var out: [String] = []
+    let parser = RecordParser(format: .csv) { r in
+        out = r.fields.map { String(bytes: $0.value, encoding: .utf8) ?? "" }
+        return false
+    }
+    try? parser.feed(Array(s.utf8) + [BYTE_LF])
+    if out.isEmpty { out = [s] }
+    return out
+}

@@ -226,6 +226,30 @@ had gone up.
 **要看 SKIP 清單，不要看 PASS 數。** 一個跳過的案例，看起來與一個通過的案例一模一樣。當核心換了
 13,187 個 commit 時，真正要緊的答案是「那七個 SKIP 是同樣的七個」，而不是總數變多了。
 
+### 11a. `--help` and BOTH READMEs are part of the change, not follow-up
+
+A flag the parser knows and the documentation does not is a flag nobody will
+find. T154c and T154e exist to make that impossible to forget: one checks that
+every flag the parser accepts appears in `--help`, the other that it appears in
+**each** README. On 2026-08-27 they were the only two failures in a suite of
+1039 after `-add-column` was implemented, and they were right -- the verb
+worked and was undiscoverable.
+
+一個「解析器認得、而文件不認得」的旗標，是一個沒有人會找到的旗標。T154c 與 T154e 的存在就是為了
+讓這件事無法被忘記：一個檢查「解析器接受的每一個旗標都出現在 `--help` 裡」，另一個檢查它出現在
+**每一份** README 裡。2026-08-27，在 `-add-column` 實作完之後，它們是一份 1039 個案例的測試裡
+僅有的兩個失敗，而它們是對的——那個動詞能用，而且找不到。
+
+**This applies to new features, not only to defects found by a round.** Rules
+11 to 13 sit under "After the report" because that is where they were learned,
+but nothing about them is specific to a report: a feature added on request
+needs the same four platforms, the same documentation in both languages, and
+the same commit order.
+
+**這適用於新功能，不只適用於某一回合找到的缺陷。** 第 11 到 13 條排在「收到報告之後」底下，
+是因為它們是在那裡學到的，但它們沒有一條是「只對報告成立」的：一個依要求新增的功能，需要同樣的
+四個平台、同樣兩種語言的文件、以及同樣的 commit 順序。
+
 ### 12. Commit, push, then the parent's gitlink
 
 In that order. A gitlink pointing at a commit that exists only locally names

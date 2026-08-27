@@ -23,6 +23,12 @@ enum EditVerb {
     case deleteRange(from: Int, to: Int)
     case deleteCell(record: Int, column: String)
     case deleteColumn(column: String)
+    /// Phase 10. `at` is 1-based like every other address here; `name` carries
+    /// both titles the way a header row does, comma-separated; `value` fills
+    /// every data row and is empty when omitted.
+    /// 第 10 階段。`at` 與這裡其他每一個位址一樣是 1-based；`name` 以「標頭列的方式」承載兩個
+    /// 標題，逗號分隔；`value` 會填進每一筆資料列，省略時為空。
+    case addColumn(at: Int, name: String, value: String)
     case update(record: Int, column: String, value: String)
 }
 
@@ -192,6 +198,7 @@ let KNOWN_FLAGS: Set<String> = [
     "debug",
     "decrypt",
     "delete",
+    "add-column",
     "en",
     "encrypt",
     "filter",
@@ -572,6 +579,30 @@ func parseArgs(_ argv: [String]) throws -> Options {
             o.cellModifier = false; o.colModifier = false
         case "append":
             o.edits.append(.append(row: try needData(arg)))
+            o.cellModifier = false; o.colModifier = false
+        case "add-column":
+            // The column number, then the name, then an optional value. The
+            // value is optional and the name is not: a column csv2 cannot
+            // address by name is a column it should not create. Phase 10.
+            // 欄位編號、名字，然後是一個選填的值。值是選填的，名字不是：一個 csv2 沒辦法以名稱
+            // 定址的欄位，是一個它不該造出來的欄位。第 10 階段。
+            let colNum = try intVal(arg, try need(arg))
+            guard colNum >= 1 else {
+                throw usageError(
+                    "-add-column \(colNum): columns are numbered from 1 here, the same as -delete -col and -get r:c. 0 is the header, which is why it cannot mean the first column",
+                    "-add-column \(colNum)：這裡的欄位從 1 開始編號，與 -delete -col 及 -get r:c 相同。0 是標頭，那正是它不能表示第一欄的原因")
+            }
+            let colName = try needData(arg)
+            // One argument or two. A value that begins with `-` is a flag, and
+            // needData refuses it -- so `-add-column 3 note -i f.csv2` reads
+            // the value as absent rather than swallowing `-i`.
+            // 一個引數或兩個。一個以 `-` 開頭的值是旗標，而 needData 會拒絕它——因此
+            // `-add-column 3 note -i f.csv2` 會把那個值讀成「沒有給」，而不是把 `-i` 吞掉。
+            var colValue = ""
+            if i + 1 < argv.count, !argv[i + 1].hasPrefix("-") {
+                colValue = try needData(arg)
+            }
+            o.edits.append(.addColumn(at: colNum, name: colName, value: colValue))
             o.cellModifier = false; o.colModifier = false
         case "delete":
             let spec = try need(arg)
@@ -1071,6 +1102,20 @@ func validate(_ o: inout Options) throws {
                 throw usageError(
                     "-delete -col cannot be combined with -insert or -append: the literal row would have to match either the old shape or the new one, and there is no way to tell which was meant. Run them as two commands.",
                     "-delete -col 不可與 -insert／-append 併用：那一列字面值必須符合舊形狀或新形狀其中之一，而無法判斷是哪一個。請分成兩道指令執行。")
+            case .addColumn(let at, _, _):
+                // Both verbs number columns against the arriving file, so
+                // `-delete -col 2 -add-column 2` names two different second
+                // columns depending on which is applied first -- and both
+                // orders read correctly off the command line. Adding after
+                // dropping is what the code does; saying so in a message the
+                // user has to find later is not the same as refusing now.
+                // 兩個動詞都是對送達時的檔案編號，因此 `-delete -col 2 -add-column 2` 裡的
+                // 「第 2 欄」是哪一欄，取決於誰先套用——而兩種順序從命令列上讀起來都對。
+                // 程式實際上是先刪後加；把這件事寫在一則使用者事後才會找到的訊息裡，
+                // 與現在就拒絕並不相同。
+                throw usageError(
+                    "-delete -col cannot be combined with -add-column \(at): both number columns against the file as it arrives, so the same number means two different columns depending on which is applied first. Run them as two commands.",
+                    "-delete -col 不可與 -add-column \(at) 併用：兩者都是對送達時的檔案編號，因此同一個欄號會依「誰先套用」而指向兩個不同的欄。請分成兩道指令執行。")
             default: break
             }
         }
@@ -2303,6 +2348,14 @@ func printHelp() {
       -delete -cell r:c  BLANK that cell; the field count never changes
       -delete -col N     remove column N from every record AND both header
                          rows. The one deletion that keeps alignment.
+      -add-column N NAME [VAL]
+                         insert a column AT position N, numbered from 1 like
+                         every other address here. N may be one past the last
+                         column, which appends. NAME carries both titles the
+                         way a header row does: 'note,備註'. A .csv2 given
+                         only the English title warns and leaves row 2 empty.
+                         VAL fills every data row; omitted, they are empty.
+                         Not combinable with -delete -col in one run.
       -get r:c           print that cell's value and nothing else. The read
                          that matches -update r:c VAL
       -update r:c VAL    set that cell

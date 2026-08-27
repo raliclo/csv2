@@ -3173,6 +3173,169 @@ Swift 5 語言模式。因此每個建置入口都傳入 `-swift-version 6`，SP
 - [x] native Windows: executable, module, client and SPM all use Swift 6 mode / 原生 Windows：執行檔、module、客戶端與 SPM 全部使用 Swift 6 模式
 - [ ] repeat the Swift 6 verification on macOS and aarch64 Linux / 在 macOS 與 aarch64 Linux 重跑 Swift 6 驗證
 
+## Phase 10: adding a column / 第 10 階段：新增一欄
+
+Requested 2026-08-27. `-delete -col N` has existed since phase 4 and has never
+had a counterpart, and until today that absence was not even on the "not
+offered" table -- a reader found neither the verb, nor the reason, nor the
+alternative (KA).
+
+2026-08-27 提出。`-delete -col N` 從第 4 階段起就存在，而它從來沒有對應的動詞；直到今天，那個
+缺席甚至不在「不提供」那張表上——讀者找不到那個動詞、找不到理由、也找不到替代方案（KA）。
+
+### Decided / 已定案
+
+**`-add-column N NAME [VALUE]`, and N is 1-BASED.**
+
+Two arguments, not four, and `NAME` carries both titles the way the header row
+itself carries them -- `'note,備註'`, comma-separated and quoted by the same
+CSV rules as everything else in this tool. Four separate arguments cannot be
+told apart: `-add-column 3 note hello` gives no way to know whether `hello` is
+the Chinese title or the value, and a verb whose meaning depends on counting
+its arguments is a verb that will be typed wrong.
+
+**`-add-column N NAME [VALUE]`，而 N 是 1-based。**
+兩個引數，不是四個，而 `NAME` 以「標頭列本身承載它們的方式」承載那兩個標題——`'note,備註'`，
+以逗號分隔，並依照這個工具其他每一處相同的 CSV 引號規則。四個各自獨立的引數分辨不出來：
+`-add-column 3 note hello` 沒有辦法知道 `hello` 是中文標題還是那個值，而一個「意思取決於數引數個數」
+的動詞，是一個會被打錯的動詞。
+
+The user chose 1-based over the 0-based they first asked for, once the conflict
+was named: every address in this tool is 1-based (`-get 1:1`, `-delete -col 1`),
+and `0` already means something else -- it is the header, reported as `0a`/`0b`.
+A 0-based column verb beside a 1-based one would make `-add-column 2` and
+`-delete -col 2` name different columns, in the same file, in the same run. That
+is the off-by-one this whole design exists to refuse.
+
+**`-add-column N NAME [VALUE]`，而 N 是 1-based。**
+使用者一開始要求的是 0-based，在那個衝突被指出之後改選了 1-based：這個工具裡每一個位址都是
+1-based（`-get 1:1`、`-delete -col 1`），而 `0` 已經有別的意思——它是標頭，回報為 `0a`／`0b`。
+一個 0-based 的欄位動詞擺在一個 1-based 的旁邊，會讓 `-add-column 2` 與 `-delete -col 2` 在同一個
+檔案、同一次執行裡指向**不同的欄位**。那正是這整份設計存在所要拒絕的那個差一位。
+
+**The English title is always required.** Not defaulted, not derived from the
+value, not generated from the column number. A column with no name is a column
+`--zh`, `-get 1:name` and `--json`'s `fields` keys cannot address, and this tool
+does not create things it then cannot address.
+
+**英文標題永遠是必填的。** 不給預設值、不從那個值推導、也不從欄位編號生成。一個沒有名字的欄位，
+是 `--zh`、`-get 1:name` 與 `--json` 的 `fields` 鍵都定址不到的欄位，而這個工具不會造出一個它自己
+之後定址不到的東西。
+
+**Both titles on a `.csv2`; missing the Chinese one is a WARNING, and the row is
+left EMPTY.** The user chose a warning over a refusal on 2026-08-27. What the
+warning cannot leave undecided is what actually goes in that row, and there are
+only two candidates: copy the English title, or leave it empty.
+
+Copying is refused. It would put `note` in the Chinese row and that is a
+statement -- "this column is called note in Chinese" -- which nobody made. The
+empty string says "this column has no Chinese name", which is true, and it is
+the thing the warning is warning about. A false title is worse than a missing
+one precisely because it looks finished.
+
+**`.csv2` 上兩個標題都要；缺中文那個是**警告**，而那一列會**留空**。** 使用者在 2026-08-27 選了
+警告而不是拒絕。警告不能懸而未決的是「那一列實際上放什麼」，而候選只有兩個：複製英文標題，或留空。
+
+複製被否決。那會把 `note` 放進中文那一列，而那是一句話——「這一欄的中文名字叫 note」——沒有人說過
+那句話。空字串說的是「這一欄沒有中文名字」，那是真的，而且正是那個警告在警告的東西。**一個假的標題
+比一個缺席的標題更糟，正因為它看起來是完成的。**
+
+**This paragraph used to say "or refuse", and it survived the decision that
+replaced it.** Written before the user chose a warning on 2026-08-27, it went
+on arguing at length that a missing Chinese title must be refused -- three
+paragraphs below the three that had already settled on a warning, in the same
+section, both reading as decided. Nothing flagged the contradiction; it was
+found while ticking the boxes. The rule that a plan is rewritten when
+implementation contradicts it applies to the plan contradicting ITSELF, and
+this is what it looks like when it is not applied in time.
+
+**這一段原本寫的是「否則拒絕」，而它在那個取代了它的決定之後還活著。** 它寫在使用者於 2026-08-27
+選擇「警告」之前，卻繼續用三段的篇幅論證「缺中文標題必須被拒絕」——就排在那三段「已經定案為警告」
+的段落下面，同一節裡，兩者讀起來都像是已定案。沒有任何東西指出這個矛盾；它是在打勾的時候才被發現的。
+「實作與計畫矛盾時要回寫計畫」那條規則，同樣適用於**計畫與它自己矛盾**，而這就是它沒有被及時套用的樣子。
+
+**No row index on this verb.** The request was "given a row index it fills one
+cell, otherwise every data row". The effect is right and the syntax is not:
+this verb takes a COLUMN first, and `r:c` everywhere else takes a ROW first, so
+`-add-column 3:2` and `-update 2:3` would name the same cell in opposite
+orders. Two addressing orders in one tool is the same off-by-one in a different
+coat.
+
+The four edit verbs already compose in one atomic run, so the effect needs no
+new syntax:
+
+```console
+$ csv2 -add-column 3 note 備註 -update 2:3 'hello' -i f.csv2 --in-place
+```
+
+`VALUE` fills every data row; omitting it leaves the column empty; `-update
+r:N` fills one cell -- with the addressing that is already there and already
+tested.
+
+**這個動詞不接受列索引。** 原本的要求是「給了列索引就只填一格，否則填每一筆資料列」。那個**效果**
+是對的，而那個**語法**不是：這個動詞先吃**欄**，而其他每一處的 `r:c` 先吃**列**，於是
+`-add-column 3:2` 與 `-update 2:3` 會以相反的順序指向同一格。一個工具裡有兩種定址順序，是同一個
+差一位換了件衣服。四個編輯動詞本來就能在一次原子執行裡混用，因此那個效果不需要新語法。
+
+### Decided while implementing / 實作時定下的
+
+- **`-delete -col` with `-add-column` in one run: REFUSED.** The batch rule is
+  that every index counts against the file AS IT ARRIVED, and here that rule
+  cannot be kept by both verbs at once. `-delete -col 2 -add-column 2` names a
+  second column that is different depending on which is applied first, and both
+  orders read correctly off the command line -- so picking one silently makes
+  the other half of the people who type it wrong. What the code does is drop
+  first and add second; saying so in a message someone has to find afterwards
+  is not the same as refusing now. This is the shape `-delete -col` with
+  `-insert`/`-append` was already refused for, and the refusal sits beside it.
+  **同一次執行裡的 `-delete -col` 與 `-add-column`：拒絕。** 批次規則是「每一個索引都對送達時
+  的檔案計數」，而在這裡那條規則沒辦法讓兩個動詞同時遵守。`-delete -col 2 -add-column 2` 裡的
+  「第 2 欄」會依誰先套用而不同，而兩種順序從命令列上讀起來都對——於是靜默地挑一個，會讓打出
+  這行的人裡有一半是錯的。程式實際做的是先刪後加；把這件事寫在一則有人事後才會找到的訊息裡，
+  與現在就拒絕並不相同。這與 `-delete -col` 搭配 `-insert`／`-append` 被拒絕的形狀相同，
+  而那道拒絕就寫在它旁邊。
+- **`N` one past the last column: APPENDS. Beyond that: REFUSED.** The first
+  working version clamped, and `-add-column 9` on a two-column file landed at
+  the end and exited 0 -- a file handed back in which the 9 silently meant
+  nothing, which is the failure this whole tool is named after. One past the
+  last is the append, the same way `-insert` allows the position after the last
+  record; anything further is a number that does not describe this file.
+  **`N` 剛好是「最後一欄再加一」：附加。再往後：拒絕。** 第一個能動的版本是用夾取的，於是
+  一個兩欄檔案上的 `-add-column 9` 落在最後並以 0 結束——交回一個「那個 9 靜默地沒有意義」的
+  檔案，而那正是這整個工具最在意的那種失敗。「最後一欄再加一」就是附加，與 `-insert` 允許
+  「最後一筆之後」的位置是同一回事；再往後就是一個描述不了這個檔案的數字。
+- **A protected column among the existing ones: ALLOWED, and checked.** The
+  plan said to check rather than assume, and the checking was the point: a
+  ciphertext that no longer decrypts looks exactly like a ciphertext, so this
+  is a failure that would have been silent. rawRowWriteRefusal does not fire,
+  the marker and the digest are carried across the move, and the encrypt →
+  add → decrypt round trip closes. T214l and T214m pin both.
+  **既有欄位裡有受保護欄位：允許，而且查證過。** 計畫寫的是「查證而不是假設」，而那個查證正是
+  重點：一段解不開的密文，看起來與一段密文一模一樣，因此這是一個「壞掉也會是無聲的」失敗。
+  rawRowWriteRefusal 不會觸發，標記與摘要都在移動中被帶過去，而「加密 → 新增 → 解密」那趟往返
+  合得起來。T214l 與 T214m 各釘住一項。
+- **The header write must not live inside the `-delete -col` block.** It did,
+  in the first version: every data record grew and the header kept its arriving
+  width, so a run that only added a column produced a file csv2's own reader
+  then refused -- `record 1 (line 3) has 3 fields but the header has 2`. The
+  write succeeded; the file was wrong; the next read is what said so. T214b is
+  there for exactly this.
+  **寫標頭那一行不能住在 `-delete -col` 的區塊裡。** 第一版就是那樣：每一筆資料列都變寬了而
+  標頭維持送達時的寬度，於是一次「只加不刪」的執行產生了一份 csv2 自己的讀取器隨後就拒絕的檔案
+  ——`record 1 (line 3) has 3 fields but the header has 2`。寫入成功了；檔案是錯的；說出這件事的
+  是下一次讀取。T214b 就是為了這一個而存在。
+
+- [x] the decisions above, in this file, before code / 上面那些決定寫在這個檔案裡，然後才寫程式
+- [x] `-add-column N NAME [VALUE]`, 1-based -- T214d, T214f / 1-based——T214d、T214f
+- [x] a `.csv2` missing the Chinese title warns and leaves row 2 empty -- T214g, T214h; a `.csv` is not warned at -- T214i / `.csv2` 缺中文標題時警告並把第 2 列留空——T214g、T214h；`.csv` 不會被警告——T214i
+- [x] one past the last column appends, beyond that is refused -- T214c, T214e / 最後一欄再加一會附加，再往後拒絕——T214c、T214e
+- [x] both header rows grow with the records -- T214b / 兩列標頭與紀錄一起變寬——T214b
+- [x] `-delete -col` in the same run is refused, not ordered -- T214j / 同一次執行裡的 `-delete -col` 是拒絕而非定序——T214j
+- [x] a protected column is carried across intact -- T214l, T214m / 受保護欄位被完整帶過去——T214l、T214m
+- [x] the "not offered" row changes from "nothing does" to the verb, in BOTH READMEs / 「不提供」那一列從「沒有任何東西做得到」改成那個動詞，**兩份** README 都改
+- [x] `--help` lists it, and T154c/T154e pin that it stays listed / `--help` 列出它，而 T154c／T154e 釘住「它會一直被列著」
+- [ ] four platforms / 四個平台
+
 ## 待決問題
 
 1. ~~submodule 掛在哪裡~~ —— 已定：`sos/csv2`。

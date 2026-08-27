@@ -48,21 +48,28 @@ described somewhere below; this is the list a reader should see first:
 | editing a Markdown table | supported since 2026-08-26 — render with `-md`, edit, read the `.md` back. See the note below the table |
 | safe concurrent writers | serialise them yourself; two writers silently lose one edit. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one that finishes SECOND warns that it could not update the index |
 | telling refusals apart programmatically | nothing but exit 1 and English prose, in every one of them |
-| adding a column | nothing does — `-delete -col` has no counterpart. Write the records out with `--json`, add the field in one pass of your own, and read them back; or write a new `.csv2` beside the old one. On a `.csv2` a new column needs BOTH titles, and inventing the second is the one thing this tool will not do — see the note below |
 | scoping a search to ONE column | nothing does. `-contains` is a substring search across every column, so counting with it is silently wrong the moment the word appears anywhere else — see below |
 
 **A new column on a `.csv2` needs both titles, and csv2 will not invent the
-second one.** That is not a limitation waiting to be lifted; it is the same
-rule that refuses to write a one-header `.csv` into a `.csv2`:
+second one.** That is the same rule that refuses to write a one-header `.csv`
+into a `.csv2`:
 
 > going to two rows would mean **inventing a row of titles**
 
 A program that refuses to invent a Chinese title there, and invents one here,
-would be contradicting itself inside the same binary. So when adding a column
-arrives it will require both names on a `.csv2` and one on a `.csv`, and refuse
-by naming which one is missing. Until then, `--json` and one pass of your own
-is the way, and you supply both titles yourself -- which is the same
-requirement, just carried out by hand.
+would be contradicting itself inside the same binary. So `-add-column` takes
+both, the way a header row carries them -- one CSV record, comma-separated:
+
+```console
+$ csv2 -add-column 2 'note,備註' 'todo' -i pkgs.csv2 --in-place
+```
+
+Give only the English title on a `.csv2` and it **warns** on stderr and leaves
+row 2 empty. It is a warning rather than a refusal because the file that comes
+back is still correct csv2, and because the person adding a column is often not
+the person who can translate its name. The empty cell says so and can be filled
+later; an English title copied into the Chinese row would be a translation
+csv2 invented, and a wrong one is harder to find afterwards than a blank.
 
 **A search cannot be scoped to a column, and that makes the obvious counting
 idiom wrong.** `-contains` matches a substring in ANY column:
@@ -600,6 +607,24 @@ EDITING / 編輯
                         resolved against the file as it is now, so running
                         `-delete -col 1` twice removes two different columns --
                         the second run's `1` is what used to be `2`
+  -add-column N NAME [VAL]
+                        insert a column at position N, numbered from 1 the way
+                        every other address here is. N may be one past the last
+                        column, which appends; beyond that is refused, because
+                        clamping `-add-column 9` on a two-column file to the
+                        end and exiting 0 would hand back a file in which the
+                        9 silently meant nothing. NAME carries both titles the
+                        way a header row does -- one CSV record, so
+                        `'note,備註'` is two fields and a title containing a
+                        comma can be quoted like anything else. On a `.csv2`
+                        given only the English title, row 2 is left EMPTY and
+                        a warning goes to stderr. VAL fills every data row;
+                        omitted, they are empty. Cannot be combined with
+                        `-delete -col` in one run: both number columns against
+                        the file as it ARRIVES, so the same number names two
+                        different columns depending on which is applied first,
+                        and both readings are defensible. Run them separately.
+                        To set one cell afterwards, compose with `-update r:c`
   -update r:c VAL       update one cell
   --truncate-partial    when READING, drop a record left unfinished at EOF by
                         an unclosed quote, instead of failing. A trailing
@@ -2118,6 +2143,9 @@ here rather than to grow the table into something nobody reads.
 | `-delete -col` removing every column | a file with no columns is not a CSV file |
 | `-delete -col X` with `-update`/`-delete -cell`/`-encrypt`/`-hash` on X | the edit would have no effect and would still be reported as done |
 | `-delete -col` with `-insert`/`-append` | the literal row would have to match either the old shape or the new one, and there is no way to tell which was meant |
+| `-delete -col` with `-add-column` | both number columns against the file as it arrives, so the same number means two different columns depending on which is applied first |
+| `-add-column N` with N past one-after-the-last column | clamping it to the end would exit 0 having silently ignored the number |
+| `-add-column 0` | columns are numbered from 1 here; 0 is the header |
 | `--a1` or `--physical` without a locating report | they add a part to the report's address, and `-r`/`--filter`/`-md`/`--json` do not emit one; there would be nothing to add to |
 | `-insert -cell` | inserting a cell mid-record shifts every later field one column along |
 | `-update 99:3` on a 21-record file | out of range is an error, never "grow the file to fit" |
