@@ -370,6 +370,7 @@ fi
 [[ -x $BIN ]] || die "no binary at $BIN -- run ./compile_csv2.zsh first / 找不到執行檔，請先執行 ./compile_csv2.zsh"
 
 BUILT_VERSION=$($BIN --version) || die "the built binary does not run / 建好的執行檔無法執行"
+BUILT_VERSION=${BUILT_VERSION%$'\r'}
 
 say "csv2 install / 安裝"
 say "  from    : $BIN ($BUILT_VERSION)"
@@ -444,8 +445,13 @@ resolves_to_dest() {
 }
 
 if (( DRY )); then
-    say "  DRY  ask a fresh shell whether it runs $DEST, and add a PATH line if not"
-    say "  DRY  問一個全新的 shell 它執行到的是不是 $DEST，不是的話補上 PATH 那一行"
+    if (( RC )); then
+        say "  DRY  ask a fresh shell whether it runs $DEST, and add a PATH line if not"
+        say "  DRY  問一個全新的 shell 它執行到的是不是 $DEST，不是的話補上 PATH 那一行"
+    else
+        say "  DRY  ask a fresh shell whether it runs $DEST; do not change shell rc files"
+        say "  DRY  問一個全新的 shell 它執行到的是不是 $DEST；不修改 shell rc 檔"
+    fi
     say "dry run complete / 預演結束"
     exit 0
 fi

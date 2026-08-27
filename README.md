@@ -10,8 +10,12 @@ and the macOS host it is built from.
 
 **Phases 1–6 are implemented and pass their tests. Phase 7 (shipping) is a deliberate deferral.**
 
+All build entry points require a Swift 6 toolchain and explicitly select Swift
+6 language mode; an installed Swift 6 compiler silently defaulting to Swift 5
+mode is not considered a Swift 6 build.
+
 ```zsh
-./compile_csv2.zsh       # build release/csv2
+./compile_csv2.zsh      # auto-detect the host; release/csv2 or release/csv2.exe
 ./test/test_csv2.zsh    # 0 FAIL. On macOS the one SKIP is T47, which
                         # compares two platforms and so runs from the parent
                         # project. Other platforms skip more, each with its

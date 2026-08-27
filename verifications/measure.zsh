@@ -15,10 +15,9 @@
 # 會慢一個數量級。若真是如此，16 MiB 的索引與平行門檻就是對著錯的數字挑的。
 #
 # This is a MEASUREMENT, not a test: it has no pass/fail and asserts nothing.
-# It prints numbers and writes them beside itself, so a later run can be
-# compared against an earlier one.
-# 這是「量測」而不是「測試」：它沒有通過／失敗，也不斷言任何事。它印出數字並寫在自己
-# 旁邊，讓日後的執行能與先前的比較。
+# benchmark.zsh applies calibrated limits to these same readings.
+# 這是「量測」而不是「測試」：它沒有通過／失敗，也不斷言任何事。
+# benchmark.zsh 會對同一組讀數套用校準過的上限。
 #
 # Usage / 用法:
 #   ./measure.zsh              measure with the defaults / 以預設值量測
@@ -46,7 +45,8 @@ ROOT=${HERE:h}
 
 [[ -x $CSV2 ]] || { print -u2 -- "build first: $ROOT/compile_csv2.zsh"; exit 1 }
 
-OUT=$HERE/measure_output.txt
+: ${MEASURE_OUTPUT:=$HERE/measure_output.txt}
+OUT=$MEASURE_OUTPUT
 TMP=$(mktemp -d "$HERE/.measure.XXXXXX")
 trap 'rm -rf -- "$TMP"' EXIT INT TERM
 
@@ -56,7 +56,9 @@ say() { print -r -- "$1"; print -r -- "$1" >> $OUT }
 say "# csv2 measurements"
 say "date    : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 say "host    : $(uname -sm)"
-say "binary  : $($CSV2 --version)"
+binary_version=$($CSV2 --version)
+binary_version=${binary_version%$'\r'}
+say "binary  : $binary_version"
 say ""
 
 # ---------------------------------------------------------------------

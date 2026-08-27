@@ -10991,8 +10991,8 @@ fi
 # 行為寫成無條件成立，直到第 74 回合實測 -o 拿到 LF。這個行為是刻意的——其他每一種編輯都以
 # 同樣方式重寫分隔符——因此錯的是那句話，而這個案例是用來讓改過的那句話保持誠實的。
 printf 'a,b\r\n1,x\r\n' > "$TMP/t202_o.csv"
-"$CSV2" -append '2,y' -i "$TMP/t202_o.csv" -o "$TMP/t202_o.out" -t
-_t202f=$(od -A n -c < "$TMP/t202_o.out" | tr -s ' ')
+"$CSV2" -append '2,y' -i "$TMP/t202_o.csv" -o "$TMP/t202_output.csv" -t
+_t202f=$(od -A n -c < "$TMP/t202_output.csv" | tr -s ' ')
 if [[ $_t202f == *"\\r"* ]]; then
     bad "T202f -o kept CR, and the README says it does not / -o 保留了 CR，而 README 說它不會"
 else
@@ -11922,6 +11922,13 @@ case $_t211_dev in
         bad "T211p -o /dev/stdout refused for the wrong reason: $_t211_dev / 以錯的理由拒絕" ;;
     *"regular file"*|*FIFO*)
         ok "T211p -o to a non-regular file is refused for what it is / 指向非一般檔案的 -o，以「它是什麼」為理由被拒絕" ;;
+    *"/proc/self/fd/1"*"directory /proc/self/fd does not exist"*)
+        # MSYS translates /dev/stdout for a native Windows process, but that
+        # process has no /proc filesystem. This is still a path refusal, not
+        # the header-count mistake this case guards against.
+        # MSYS 會替原生 Windows 程式轉換 /dev/stdout，但該程式沒有 /proc
+        # 檔案系統。這仍是路徑拒絕，不是本案例要攔住的標頭列數誤判。
+        ok "T211p native Windows sees the translated stream path as missing / 原生 Windows 看見轉換後的串流路徑不存在" ;;
     "")
         # It SUCCEEDED, and on some systems that is right: with stdout on a
         # file, /dev/stdout resolves to /dev/fd/1 and a process that may write

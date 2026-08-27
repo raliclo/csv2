@@ -14,14 +14,24 @@ chcp 65001 > nul
 :: short compared with swift_tar's equivalent: there is nothing to find but
 :: swiftc itself.
 ::
-:: STATUS: NEVER COMPILED OR RUN. Written from the pattern in
-:: multissh/swift_tar/compile_tar-win.bat. Until it produces a csv2.exe that
-:: passes the suite, nothing in this repository should describe Windows as
-:: supported.
+:: This is also called by compile_csv2.zsh when uname reports MSYS, MINGW, or
+:: CYGWIN. It remains usable directly from cmd.exe.
 ::
 :: Output: release\csv2.exe
 
 cd /d "%~dp0"
+
+set "_opt=-O"
+:parse_args
+if "%~1"=="" goto args_done
+if /i "%~1"=="--debug" (
+    set "_opt=-Onone"
+    shift
+    goto parse_args
+)
+echo [FAIL] Unknown option: %~1
+exit /b 2
+:args_done
 
 where swiftc.exe > nul 2>&1
 if errorlevel 1 (
@@ -76,8 +86,8 @@ if not defined _sources (
 
 if not exist release mkdir release
 
-echo Building csv2.exe
-swiftc -O %_sources% -o release\csv2.exe
+echo Building csv2.exe ^(%_opt%^)
+swiftc -swift-version 6 %_opt% %_sources% -o release\csv2.exe
 if errorlevel 1 (
     echo [FAIL] swiftc failed.
     exit /b 1

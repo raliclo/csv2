@@ -1381,6 +1381,13 @@ sparse image，且這是寫入尚未配置的區塊。但那正是 csv2 的情�
 **寫入端的預測是準的，讀取端差了 64 倍。** 計畫自己已經警告過「真正的解析器會慢一個
 數量級」——方向對了，幅度低估了六倍。
 
+2026-08-27 改用 Swift 6 語言模式後，原生 Windows x64 以同一份 20 萬筆／
+26,642,235 bytes 語料重複量四次：單執行緒剖析 2.410–2.640 秒、平行剖析
+0.839–0.898 秒、最小落地編輯 0.0785–0.0885 秒、整檔重寫 2.444–2.590 秒。
+`verifications/benchmark.zsh` 以 4.0／1.5／0.15／4.0 秒為四項上限，因此能擋下
+明顯退化，同時不會因一般主機負載就變成不穩定的 wall-clock 測試。這些上限是
+Windows runner 的校準值；既有 T9／T12／T13／T108 仍以比例限制跨平台的 RSS 與讀取量。
+
 ### 而門檻因此變得比原本更站得住腳
 
 16 MiB 的索引與平行門檻是對著 2900 MiB/s 挑的。在那個速率下，掃描 16 MiB 只要
@@ -3128,10 +3135,38 @@ there is no `swiftc`.
 客戶端去 import 它、用到全部七個型別，然後**執行**它。T212 會呼叫它，而在沒有 `swiftc` 的地方以
 具名理由跳過。
 
+### Swift 6 language mode, everywhere / 所有入口一律使用 Swift 6 語言模式
+
+Decided by the user on 2026-08-27: installing a Swift 6 compiler is not enough,
+because bare `swiftc` may still compile in Swift 5 language mode. Every build
+entry point therefore passes `-swift-version 6`, and the SPM verification uses
+`.swiftLanguageMode(.v6)`. The rule covers the native macOS/Linux build, the
+aarch64 Linux guest build, the native Windows bootstrap, the standalone module,
+and its external client.
+
+The migration removed two unnecessary pieces of shared state: stdout binary
+mode is set idempotently instead of remembered globally, and the system random
+generator is local to each request. State whose design genuinely crosses a
+concurrency boundary now names that boundary explicitly: the signal-handler
+temp pointer uses the narrow `nonisolated(unsafe)` required by async-signal-safe
+code, Logger records its coordinator ownership, and parallel batch results put
+their lock and values in one Sendable wrapper.
+
+2026-08-27 由使用者定案：只安裝 Swift 6 編譯器仍不夠，因為裸 `swiftc` 可能繼續使用
+Swift 5 語言模式。因此每個建置入口都傳入 `-swift-version 6`，SPM 驗證則使用
+`.swiftLanguageMode(.v6)`。這條規則涵蓋 macOS／Linux 原生建置、aarch64 Linux guest
+建置、Windows 原生 bootstrap、獨立 module，以及其外部客戶端。
+
+遷移時移除了兩份不必要的共享狀態：stdout binary mode 改為冪等設定，不再以全域變數記住；
+系統亂數產生器則改為每次請求各自建立。真正跨越並行邊界的狀態，現在明確指出該邊界：訊號處理
+暫存指標使用 async-signal-safe 程式所需、範圍狹窄的 `nonisolated(unsafe)`；Logger 記錄其
+協調執行緒所有權；平行批次結果則把鎖與值封裝在同一個 Sendable wrapper 中。
+
 - [x] the seven types public, and nothing else / 那七個型別 public，別無其他
 - [x] the subset closes: Platform, Core, Support, Crypto, Markdown, Width / 子集自足
 - [x] verified by importing it from outside and running it / 以「從外面 import 並執行」驗證
-- [ ] the same verification on the other three platforms / 另外三個平台上的同一項驗證
+- [x] native Windows: executable, module, client and SPM all use Swift 6 mode / 原生 Windows：執行檔、module、客戶端與 SPM 全部使用 Swift 6 模式
+- [ ] repeat the Swift 6 verification on macOS and aarch64 Linux / 在 macOS 與 aarch64 Linux 重跑 Swift 6 驗證
 
 ## 待決問題
 

@@ -195,7 +195,14 @@ func reportEscape(_ s: String) -> String {
     return out
 }
 
-final class Logger {
+/// The singleton is configured, used and closed by the CLI coordinator. The
+/// parallel workers return values to that coordinator and never call Logger
+/// themselves. `@unchecked Sendable` records that ownership boundary without
+/// imposing MainActor on the parser and byte-stream library surface.
+/// 這個單例由 CLI 協調執行緒設定、使用並關閉；平行工作者只把值交回協調端，不會自行
+/// 呼叫 Logger。`@unchecked Sendable` 記錄這條所有權界線，同時不把 MainActor 強加到
+/// parser 與位元組串流的 library 表面。
+final class Logger: @unchecked Sendable {
     static let shared = Logger()
 
     var threshold: LogLevel = .warn

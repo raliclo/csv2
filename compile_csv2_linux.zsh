@@ -4,12 +4,14 @@
 #                          guest VM.
 # compile_csv2_linux.zsh — 在 guest VM 內把 csv2 建置成 Linux aarch64 ELF。
 #
-# Kept separate from compile_csv2.zsh, which is the macOS host build. The
-# two differ in exactly one place -- where swiftc lives -- and that is the
+# Kept separate from the auto-detecting compile_csv2.zsh because the guest
+# requires an explicit toolchain and source location. They otherwise differ
+# in exactly one place -- where swiftc lives -- and that is the
 # whole point of csv2 having no C dependencies: swift_tar needs a sysroot,
 # generated module maps and zlib headers for its Linux build, and csv2
 # needs none of it. Foundation and Dispatch only.
-# 與 compile_csv2.zsh（macOS host 版）分開。兩者只差一處——swiftc 在哪裡——
+# 與自動偵測平台的 compile_csv2.zsh 分開，因為 guest 必須明確指定 toolchain 與
+# 原始碼位置。除此之外兩者只差一處——swiftc 在哪裡——
 # 而這正是「csv2 沒有 C 依賴」的價值所在：swift_tar 的 Linux 建置需要 sysroot、
 # 自行產生的 module map 與 zlib header，csv2 一樣都不需要，只用 Foundation
 # 與 Dispatch。
@@ -57,7 +59,7 @@ done
 mkdir -p release
 
 print -- "Building csv2 for aarch64 Linux ($OPT) / 正在為 aarch64 Linux 建置 csv2（$OPT）"
-"$SWIFTC" $OPT -o release/csv2 $SOURCES
+"$SWIFTC" -swift-version 6 $OPT -o release/csv2 $SOURCES
 
 # Verify by RUNNING it, not by checking the file exists -- the same rule the
 # macOS build follows. Here it also proves the Swift runtime resolves: a binary

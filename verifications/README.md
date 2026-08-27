@@ -2,12 +2,13 @@
 
 - **繁體中文：[README.zh-TW.md](README.zh-TW.md)**
 
-Measurements, not tests. Nothing here passes or fails; it prints numbers and
-writes them beside itself so a later run can be compared with an earlier one.
-The pass/fail suite is [`../test/test_csv2.zsh`](../test/test_csv2.zsh).
+`measure.zsh` records measurements without judging them. `benchmark.zsh`
+applies the native Windows Swift 6 regression limits calibrated on 2026-08-27.
+The correctness suite remains [`../test/test_csv2.zsh`](../test/test_csv2.zsh).
 
 ```zsh
 ./measure.zsh                    # results land in measure_output.txt
+./benchmark.zsh                  # measure, then enforce Windows Swift 6 limits
 RECORDS=20000 ./measure.zsh      # smaller corpus, for a slow machine
 CSV2=/path/to/csv2 ./measure.zsh
 ```
@@ -15,7 +16,16 @@ CSV2=/path/to/csv2 ./measure.zsh
 | File | Where it came from |
 |---|---|
 | `measure_output.txt` | the host — run this script directly |
+| `measure_output_windows.txt` | native Windows Swift 6 — written by `benchmark.zsh` |
 | `measure_output_linux.txt` | the aarch64 guest — written by `sos/test_submodules/run_csv2_test.zsh`, which runs this same script inside the VM and captures the output back |
+
+The Windows guard uses the same 200,000-record corpus and best-of-N readings as
+the measurement. Four Swift 6 runs observed 2.410–2.640 s single-threaded,
+0.839–0.898 s parallel, 0.0785–0.0885 s for a small durable edit, and
+2.444–2.590 s for a whole-file rewrite. The corresponding upper limits are
+4.0, 1.5, 0.15, and 4.0 seconds. They retain enough room for normal host load
+but fail a substantial regression. A separately calibrated runner may override
+the four `CSV2_BENCH_MAX_*_SECONDS` variables.
 
 `RECORDS`, not a size in MB: the corpus is built row by row, so the record count
 is what is actually controlled. A size knob could only be an estimate, and would

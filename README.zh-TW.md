@@ -10,8 +10,11 @@ English: [README.md](./README.md)
 
 **第 1–6 階段已實作並通過測試；第 7 階段（出貨）是刻意暫緩。**
 
+所有建置入口都要求 Swift 6 工具鏈，並明確選用 Swift 6 語言模式；只安裝 Swift 6
+編譯器、卻靜默採用 Swift 5 預設語言模式，不算 Swift 6 建置。
+
 ```zsh
-./compile_csv2.zsh       # 建置 release/csv2
+./compile_csv2.zsh      # 自動偵測平台；產生 release/csv2 或 release/csv2.exe
 ./test/test_csv2.zsh    # 0 失敗。在 macOS 上唯一的 SKIP 是 T47——它比對的是兩個
                         # 平台，因此由母專案執行。其他平台會多幾個，每一個都會印出
                         # 理由；那個數量由測試自己檢查。

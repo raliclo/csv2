@@ -1,5 +1,5 @@
-# The source list, in compile order. ONE list, read by both build scripts.
-# 原始檔清單，依編譯順序。只有一份，兩支建置腳本都讀它。
+# The source list, in compile order. ONE list, read by every build script.
+# 原始檔清單，依編譯順序。只有一份，所有建置腳本都讀它。
 #
 # It lives here rather than being written out twice because the two scripts
 # DID drift: compile_csv2_linux.zsh was missing src/Parallel.swift, and the

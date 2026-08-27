@@ -2,12 +2,13 @@
 
 - **English: [README.md](README.md)**
 
-這裡放的是「量測」，不是「測試」。沒有任何東西會通過或失敗；它印出數字並寫在自己旁邊，
-讓日後的執行能與先前的比較。通過／失敗的測試在
+`measure.zsh` 只記錄量測、不下判斷；`benchmark.zsh` 則套用 2026-08-27 校準的
+原生 Windows Swift 6 效能回歸上限。正確性測試仍在
 [`../test/test_csv2.zsh`](../test/test_csv2.zsh)。
 
 ```zsh
 ./measure.zsh                    # 結果寫入 measure_output.txt
+./benchmark.zsh                  # 量測，然後檢查 Windows Swift 6 上限
 RECORDS=20000 ./measure.zsh      # 較小的語料，供較慢的機器使用
 CSV2=/path/to/csv2 ./measure.zsh
 ```
@@ -15,7 +16,14 @@ CSV2=/path/to/csv2 ./measure.zsh
 | 檔案 | 從哪裡來 |
 |---|---|
 | `measure_output.txt` | host——直接執行本腳本 |
+| `measure_output_windows.txt` | 原生 Windows Swift 6——由 `benchmark.zsh` 寫入 |
 | `measure_output_linux.txt` | aarch64 guest——由 `sos/test_submodules/run_csv2_test.zsh` 在 VM 內執行同一支腳本並將輸出擷取回來 |
+
+Windows 守衛使用與量測相同的 20 萬筆語料與 N 次取最快值。四次 Swift 6 執行實測為：
+單執行緒 2.410–2.640 秒、平行 0.839–0.898 秒、最小落地編輯 0.0785–0.0885 秒，以及
+整檔重寫 2.444–2.590 秒。對應上限為 4.0、1.5、0.15 與 4.0 秒；它們為一般主機負載
+保留餘裕，但會擋下明顯退化。另一台已獨立校準的 runner 可覆寫四個
+`CSV2_BENCH_MAX_*_SECONDS` 變數。
 
 旋鈕是 `RECORDS` 而不是 MB：語料是一列一列產生的，能被真正控制的是筆數。以大小為單位
 只能是估計值，並會與腳本印出的實際位元組數不一致。

@@ -50,7 +50,7 @@ func normalizedBytes(_ v: [UInt8]) -> [UInt8] {
 // MARK: - Emitters / 輸出器
 // ---------------------------------------------------------------------
 
-struct EmitContext {
+struct EmitContext: Sendable {
     var format: Format
     var headers: [Record]
     var withHeader: Bool

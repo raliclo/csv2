@@ -103,7 +103,7 @@ let LOG_VALUE_WARN_BYTES = 1 << 20
 /// 格式是由副檔名宣告的事實，絕不從內容猜測。沒有任何啟發式能可靠分辨
 /// 「第二列是中文標題」與「第二列是第一筆資料」，而猜錯會把一筆資料當成
 /// 標頭吃掉且不報錯。
-public enum Format: String {
+public enum Format: String, Sendable {
     case csv
     case csv2
     /// A file with no suffix: one column, no header rows, and the line's bytes
@@ -225,7 +225,7 @@ public enum Format: String {
 /// `raw` 是該欄位在輸入中的原樣（含引號）。保留它才可能做到逐位元相同的
 /// round-trip：本來就被加了引號、實際上不需要引號的欄位會維持原樣，於是
 /// `csv2 -r` 不會改寫一個它只是被要求讀取的檔案。
-public struct Field {
+public struct Field: Sendable {
     public var raw: [UInt8]?
     public var value: [UInt8]
 
@@ -239,7 +239,7 @@ public struct Field {
     public mutating func set(_ v: [UInt8]) { value = v; raw = nil }
 }
 
-public struct Record {
+public struct Record: Sendable {
     public var fields: [Field]
     /// Byte offset of the record's first byte. / 該筆第一個位元組的偏移量。
     public var offset: Int = 0

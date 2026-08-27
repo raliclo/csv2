@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 # =====================================================================
-# compile_csv2.zsh — build csv2 on the macOS host
-# compile_csv2.zsh — 在 macOS host 上建置 csv2
+# compile_csv2.zsh — detect the host platform and build csv2
+# compile_csv2.zsh — 偵測 host 平台並建置 csv2
 #
 # Plain .swift sources compiled with swiftc, the same way swift_tar is
 # built: Foundation + Dispatch only, no SwiftPM, no SwiftNIO. That choice
@@ -11,7 +11,7 @@
 # Dispatch，不用 SwiftPM、不用 SwiftNIO。這個選擇讓日後的 Linux 交叉編譯
 # （第 6 階段）只是換一個 target triple，而不是移植一套建置系統。
 #
-# Output / 輸出：release/csv2
+# Output / 輸出：release/csv2（macOS/Linux）或 release/csv2.exe（Windows）
 #
 # Usage / 用法：
 #   ./compile_csv2.zsh            optimised build / 最佳化建置
@@ -19,6 +19,24 @@
 # =====================================================================
 set -e
 cd "$(dirname "$0")"
+
+HOST_KERNEL=$(uname -s)
+case "$HOST_KERNEL" in
+    MSYS*|MINGW*|CYGWIN*)
+        # The native batch bootstrap locates and initialises MSVC before
+        # invoking swiftc. Disable MSYS argument rewriting so cmd.exe receives
+        # /d and /c as Windows switches rather than POSIX paths.
+        # 原生 batch bootstrap 會先尋找並初始化 MSVC，再呼叫 swiftc。關閉 MSYS
+        # 參數改寫，避免 cmd.exe 的 /d 與 /c 被當成 POSIX 路徑轉換。
+        MSYS2_ARG_CONV_EXCL='*' cmd.exe /d /c compile_csv2_win.bat "$@"
+        exit $?
+        ;;
+    Darwin|Linux) ;;
+    *)
+        print -u2 -- "unsupported build platform: $HOST_KERNEL / 不支援的建置平台：$HOST_KERNEL"
+        exit 1
+        ;;
+esac
 
 OPT="-O"
 for arg in "$@"; do
@@ -42,8 +60,8 @@ done
 
 mkdir -p release
 
-echo "Building csv2 ($OPT) / 正在建置 csv2（$OPT）"
-swiftc $OPT -o release/csv2 $SOURCES
+echo "Building csv2 for $HOST_KERNEL ($OPT) / 正在為 $HOST_KERNEL 建置 csv2（$OPT）"
+swiftc -swift-version 6 $OPT -o release/csv2 $SOURCES
 
 # Verify by RUNNING it, not by checking the file exists. Whether the binary
 # landed proves nothing about whether it works; this is the same reasoning as

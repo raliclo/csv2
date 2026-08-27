@@ -223,11 +223,49 @@ func canRunParallelSearch(_ o: Options, format: Format) -> Bool {
     parallelDeclineReason(o, format: format) == nil
 }
 
-private struct ChunkSpan {
+private struct ChunkSpan: Sendable {
     var start: UInt64
     var end: UInt64
     var firstRecord: Int
     var records: Int
+}
+
+/// Results written by parallel workers. The lock protects every stored value;
+/// the coordinator takes one snapshot only after `concurrentPerform` returns.
+/// `@unchecked Sendable` makes that synchronization boundary explicit to
+/// Swift 6 instead of leaving several independently captured mutable arrays.
+/// 平行工作者寫入的結果。鎖保護每一個儲存值；協調端只在 `concurrentPerform`
+/// 返回後取一次快照。`@unchecked Sendable` 向 Swift 6 明確表達這條同步界線，
+/// 不再讓數個可變陣列各自被 closure 捕捉。
+private final class ParallelBatchResults: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fragments: [[UInt8]]
+    private var counts: [Int]
+    private var firstError: Error?
+
+    init(count: Int) {
+        fragments = [[UInt8]](repeating: [], count: count)
+        counts = [Int](repeating: 0, count: count)
+    }
+
+    func store(bytes: [UInt8], hits: Int, at index: Int) {
+        lock.lock()
+        fragments[index] = bytes
+        counts[index] = hits
+        lock.unlock()
+    }
+
+    func store(error: Error) {
+        lock.lock()
+        if firstError == nil { firstError = error }
+        lock.unlock()
+    }
+
+    func snapshot() -> (fragments: [[UInt8]], counts: [Int], error: Error?) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (fragments, counts, firstError)
+    }
 }
 
 /// Pass one: find the record boundaries. Single-threaded and cheap -- it only
@@ -436,9 +474,6 @@ func runParallelSearch(_ o: Options) throws {
     var throttled = false
     var totalRecords = 0
     var matched = 0
-    var firstError: Error?
-    let lock = NSLock()
-
     var i = 0
     while i < spans.count {
         let batch = max(1, min(workerCount(), cap / max(perChunk, 1)))
@@ -456,11 +491,16 @@ func runParallelSearch(_ o: Options) throws {
                 + "CSV2_PARALLEL_MAX_BYTES is \(cap)")
         }
         let hi = min(i + batch, spans.count)
-        var fragments = [[UInt8]](repeating: [], count: hi - i)
-        var counts = [Int](repeating: 0, count: hi - i)
+        let batchStart = i
+        let batchCount = hi - batchStart
+        let results = ParallelBatchResults(count: batchCount)
+        let planFormat = plan.format
+        let headerRows = plan.headerRows
+        let jsonOutput = o.json
+        let normalize = o.normalize
 
-        DispatchQueue.concurrentPerform(iterations: hi - i) { k in
-            let span = spans[i + k]
+        DispatchQueue.concurrentPerform(iterations: batchCount) { k in
+            let span = spans[batchStart + k]
             var bytes: [UInt8] = []
             var hitCount = 0
             do {
@@ -469,7 +509,7 @@ func runParallelSearch(_ o: Options) throws {
                 h.seek(toFileOffset: span.start)
 
                 let memory = ByteSink(memory: ())
-                let emitter: RecordEmitter = o.json
+                let emitter: RecordEmitter = jsonOutput
                     ? JSONEmitter(sink: memory, reportMode: true)
                     : ReportEmitter(sink: memory, needle: needle)
 
@@ -478,18 +518,18 @@ func runParallelSearch(_ o: Options) throws {
                 // 紀錄號與行號直接交給解析器，因此一個區塊回報的位址與完整掃描
                 // 給出的完全相同。
                 var localError: Error?
-                let parser = RecordParser(format: plan.format,
-                                          firstRecordNumber: span.firstRecord + plan.headerRows,
+                let parser = RecordParser(format: planFormat,
+                                          firstRecordNumber: span.firstRecord + headerRows,
                                           firstOffset: Int(span.start),
-                                          firstLine: span.firstRecord + plan.headerRows) { rec in
+                                          firstLine: span.firstRecord + headerRows) { rec in
                     do {
                         var r = rec
-                        r.number = rec.number - plan.headerRows
+                        r.number = rec.number - headerRows
                         try checkFieldCount(r, expected: expectedFields,
                                             what: "record \(r.number) (line \(r.line))")
                         var hits: [Int] = []
                         for (n, f) in r.fields.enumerated() {
-                            let hay = o.normalize ? normalizedBytes(f.value) : f.value
+                            let hay = normalize ? normalizedBytes(f.value) : f.value
                             if bytesContain(hay, needle) { hits.append(n) }
                         }
                         if !hits.isEmpty {
@@ -519,18 +559,16 @@ func runParallelSearch(_ o: Options) throws {
                 if let e = localError { throw e }
                 bytes = memory.takeBytes()
             } catch {
-                lock.lock()
-                if firstError == nil { firstError = error }
-                lock.unlock()
+                results.store(error: error)
                 return
             }
-            lock.lock()
-            fragments[k] = bytes
-            counts[k] = hitCount
-            lock.unlock()
+            results.store(bytes: bytes, hits: hitCount, at: k)
         }
 
-        if let e = firstError { throw e }
+        let batchResult = results.snapshot()
+        if let e = batchResult.error { throw e }
+        let fragments = batchResult.fragments
+        let counts = batchResult.counts
         // Written in chunk order, which is what makes the output identical to
         // the single-threaded run.
         // 按區塊順序寫出，這正是輸出能與單執行緒完全相同的原因。
@@ -539,9 +577,9 @@ func runParallelSearch(_ o: Options) throws {
         // there is nothing left to measure.
         // 這一批實際持有了多少，決定下一批的大小。在片段被寫出並釋放「之前」量，
         // 因為之後就沒有東西可以量了。
-        perChunk = max(1, fragments.reduce(0) { $0 + $1.count } / max(hi - i, 1))
+        perChunk = max(1, fragments.reduce(0) { $0 + $1.count } / max(batchCount, 1))
 
-        for k in 0..<(hi - i) {
+        for k in 0..<batchCount {
             outSink.write(fragments[k])
             matched += counts[k]
         }

@@ -26,6 +26,34 @@ emulate -L zsh
 setopt no_unset pipe_fail
 
 ROOT=${0:A:h:h}
+LINKER_ARGS=()
+
+# A native Windows Swift toolchain must link with MSVC's link.exe and library
+# paths. From MSYS, /zsh/current/link otherwise wins the PATH lookup. The
+# batch file does only the native bootstrap, then hands control straight back
+# to this script with the resulting environment.
+# Windows 原生 Swift toolchain 必須使用 MSVC 的 link.exe 與 library 路徑；從
+# MSYS 執行時，否則會由 /zsh/current/link 搶先命中。batch 檔只負責原生環境
+# bootstrap，接著帶著該環境立刻把控制權交回本腳本。
+case $(uname -s) in
+    MSYS*|MINGW*|CYGWIN*)
+        if [[ ${CSV2_MSVC_READY:-0} != 1 ]]; then
+            (
+                cd $ROOT
+                MSYS2_ARG_CONV_EXCL='*' cmd.exe /d /c verifications\\module_api_win.bat
+            )
+            exit $?
+        fi
+        # zsh for Windows carries a POSIX `link` utility ahead of MSVC's
+        # link.exe. Swift ships lld-link and supports selecting it explicitly;
+        # vcvars still supplies the Windows SDK and runtime library paths.
+        # Windows 版 zsh 會把 POSIX `link` 放在 MSVC link.exe 前面。Swift
+        # 自帶 lld-link 並支援明確選用；vcvars 仍提供 Windows SDK 與 runtime
+        # library 路徑。
+        LINKER_ARGS=(-use-ld=lld)
+        ;;
+esac
+
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/csv2_module.XXXXXX")
 trap 'rm -rf $WORK' EXIT
 
@@ -37,7 +65,7 @@ for f in $SUBSET; do
 done
 
 print -r -- "building module CSV2Core from: ${SUBSET[*]}"
-swiftc -O -emit-module -emit-library -static \
+swiftc -swift-version 6 -O $LINKER_ARGS -emit-module -emit-library -static \
        -module-name CSV2Core -emit-module-path $WORK/CSV2Core.swiftmodule \
        -o $WORK/libCSV2Core.a $SRCS 2>&1 | tail -20 || exit 1
 [[ -f $WORK/libCSV2Core.a ]] || { print -u2 -- "no library produced"; exit 1 }
@@ -110,8 +138,9 @@ print("client OK")
 SWIFT
 
 print -r -- "compiling a client that imports it"
-swiftc -O -I $WORK -L $WORK -lCSV2Core -o $WORK/client $WORK/client.swift 2>&1 | tail -20 || exit 1
+swiftc -swift-version 6 -O $LINKER_ARGS -I $WORK $WORK/libCSV2Core.a -o $WORK/client $WORK/client.swift 2>&1 | tail -20 || exit 1
 out=$($WORK/client) || exit 1
+out=${out%$'\r'}
 [[ $out == "client OK" ]] || { print -u2 -- "client said: $out"; exit 1 }
 print -r -- "PASS  the six-file subset builds as a module and a client can use it"
 print -r -- "通過  那六個檔案的子集建得成 module，而一個客戶端用得了它"
@@ -119,33 +148,26 @@ print -r -- "通過  那六個檔案的子集建得成 module，而一個客戶�
 # ---------------------------------------------------------------------
 # The same subset through SPM, which is how a real consumer takes it.
 #
-# Everything above uses bare `swiftc`, and a bare compile does not go through
-# SPM's language mode. The first real consumer built it with SwiftPM in Swift 6
-# mode and was stopped by two globals -- `binaryModeSet` and `doomedTemp` --
-# that are `nonisolated global shared mutable state`. It declared
-# `.swiftLanguageMode(.v5)` and moved on, which is a statement about what this
-# module is rather than a workaround.
-#
-# So both modes are checked, and the v6 FAILURE is asserted rather than
-# ignored. If someone makes those two globals safe, this says so instead of
-# staying quiet -- a check that only notices regressions is half a check.
+# Everything above uses bare `swiftc`, so `-swift-version 6` is explicit there.
+# A real consumer takes the module through SPM, and that path must use Swift 6
+# language mode too. The two former blockers were resolved rather than hidden:
+# redundant binary-mode bookkeeping was removed, while the signal-handler
+# pointer carries the narrow `nonisolated(unsafe)` its async-signal-safe design
+# requires.
 #
 # 同一個子集，改走 SPM——那才是一個真實消費端取用它的方式。
-# 上面每一步用的都是裸 `swiftc`，而裸編譯不會經過 SPM 的語言模式。第一個真實的消費端以 SwiftPM
-# 在 Swift 6 模式下建置它，被兩個全域變數擋下——`binaryModeSet` 與 `doomedTemp`——它們是
-# `nonisolated global shared mutable state`。它宣告了 `.swiftLanguageMode(.v5)` 然後繼續，
-# 而那是在陳述「這個 module 是什麼」，不是繞過。
-# 因此兩種模式都檢查，而 v6 的**失敗**是被斷言的，不是被忽略的。哪天有人把那兩個全域變數變成安全的，
-# 這裡會說出來，而不是保持沉默——一個只察覺退化的檢查，只是半個檢查。
+# 上面每一步用的都是裸 `swiftc`，因此明確給 `-swift-version 6`。真正的消費端會經由 SPM
+# 取用 module，那條路徑也必須使用 Swift 6 語言模式。原本的兩個阻礙已被解決而非隱藏：多餘的
+# binary-mode 記帳已移除；訊號處理常式的指標則只帶上其 async-signal-safe 設計所需、範圍狹窄的
+# `nonisolated(unsafe)`。
 # ---------------------------------------------------------------------
 if (( ! $+commands[swift] )); then
     print -r -- "SKIP  no swift driver here, so the SPM path is unchecked / 這裡沒有 swift driver，SPM 那條路徑未檢查"
     exit 0
 fi
 
-spm_build() {   # <language mode> -> 0 if it builds
-    local mode=$1
-    local pkg=$WORK/spm_$mode
+spm_build() {
+    local pkg=$WORK/spm_v6
     rm -rf $pkg; mkdir -p $pkg/Sources/CSV2Core
     for f in $SUBSET; do cp $ROOT/src/$f.swift $pkg/Sources/CSV2Core/; done
     cat > $pkg/Package.swift <<PKG
@@ -154,7 +176,7 @@ import PackageDescription
 let package = Package(
     name: "CSV2Core",
     products: [.library(name: "CSV2Core", targets: ["CSV2Core"])],
-    targets: [.target(name: "CSV2Core", swiftSettings: [.swiftLanguageMode(.$mode)])]
+    targets: [.target(name: "CSV2Core", swiftSettings: [.swiftLanguageMode(.v6)])]
 )
 PKG
     # `> log 2>&1`, not `2>&1 > log`. The second binds stderr to the terminal
@@ -164,24 +186,14 @@ PKG
     # 是 `> log 2>&1`，不是 `2>&1 > log`。後者會先把 stderr 綁到終端機、之後才移動 stdout，於是
     # 一次失敗的 v6 建置把整個 frontend 呼叫印到了螢幕上——那個經典的順序錯誤，犯在一支「主題就是
     # 好好檢查東西」的腳本裡。
-    ( cd $pkg && swift build > $WORK/spm_$mode.log 2>&1 )
+    ( cd $pkg && swift build > $WORK/spm_v6.log 2>&1 )
     return $?
 }
 
-if spm_build v5; then
-    print -r -- "PASS  and it builds through SPM in Swift 5 mode, which is how it is consumed / 而它以 Swift 5 模式經 SPM 建得起來，那正是它被取用的方式"
+if spm_build; then
+    print -r -- "PASS  and it builds through SPM in Swift 6 language mode / 而它以 Swift 6 語言模式經 SPM 建得起來"
 else
-    print -u2 -r -- "FAIL  the SPM build in Swift 5 mode does not work"
-    tail -5 $WORK/spm_v5.log >&2
+    print -u2 -r -- "FAIL  the SPM build in Swift 6 language mode does not work"
+    tail -5 $WORK/spm_v6.log >&2
     exit 1
-fi
-
-if spm_build v6; then
-    print -r -- "NOTE  it now builds in Swift 6 mode as well -- the two globals that stopped it"
-    print -r -- "      (binaryModeSet, doomedTemp) must have been made safe. Update this check"
-    print -r -- "      and the note beside them, and tell the consumers that pinned .v5."
-    print -r -- "注意  它現在在 Swift 6 模式下也建得起來了——擋住它的那兩個全域變數應該已經被改成"
-    print -r -- "      安全的了。請更新這項檢查與它們旁邊那則附註，並告訴那些釘了 .v5 的消費端。"
-else
-    print -r -- "PASS  and Swift 6 mode still stops on the two globals, as documented / 而 Swift 6 模式仍然卡在那兩個全域變數上，與記載相符"
 fi

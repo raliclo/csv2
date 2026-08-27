@@ -6,7 +6,7 @@ Guidance for coding agents working in this repository.
 ## Status: phases 1–6 done; only phase 7 (shipping) remains / 狀態：第 1–6 階段完成，只剩第 7 階段（出貨）
 
 ```zsh
-./compile_csv2.zsh      # builds release/csv2 with swiftc / 以 swiftc 建置 release/csv2
+./compile_csv2.zsh      # auto-detects macOS/Linux/Windows / 自動偵測 macOS／Linux／Windows
 ./test/test_csv2.zsh    # 0 FAIL; on macOS the one SKIP is T47 / 0 失敗；macOS 上唯一的 SKIP 是 T47
 
 # the Linux half, driven from the parent project (boots a guest VM)
@@ -88,9 +88,10 @@ do not quietly implement something else.
   `zsh -c`，絕不用 `sh -c`——許多 Linux 上的 `/bin/sh` 是 dash，`sh -c` 會靜默地
   測到一個與腳本語法不同的 shell。
 - **Swift style follows swift_tar**: plain `.swift` sources, Foundation +
-  Dispatch, built with `swiftc` build scripts. No SwiftPM, no SwiftNIO.
+  Dispatch, built with `swiftc` build scripts in explicit Swift 6 language
+  mode. No SwiftPM, no SwiftNIO.
   Swift 風格比照 swift_tar：純 `.swift` 原始檔，Foundation + Dispatch，
-  以 `swiftc` 建置腳本編譯；不用 SwiftPM、不用 SwiftNIO。
+  以 `swiftc` 建置腳本明確採用 Swift 6 語言模式編譯；不用 SwiftPM、不用 SwiftNIO。
 - **Both platforms, always.** Built natively on the macOS host and
   cross-compiled to aarch64 Linux, with the same tests run on each and
   byte-identical output required. Linux Foundation is swift-corelibs-foundation,

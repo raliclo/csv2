@@ -424,10 +424,10 @@ enum Scrypt {
 /// 取自系統 CSPRNG 的密碼學安全亂數。
 func cryptoRandomBytes(_ count: Int) -> [UInt8] {
     var out = [UInt8](repeating: 0, count: count)
+    var systemRandom = SystemRandomNumberGenerator()
     for i in 0..<count { out[i] = UInt8.random(in: 0...255, using: &systemRandom) }
     return out
 }
-private var systemRandom = SystemRandomNumberGenerator()
 
 // ---------------------------------------------------------------------
 // MARK: - Encrypted container / 加密容器

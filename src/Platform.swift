@@ -416,22 +416,20 @@ enum Platform {
     /// failed with output that looked identical and was not -- `got 'zzz',
     /// want 'zzz'`, differing by an invisible CR.
     ///
-    /// Set once, before the first write. It restores the promise the README
-    /// makes in one line: output always uses `\n`, on every platform.
+    /// Set idempotently before a write. It restores the promise the README
+    /// makes in one line: output always uses `\n`, on every platform. Calling
+    /// `_setmode` again is cheaper and safer than shared mutable bookkeeping.
     ///
     /// Windows 的 C runtime 以「文字模式」開啟 fd 1 與 fd 2，在那裡每一個寫出的 `\n` 都會
     /// 變成 `\r\n`。Foundation 的 `FileHandle.write` 從未遇到這件事，因為它寫的是 Win32
     /// handle 而不是 CRT 描述子；把 stdout 改走 `_write` 就正面撞上了它，43 個案例因此失敗，
     /// 而它們的輸出「看起來一模一樣」卻不相同——`got 'zzz', want 'zzz'`，差在一個看不見的 CR。
     ///
-    /// 在第一次寫出之前設定一次。它守住 README 用一句話給出的那個承諾：輸出一律使用 `\n`，
-    /// 在每一個平台上。
-    private static var binaryModeSet = false
+    /// 在寫出前以冪等方式設定。它守住 README 用一句話給出的那個承諾：輸出一律使用 `\n`，
+    /// 在每一個平台上。再次呼叫 `_setmode`，比維護一份共享可變狀態更便宜也更安全。
 
     private static func ensureBinaryMode(_ fd: Int32) {
         #if canImport(ucrt)
-        if binaryModeSet { return }
-        binaryModeSet = true
         _ = _setmode(1, _O_BINARY)
         _ = _setmode(2, _O_BINARY)
         #endif
@@ -833,7 +831,13 @@ enum Platform {
     /// 一個訊號處理常式可以 unlink 的路徑，以 C 字串形式。
     /// 刻意預先配置。處理常式不可配置記憶體、不可取鎖、不可呼叫 Swift runtime——因此那個
     /// 路徑不能等訊號到達時才從 String 轉換。它在暫存檔建立時轉換，在暫存檔消失時釋放。
-    private static var doomedTemp: UnsafeMutablePointer<CChar>?
+    /// `nonisolated(unsafe)` is deliberate: the CLI mutates this on its single
+    /// main thread, while a POSIX signal handler may only perform the plain
+    /// pointer load below. A lock or actor hop is not async-signal-safe.
+    /// `nonisolated(unsafe)` 是刻意的：CLI 只在單一主執行緒修改它，而 POSIX
+    /// 訊號處理常式只能做下方那次單純的指標讀取；取鎖或切換 actor 都不具
+    /// async-signal-safety。
+    nonisolated(unsafe) private static var doomedTemp: UnsafeMutablePointer<CChar>?
 
     /// Remember a temp file for the duration of the write, so an interrupted
     /// run does not leave it beside the target.

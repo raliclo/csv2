@@ -299,7 +299,10 @@ final class CSVIndex {
     /// 先試過的做法是把查詢那一次靜音，而那更糟：在一個「拒絕平行路徑」的搜尋裡，查詢是
     /// 唯一的一次呼叫，於是那個理由變成完全不印——而拒絕訊息卻寫著「用 -debug 看原因」。
     /// 重複只是雜訊；沉默才是這一帶一再產生的那種缺陷。
-    private static var announced = Set<String>()
+    // Index loading and its diagnostics are owned by the coordinator thread;
+    // chunk workers receive an already-decided plan and never mutate these.
+    // 索引載入與診斷由協調執行緒持有；chunk 工作者只接收已決定的計畫，絕不修改這些狀態。
+    nonisolated(unsafe) private static var announced = Set<String>()
 
     /// Why the last `load` discarded a sidecar, in a few words, for a caller
     /// that has to say something about it.
@@ -330,7 +333,7 @@ final class CSVIndex {
     /// ——於是中文那一行讀起來是「…無法使用：stale: the data file changed。」。
     /// 「恰好兩行、英文在前中文在後」這個契約依行數成立、依語言不成立，而它之所以如此，
     /// 是因為那個理由被寫了一次、用了兩次。
-    private(set) static var lastDiscardReason: (en: String, zh: String)?
+    nonisolated(unsafe) private(set) static var lastDiscardReason: (en: String, zh: String)?
 
     private static func announceDiscard(_ message: @autoclosure () -> String, for sidecar: String,
                                         reason: String, reasonZh: String) {
