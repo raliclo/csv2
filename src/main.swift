@@ -623,7 +623,21 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "verify-index": o.verifyIndex = true
         case "build-index": o.buildIndex = true
         case "version", "V":
-            print("csv2 \(CSV2_VERSION)")
+            // The build, not just the number. `csv2 0.1.0` has been the
+            // answer since the first commit, so it cannot tell two builds
+            // apart -- and this tree has paid for that twice: a scoop shim
+            // resolving to a year-old binary that reported the same string
+            // (NN, 2026-08-20), and an install that copied a 496,128-byte file
+            // instead of the 543,744-byte one just built, where both said
+            // `csv2 0.1.0` (2026-08-27). Those checks compare FILES now, which
+            // is right, and this makes the version string able to answer as
+            // well.
+            // 印出這次建置，不只是那個號碼。`csv2 0.1.0` 從第一個 commit 起就是這個答案，因此它
+            // 分不出兩個建置——而這棵樹為此付過兩次代價：一個 scoop shim 解析到一年前的二進位檔，
+            // 而它回報同一個字串（NN，2026-08-20）；以及一次安裝複製了 496,128 位元組的檔案而不是
+            // 剛建好的 543,744 位元組那個，兩者都說自己是 `csv2 0.1.0`（2026-08-27）。那些檢查現在
+            // 比對的是**檔案**，那是對的，而這一項讓版本字串也答得出來。
+            print("csv2 \(CSV2_VERSION) (\(CSV2_BUILD))")
             exit(0)
         case "h", "help":
             printHelp()

@@ -11966,6 +11966,84 @@ esac
 # 3.4 ms——那是呼叫端的大小，不是 csv2 的——在一條「每批一次」的路徑上那是一次看得見的凍結。
 # 由 SoftPCB session 量測；那六個檔案的子集是它找出來「足夠」的那一份。
 # ---------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
+# T213 -- --version and --help, which nothing asserted until 2026-08-27.
+#
+# They were the two things every caller reaches for first and the two things
+# no case checked. The cost was not hypothetical: `csv2 --version` answered
+# `csv2 0.1.0` from the first commit to that day, so it could not tell two
+# builds apart -- and this tree paid for that twice, with a scoop shim
+# resolving to a year-old binary (NN) and an install copying a 496,128-byte
+# file instead of the 543,744-byte one just built. Both reported the same
+# string. The version now carries the build.
+#
+# T213 —— `--version` 與 `--help`，在 2026-08-27 之前沒有任何案例斷言過它們。
+# 它們是每一個呼叫端最先伸手去拿的兩樣東西，也是沒有任何案例檢查過的兩樣東西。代價不是假設性的：
+# `csv2 --version` 從第一個 commit 起到那一天為止都回答 `csv2 0.1.0`，因此它分不出兩個建置
+# ——而這棵樹為此付過兩次代價：一個 scoop shim 解析到一年前的二進位檔（NN），以及一次安裝複製了
+# 496,128 位元組的檔案而不是剛建好的 543,744 位元組那個。兩者回報的字串相同。版本現在帶著建置。
+# ---------------------------------------------------------------------
+echo
+echo "--- T213: --version and --help / T213：--version 與 --help ---"
+
+# Three spellings, all accepted, all on stdout at rc=0. A tool whose --version
+# writes to stderr cannot be read by the script that asks it.
+# 三種寫法都收，都在 stdout 上、rc=0。一個把 --version 寫到 stderr 的工具，問它的那支腳本讀不到。
+for _t213_f in --version -version -V; do
+    _t213_out=$("$CSV2" $_t213_f 2>/dev/null); _t213_rc=$?
+    if [[ $_t213_rc == 0 && $_t213_out == csv2\ * ]]; then
+        ok "T213a $_t213_f prints the version on stdout at rc=0 / $_t213_f 以 rc=0 在 stdout 印出版本"
+    else
+        bad "T213a $_t213_f gave rc=$_t213_rc: $_t213_out / 實得如上"
+    fi
+done
+
+# It must carry the BUILD, not just the number, or it cannot answer the
+# question anyone asks it: is this node running what I just made?
+# 它必須帶著**這次建置**，不只是那個號碼，否則它答不了任何人問它的那個問題：這個節點跑的是不是
+# 我剛做出來的那一個？
+_t213_v=$("$CSV2" --version)
+case $_t213_v in
+    *"("*")"*) ok "T213b the version names the build, so two builds are distinguishable / 版本說出了這次建置，因此兩個建置分得出來" ;;
+    *) bad "T213b the version is just a number and cannot tell two builds apart: $_t213_v / 版本只是一個號碼，分不出兩個建置" ;;
+esac
+
+# A spelling that is NOT accepted stays refused, so this does not quietly
+# become "any argument starting with v".
+# 沒有被接受的寫法要維持被拒絕，這樣它才不會安靜地變成「任何以 v 開頭的引數」。
+assert_fails "T213c -v is not a spelling of --version / -v 不是 --version 的一種寫法" -- \
+    "$CSV2" -v
+
+# --help, likewise on stdout: it has to be pipeable into a pager.
+# --help 同樣走 stdout：它必須能被接進一個分頁器。
+for _t213_f in --help -help -h; do
+    _t213_h=$("$CSV2" $_t213_f 2>/dev/null); _t213_rc=$?
+    if [[ $_t213_rc == 0 && $(print -r -- "$_t213_h" | wc -l) -gt 20 ]]; then
+        ok "T213d $_t213_f prints usage on stdout at rc=0 / $_t213_f 以 rc=0 在 stdout 印出用法"
+    else
+        bad "T213d $_t213_f gave rc=$_t213_rc and $(print -r -- "$_t213_h" | wc -l) lines / 實得如上"
+    fi
+done
+
+# Bilingual, like every other thing this tool says.
+# 雙語，與這個工具說的其他每一句話一樣。
+if [[ $("$CSV2" --help 2>/dev/null | head -2 | tail -1) == *[一-鿿]* ]]; then
+    ok "T213e the help is bilingual, like the refusals / 那份說明是雙語的，與那些拒絕一樣"
+else
+    bad "T213e the help's second line is not Chinese / 說明的第二行不是中文"
+fi
+
+# No arguments is NOT usage: this tool goes in a pipeline, and 77 lines on
+# stdout for a mistyped script is noise. It points at the way in instead.
+# 沒有引數時**不是**印用法：這個工具要放進管線，而為了一支打錯的腳本在 stdout 上吐 77 行是雜訊。
+# 它改為指出入口在哪裡。
+_t213_none=$("$CSV2" 2>&1 >/dev/null); _t213_rc=$?
+if [[ $_t213_rc == 1 && $_t213_none == *"-i"* ]]; then
+    ok "T213f no arguments is a refusal naming the way in, not usage on stdout / 沒有引數時是一句指出入口的拒絕，不是 stdout 上的用法"
+else
+    bad "T213f rc=$_t213_rc, said: $_t213_none / 實得如上"
+fi
 echo
 echo "--- T212: the library surface / T212：library 表面 ---"
 

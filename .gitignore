@@ -21,3 +21,4 @@ test/.test_csv2.*
 # 量測腳本的暫存目錄。它的「輸出」（measure_output*.txt）是刻意提交的：一次無法與
 # 日後的執行相比的量測，不值得做。
 verifications/.measure.*
+src/BuildInfo.swift
