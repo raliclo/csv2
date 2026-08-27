@@ -28,7 +28,28 @@ case "$HOST_KERNEL" in
         # /d and /c as Windows switches rather than POSIX paths.
         # 原生 batch bootstrap 會先尋找並初始化 MSVC，再呼叫 swiftc。關閉 MSYS
         # 參數改寫，避免 cmd.exe 的 /d 與 /c 被當成 POSIX 路徑轉換。
-        MSYS2_ARG_CONV_EXCL='*' cmd.exe /d /c compile_csv2_win.bat "$@"
+        # `.\` is required and is not decoration. cmd.exe does not search the
+        # current directory for an executable unless the path says so -- a bare
+        # name is looked up on PATH only -- so this failed with
+        # "'compile_csv2_win.bat' is not recognized as an internal or external
+        # command" while the file was sitting in the working directory, named
+        # correctly, one `ls` away. The Swift build was never reached.
+        #
+        # It cost a `build: FAILED` on the Windows node from the very commit
+        # whose subject was hardening Windows verification, and the node kept
+        # its previous binary -- which is the shape this tree recorded on
+        # 2026-08-19 and again this morning: a build that never ran, with tests
+        # afterwards reporting on a program that was never made.
+        #
+        # `.\` 是必要的，不是裝飾。cmd.exe 不會為了找一個執行檔而搜尋當前目錄，除非路徑裡明說
+        # ——一個裸名字只會在 PATH 上被查找——因此這裡會以
+        # 「'compile_csv2_win.bat' is not recognized as an internal or external command」失敗，
+        # 而那個檔案就在工作目錄裡、名字正確、`ls` 一下就看得到。Swift 的建置根本沒有被走到。
+        # 它讓 Windows 節點在「主旨正是強化 Windows 驗證」的那個 commit 上得到一次
+        # `build: FAILED`，而那個節點保留了它先前的二進位檔——那正是這棵樹在 2026-08-19、
+        # 以及今天早上各記錄過一次的形狀：一次從未執行的建置，之後的測試回報的是一個從未被造出來
+        # 的程式。
+        MSYS2_ARG_CONV_EXCL='*' cmd.exe /d /c '.\compile_csv2_win.bat' "$@"
         exit $?
         ;;
     Darwin|Linux) ;;
