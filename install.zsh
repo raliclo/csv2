@@ -29,7 +29,32 @@ emulate -L zsh
 setopt no_unset pipe_fail
 
 ROOT=${0:A:h}
-BIN=$ROOT/release/csv2
+# The SOURCE needs the same `.exe` the destination has had all along, and the
+# asymmetry is what made this wrong. `DEST` is `csv2.exe` on Windows; `BIN` was
+# `csv2` everywhere -- and on that node `release/` holds BOTH, because the
+# Windows build writes `csv2.exe` beside a `csv2` left by something earlier. So
+# install copied a 496,128-byte file that was not the 543,744-byte one just
+# built, ran its verification against what it had copied, and reported success.
+#
+# The node's own check is what caught it: "the shell runs
+# C:/Users/lowei/AppData/Local/csv2/csv2.exe, which is NOT the binary just
+# built". That check compares FILES rather than versions for exactly this
+# reason -- both would have said `csv2 0.1.0`. It was added after a scoop shim
+# resolved to a year-old binary in 2026-08-20 (NN), and this is the second
+# thing it has caught that a version string could not.
+#
+# **來源**需要目的地一直都有的那個 `.exe`，而那個不對稱正是它出錯的原因。`DEST` 在 Windows 上是
+# `csv2.exe`；`BIN` 在每個平台上都是 `csv2`——而那個節點的 `release/` 裡**兩個都有**，因為 Windows
+# 的建置會把 `csv2.exe` 寫在一個「更早的什麼東西留下的 `csv2`」旁邊。於是安裝複製了一個 496,128
+# 位元組、而且不是剛建的那個 543,744 位元組的檔案，拿它複製過去的東西去做驗證，然後回報成功。
+# 抓到它的是那個節點自己的檢查：「shell 執行到的是 C:/Users/lowei/AppData/Local/csv2/csv2.exe，
+# 而那不是剛建好的那個二進位檔」。那個檢查之所以比對**檔案**而不是版本，正是為了這種情況——兩者都會
+# 說自己是 `csv2 0.1.0`。它是在 2026-08-20 一個 scoop shim 解析到一年前的二進位檔之後加的（NN），
+# 而這是它抓到的第二件「版本字串抓不到」的事。
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) BIN=$ROOT/release/csv2.exe ;;
+    *)                    BIN=$ROOT/release/csv2 ;;
+esac
 DRY=0
 MODE=install
 PREFIX=""
