@@ -8184,3 +8184,68 @@ lines, and removing its only column would leave nothing.
 修法:拒絕。`.lines` 的定義就是一欄,而加一欄會產生一個「副檔名不再描述它」的檔案——那正是
 `.csv`／`.csv2` 互轉被拒絕的同一條理由(副檔名宣告格式)。要兩欄,就寫成一個有副檔名的檔案。
 釘住的測試是 T215q。
+
+## KD. `--help` 用五個字描述 `--json`,而它自己輸出的兩行 meta 一個字都沒提(2026-08-28,使用者回報)
+
+`--help` 那一行是:
+
+```
+  --json             JSON Lines; --json-ascii escapes non-ASCII
+```
+
+而它實際輸出的是:
+
+```console
+$ csv2 -r --json -i t.csv2
+{"meta":{"format":"csv2","headers":2,"fields":2,"header_zh":["套件","版本"]}}
+{"record":1,"line":3,"fields":{"pkg":"zlib","ver":"1.3"}}
+{"record":2,"line":4,"fields":{"pkg":"lz4","ver":"1.9"}}
+{"meta":{"records":2,"matched":0}}
+```
+
+**第一行與最後一行都是 meta,而 `--help` 說的是「JSON Lines」。** 一個照著這五個字去寫的
+解析器,會把每一行都當成紀錄,然後拿到兩個沒有 `record` 鍵的物件——而它拿到的位置是第一行,
+也就是它還沒開始信任自己的輸入之前。
+
+**這不是「文件寫得少」,是文件漏掉了它自己在別處推薦的東西。** README 的「不提供」表裡,
+「不讀檔計數(`-count`)」那一列的答案就是**「`records` on the trailing `--json` meta line」**
+——README 把那個鍵當成一個正式的替代做法在推薦,而 `--help` 連它存在都沒說。一個只讀 `--help`
+的人,拿不到那個答案,也不知道要去找。
+
+README 本身是完整的:第 1660 行起有一整節講這個形狀,包括「為什麼第二列標題必須走 meta 行」
+(欄名可以合法重複,而物件裝不下)。**缺的只有 `--help`。** 那使它比「兩邊都沒寫」更難被發現:
+任何一次對照 README 的檢查都會通過。
+
+另外一項同樣沒說:**搜尋與讀取的紀錄形狀不同**。`-r --json` 每筆是
+`{"record":N,"line":N,"fields":{...}}`;`-contains X --json` 每筆是
+`{"record":N,"field":N,"header_en":...,"header_zh":...,"value":...,"line":N}`。
+兩種形狀,一個旗標,`--help` 裡沒有任何一句話讓人預期到這件事。
+
+修法:把那一行擴成一段,說出兩行 meta、`records` 是計數的答案、以及兩種紀錄形狀。
+釘住它的測試不是「`--help` 裡有沒有 meta 這個字」——那種測試會在文字重寫時失效而不是在行為改變時
+失效。T216 改為斷言 **`--help` 提到的每一個 JSON 鍵名,都真的出現在實際輸出裡**,反過來也一樣。
+
+### 那個測試自己也被驗證過,而第一次驗證是失敗的
+
+一個「斷言兩份清單相符」的測試,在兩份清單都是空的時候也會通過。這不是假設——**T216b 第一次
+跑就是這樣通過的**:抽取說明段落用了 `head -n -1`,那是 GNU 擴充,macOS 的 head 不收負數,
+整條管線給出空字串,而「空集合裡的每一個鍵都被吐出來過」為真。改用 awk 之後才是真的在比。
+
+因此三個案例都用「故意弄壞再看它會不會叫」驗證過。**第一次弄壞沒有被抓到**:把
+`{"meta":{"records","matched"}}` 從說明裡拿掉之後,三個案例仍然全過——因為 `records` 在那段
+說明裡出現**兩次**,另一處是「`records` 也是不讀完整個檔案來計數的答案」,而它還在。
+
+那次失敗的驗證比成功的那兩次更有用:**要證明一個測試會叫,得挑一個只出現一次的東西去弄壞它。**
+改用 `header_en`(全篇只有一處)之後:
+
+```
+A：--help 少了 header_en
+FAIL  T216a emitted but not in --help: header_en
+PASS  T216b
+
+B：--help 多承諾一個從不出現的 skipped
+PASS  T216a
+FAIL  T216b named in --help but never emitted: skipped
+```
+
+兩個方向各自只抓到自己該抓的那一個,沒有互相牽連。

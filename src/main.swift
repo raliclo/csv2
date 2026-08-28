@@ -2338,7 +2338,24 @@ func printHelp() {
                          from the table, so --headers is refused here.
                          --md-table N takes the Nth table out of a document;
                          without it the file must BE a table
-      --json             JSON Lines; --json-ascii escapes non-ASCII
+      --json             JSON Lines, and TWO of those lines are metadata, not
+                         records. The FIRST is the format csv2 believes it is
+                         reading -- {"meta":{"format","headers","fields"}},
+                         plus "header_zh" on a .csv2, because column names can
+                         legitimately repeat and an object cannot hold the
+                         second row under one key. The LAST is
+                         {"meta":{"records","matched"}}. A parser that treats
+                         every line as a record meets a line with no "record"
+                         key as its very first input. "records" is also the
+                         answer to counting without reading the whole file
+                         yourself -- see the README, because the obvious way
+                         to get it reads every byte.
+                         The record shape DIFFERS between reading and
+                         searching: -r gives {"record","line","fields"{}},
+                         while -contains gives one line per HIT --
+                         {"record","field","header_en","header_zh","value",
+                         "line"}. Same flag, two shapes.
+                         --json-ascii escapes non-ASCII
       --en  --zh         which header row to name columns by
 
     EDITING / 編輯

@@ -12407,6 +12407,81 @@ else
 fi
 
 echo
+echo "--- T216: --help describes the shape --json actually emits / T216：--help 描述的形狀就是 --json 真的吐出來的那個 ---"
+# KD. --help described --json in five words -- "JSON Lines; --json-ascii
+# escapes non-ASCII" -- and said nothing about the two meta lines it emits or
+# the records count on the last one. A parser written from those five words
+# meets a line with no "record" key as its very first input. README documented
+# all of it, which made the gap harder to find: every check against the README
+# passed.
+# KD。--help 用五個字描述 --json——「JSON Lines; --json-ascii escapes non-ASCII」——而它自己輸出的
+# 兩行 meta、以及最後一行上的 records 計數，一個字都沒提。照著那五個字寫出來的解析器，第一筆輸入
+# 就會撞上一個沒有 "record" 鍵的行。README 全都寫了，這反而讓那個缺口更難被發現：每一次對照
+# README 的檢查都會通過。
+#
+# Asserting that "meta" appears in the help text would be a test of the
+# WORDING: it breaks when someone rewrites the paragraph and survives when the
+# output changes, which is backwards. This compares the KEY NAMES the help
+# quotes against the key names the program emits, in both directions.
+# 斷言說明文字裡有「meta」這個字，測到的是**措辭**：有人重寫那一段時它會壞，而輸出改變時它會活著
+# ——那是反的。這裡比的是「說明引用的鍵名」與「程式真的吐出來的鍵名」，而且是雙向比。
+# `head -n -1` to drop the terminator line is a GNU extension; macOS head
+# rejects a negative count, the pipeline produced an EMPTY help section, and
+# T216b then PASSED -- because every key in an empty set is trivially emitted.
+# A vacuous pass is the exact failure this file keeps writing tests about.
+# 用 `head -n -1` 去掉結尾那一行是 GNU 擴充；macOS 的 head 不收負數，那條管線於是給出一段**空的**
+# 說明文字，而 T216b 因此**通過**了——因為空集合裡的每一個鍵都「當然」被吐出來過。一次空洞的通過，
+# 正是這個檔案不斷在為它寫測試的那種失敗。
+_t216_help=$("$CSV2" --help 2>/dev/null | awk '/^  --json /{f=1} /^  --en /{f=0} f')
+# Column names in UPPERCASE on purpose. The key names are extracted with
+# `"[a-z_]*":`, and a lowercase column name is indistinguishable from a
+# structural key: with `pkg,ver` the extraction returns "pkg" and "ver" as
+# keys --help would then be required to document, which it must never do.
+# 欄名刻意用大寫。鍵名是用 `"[a-z_]*":` 抽出來的，而一個小寫的欄名與一個結構鍵無從分辨：用
+# `pkg,ver` 時，抽取會把 "pkg" 與 "ver" 當成鍵傳回，於是 --help 就被要求去記載它們——而那是它
+# 永遠不該做的事。
+printf 'PKG,VER\n套件,版本\nzlib,1.3\nlz4,1.9\n' > "$TMP/t216.csv2"
+_t216_emitted=$( { "$CSV2" -r --json -i "$TMP/t216.csv2"
+                   "$CSV2" -contains zlib --json -i "$TMP/t216.csv2" } 2>/dev/null \
+                 | grep -o '"[a-z_]*":' | tr -d '":' | sort -u )
+
+_t216_unmentioned=()
+for _k in ${(f)_t216_emitted}; do
+    [[ $_t216_help == *"\"$_k\""* ]] || _t216_unmentioned+=($_k)
+done
+if (( ${#_t216_unmentioned} == 0 )); then
+    ok "T216a every key --json emits is named in --help / --json 吐出來的每一個鍵，--help 都指名了"
+else
+    bad "T216a emitted but not in --help: ${_t216_unmentioned[*]} / 有吐出來卻不在 --help 裡的鍵"
+fi
+
+# The other direction: a key the help promises and the program never emits is
+# the worse half of the same defect -- it sends the reader looking for
+# something that is not there.
+# 反方向：一個「說明承諾了、而程式從不吐出」的鍵，是同一個缺陷裡更糟的那一半——它會讓讀者去找
+# 一個根本不存在的東西。
+_t216_phantom=()
+for _k in ${(f)"$(print -r -- "$_t216_help" | grep -o '"[a-z_]*"' | tr -d '"' | sort -u)"}; do
+    print -r -- "$_t216_emitted" | grep -qx "$_k" || _t216_phantom+=($_k)
+done
+if (( ${#_t216_phantom} == 0 )); then
+    ok "T216b and every key --help names is one --json emits / 而 --help 指名的每一個鍵，--json 都真的會吐"
+else
+    bad "T216b named in --help but never emitted: ${_t216_phantom[*]} / 有在 --help 裡卻從不出現的鍵"
+fi
+
+# The specific claim the user's report was about: `records` is what the README
+# offers as the answer to counting, and a reader of --help alone could not
+# find it.
+# 使用者那份回報針對的那一項具體宣稱：`records` 是 README 給「計數」的答案，而一個只讀 --help
+# 的人找不到它。
+if [[ $_t216_help == *'"records"'* && $("$CSV2" -r --json -i "$TMP/t216.csv2" | tail -1) == *'"records":2'* ]]; then
+    ok "T216c --help names records, and it is the count of data records / --help 指名了 records，而它就是資料紀錄的筆數"
+else
+    bad "T216c help says: $_t216_help / 實得如上"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
