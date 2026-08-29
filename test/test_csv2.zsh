@@ -12651,8 +12651,25 @@ echo "--- T218: the zstat rule holds across every script here / T218：zstat 規
 # flagged them would be unusable.
 # 註解行被刻意排除：這個檔案頂端那兩行 `stat -c`／`stat -f` 是這條規則自己的反面示範，一個會
 # 標記它們的檢查是不能用的。
-_t218_hits=$(grep -rnE '(^|[;&|(`]|\$\(|=)[[:space:]]*stat[[:space:]]+-' \
-                  --include='*.zsh' "$ROOT" 2>/dev/null \
+# The file list comes from a zsh glob, not from `grep --include`. That option
+# is GNU-only: the guest's grep does not have it, so the first version scanned
+# NOTHING there and T218a passed on an empty result -- a vacuous pass inside
+# the check written to enforce a rule against exactly this. T218b is what
+# caught it, one commit after being added for precisely that reason.
+# 檔案清單來自 zsh 的 glob，不是來自 `grep --include`。那個選項是 GNU 專屬的：guest 的 grep
+# 沒有它，於是第一版在那裡**什麼都沒掃**，而 T218a 以一個空結果通過了——一次空洞的通過，
+# 發生在「為了強制一條正是針對這種事的規則」而寫的檢查裡。抓到它的是 T218b，就在它為了這個
+# 理由被加進來的一個 commit 之後。
+_t218_files=($ROOT/**/*.zsh(N))
+# Zero files means the glob failed, not that the tree is clean. Without this
+# the check would pass hardest at the moment it stopped working.
+# 零個檔案代表 glob 失敗了，不代表這棵樹是乾淨的。少了這一行，這個檢查會在它停止運作的那一刻
+# 通過得最徹底。
+if (( ${#_t218_files} < 4 )); then
+    bad "T218a the glob found ${#_t218_files} .zsh files, so nothing was scanned / glob 只找到 ${#_t218_files} 個 .zsh 檔，等於什麼都沒掃"
+    _t218_files=()
+fi
+_t218_hits=$(grep -nE '(^|[;&|(`]|\$\(|=)[[:space:]]*stat[[:space:]]+-' $_t218_files 2>/dev/null \
              | grep -vE '^[^:]*:[0-9]+:[[:space:]]*#')
 if [[ -z $_t218_hits ]]; then
     ok "T218a no .zsh here calls stat(1); zstat is the only shape used / 這裡沒有任何 .zsh 呼叫 stat(1)；只用 zstat 那個形狀"
@@ -12675,8 +12692,8 @@ fi
 # 值得留著；把字面值藏起來是比較小的那個改動。
 _t218_cmd=stat
 print -r -- "x=\$($_t218_cmd -c '%a' \"\$1\")" > "$TMP/t218probe.zsh"
-_t218_probe=$(grep -rnE '(^|[;&|(`]|\$\(|=)[[:space:]]*stat[[:space:]]+-' \
-                   --include='*.zsh' "$TMP" 2>/dev/null \
+_t218_probe=$(grep -nE '(^|[;&|(`]|\$\(|=)[[:space:]]*stat[[:space:]]+-' \
+                   "$TMP/t218probe.zsh" 2>/dev/null \
               | grep -vE '^[^:]*:[0-9]+:[[:space:]]*#')
 if [[ -n $_t218_probe ]]; then
     ok "T218b and the check catches a stat(1) call when there is one / 而真的有 stat(1) 呼叫時，這個檢查抓得到"
