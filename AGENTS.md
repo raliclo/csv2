@@ -120,6 +120,58 @@ do not quietly implement something else.
   測試且要求輸出逐位元相同。Linux 的 Foundation 是 swift-corelibs-foundation，另一份
   實作——「macOS 會過」對 Linux 不構成證據。暫不隨 rootfs 出貨並不放寬這一點。
 
+## Shell scripts here: `zstat`, never `stat(1)` / 這裡的 shell 腳本：用 `zstat`，不用 `stat(1)`
+
+A rule for this tree since 2026-08-26, and it was aimed at two real lines:
+
+```zsh
+m=$(stat -c '%a' "$1")                        # GNU / busybox
+[[ $m == <-> ]] || m=$(stat -f '%Lp' "$1")    # BSD / macOS
+```
+
+**`stat(1)` has no portable interface.** BSD and GNU both take `-f` and mean
+opposite things by it, so a script writes both and then guesses which answer is
+real -- and the guess is made by **looking at the output**, which is the exact
+shape of check this project exists to distrust. `zstat` is a zsh builtin,
+identical on every platform, and it returns into an array rather than a string
+somebody then has to parse.
+
+```zsh
+zmodload -F zsh/stat b:zstat
+zstat -H h -- "$path"
+print $(( h[mode] & 8#777 ))     # 8#777, NOT 0777
+```
+
+**The mask is `8#777`.** zsh does not read a leading zero as octal, so
+`& 0777` is an AND with decimal 777: it returns 256 for a 0644 file -- a
+plausible number that is wrong. Found on the first command written while
+probing for this change.
+
+All four platforms load `zsh/stat`: macOS, WSL, the Windows MSYS zsh, and the
+aarch64 guest. The guest was **measured** on 2026-08-26; this tree had carried
+a comment claiming otherwise, inherited from the days when the guest had no
+`stat` applet either, and that sentence was copied forward into new comments
+and into a commit message whose whole subject was measuring before changing.
+
+The full reasoning, with the reproduction, is at the top of
+[`test/test_csv2.zsh`](./test/test_csv2.zsh) beside `zstat_mode()`.
+
+自 2026-08-26 起是這棵樹的規則，而它針對的是兩行真實存在過的程式碼（見上）。
+
+**`stat(1)` 沒有可攜的介面。** BSD 與 GNU 都收 `-f`，意思卻相反，於是腳本得兩種都寫、再猜哪個
+答案是真的——而那個猜法是**看輸出**，那正是這個專案存在所要不信任的那種檢查。`zstat` 是 zsh 的
+內建指令，每個平台都一樣，而且回傳到陣列，不是一個還要有人去剖析的字串。
+
+**遮罩是 `8#777`。** zsh 不會把開頭的 0 當成八進位，因此 `& 0777` 是與十進位 777 做 AND——
+對一個 0644 的檔案會得到 256，一個看起來合理而錯誤的數字。這是在為那次修改做探測時、在寫下的
+第一個指令上發現的。
+
+四個平台都載得進 `zsh/stat`：macOS、WSL、Windows 的 MSYS zsh，以及 aarch64 guest。guest 是
+2026-08-26 **實測**的；在那之前這棵樹帶著一句相反的註解，沿用自「它連 `stat` applet 都沒有」的
+年代，而那句話被抄進了新的註解，也抄進了一個「主旨正是『動手前先量』」的 commit message。
+
+完整的推理與重現步驟，在 [`test/test_csv2.zsh`](./test/test_csv2.zsh) 頂端 `zstat_mode()` 旁邊。
+
 ## Who may call csv2 / 誰可以呼叫 csv2
 
 **Inside the LinuxCS project, only TEST scripts call csv2.** The build and

@@ -12636,6 +12636,56 @@ else
 fi
 
 echo
+echo "--- T218: the zstat rule holds across every script here / T218：zstat 規則在這裡每一支腳本上都成立 ---"
+# The rule has been in this file's comments since 2026-08-26 and in AGENTS.md
+# since 2026-08-29, and until now nothing enforced it: a new script could call
+# `stat -c` and no check would say a word. A rule that lives only in prose is
+# the shape this tree keeps paying for -- see mistakes.md, where the entry with
+# five occurrences across three days is waiting on exactly this kind of check.
+# 這條規則從 2026-08-26 起就寫在這個檔案的註解裡、從 2026-08-29 起寫在 AGENTS.md 裡，而在此之前
+# 沒有任何東西強制它：一支新腳本可以呼叫 `stat -c`，而不會有任何檢查說一句話。一條只活在散文裡的
+# 規則，正是這棵樹一再付帳的那個形狀——見 mistakes.md，那條「跨三天、五次」的條目等的就是這一類檢查。
+#
+# Comment lines are excluded on purpose: the two `stat -c` / `stat -f` lines at
+# the top of this file are the rule's own counter-example, and a check that
+# flagged them would be unusable.
+# 註解行被刻意排除：這個檔案頂端那兩行 `stat -c`／`stat -f` 是這條規則自己的反面示範，一個會
+# 標記它們的檢查是不能用的。
+_t218_hits=$(grep -rnE '(^|[;&|(`]|\$\(|=)[[:space:]]*stat[[:space:]]+-' \
+                  --include='*.zsh' "$ROOT" 2>/dev/null \
+             | grep -vE '^[^:]*:[0-9]+:[[:space:]]*#')
+if [[ -z $_t218_hits ]]; then
+    ok "T218a no .zsh here calls stat(1); zstat is the only shape used / 這裡沒有任何 .zsh 呼叫 stat(1)；只用 zstat 那個形狀"
+else
+    bad "T218a stat(1) called at: $(print -r -- "$_t218_hits" | head -3 | tr '\n' ' ') / 有地方呼叫了 stat(1)"
+fi
+
+# The check must actually bite. Written after KF, where a test reported 0 for a
+# reason that had nothing to do with what it claimed to measure -- an empty
+# result proves nothing until an intentional break has been shown to produce a
+# non-empty one.
+# 這個檢查必須真的會咬。寫在 KF 之後——那次一個測試回報 0，而那個 0 與它宣稱在量的東西毫無關係；
+# 在「故意弄壞會產生非空結果」被證明之前，一個空的結果什麼都證明不了。
+# The probe's text is ASSEMBLED rather than written literally, because T218a
+# scans this file too and caught this very line on its first run -- a correct
+# catch of a string that is not a call. That the check reads the suite itself
+# is worth keeping; hiding the literal is the smaller change.
+# 探針的文字是**組出來的**而不是寫成字面值，因為 T218a 連這個檔案也掃，而它第一次執行時抓到的
+# 正是這一行——一次正確的命中，對象是一個字串而不是一次呼叫。「這個檢查會讀測試檔自己」這件事
+# 值得留著；把字面值藏起來是比較小的那個改動。
+_t218_cmd=stat
+print -r -- "x=\$($_t218_cmd -c '%a' \"\$1\")" > "$TMP/t218probe.zsh"
+_t218_probe=$(grep -rnE '(^|[;&|(`]|\$\(|=)[[:space:]]*stat[[:space:]]+-' \
+                   --include='*.zsh' "$TMP" 2>/dev/null \
+              | grep -vE '^[^:]*:[0-9]+:[[:space:]]*#')
+if [[ -n $_t218_probe ]]; then
+    ok "T218b and the check catches a stat(1) call when there is one / 而真的有 stat(1) 呼叫時，這個檢查抓得到"
+else
+    bad "T218b the check found nothing in a file that calls stat -c / 這個檢查在一個確實呼叫了 stat -c 的檔案裡什麼也沒找到"
+fi
+rm -f "$TMP/t218probe.zsh"
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
