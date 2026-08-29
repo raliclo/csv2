@@ -635,7 +635,8 @@ func runSelect(_ o: Options) throws {
     } else if o.json {
         emitter = JSONEmitter(sink: sink, reportMode: reportMode)
     } else if o.markdown {
-        emitter = MarkdownEmitter(sink: sink, pretty: o.pretty)
+        emitter = MarkdownEmitter(sink: sink, pretty: o.pretty,
+                                  layout: o.mdStyle == .preserve ? plan.mdLayout : nil)
     } else if reportMode {
         emitter = ReportEmitter(sink: sink, needle: needle)
     } else {

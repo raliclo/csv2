@@ -556,6 +556,28 @@ OUTPUT SHAPE / 輸出形狀
                         modifier and a variation-selector emoji wrong.
                         `-debug` prints the computed column widths, so you can
                         check the alignment instead of counting it by eye
+  --md-style S          how `-md` writes the table out: `preserve` (the
+                        DEFAULT), `compact`, or `pretty`.
+                        `preserve` writes a row back as the exact line it
+                        arrived on, so a row nobody edited is byte-identical
+                        and the diff is the cells that changed. It needs a
+                        `.md` INPUT to copy a layout from; from a `.csv`/
+                        `.csv2` there is nothing to preserve and it renders as
+                        `compact`.
+                        `compact` is `|a|b|` -- the default until 2026-08-29,
+                        still reachable by name.
+                        `pretty` is `--pretty`, and the two are the same flag
+                        spelled twice.
+                        The default changed because rendering a padded table
+                        back rewrote EVERY row: on a four-row table a one-cell
+                        edit arrived as a six-line diff, which buries the real
+                        change in a review and makes `git blame` on every
+                        untouched row point at an edit that did not touch it.
+                        `--pretty` is not the smaller option -- it widens the
+                        `|---|` separator to the column widths, so it rewrites
+                        the whole table on FIRST contact even when nothing was
+                        edited, and it re-flows every row whenever any value's
+                        width changes
   --md-table N          read the Nth Markdown table out of a `.md` document,
                         counting from 1. Without it a `.md` input must BE a
                         table and nothing else -- prose around it is refused,

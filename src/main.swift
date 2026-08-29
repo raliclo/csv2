@@ -70,6 +70,12 @@ struct Options {
 
     var markdown = false
     var pretty = false
+    /// Default `preserve`: the only value that keeps a one-cell edit to a
+    /// one-cell diff. `compact` was the default until 2026-08-29 and stays
+    /// reachable by name; `--pretty` is the same thing as `--md-style pretty`.
+    /// 預設 `preserve`：唯一能讓「一格的編輯」維持成「一格的 diff」的值。`compact` 在
+    /// 2026-08-29 之前是預設，仍可指名使用；`--pretty` 與 `--md-style pretty` 是同一件事。
+    var mdStyle = MDStyle.preserve
     var json = false
     var jsonASCII = false
     var mdTable: Int? = nil
@@ -225,6 +231,7 @@ let KNOWN_FLAGS: Set<String> = [
     "o",
     "physical",
     "pretty",
+    "md-style",
     "r",
     "rownum",
     "si",
@@ -503,7 +510,16 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "in-place": o.inPlace = true
         case "headers": try once("--headers"); o.headersOverride = try intVal(arg, try need(arg))
         case "md": o.markdown = true
-        case "pretty": o.pretty = true
+        case "pretty": o.pretty = true; o.mdStyle = .pretty
+        case "md-style":
+            let v = try need(arg)
+            guard let st = MDStyle(rawValue: v) else {
+                throw usageError(
+                    "--md-style \(v): the styles are preserve (default -- an unedited row is written back as the line it arrived on), compact (|a|b|), and pretty (padded and aligned)",
+                    "--md-style \(v)：可用的樣式是 preserve（預設——沒被編輯過的列會原封不動寫回成它送達時的那一行）、compact（|a|b|）、pretty（補齊空白並對齊）")
+            }
+            o.mdStyle = st
+            o.pretty = (st == .pretty)
         case "json": o.json = true
         case "json-ascii": o.json = true; o.jsonASCII = true
         case "md-table": try once("--md-table"); o.mdTable = try intVal(arg, try need(arg))
@@ -1751,6 +1767,30 @@ func validate(_ o: inout Options) throws {
     // 隨後拒絕讀取的檔案，而那正是格式規則要防止的失敗。
     if !o.edits.isEmpty || o.encryptCols != nil || o.decryptCols != nil || o.hashCols != nil {
         let shape = o.json ? "--json" : (o.markdown ? "-md" : nil)
+        // Relaxing this to allow `-md` into a `.md` destination was tried on
+        // 2026-08-29 and REVERTED the same hour. The refusal is only half the
+        // work: the edit path writes bytes through FieldEncoder directly, so
+        // with the guard gone the run accepted `-md`, reported success, and
+        // wrote CSV into a file named `.md`. A refusal replaced by a wrong
+        // answer is worse than the refusal -- and it was found only because
+        // the output was looked at rather than the exit status.
+        //
+        // Making it real means giving the edit path a MarkdownEmitter and
+        // deciding what an index means for a `.md` destination. That is phase
+        // 11 item 2a, with `--md-table N --in-place` behind it, and it is why
+        // `--md-style preserve` alone cannot help the editing case yet: the
+        // documented two-run workaround reads a `.csv` in its second run and
+        // has no layout to keep.
+        // 把這道拒絕放寬成「允許 `-md` 寫進 `.md` 目的地」，在 2026-08-29 試過，並在同一個小時內
+        // **撤回**。那道拒絕只是工作的一半：編輯路徑是直接透過 FieldEncoder 寫位元組的，因此守衛
+        // 一拿掉，那次執行就接受了 `-md`、回報成功、然後把 CSV 寫進一個叫 `.md` 的檔案。一道被
+        // 錯誤答案取代的拒絕，比那道拒絕更糟——而它之所以被發現，只是因為有人去看了輸出，
+        // 而不是去看結束狀態。
+        //
+        // 要讓它成真，得給編輯路徑一個 MarkdownEmitter，並決定「一個 `.md` 目的地的索引」是什麼
+        // 意思。那是第 11 階段的 2a，後面還跟著 `--md-table N --in-place`；那也正是
+        // `--md-style preserve` 目前幫不上編輯情境的原因：文件記載的那個兩趟做法，第二趟讀的是
+        // 一個 `.csv`，沒有任何排版可以保留。
         if let shape = shape {
             throw usageError(
                 "\(shape) is an output shape and an edit writes CSV, so the two cannot be combined. Read with \(shape) in a separate run",
@@ -2022,11 +2062,26 @@ func resolveColumnList(_ spec: String, header: Record, allMeansMarked: Bool = fa
 // MARK: - Reading a whole input through the parser / 以解析器讀取輸入
 // ---------------------------------------------------------------------
 
+/// How `-md` writes a table out.
+/// `-md` 以什麼樣子把一張表寫出去。
+enum MDStyle: String {
+    case preserve, compact, pretty
+}
+
 struct InputPlan {
     var format: Format
     var headerRows: Int
     var source: ByteSource
     var describedPath: String
+    /// Present only when the input was a Markdown table. `--md-style preserve`
+    /// reads it to write an unedited row back as the exact line it arrived on.
+    /// Carried here rather than in a global because Swift 6 refuses mutable
+    /// global state outright -- and it was right to: this belongs to ONE input,
+    /// and openInput is where an input's facts are already assembled.
+    /// 只有在輸入是一張 Markdown 表時才存在。`--md-style preserve` 讀它，好把一個沒被編輯過的列
+    /// 原封不動地寫回成它送達時的那一行。放在這裡而不是全域，是因為 Swift 6 直接拒絕可變的全域
+    /// 狀態——而它拒對了：這東西屬於**某一個**輸入，而 openInput 正是那個輸入的事實被組起來的地方。
+    var mdLayout: MarkdownLayout? = nil
 }
 
 /// The `-log` path against the other files this run names. Called before the
@@ -2105,7 +2160,8 @@ func openInput(_ o: Options) throws -> InputPlan {
                 "輸入有 \(t.headerRows) 列標頭，而 \(out) 的副檔名宣告 \(outFmt.headerRows) 列。csv2 不會替你轉換：轉成兩列意味著要發明一列標題，轉成一列則會丟掉它們。請改用相符的輸出副檔名，或自行寫出標頭列。")
         }
         return InputPlan(format: t.headerRows == 2 ? .csv2 : .csv, headerRows: t.headerRows,
-                         source: ByteSource(bytes: t.bytes), describedPath: path)
+                         source: ByteSource(bytes: t.bytes), describedPath: path,
+                         mdLayout: t.layout)
     }
     guard let fmt = Format.from(path: path) else {
         // No suffix: one column, no header rows, the line's bytes verbatim.
@@ -2334,6 +2390,15 @@ func printHelp() {
                          one record per line, newlines escaped as \\n
       -md [--pretty]     Markdown table; needs -t. --pretty aligns and
                          therefore gives up streaming
+      --md-style S       how -md writes the table. preserve (DEFAULT) puts a
+                         row back as the exact line it arrived on, so a row
+                         nobody edited is byte-identical and the diff is the
+                         cells that changed. compact is |a|b|. pretty is
+                         --pretty. preserve needs a .md INPUT to copy a layout
+                         from; from a .csv/.csv2 there is none, and it renders
+                         as compact. Note --pretty widens the |---| separator
+                         to the column widths, so it rewrites the whole table
+                         on first contact even when nothing was edited
       foo.md             READ a Markdown table back. Header rows are recovered
                          from the table, so --headers is refused here.
                          --md-table N takes the Nth table out of a document;

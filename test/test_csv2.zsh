@@ -12482,6 +12482,138 @@ else
 fi
 
 echo
+echo "--- T217: --md-style / T217：--md-style ---"
+# Reported from the Windows node: `-md` could not reproduce the input table's
+# spacing, so a one-cell edit came back as a rewrite of every row -- six diff
+# lines on a four-line table, in BOTH render modes, with no third mode. Not
+# data loss (values round-trip byte for byte, measured on escaped pipes and
+# backtick spans) but diff noise, and it cost the feature its main use: editing
+# a table that lives in a version-controlled document.
+# 由 Windows 節點回報：`-md` 無法重現輸入表的排版，於是一格的編輯回來時是整表重寫——四行的表
+# 產生六行 diff，**兩種**算繪模式都是，而且沒有第三種模式。這不是資料遺失（值是逐位元往返的，
+# 在被跳脫的 `|` 與 backtick 段落上都量過），是 diff 雜訊；而它讓這個功能失去了它主要的用途：
+# 編輯一張活在版控文件裡的表。
+cat > "$TMP/t217.md" <<'T217EOF'
+# Notes
+
+Some prose before the table.
+
+| pkg | ver | note |
+|---|---|---|
+| zlib | 1.3.2 | first |
+| zstd | 1.5.6 | second |
+T217EOF
+sed -n '5,8p' "$TMP/t217.md" > "$TMP/t217orig.md"
+
+# The claim the whole flag rests on: nothing edited, nothing changed.
+# 整個旗標所依據的那一句話：什麼都沒編輯，就什麼都沒改變。
+"$CSV2" -r -t -md -i "$TMP/t217.md" --md-table 1 > "$TMP/t217p.md" 2>/dev/null
+if cmp -s "$TMP/t217orig.md" "$TMP/t217p.md"; then
+    ok "T217a preserve is the default, and an unedited table round-trips byte for byte / preserve 是預設，而一張沒被編輯的表逐位元往返"
+else
+    bad "T217a $(diff "$TMP/t217orig.md" "$TMP/t217p.md" | tr '\n' ' ') / 實得如上"
+fi
+
+# compact is the pre-2026-08-29 default and has to stay reachable, because the
+# narrower landing the report offered was "keep compact, make preserve
+# reachable" -- the reverse of what was built, and the fallback if preserve
+# ever has to be withdrawn.
+# compact 是 2026-08-29 之前的預設，必須保持可指名使用——因為那份報告提出的較小落地方式是
+# 「保留 compact，讓 preserve 可用」，那正好與實際建的相反，也是萬一 preserve 必須被撤回時的退路。
+_t217c=$("$CSV2" -r -t -md --md-style compact -i "$TMP/t217.md" --md-table 1 2>/dev/null | head -1)
+if [[ $_t217c == '|pkg|ver|note|' ]]; then
+    ok "T217b compact is still reachable by name / compact 仍然可以指名使用"
+else
+    bad "T217b got: $_t217c / 實得如上"
+fi
+
+# --pretty and --md-style pretty must be the same flag spelled twice, or the
+# README's claim that they are is wrong.
+# --pretty 與 --md-style pretty 必須是同一個旗標的兩種寫法，否則 README 說它們相同就是錯的。
+_t217d=$("$CSV2" -r -t -md --md-style pretty -i "$TMP/t217.md" --md-table 1 2>/dev/null)
+_t217e=$("$CSV2" -r -t -md --pretty -i "$TMP/t217.md" --md-table 1 2>/dev/null)
+if [[ -n $_t217d && $_t217d == $_t217e ]]; then
+    ok "T217c --md-style pretty and --pretty are the same flag spelled twice / --md-style pretty 與 --pretty 是同一個旗標的兩種寫法"
+else
+    bad "T217c they differ / 兩者不同"
+fi
+
+# The separator widening is the half that is pure formatting: that line carries
+# no data at all, and --pretty rewrites it on first contact.
+# 分隔列的加寬是純粹格式的那一半：那一行根本不承載任何資料，而 --pretty 在第一次接觸就重寫它。
+if [[ $(print -r -- "$_t217d" | sed -n 2p) == '|------|-------|--------|' \
+      && $(sed -n 2p "$TMP/t217p.md") == '|---|---|---|' ]]; then
+    ok "T217d --pretty widens the separator while preserve leaves it / --pretty 會加寬分隔列，而 preserve 不動它"
+else
+    bad "T217d pretty sep=$(print -r -- "$_t217d" | sed -n 2p) preserve sep=$(sed -n 2p "$TMP/t217p.md") / 實得如上"
+fi
+
+# From a .csv there is no layout to copy. That is not a fallback to apologise
+# for -- it is what "preserve" means when nothing was there to preserve, and
+# the README says so rather than leaving the reader to discover it.
+# 來源是 .csv 時沒有排版可抄。那不是一個需要道歉的退路——那就是「保留」在無物可保留時的意思，
+# 而 README 說出了它，不是留給讀者自己去撞到。
+printf 'a,b\n1,2\n' > "$TMP/t217.csv"
+if [[ $("$CSV2" -r -t -md -i "$TMP/t217.csv" 2>/dev/null | head -1) == '|a|b|' ]]; then
+    ok "T217e preserve renders as compact when the input carried no layout / 輸入沒有帶排版時，preserve 以 compact 算繪"
+else
+    bad "T217e got: $("$CSV2" -r -t -md -i "$TMP/t217.csv" 2>/dev/null | head -1) / 實得如上"
+fi
+
+# An unknown style names the three that exist rather than saying "invalid".
+# 未知的樣式會指名那三個存在的，而不是只說「無效」。
+_t217f=$("$CSV2" -r -t -md --md-style bogus -i "$TMP/t217.md" 2>&1 >/dev/null)
+if [[ $? != 0 && $_t217f == *preserve* && $_t217f == *compact* && $_t217f == *pretty* ]]; then
+    ok "T217f an unknown style names all three that exist / 未知的樣式會指名那三個存在的"
+else
+    bad "T217f said: $_t217f / 實得如上"
+fi
+
+# The values were never the problem and must not become one: escaped pipes,
+# backtick spans and bold survive preserve exactly as they survived compact.
+# 值從來就不是問題所在，而且不能因此變成問題：被跳脫的 `|`、backtick 段落與粗體，在 preserve
+# 下的存活情況與它們在 compact 下完全相同。
+printf '| a | b |\n|---|---|\n| pipe \\| here | `code` |\n| **bold** | x\\|y |\n' > "$TMP/t217v.md"
+"$CSV2" -r -t -i "$TMP/t217v.md" --md-table 1 -o "$TMP/t217v1.csv" 2>/dev/null
+"$CSV2" -r -t -md -i "$TMP/t217v.md" --md-table 1 > "$TMP/t217v.back.md" 2>/dev/null
+"$CSV2" -r -t -i "$TMP/t217v.back.md" --md-table 1 -o "$TMP/t217v2.csv" 2>/dev/null
+if cmp -s "$TMP/t217v1.csv" "$TMP/t217v2.csv"; then
+    ok "T217g values still round-trip byte for byte under preserve / 在 preserve 之下，值仍然逐位元往返"
+else
+    bad "T217g $(diff "$TMP/t217v1.csv" "$TMP/t217v2.csv" | tr '\n' ' ') / 實得如上"
+fi
+
+# Both READMEs now state a NUMBER -- "on a four-row table a one-cell edit
+# arrived as a six-line diff" -- and a number in prose decays unless something
+# measures it. This is the measurement, on the reporter's own fixture: compact
+# rewrites the whole table, preserve rewrites the row.
+# 兩份 README 現在都寫下了一個**數字**——「在一張四列的表上，一格的編輯會以六行 diff 的樣子
+# 抵達」——而一個寫在散文裡的數字，除非有東西去量它，否則就會腐爛。這裡就是那個量測，用的是
+# 回報者自己的 fixture：compact 重寫整張表，preserve 只重寫那一列。
+"$CSV2" -r -t -md --md-style compact -i "$TMP/t217.md" --md-table 1 > "$TMP/t217c.md" 2>/dev/null
+_t217_compact_lines=$(diff "$TMP/t217orig.md" "$TMP/t217c.md" | grep -c '^[<>]')
+if (( _t217_compact_lines == 6 )); then
+    ok "T217i compact rewrites all six lines of a four-row table, the number both READMEs quote / compact 會重寫一張四列表的全部六行，也就是兩份 README 引用的那個數字"
+else
+    bad "T217i compact gave $_t217_compact_lines diff lines, the READMEs say 6 / compact 給出 $_t217_compact_lines 行 diff，而 README 寫的是 6"
+fi
+
+# The refusal that stops an edit writing -md is still there. Relaxing it was
+# tried and reverted the same hour: the edit path writes bytes through
+# FieldEncoder, so with the guard gone the run accepted -md, reported success,
+# and wrote CSV into a file named .md. This case is why the revert is not
+# silently undone later.
+# 那道「阻止編輯輸出 -md」的拒絕仍然在。放寬它試過並在同一個小時內撤回：編輯路徑是透過
+# FieldEncoder 直接寫位元組的，因此守衛一拿掉，那次執行就接受了 -md、回報成功、然後把 CSV
+# 寫進一個叫 .md 的檔案。這個案例就是為了讓那次撤回不會在日後被無聲地取消。
+_t217h=$("$CSV2" -update 1:1 'X' -md -t -i "$TMP/t217v.md" -o "$TMP/t217out.md" 2>&1 >/dev/null)
+if [[ $? != 0 && $_t217h == *"output shape"* ]]; then
+    ok "T217h an edit still cannot write -md, and the reason is still the shape / 編輯仍然不能輸出 -md，而理由仍然是「形狀」"
+else
+    bad "T217h rc=$? said: $_t217h / 實得如上"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

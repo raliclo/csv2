@@ -3395,6 +3395,390 @@ tested.
 - [x] `--help` lists it, and T154c/T154e pin that it stays listed / `--help` 列出它，而 T154c／T154e 釘住「它會一直被列著」
 - [ ] four platforms / 四個平台
 
+## Phase 11: what an editor has and this did not / 第 11 階段：一個編輯器有、而這個沒有的東西
+
+Requested 2026-08-29 as seven proposals measured against what an editing tool is
+expected to do. Six are being built; the seventh was measured to exist already.
+
+2026-08-29 提出，是對照「一個編輯工具該有的樣子」而來的七項提案。其中六項要做；第七項經實測
+發現**已經可用**。
+
+### The constraint that came with the decision / 與決定一起給的那條約束
+
+**Output always uses LF as the end of line.** Given by the user in the same
+sentence as the go-ahead, and it is not a side condition -- it is the answer to
+the one conflict phase 11 could not resolve on its own. Proposal 3 wants the
+prose around a Markdown table left untouched; the tool guarantees LF on output.
+On a CRLF document those two cannot both hold. The decision picks LF, which
+means editing one table in a CRLF document rewrites every line ending in it and
+`diff` will say so. That is already true of every other edit here -- the README
+records it as the entry that makes the log UNDERSTATE the change -- so phase 11
+adds no new behaviour, it just stops pretending the conflict was open.
+
+**輸出永遠以 LF 作為行尾。** 由使用者在同一句話裡連同許可一起給出，而它不是附帶條件——它正是
+第 11 階段自己解不開的那個衝突的答案。第 3 條提案要的是「Markdown 表周圍的散文一個位元組都不動」，
+而這個工具保證輸出是 LF。在一份 CRLF 文件上，那兩件事不可能同時成立。這個決定選了 LF，
+也就是說：在一份 CRLF 文件裡改一張表，會重寫它裡面每一個行尾，而 `diff` 會這麼說。那件事對這裡
+其他每一種編輯本來就已經成立——README 把它記為「讓 log 低估改動幅度」的那一項——因此第 11 階段
+沒有引入新行為，它只是不再假裝那個衝突還開著。
+
+### 1. `-update-where OLD NEW` / 內容錨定的更新
+
+**The whole cell must equal OLD, not contain it.** `-contains` is a substring
+search and this is not: `-update r:c VAL` sets a whole cell, so its
+content-anchored form has to mean the same thing. A substring rewrite is a
+different tool's job, and offering both under names that differ by one word is
+how someone gets the other one.
+
+**整格必須「等於」OLD，而不是「含有」OLD。** `-contains` 是子字串搜尋，這個不是：`-update r:c VAL`
+設定的是**整格**，因此它的內容錨定版本必須是同一個意思。子字串改寫是另一個工具的工作，而把兩者
+用只差一個字的名字並列，正是有人會拿到另一個的原因。
+
+**Zero matches is a REFUSAL, not a quiet success.** A run that changed nothing
+and exited 0 is the exact shape this tree keeps paying for. **More than one
+match is also a refusal**, and it prints every address it found, because the
+ambiguity is not in the result -- it is in what the caller believes. Same
+reason `-delete -col note` refuses a file with two `note` columns.
+
+**零個命中是拒絕，不是安靜的成功。** 一次「什麼都沒改、以 0 結束」的執行，正是這棵樹一再付帳的
+那個形狀。**多於一個命中同樣是拒絕**，並且會印出它找到的每一個位址——因為有歧義的不是結果，
+是呼叫者的認知。這與 `-delete -col note` 拒絕一個有兩個 `note` 欄位的檔案是同一個理由。
+
+Repeatable, and every match is computed against the file AS IT ARRIVED --
+the rule `-insert` has always followed and the one `-add-column` broke in
+phase 10 (KB). Two `-update-where` whose matches overlap is a refusal.
+
+可重複，而每一次比對都是對**送達時**的檔案計算——那是 `-insert` 一直遵守、而 `-add-column` 在
+第 10 階段違反過的那條規則（KB）。兩個 `-update-where` 的命中若重疊，拒絕。
+
+### 2. `--value-file PATH` and `--value-stdin` / 讓值不經過 shell
+
+The README already prescribes the fix -- *"carry it through a file instead"* --
+and there was no flag to carry out the prescription. `$( )` strips every
+trailing newline, so a value ending in one comes back a byte shorter, written
+that way, at rc=0. The documented workaround is three lines of guard rail and
+the README says the third is the one people drop.
+
+README 早就開了藥方——「carry it through a file instead」——而沒有旗標能執行那個藥方。`$( )`
+會吃掉所有結尾換行，於是一個以換行結尾的值回來時少一個位元組，並且就那樣被寫進去，rc=0。
+文件記載的權宜做法是三行護欄，而 README 自己說第三行是最常被漏掉的那一行。
+
+**The bytes of the file ARE the value. Nothing is stripped.** Not the trailing
+newline, not whitespace. `printf 'x' > v` and `echo x > v` give different
+values because they are different bytes, and a tool that silently equalised
+them would be doing the thing this one exists to refuse.
+
+**檔案的位元組「就是」那個值，不做任何裁切。** 不裁結尾換行，不裁空白。`printf 'x' > v` 與
+`echo x > v` 給出不同的值，因為它們本來就是不同的位元組；一個會靜默把兩者抹平的工具，做的正是
+這個工具存在要拒絕的那件事。
+
+**Allowed only when the run has exactly ONE verb that takes a value.**
+Otherwise the flag would have to bind to a verb by position, and "the meaning
+depends on counting the arguments" is what `-add-column` already refused when
+it took both titles as one field instead of two arguments.
+
+**只在「這次執行恰好有一個吃值的動詞」時允許。** 否則這個旗標就得靠位置去綁定某個動詞，而
+「意思取決於數引數個數」正是 `-add-column` 已經拒絕過的東西——它把兩個標題收成一個欄位而不是
+兩個引數，就是為了這個。
+
+`--value-file` and `--value-stdin` together is a refusal; either with a literal
+value in the argument position is a refusal. Two sources for one value is not
+a thing to resolve by precedence.
+
+`--value-file` 與 `--value-stdin` 併用是拒絕；任一個與「引數位置上的字面值」併用也是拒絕。
+一個值有兩個來源，不是一件該用優先順序去解決的事。
+
+### 3. `--md-table N` with `--in-place` / 只改那一張表
+
+The expensive one, and it is expensive because it asks for a file model this
+tool does not have. Every write here is whole-file: build the new content,
+write a temp file, rename. Replacing table N and leaving the prose means
+remembering the byte range that table occupied and substituting only that span.
+
+最貴的一條，而它貴的原因是它要求一個這個工具沒有的**檔案模型**。這裡每一次寫入都是整檔的：
+建出新內容、寫暫存檔、rename。而「換掉第 N 張表、留住散文」意味著要記住那張表在原檔中佔的
+位元組範圍，並且只替換那一段。
+
+The LF decision above settles what happens to the prose: it is carried across
+as its bytes, with every line ending normalised to LF like everything else this
+tool writes. It is not byte-identical on a CRLF document and the README must
+say so rather than implying the prose is untouched.
+
+上面那條 LF 決定，也決定了散文會怎麼樣：它的位元組會被帶過去，而每一個行尾都與這個工具寫出的
+其他一切一樣被正規化成 LF。在一份 CRLF 文件上它**不是**逐位元相同，而 README 必須說出這件事，
+不能讓人以為散文完全沒被動過。
+
+#### The paragraph that used to be here was wrong, and a second list corrected it
+#### 這裡原本那一段是錯的，而第二份清單把它更正了
+
+It said the table is **re-rendered, not patched** -- `| a | b |` becoming
+`|a|b|` unless `--pretty` was given -- on the grounds that "inventing padding
+to match what was there would be inventing formatting, the same refusal as
+inventing a Chinese title."
+
+它原本說那張表是**被重新算繪、不是被修補**——`| a | b |` 會變成 `|a|b|`，除非給了 `--pretty`
+——理由是「為了對齊原樣而去發明 padding，就是發明格式，與發明一個中文標題是同一道拒絕」。
+
+**That argument confused PRESERVING a format with INVENTING one.** Inventing is
+adding padding to a table that had none. Preserving is leaving alone what the
+document already said. They are opposites, and the refusal only ever applied to
+the first.
+
+**那個論證把「保留」一個格式與「發明」一個格式搞混了。** 發明，是給一張本來沒有 padding 的表
+加上 padding。保留，是讓文件原本就寫著的東西維持原樣。兩者是相反的，而那道拒絕從頭到尾只適用於
+前者。
+
+The cost was measured rather than argued. Reading a padded table and rendering
+it straight back, **with nothing edited at all**:
+
+代價是量出來的，不是辯出來的。把一張對齊過的表讀出來、原封不動再算繪回去，**一格都沒有改**：
+
+```console
+$ cat t.md
+| name  | status | note        |
+|-------|--------|-------------|
+| alpha | ok     | first thing |
+| beta  | ok     | second      |
+$ csv2 -r -t -md -i t.md | diff t.md -
+1,4c1,4          <- every line of the table, on a run that changed nothing
+```
+
+**In a code review that buries the actual change.** A one-cell edit arrives as
+a four-line diff and the reviewer has to find which of the four is the edit.
+That is the same failure mode as the log entry the README flags for
+UNDERSTATING a change, arriving from the other direction: here the diff
+OVERSTATES it, and both leave a reader unable to see what happened.
+
+**在一次 code review 裡，那會把真正的改動淹掉。** 一格的編輯以四行 diff 的樣子抵達，而審閱者
+得自己去找那四行裡哪一行才是改動。那與 README 標記為「讓 log **低估**改動幅度」的那一項是同一種
+失敗，只是從相反方向來：這裡的 diff **高估**了它，而兩者都讓讀者看不出實際發生了什麼。
+
+**`--md-style preserve|compact|pretty`, defaulting to `preserve`.** The
+default is the one that keeps a diff to the cells that changed. `compact` is
+the current behaviour (`|a|b|`) and stays reachable by name; `pretty` is the
+existing `--pretty` width-aware alignment. When the input was not Markdown
+there is no original layout to keep and `preserve` renders as `compact` --
+that is not a fallback to explain away, it is what "preserve" means when
+nothing was there to preserve.
+
+**`--md-style preserve|compact|pretty`，預設 `preserve`。** 預設值是那個「讓 diff 只出現在真正
+改過的儲存格上」的選項。`compact` 是現在的行為（`|a|b|`），仍然可以指名使用；`pretty` 就是既有的
+`--pretty`（依顯示寬度對齊）。輸入不是 Markdown 時沒有原始排版可保留，`preserve` 就以 `compact`
+算繪——那不是一個需要辯解的退路，那就是「保留」在「本來沒有東西可保留」時的意思。
+
+This is the one place csv2's data model has to hold something that is not
+data: the padding each cell arrived with. It is carried, not interpreted --
+csv2 still does not know what a column "should" be aligned to, only what this
+document already did.
+
+**Reported independently from the Windows node the same day, with sharper
+numbers**, against `csv2 0.1.0 (30425be)` through the scoop shim -- a real use,
+not a lab case. Its four-line fixture, one cell edited (`-update 1:3`):
+
+**同一天由 Windows 節點獨立回報，數字更精確**，對象是經 scoop shim 安裝的
+`csv2 0.1.0 (30425be)`——那是真實使用，不是實驗室案例。它那個四行的 fixture，改一格
+（`-update 1:3`）：
+
+| render mode | changed diff lines |
+|---|---|
+| default `-md` | 6 |
+| `--pretty` | 6 |
+| a style-preserving writer would give | 2 |
+
+Reproduced here exactly. Three things in that report the paragraphs above did
+not have:
+
+在此完整重現。那份報告裡有三件事，是上面幾段沒有的：
+
+**`--pretty` widens the separator row too.** `|---|` becomes `|------|`,
+sized to the columns. So `--pretty` is not a smaller change than the default --
+it rewrites the separator as well, and it is a whole-table rewrite on FIRST
+contact even when nothing was edited.
+
+**`--pretty` 連分隔列也會加寬。** `|---|` 變成 `|------|`，寬度依欄位而定。因此 `--pretty`
+並不是比預設更小的改動——它連分隔列一起重寫，而且即使什麼都沒編輯，**第一次接觸**就是一次
+整表重寫。
+
+**"Just use `--pretty` everywhere" is not the cheap way out**, and it is worth
+writing down why, because it is the obvious thing to reach for instead of
+adding a flag. It reformats on first contact, as above; and it re-flows every
+row whenever any value's width changes, so the next edit reintroduces exactly
+the noise it was supposed to avoid. A style that depends on the widest value
+in a column is not stable across edits.
+
+**「大家統一用 `--pretty` 就好」不是那條省事的路**，而這件事值得寫下來，因為它正是「與其加一個
+旗標，不如……」時最先會被想到的東西。它在第一次接觸就重排，如上；而且只要任何一個值的寬度改變，
+它就會把每一列重新排一次——於是下一次編輯又會製造出它本來要避免的那種雜訊。一個「取決於該欄最寬
+的值」的排版，在多次編輯之間並不穩定。
+
+**`git blame` is the durable half of the cost.** A code review is one reader
+once; blame is every reader afterwards. A whole-table rewrite makes blame on
+every untouched row point at an edit that did not touch it, and no later
+reading recovers the real author.
+
+**`git blame` 是這筆代價中比較持久的那一半。** 一次 code review 是一位讀者、一次；而 blame 是
+之後每一位讀者。整表重寫會讓每一個沒被動過的列，在 blame 上指向一次根本沒碰過它的編輯，而
+之後任何一次閱讀都救不回真正的作者。
+
+**The values themselves are already byte-perfect, and that is what makes this
+a formatting issue rather than a data one.** Measured here on the hostile
+cases: an escaped `\|` inside a cell, a backtick span, and `**bold**` all
+survive a `.md` -> `.csv` -> `.md` -> `.csv` round trip byte for byte. So
+`preserve` needs to carry padding only; it never has to reason about the
+values, which is the half that would have been dangerous.
+
+**值本身早就已經是逐位元正確的，而那正是這件事屬於「格式問題」而不是「資料問題」的原因。**
+在此以刁難的案例實測過：儲存格內被跳脫的 `\|`、一段 backtick、以及 `**bold**`，在
+`.md` → `.csv` → `.md` → `.csv` 的往返之後全都逐位元存活。因此 `preserve` 只需要帶著 padding
+走，它從來不需要對「值」做任何推理——而那才是原本會有危險的那一半。
+
+**A narrower landing is available if the full one is too much at once**: keep
+`compact` as the default and make `preserve` reachable by name. It solves the
+reported problem for anyone who asks for it, and leaves the default change as
+a separate decision. Not what is planned -- the default is where the cost is
+paid by people who never read this file -- but it is the fallback if
+`preserve` turns out to be expensive to get right.
+
+**如果一次做完太多，有一個比較小的落地方式**：把 `compact` 留作預設，只讓 `preserve` 可以被指名
+使用。那能替每一個主動要求它的人解決這個問題，並把「改預設值」留成另一個決定。這不是計畫要走的
+路——代價是由那些從來不會讀到這個檔案的人付的，而預設值正是那個代價發生的地方——但如果
+`preserve` 做起來比預期昂貴，它就是退路。
+
+這是 csv2 的資料模型唯一需要裝一樣「不是資料的東西」的地方：每一格送達時所帶的 padding。
+它只被**帶著走**，不被詮釋——csv2 仍然不知道一個欄位「應該」對齊到哪裡，它只知道這份文件原本
+是怎麼做的。
+
+#### Editing must be allowed to write `-md`, or none of the above can happen
+#### 編輯必須被允許輸出 `-md`，否則上面這些都做不到
+
+Measured:
+
+```console
+$ csv2 -update 1:1 'X' -md -t -i t.md -o o.md
+csv2: -md is an output shape and an edit writes CSV, so the two cannot be
+combined. Read with -md in a separate run
+```
+
+**That refusal is the thing standing in front of `--md-table N --in-place`.**
+Editing a `.md` and writing a `.md` back is exactly what it forbids, so it is
+not a seventh independent proposal -- it is the precondition for the first
+three. Today the way through is two runs and a temp file, which is also two
+chances for the temp file to be what survives a crash.
+
+**那道拒絕正是擋在 `--md-table N --in-place` 前面的東西。** 「編輯一個 `.md` 並把 `.md` 寫回去」
+正是它禁止的事，因此它不是第七個獨立提案——它是前三條的**前提**。今天的走法是兩趟執行加一個
+暫存檔，而那也是兩次「最後活下來的是那個暫存檔」的機會。
+
+The refusal's reasoning is sound as far as it goes: `-md` names an output shape
+and an edit writes CSV. What it missed is that those are only in conflict when
+the shape and the destination disagree. `-update ... -md -o out.md` names one
+shape twice. The refusal should fire on the disagreement, not on the
+combination.
+
+那道拒絕的推理，在它涵蓋的範圍內是成立的：`-md` 指定的是一種輸出形狀，而編輯寫出的是 CSV。
+它漏掉的是——只有在**形狀與目的地互相矛盾**時，兩者才衝突。`-update ... -md -o out.md` 是把
+同一種形狀說了兩次。那道拒絕該在「矛盾」時觸發，而不是在「併用」時觸發。
+
+### 4. `--dry-run` / 先看到，再寫
+
+**One flag, not two.** The proposal named `--diff` and `--dry-run` as
+alternatives for one need. Two flags doing the same thing is two chances to
+pick the wrong one, and the answer to "what would this do" is the same answer
+either way.
+
+**一個旗標，不是兩個。** 提案把 `--diff` 與 `--dry-run` 當成同一個需求的兩種說法。兩個旗標做
+同一件事，就是兩次挑錯的機會；而「這會做什麼」的答案，兩種說法下是同一個。
+
+It prints the per-cell before-and-after the `-log` trail already carries --
+`update 1:note: "alpha" -> "ALPHA"` -- and writes nothing. **To stdout**,
+because it is the product of the run and has to be readable in a pipeline;
+"nothing on the normal path" is about output nobody asked for, and this was
+asked for by name.
+
+它印出 `-log` 的 trail 早就在承載的那種「逐格前後對照」——`update 1:note: "alpha" -> "ALPHA"`
+——並且不寫入任何東西。**走 stdout**，因為它是這次執行的產物，必須能被接進管線；「正常路徑上
+不輸出任何東西」講的是「沒有人要求的輸出」，而這一個是被指名要求的。
+
+### 5. Not built: it already works / 不做：它已經可用
+
+Measured, not assumed. `.txt`, `.swift` and every other suffix that is not
+`.csv`/`.csv2` already read as `lines`, and `-update 2:1` on a `.swift` writes
+one line and leaves the rest. Tabs and trailing spaces survive. What does not
+survive is CRLF, which becomes LF -- on lines that were not edited too -- and a
+file with no final newline gains one. Both are documented, and both are now
+decided policy rather than an open question.
+
+實測，不是假設。`.txt`、`.swift` 以及任何不是 `.csv`／`.csv2` 的副檔名，早就以 `lines` 讀進來，
+而在一個 `.swift` 上 `-update 2:1` 會改一行、其餘不動。tab 與行尾空白都活著。活不下來的是 CRLF
+——它會變成 LF，**包括沒有被編輯的那些行**——以及「沒有結尾換行的檔案會被補上一個」。兩者都有
+文件，而且現在都是已定的政策，不再是一個開著的問題。
+
+### 6. A refusal a program can read / 一個程式讀得懂的拒絕
+
+**A JSON error object under `--json`. The exit code stays 1.** Classifying the
+exit code would break every caller and every test already asserting rc=1, and
+"failure is non-zero" is not the part that is wrong. Adding a channel takes
+nothing away.
+
+**在 `--json` 之下輸出一個 JSON 錯誤物件。離開碼維持 1。** 把離開碼分類，會弄壞每一個已經在
+斷言 rc=1 的呼叫端與測試，而「失敗即非零」並不是有問題的那一部分。新增一條管道不會拿走任何東西。
+
+**On stderr, one line.** Callers already read stderr for the refusal text;
+making that text parseable does not require moving it onto the stream carrying
+the data. A refusal on stdout would corrupt the very pipeline `--json` exists
+to feed.
+
+**走 stderr，一行。** 呼叫端本來就在讀 stderr 取得拒絕文字；讓那段文字變成可解析的，不需要把它
+搬到承載資料的那條流上。一個出現在 stdout 上的拒絕，會弄壞 `--json` 存在的目的所在的那條管線。
+
+The code is a stable kebab-case string, not a number. A number needs a table
+kept somewhere and says nothing on its own; `no-such-column` survives being
+read by a person debugging the script that matched it.
+
+那個代碼是一個穩定的 kebab-case 字串，不是數字。數字需要在某處維護一張表，而且自己什麼也沒說；
+`no-such-column` 在「一個人在除錯那支比對它的腳本」時仍然讀得懂。
+
+### 7. `--backup` for `--in-place` / 就地編輯的備份
+
+The smallest of the six. `-append --in-place` is the one edit with no temp file
+to fall back on -- it writes onto the end of the file and keeps the inode, so
+there is no rename to make it atomic, and a run killed mid-append leaves a
+partial record. The README states this plainly; `--backup` is the thing that
+makes it recoverable rather than merely disclosed.
+
+六條裡最小的一條。`-append --in-place` 是唯一一種沒有暫存檔可退的編輯——它直接寫到檔案末端並
+保留 inode，因此沒有 rename 能讓它成為原子操作，而一次在中途被殺死的執行會留下半筆紀錄。
+README 把這件事明說了；`--backup` 是讓它從「已揭露」變成「可復原」的那個東西。
+
+### To decide while implementing / 實作時要定的
+
+- Where `--backup` writes and what it is called. Beside the target is the
+  obvious answer and also the one that fails when the directory is read-only,
+  which is exactly when a backup matters.
+  `--backup` 寫到哪裡、叫什麼名字。「就寫在目標旁邊」是顯而易見的答案，也正是「目錄唯讀時會失敗」
+  的那個答案——而那正是備份最重要的時候。
+- Whether `--dry-run` and `--backup` compose. A dry run has nothing to back up,
+  so this is probably a refusal rather than a no-op.
+  `--dry-run` 與 `--backup` 能不能併用。一次試跑沒有東西需要備份，因此這多半該是一道拒絕，
+  而不是一個什麼都不做的動作。
+- How many of the existing refusals get a code in the first pass. All of them
+  is the right destination; doing it in one commit is not obviously the right
+  route.
+  第一輪要給多少既有的拒絕配上代碼。「全部」是正確的目的地；「在一個 commit 裡做完」不見得是
+  正確的路線。
+
+- [ ] the decisions above, in this file, before code / 上面那些決定寫在這個檔案裡，然後才寫程式
+- [ ] 1. `-update-where OLD NEW`, whole-cell, 0 and >1 both refused
+- [ ] 2. `--value-file` / `--value-stdin`, bytes verbatim, one value-taking verb
+- [ ] 2a. an edit may write `-md` when the shape and the destination agree / 形狀與目的地一致時，編輯可以輸出 `-md`
+- [ ] 3. `--md-table N --in-place`, prose carried across, LF everywhere
+- [ ] 3a. `--md-style preserve|compact|pretty`, default preserve / 預設 preserve
+- [ ] 4. `--dry-run`, per-cell before-and-after, to stdout
+- [ ] 6. `--json` error object on stderr, exit code unchanged
+- [ ] 7. `--backup` for `--in-place`
+- [ ] both READMEs and `--help` for each / 每一條都要進兩份 README 與 `--help`
+- [ ] four platforms / 四個平台
+
 ## 待決問題
 
 1. ~~submodule 掛在哪裡~~ —— 已定：`sos/csv2`。
@@ -3410,6 +3794,96 @@ tested.
    理由見上方「遷移既有檔案的代價」。這個問題就此關閉，不再是待決事項。
 7. ~~要不要「依位址讀取」？~~ —— **已定（2026-08-18）：要，`-get r:c`**。由回合制盲測
    的讀者提出，並依其提議命名。見下方。
+
+8. ~~七項提案，對照一個編輯器該有的樣子（2026-08-29 提出）~~ —— **已定（2026-08-29）：
+   值得做的六條全做，第 5 條不做（實測已經可用）。輸出永遠以 LF 作為行尾。**
+   那最後一句是使用者連同決定一起給的，而它不是附帶條件——它直接解掉了第 3 條當時還沒有
+   答案的那個衝突（散文原樣保留 vs 分隔符永遠 LF）。設計見第 11 階段。
+
+## 七項提案：實測過的現況，與各自的建議（2026-08-29）
+
+**每一條的第一欄不是提案說了什麼，是實測到什麼。** 提案本身是好的——七條裡有六條指向真實的
+缺口——但其中兩條的前提需要更正，而更正的方向剛好相反：一條比提案講的更嚴重，一條根本不需要做。
+
+Each row below is what was MEASURED, not what the proposal claimed. Six of the
+seven name a real gap; two of the premises needed correcting, in opposite
+directions -- one is worse than stated, one does not need doing at all.
+
+| # | 提案 | 實測 | 建議 |
+|---|---|---|---|
+| 1 | `-update-where OLD NEW`，命中不唯一就拒絕 | 不存在（`unknown flag`）。README 用一整節講替代路徑，而那一節自陳：`\| head -1` 會讓管線的結束狀態變成 `head` 的，於是**一個 REFUSED 的 csv2 在腳本看來是 rc=0**，`addr` 變空，與「沒找到」無從分辨 | **做，而且排第一** |
+| 2 | `--value-file PATH` / `--value-stdin` | 不存在。README 明說「carry it through a file instead」——**修法寫了，旗標沒有** | **做，與 1 一起** |
+| 3 | `--md-table N --in-place` | 前提要更正：`-o out.md` **是成功的**（rc=0，檔案產生）。真正的問題是輸出**只有那張表，散文靜默消失**。`--in-place` 到 `.md` 被拒絕 | 做，但它最貴——見下 |
+| 4 | `--diff` / 編輯用的 `--dry-run` | 兩個都不存在 | 做，但先定形狀 |
+| 5 | 非 CSV 檔的 raw/line 模式 | **已經可用。** `.txt`、`.swift` 都以 `lines` 讀進來，而 `-update 2:1` 編輯一個 `.swift` 也成功、其他行不動 | **不用做**，但有兩個代價要知道 |
+| 6 | 機器可判讀的拒絕 | 四種完全不同的失敗——`-head 0`、找不到檔案、越界位址、未知旗標——全部 rc=1 | 做，但**只做 `--json` 錯誤物件** |
+| 7 | `--in-place` 的 `--backup` | 不存在。README 明說 `-append --in-place` 沒有 temp file 可退，崩在中間會留半筆紀錄 | 做，範圍最小 |
+
+### 為什麼第 1 條排第一
+
+那一節的最後一句話是它自己的證據：**「Both were missing from this recipe until
+2026-08-22, and a round following it verbatim reported 'no cell contains --in-place'
+about a file whose record 3 contains exactly that.」** 一份需要四道護欄（`set -o pipefail`、
+搜尋字串上的 `--`、`printf x` 尾巴保護、再去掉 `-get` 自己加的換行）才能正確執行的配方，
+本身就是「這件事該由工具做」的證據——而那份配方是這個 repo 自己寫的，並且它記錄了照著做的人
+真的錯了一次。
+
+「命中不唯一就拒絕」不是新規則。`-delete -col note` 在有兩個 `note` 的檔案上就是這樣拒絕的，
+而那條拒絕的理由寫得很清楚：**有歧義的不是結果，是呼叫者的認知**。
+
+### 第 2 條與第 1 條是同一件事的兩半
+
+第 1 條讓「位址」不必經過 shell，第 2 條讓「值」不必經過 shell。兩條都做完，shell 就完全退出
+資料路徑——而 README 那一節列出的每一個陷阱，無一例外都發生在 shell 裡，不在 csv2 裡。
+只做其中一條，另一半的陷阱原封不動。
+
+### 第 3 條為什麼最貴
+
+它要求的不是一個旗標，是一個**新的檔案模型**。csv2 現在的寫入是「整檔重寫、rename 上去」;
+「只換掉文件中第 N 張表、其餘散文一個位元組都不動」需要它記住那張表在原檔中的位元組範圍，
+並只替換那一段。那與現有的每一條路徑都不同,也與「輸出永遠是 LF」那條保證直接衝突——散文
+若含 CRLF,原樣保留就不能重寫分隔符,重寫分隔符就不是原樣保留。**這一條要先回答那個衝突,
+才談得上設計。**
+
+### 第 5 條:已經可用,而代價是有文件的
+
+實測（csv2 0.1.0 (6758b0f)）:
+
+```console
+$ printf 'let x = 1\nlet y = 2\n' > f.swift
+$ csv2 -update 1:1 'let x = 99' -i f.swift --in-place   # rc=0
+$ cat f.swift
+let x = 99
+let y = 2
+```
+
+`.txt`、`.swift` 以及任何不是 `.csv`／`.csv2` 的副檔名,都以 `lines` 讀進來（那是 JY 記下的
+事實:「沒有副檔名」其實是「任何不是 .csv/.csv2 的副檔名」）。tab 與行尾空白都原樣保留。
+
+**兩個代價,兩個都在 README 裡:**
+
+```console
+$ printf 'a\r\nb\nc' > mix.txt          # CRLF、LF 混合,結尾無換行
+$ csv2 -r -t -i mix.txt -o rt.txt
+$ od -c mix.txt | head -1
+0000000    a  \r  \n   b  \n   c
+$ od -c rt.txt | head -1
+0000000    a  \n   b  \n   c  \n
+```
+
+CRLF 變成 LF——**包括沒有被編輯的那些行**——而結尾少一個換行的檔案會被補上一個。README 第
+「that every line ending in the file was rewritten」那一列把前者記為「讓 log 低估改動幅度」
+的那一項,並說一次 CRLF 檔編輯之後的 `diff` 或 checksum「量到的是分隔符」。
+
+因此第 5 條的答案是:**讀寫都已經可用,而如果目標是「拿它改 Windows 那側的原始碼樹」,
+要先決定「行尾是否原樣保留」——那是第 3 條同一個衝突的另一面,兩條應該一起決定。**
+
+### 第 6 條:做 `--json` 錯誤物件,不要動離開碼
+
+把 rc 分類會破壞每一個已經在比對 rc=1 的呼叫端與測試,而「失敗即非零」這條約定本身沒有問題。
+新增一條**表達管道**（`--json` 之下輸出一個錯誤物件）不會拿走任何既有的東西,而且與這個工具
+「正常路徑上不輸出任何訊息」那條規則相容——錯誤物件走的是 stderr 還是 stdout,是設計時要答的
+第一個問題。
 
 ## 同名欄位：為什麼 `-delete -col` 也拒絕（2026-08-18）
 

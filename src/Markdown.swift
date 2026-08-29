@@ -17,6 +17,37 @@ import Foundation
 // Markdown 表，而且不可能與 CSV 那條路徑漂移，因為只有一條路徑。
 // ---------------------------------------------------------------------
 
+/// What the input table's rows looked like BEFORE they were split into cells.
+/// `preserve` needs one thing from the source document: the exact line a row
+/// arrived on, so a row nobody edited can be written back unchanged. It never
+/// needs to reason about the VALUES -- those already round-trip byte for byte,
+/// measured on escaped pipes, backtick spans and `**bold**`. Carrying only the
+/// line keeps the dangerous half out of this entirely.
+/// 輸入表的每一列在「被切成儲存格之前」長什麼樣子。`preserve` 只需要源文件給它一樣東西：
+/// 每一列送達時的那一行原文，好讓一個沒有人編輯過的列能原封不動地寫回去。它從不需要對「值」
+/// 做任何推理——那些本來就逐位元往返，在被跳脫的 `|`、backtick 段落與 `**bold**` 上都實測過。
+/// 只帶著「那一行」走，等於把危險的那一半整個排除在外。
+///
+/// Keyed by the cell values rather than by row number because an edit may
+/// insert or delete rows, and every number after the change would be wrong.
+/// Values that are unchanged are what "unchanged row" means anyway.
+/// 以「儲存格的值」為鍵，而不是以列號為鍵，因為一次編輯可能插入或刪除列，改動之後的每一個號碼
+/// 都會是錯的。而「值沒有變」本來就是「這一列沒被改」的意思。
+struct MarkdownLayout {
+    var header: [String: String] = [:]
+    var separator: String = ""
+    var rows: [String: String] = [:]
+
+    static func key(_ cells: [String]) -> String {
+        // NUL cannot appear in a Markdown cell -- the file is UTF-8 text --
+        // so it separates fields without ever colliding with content. Joining
+        // on a printable character would make `a|b` and `a`,`b` the same key.
+        // NUL 不可能出現在一個 Markdown 儲存格裡——那個檔案是 UTF-8 文字——因此用它分隔欄位
+        // 永遠不會與內容相撞。用一個可列印字元來接，會讓 `a|b` 與 `a`、`b` 變成同一個鍵。
+        cells.joined(separator: "\u{0}")
+    }
+}
+
 enum MarkdownIn {
     /// Overridable for the same reason CSV2_INDEX_MIN_BYTES is: so the limit
     /// can be TESTED without a 16 MiB fixture.
@@ -152,7 +183,7 @@ extension MarkdownIn {
     /// 接起來，因此一個「切得開兩半」的標頭儲存格說出這個檔案來自兩列標頭的格式，而切不開的那個
     /// 說它來自 `.csv`。每一個標頭儲存格都必須一致：一個「這一欄切得開、那一欄切不開」的檔案是有
     /// 歧義的，而這個工具面對歧義的做法是指名它，不是替它挑一個。
-    static func translate(path: String, table wanted: Int?) throws -> (bytes: [UInt8], headerRows: Int) {
+    static func translate(path: String, table wanted: Int?) throws -> (bytes: [UInt8], headerRows: Int, layout: MarkdownLayout) {
         guard let data = FileManager.default.contents(atPath: path) else {
             throw fault("cannot open input file: \(path)", "無法開啟輸入檔：\(path)")
         }
@@ -195,7 +226,10 @@ extension MarkdownIn {
         // 被讀成一張，而第二張表的標頭與分隔列**當成資料**進去了。`---,---` 變成了一筆紀錄，而
         // 那次執行以 0 結束。那正是這個工具存在所要拒絕的「看起來成功」，而它是被「加入這個功能」
         // 的同一個 commit 帶進來的。
-        struct Table { var headerAt: Int; var header: [String]; var rows: [(Int, [String])] }
+        struct Table {
+            var headerAt: Int; var header: [String]; var rows: [(Int, [String])]
+            var headerLine = ""; var separatorLine = ""; var rowLines: [String] = []
+        }
         var tables: [Table] = []
         var i = 0
         while i < lines.count {
@@ -225,6 +259,8 @@ extension MarkdownIn {
                 i += 1; continue
             }
             var t = Table(headerAt: lines[i].no, header: header, rows: [])
+            t.headerLine = lines[i].text
+            t.separatorLine = lines[i+1].text
             i += 2
             while i < lines.count {
                 let r = lines[i].text.trimmingCharacters(in: .whitespaces)
@@ -234,10 +270,12 @@ extension MarkdownIn {
                 // table's header, not a record of this one.
                 // 出現在這裡的分隔列，表示它上面那一行是「另一張表的標頭」，不是這一張的紀錄。
                 if MarkdownIn.isSeparator(cs) {
+                    if !t.rowLines.isEmpty { t.rowLines.removeLast() }
                     if let last = t.rows.last { t.rows.removeLast(); i = lines.firstIndex(where: { $0.no == last.0 })! }
                     break
                 }
                 t.rows.append((lines[i].no, cs))
+                t.rowLines.append(lines[i].text)
                 i += 1
             }
             tables.append(t)
@@ -265,6 +303,12 @@ extension MarkdownIn {
             chosen = tables[0]
         }
 
+        var layout = MarkdownLayout()
+        layout.separator = chosen.separatorLine
+        layout.header[MarkdownLayout.key(chosen.header)] = chosen.headerLine
+        for (n, r) in chosen.rows.enumerated() where n < chosen.rowLines.count {
+            layout.rows[MarkdownLayout.key(r.1)] = chosen.rowLines[n]
+        }
         let headerRows = try headerRowCount(of: chosen.header, path: path)
         // The bytes are handed to the reader as the format the recovered header
         // count implies, so the ESCAPING the translation writes has to be that
@@ -280,7 +324,7 @@ extension MarkdownIn {
         var out: [UInt8] = []
         try appendRow(chosen.header, headerRows: headerRows, format: wire, into: &out)
         for r in chosen.rows { try appendRow(r.1, headerRows: 1, format: wire, into: &out) }
-        return (out, headerRows)
+        return (out, headerRows, layout)
     }
 
     /// How many header rows the table had, recovered from the header cells.

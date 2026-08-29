@@ -602,10 +602,18 @@ final class MarkdownEmitter: RecordEmitter {
     private var buffered: [[String]] = []
     private var bufferedBytes = 0
     private var headerCells: [String] = []
+    /// `preserve` needs the lines the input table arrived on. Absent when the
+    /// input was not Markdown, and absent is exactly when `preserve` renders
+    /// as `compact` -- there is no layout to keep, which is what "preserve"
+    /// means with nothing to preserve.
+    /// `preserve` 需要輸入表送達時的那些原始行。輸入不是 Markdown 時它不存在，而「不存在」正是
+    /// `preserve` 以 `compact` 算繪的時候——沒有排版可以保留，那就是「保留」在無物可保留時的意思。
+    private let layout: MarkdownLayout?
 
-    init(sink: ByteSink, pretty: Bool = false) {
+    init(sink: ByteSink, pretty: Bool = false, layout: MarkdownLayout? = nil) {
         self.sink = sink
         self.pretty = pretty
+        self.layout = layout
     }
 
     private func prettyLimit() -> Int {
@@ -672,6 +680,21 @@ final class MarkdownEmitter: RecordEmitter {
             headerCells = names
             return
         }
+        // The header and the separator come from the source when they are
+        // unchanged. The separator especially: --pretty widens `|---|` to
+        // `|------|`, so even a run that edits nothing rewrites it, and that
+        // line carries no data at all -- it is pure formatting, and rewriting
+        // it is pure diff noise.
+        // 標頭與分隔列在沒有改變時取自來源。分隔列尤其如此：--pretty 會把 `|---|` 加寬成
+        // `|------|`，因此即使一次什麼都沒編輯的執行也會重寫它，而那一行根本不承載任何資料
+        // ——它純粹是格式，重寫它純粹是 diff 雜訊。
+        if let lay = layout, let orig = lay.header[MarkdownLayout.key(names)] {
+            sink.write(orig + "\n")
+            sink.write((lay.separator.isEmpty
+                        ? "|" + names.map { _ in "---" }.joined(separator: "|") + "|"
+                        : lay.separator) + "\n")
+            return
+        }
         sink.write("|" + names.joined(separator: "|") + "|\n")
         sink.write("|" + names.map { _ in "---" }.joined(separator: "|") + "|\n")
     }
@@ -695,6 +718,16 @@ final class MarkdownEmitter: RecordEmitter {
                     "-md --pretty 必須持有整張表才能對齊，而這一張超過 \(prettyLimit()) 位元組；請拿掉 --pretty（Markdown 算出來是同一張表——終端機裡則不是，它會參差不齊），或調高 CSV2_PRETTY_MAX_BYTES")
             }
             buffered.append(cells)
+            return
+        }
+        // A row whose values are unchanged goes back as the line it came in
+        // on. A row that WAS edited is rendered compact -- its line no longer
+        // describes it, and padding it to the old width would be inventing
+        // formatting for a value that was never there.
+        // 值沒有改變的列，會以它送進來時的那一行寫回去。被編輯過的列則以 compact 算繪——它原本
+        // 那一行已經描述不了它了，而把它補齊到舊的寬度，等於替一個從來不存在的值發明格式。
+        if let lay = layout, let orig = lay.rows[MarkdownLayout.key(cells)] {
+            sink.write(orig + "\n")
             return
         }
         sink.write("|" + cells.joined(separator: "|") + "|\n")
