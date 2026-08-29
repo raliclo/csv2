@@ -12591,11 +12591,33 @@ fi
 # 抵達」——而一個寫在散文裡的數字，除非有東西去量它，否則就會腐爛。這裡就是那個量測，用的是
 # 回報者自己的 fixture：compact 重寫整張表，preserve 只重寫那一列。
 "$CSV2" -r -t -md --md-style compact -i "$TMP/t217.md" --md-table 1 > "$TMP/t217c.md" 2>/dev/null
-_t217_compact_lines=$(diff "$TMP/t217orig.md" "$TMP/t217c.md" | grep -c '^[<>]')
-if (( _t217_compact_lines == 6 )); then
-    ok "T217i compact rewrites all six lines of a four-row table, the number both READMEs quote / compact 會重寫一張四列表的全部六行，也就是兩份 README 引用的那個數字"
+# Counted line by line rather than by grepping diff's output. The first version
+# used `diff | grep -c '^[<>]'` and it reported 0 in the guest while giving 6
+# here -- not a behaviour difference in csv2 but in DIFF: the `<`/`>` prefixes
+# are the traditional format, and the guest's diff does not print them. The
+# test was measuring the diff program.
+# 逐行數，而不是去 grep diff 的輸出。第一版用 `diff | grep -c '^[<>]'`，它在 guest 回報 0、
+# 在這裡給 6——那不是 csv2 的行為差異，是 **diff** 的差異：`<`／`>` 前綴是傳統格式，而 guest 的
+# diff 不印它們。那個測試量到的是 diff 這支程式。
+_t217_a=("${(@f)$(cat "$TMP/t217orig.md")}")
+_t217_b=("${(@f)$(cat "$TMP/t217c.md")}")
+_t217_changed=0
+if (( ${#_t217_a} == ${#_t217_b} && ${#_t217_a} == 4 )); then
+    for _t217_i in {1..${#_t217_a}}; do
+        [[ ${_t217_a[$_t217_i]} == ${_t217_b[$_t217_i]} ]] || _t217_changed=$((_t217_changed + 1))
+    done
 else
-    bad "T217i compact gave $_t217_compact_lines diff lines, the READMEs say 6 / compact 給出 $_t217_compact_lines 行 diff，而 README 寫的是 6"
+    _t217_changed=-1
+fi
+# THREE of the four lines, because the separator `|---|---|---|` happens to be
+# what compact emits too. A diff shows that as six lines -- old and new for
+# each -- which is the number both READMEs quote.
+# 四行裡的**三行**，因為分隔列 `|---|---|---|` 剛好就是 compact 會吐出來的那一行。diff 會把它
+# 呈現成六行——每一行各有舊與新——那就是兩份 README 引用的那個數字。
+if (( _t217_changed == 3 )); then
+    ok "T217i compact rewrites three of the four lines -- the six-line diff both READMEs quote / compact 會重寫四行裡的三行——也就是兩份 README 引用的那個「六行 diff」"
+else
+    bad "T217i $_t217_changed of 4 lines differ (want 3); orig=${#_t217_a} compact=${#_t217_b} lines / 實得如上"
 fi
 
 # The refusal that stops an edit writing -md is still there. Relaxing it was
