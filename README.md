@@ -235,6 +235,24 @@ The local suite reports pass/fail/skip counts and exits non-zero on failure.
 The parent-project runner builds csv2 in the aarch64 Linux guest, compares
 host and guest output, runs the guest suite, and records measurements.
 
+### Measured read/write time
+
+These are recorded wall-clock durations for the benchmark corpus, shown in
+microseconds (µs). They are not a fixed per-record guarantee; process startup,
+storage, corpus size, and host conditions are included. The macOS and Windows
+runs used 200,000 records (25.4 MiB); the Linux guest run used 20,000 records
+(2.48 MiB), so compare only like-for-like rows.
+
+| Measurement | macOS arm64<br>2026-08-17 | Windows x86_64<br>2026-08-27 | Linux aarch64 guest<br>2026-08-30 |
+|---|---:|---:|---:|
+| Full read, single-threaded | 556,000 µs | 2,512,000 µs | 93,000 µs |
+| Full read, parallel | 203,000 µs | 839,000 µs | 101,000 µs |
+| Small durable edit | 19,200 µs | 81,500 µs | 10,600 µs |
+| Full-file rewrite | 655,000 µs | 2,444,000 µs | 192,000 µs |
+
+The source measurements are kept in `verifications/measure_output*.txt` and
+are produced by `verifications/measure.zsh` using best-of-N timings.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

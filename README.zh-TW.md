@@ -206,6 +206,22 @@ sidecar 不存在或無效時以非零結束。`--no-index` 同時停用讀取�
 會在 aarch64 Linux guest 建置 csv2、比較 host 與 guest 輸出、執行 guest 測試，
 並保存量測結果。
 
+### 讀寫效能量測
+
+以下是基準資料集的 wall-clock 完整執行時間，以微秒（µs）表示。這不是固定的每筆成本保證；
+數字包含行程啟動、儲存裝置、資料集大小與主機條件。macOS 與 Windows 使用 200,000 筆
+（25.4 MiB）；Linux guest 使用 20,000 筆（2.48 MiB），因此只能比較資料量相同的列。
+
+| 量測項目 | macOS arm64<br>2026-08-17 | Windows x86_64<br>2026-08-27 | Linux aarch64 guest<br>2026-08-30 |
+|---|---:|---:|---:|
+| 完整讀取，單執行緒 | 556,000 µs | 2,512,000 µs | 93,000 µs |
+| 完整讀取，平行 | 203,000 µs | 839,000 µs | 101,000 µs |
+| 小型耐久編輯 | 19,200 µs | 81,500 µs | 10,600 µs |
+| 整檔重寫 | 655,000 µs | 2,444,000 µs | 192,000 µs |
+
+原始量測保存在 `verifications/measure_output*.txt`，由
+`verifications/measure.zsh` 以 best-of-N 時間產生。
+
 ## 授權
 
 MIT。見 [LICENSE](LICENSE)。
