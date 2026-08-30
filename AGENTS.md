@@ -42,9 +42,9 @@ importable as a module.
 
 Phase 6 is done: csv2 builds inside the aarch64 Linux guest and its output is
 byte-identical to macOS across 12 compared invocations. Not implemented:
-shipping (phase 7), which is a deliberate deferral rather than a gap. One item
-in phase 9 is still open: repeating the Swift 6 module verification on macOS
-and aarch64 Linux, which has so far only been done natively on Windows.
+shipping (phase 7), which is a deliberate deferral rather than a gap. The
+Swift 6 module verification has also been run on macOS, aarch64 Linux, WSL, and
+Windows through the standalone module/client check.
 
 可用：RFC 4180 解析器、`-r`、選取旗標、兩列標頭、`--json`、`-md`（含 `--pretty`
 與 UAX #11 寬度表）、把 Markdown 表讀回來（檔案不只一張表時用 `--md-table N`）、
@@ -53,8 +53,8 @@ and aarch64 Linux, which has so far only been done natively on Windows.
 `-append` 的 O(1) 快路徑、`.index` sidecar 與 `--verify-index`、平行搜尋，以及一個
 「可當 module 匯入」的七個 public 型別的 library 表面。
 第 6 階段已完成：csv2 能在 aarch64 Linux guest 內建置，且 12 組比對的輸出與 macOS
-逐位元相同。未實作：出貨（第 7 階段），那是刻意暫緩而非缺口。第 9 階段還有一項未完成：
-在 macOS 與 aarch64 Linux 上重跑那份 Swift 6 module 驗證，目前只在 Windows 上原生做過。
+逐位元相同。未實作：出貨（第 7 階段），那是刻意暫緩而非缺口。Swift 6 module 驗證也已透過
+獨立 module／client 檢查，在 macOS、aarch64 Linux、WSL 與 Windows 執行完成。
 
 ### Environment knobs / 環境變數
 

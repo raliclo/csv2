@@ -3,8 +3,8 @@
 狀態：**第 1–6 與 8–10 階段全部完成。** macOS 與 aarch64 Linux guest 兩邊皆 0 失敗，唯一的略過是
 T47（它比對兩個平台，因此無法從其中一個平台內部執行，由母專案的
 `test_submodules/run_csv2_test.zsh` 驅動）；兩邊 12 組輸出逐位元相同。第 7 階段（出貨）刻意暫緩；
-第 9 階段還有一項未完成——在 macOS 與 aarch64 Linux 上重跑那份 Swift 6 module 驗證，目前只在
-Windows 上原生做過。
+第 9 階段的 Swift 6 module 驗證已在 macOS、aarch64 Linux、WSL 與 Windows 透過獨立
+module／client 檢查完成；第 7 階段（出貨）仍刻意暫緩。
 
 這一行在第 8、9、10 階段完成之後仍寫著「只剩第 7 階段」，直到 2026-08-27 才被更正——與它下面
 那段講的是同一件事，只是換成了階段編號而不是通過數量。**移除一個會衰減的數字，並不會讓句子裡
@@ -3176,7 +3176,7 @@ Swift 5 語言模式。因此每個建置入口都傳入 `-swift-version 6`，SP
 - [x] the subset closes: Platform, Core, Support, Crypto, Markdown, Width / 子集自足
 - [x] verified by importing it from outside and running it / 以「從外面 import 並執行」驗證
 - [x] native Windows: executable, module, client and SPM all use Swift 6 mode / 原生 Windows：執行檔、module、客戶端與 SPM 全部使用 Swift 6 模式
-- [ ] repeat the Swift 6 verification on macOS and aarch64 Linux / 在 macOS 與 aarch64 Linux 重跑 Swift 6 驗證
+- [x] repeat the Swift 6 verification on macOS and aarch64 Linux / 在 macOS 與 aarch64 Linux 重跑 Swift 6 驗證
 
 ## Phase 10: adding a column / 第 10 階段：新增一欄
 
