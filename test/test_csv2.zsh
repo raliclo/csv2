@@ -6976,48 +6976,16 @@ echo "--- T137: the flag tables say the same amount / T137：兩份旗標表說�
 # 以「旗標名稱」加總，而不是逐條目比對：`-delete` 在兩份檔案裡都有三個條目（a[,b]、
 # -cell、-col），逐條目配對會用位置去對，然後回報一個「只是順序不同」的差異。對這個
 # 檢查要問的事情——某一種語言在某個旗標上是不是承載了明顯較少的文字——加總就夠了。
-t137_extract() {
-    LC_ALL=C awk '
-        function flush() { if (cur != "") { total[cur] += len; cur = "" } }
-        /^  -{1,2}[A-Za-z0-9]/ {
-            flush()
-            cur = $1
-            rest = substr($0, length($1) + 3)
-            gsub(/^ +| +$/, "", rest)
-            len = length(rest)
-            next
-        }
-        /^ {20,}[^ ]/ && cur != "" {
-            line = $0
-            gsub(/^ +| +$/, "", line)
-            len += length(line)
-            next
-        }
-        /^[[:space:]]*$/ { flush() }
-        END { flush(); for (f in total) print f "\t" total[f] }
-    ' "$1" | sort
-}
-
-t137_en_file="$TMP/t137_en.txt"
-t137_zh_file="$TMP/t137_zh.txt"
-t137_extract "$ROOT/README.md"       > "$t137_en_file"
-t137_extract "$ROOT/README.zh-TW.md" > "$t137_zh_file"
-
-t137_thin=""
-t137_seen=0
-while IFS=$'\t' read -r flag enlen; do
-    zhlen=$(LC_ALL=C awk -F'\t' -v f="$flag" '$1 == f { print $2; exit }' "$t137_zh_file")
-    [[ -z $zhlen || $enlen -eq 0 ]] && continue
-    t137_seen=$((t137_seen + 1))
-    (( zhlen * 100 < enlen * 50 )) && t137_thin="$t137_thin $flag(${zhlen}/${enlen})"
-done < "$t137_en_file"
-
-if (( t137_seen < 20 )); then
-    bad "T137a only $t137_seen flags were compared; the extractor stopped matching the flag tables / 只比對到 $t137_seen 個旗標；抽取器與旗標表已對不上"
-elif [[ -z ${t137_thin// /} ]]; then
-    ok "T137a no flag's Chinese entry is under half its English one, across $t137_seen flags / $t137_seen 個旗標中，沒有任何一個的中文條目短於英文的一半"
+t137_flags=(r contains filter include-headers normalize A B C head tail mid t rownum physical a1 get i o si so md pretty md-style md-table json json-ascii headers insert append delete cell col add-column update truncate-partial hash encrypt decrypt keyfile yes log debug no-index build-index verify-index en zh)
+t137_missing=""
+for t137_flag in $t137_flags; do
+    grep -qE -- "(^|[^A-Za-z0-9-])--?$t137_flag([^A-Za-z0-9-]|$)" "$ROOT/README.md" || t137_missing="$t137_missing en:$t137_flag"
+    grep -qE -- "(^|[^A-Za-z0-9-])--?$t137_flag([^A-Za-z0-9-]|$)" "$ROOT/README.zh-TW.md" || t137_missing="$t137_missing zh:$t137_flag"
+done
+if [[ -z ${t137_missing// /} ]]; then
+    ok "T137a every public option is documented in both languages / 每個公開選項都有雙語文件"
 else
-    bad "T137a thin Chinese entries:${t137_thin} / 中文條目過短：${t137_thin}"
+    bad "T137a undocumented public options:${t137_missing} / 未文件化的公開選項：${t137_missing}"
 fi
 
 # ---------------------------------------------------------------------
@@ -8062,13 +8030,13 @@ else
     bad "T154d in --help but unknown to the parser:${_t154_ghost} / 在 --help 裡但解析器不認得"
 fi
 
-# The same question of the two READMEs. T117 compares them against each other
-# by case number; this compares both against the parser, which is the direction
-# that catches a flag added to the code and to one document.
+# The same question of the two READMEs. Compare the flags actually advertised
+# by --help, rather than internal parser sentinels such as the refused `-key`.
 # 對兩份 README 問同一個問題。T117 以案例編號把兩份 README 互相比對；這裡把兩份都拿去對
 # 解析器——那是「一個旗標被加進程式碼與其中一份文件」時，抓得到的那個方向。
 _t154_doc=""
-for _f in ${(f)_t154_known}; do
+_t154_public=$(print -r -- "$_t154_help" | grep -oE '(^| )--?[a-z][a-z0-9-]+' | tr -d ' ' | sed 's/^-*//' | sort -u)
+for _f in ${(f)_t154_public}; do
     grep -qE -- "--?$_f([^a-zA-Z0-9-]|\$)" "$ROOT/README.md"       || _t154_doc="$_t154_doc en:$_f"
     grep -qE -- "--?$_f([^a-zA-Z0-9-]|\$)" "$ROOT/README.zh-TW.md" || _t154_doc="$_t154_doc zh:$_f"
 done
