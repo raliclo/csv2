@@ -1,15 +1,17 @@
 # csv2 measurements
-date    : 2026-08-27T00:11:40Z
+date    : 2026-08-30T19:16:54Z
 host    : MSYS_NT-10.0-26200 x86_64
-binary  : csv2 0.1.0
+binary  : csv2 0.1.0 (918c4b4)
 
 corpus bytes : 26642235
 corpus records: 200000
 
 ## 1. full RFC 4180 parse throughput / 完整解析吞吐量
-single-threaded : 2.512 s   10 MiB/s
-parallel        : 0.839 s   30 MiB/s   speedup 2.99x on 12 workers
-efficiency      : 25% of linear
+single-threaded : 2.468 s   10 MiB/s
+csv             : 1.680 s   15 MiB/s
+csv2/csv        : 1.47x
+parallel        : 0.867 s   29 MiB/s   speedup 2.85x on 12 workers
+efficiency      : 24% of linear
                   the boundary-finding pass is single-threaded, so this is
                   expected to be well under 100%; record it rather than
                   reading "parallel" as "P times faster".
@@ -17,19 +19,19 @@ efficiency      : 25% of linear
                   把它記下來，不要把「平行」讀成「快 P 倍」。
 
 ## 2. durable-write floor / 落地寫入的下限
-smallest edit   : 0.0815 s   (process start + parse + flush + rename)
+smallest edit   : 0.0843 s   (process start + parse + flush + rename)
                   一次最小編輯的總時間，含行程啟動、解析、flush 與 rename
 
 ## 3. write throughput / 寫入吞吐量
-rewrite whole   : 2.444 s   10 MiB/s
+rewrite whole   : 2.603 s   10 MiB/s
 
 ## what this says about the thresholds / 對門檻的意涵
-16 MiB at the measured parse rate : 1.582 s
+16 MiB at the measured parse rate : 1.554 s
   the index and parallel thresholds are both 16 MiB. That is the point at
   which a full scan costs the above; judge whether it is worth a sidecar.
   索引與平行的門檻都是 16 MiB。那是「全掃描要花上述時間」的那個點；
   是否值得為此維護一個 sidecar，據此判斷。
 
-1 GiB rewrite at the measured write rate : 98.5 s
+1 GiB rewrite at the measured write rate : 104.9 s
   plan/plan.md predicted 26 s from a 39 MiB/s figure.
   plan/plan.md 依 39 MiB/s 推得 26 秒。
