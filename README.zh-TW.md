@@ -1,8 +1,6 @@
 # csv2
 
-以 Swift 撰寫的命令列 CSV 解析器與編輯器，目標為
-[LinuxCS](https://github.com/raliclo/LinuxCS) 專案的 aarch64 Linux guest，
-以及建置它的 macOS host。
+以 Swift 撰寫的命令列 CSV 解析器與編輯器，供AI使用，且可跨平台使用。
 
 English: [README.md](./README.md)
 
