@@ -9,7 +9,7 @@ English documentation: [README.md](README.md)。
 ## 狀態
 
 解析器、編輯器、Markdown 讀寫、索引、平行搜尋、加密、記錄，以及跨平台建置
-都已實作並由測試涵蓋。csv2 尚未打包進 LinuxCS guest 的 root filesystem。
+都已實作並由測試涵蓋。
 公開 Swift module surface 已提供，並已在 macOS、aarch64 Linux、WSL 與 Windows
 透過獨立 module／client 檢查完成驗證。
 

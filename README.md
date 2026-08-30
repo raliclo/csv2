@@ -11,7 +11,7 @@ Traditional Chinese documentation: [README.zh-TW.md](README.zh-TW.md).
 
 The parser, editor, Markdown reader/writer, index, parallel search, encryption,
 logging, and cross-platform builds are implemented and covered by the test
-suite. Packaging csv2 into the LinuxCS guest root filesystem is not included.
+suite.
 The public Swift module surface is available and has been verified on macOS,
 aarch64 Linux, WSL, and Windows through the standalone module/client check.
 
