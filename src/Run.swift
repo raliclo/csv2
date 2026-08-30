@@ -14,6 +14,98 @@ func makeSink(_ o: Options) throws -> ByteSink {
     return ByteSink(stdout: 1 << 16)
 }
 
+func makeInPlaceBackup(_ path: String) throws {
+    let backup = path + ".bak"
+    guard !FileManager.default.fileExists(atPath: backup) else {
+        throw fault("backup path already exists: \(backup); refusing to overwrite it",
+                    "備份路徑已存在：\(backup)；拒絕覆寫")
+    }
+    do {
+        try FileManager.default.copyItem(atPath: path, toPath: backup)
+    } catch {
+        throw fault("cannot create backup \(backup): \(error.localizedDescription)",
+                    "無法建立備份 \(backup)：\(error.localizedDescription)")
+    }
+}
+
+func runMarkdownEdit(_ o: Options) throws {
+    guard let input = o.input else {
+        throw fault("Markdown editing needs -i FILE", "Markdown 編輯需要 -i FILE")
+    }
+    let probe = try openInput(o)
+    let extensionName = probe.headerRows == 2 ? "csv2" : "csv"
+    probe.source.close()
+    let temp = FileManager.default.temporaryDirectory
+        .appendingPathComponent("csv2-edit-\(UUID().uuidString).\(extensionName)").path
+    defer { try? FileManager.default.removeItem(atPath: temp) }
+
+    var csv = o
+    csv.markdown = false
+    csv.output = temp
+    csv.inPlace = false
+    csv.dryRun = false
+    csv.backup = false
+    try runEdit(csv)
+
+    var rendered = o
+    rendered.edits = []
+    rendered.input = temp
+    let renderedPath = o.inPlace
+        ? FileManager.default.temporaryDirectory.appendingPathComponent("csv2-render-\(UUID().uuidString).md").path
+        : o.output
+    rendered.output = renderedPath
+    rendered.inPlace = false
+    rendered.markdown = true
+    try runSelect(rendered)
+
+    guard o.inPlace, let renderedPath else { return }
+    defer { try? FileManager.default.removeItem(atPath: renderedPath) }
+    let original = try String(contentsOfFile: input, encoding: .utf8)
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .replacingOccurrences(of: "\r", with: "\n")
+    let replacement = try String(contentsOfFile: renderedPath, encoding: .utf8)
+    let oldLines = original.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    var newLines = replacement.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    while newLines.last == "" { newLines.removeLast() }
+    if o.mdStyle == .preserve, newLines.count >= 2 {
+        let layout = try MarkdownIn.translate(path: input, table: o.mdTable).layout
+        let headerKey = MarkdownLayout.key(MarkdownIn.cells(of: newLines[0]))
+        if let original = layout.header[headerKey] { newLines[0] = original }
+        newLines[1] = layout.separator
+        if newLines.count > 2 {
+            for row in 2..<newLines.count {
+                let key = MarkdownLayout.key(MarkdownIn.cells(of: newLines[row]))
+                if let original = layout.rows[key] { newLines[row] = original }
+            }
+        }
+    }
+    let wanted = o.mdTable ?? 1
+    var starts: [Int] = []
+    var ends: [Int] = []
+    var i = 0
+    while i + 1 < oldLines.count {
+        if oldLines[i].trimmingCharacters(in: .whitespaces).hasPrefix("|") &&
+           MarkdownIn.isSeparator(MarkdownIn.cells(of: oldLines[i + 1])) {
+            starts.append(i)
+            var end = i + 2
+            while end < oldLines.count && !oldLines[end].trimmingCharacters(in: .whitespaces).isEmpty && oldLines[end].trimmingCharacters(in: .whitespaces).hasPrefix("|") { end += 1 }
+            ends.append(end)
+            i = end
+        } else { i += 1 }
+    }
+    guard wanted >= 1, wanted <= starts.count else {
+        throw fault("--md-table \(wanted): could not locate that table for in-place replacement",
+                    "--md-table \(wanted)：找不到要就地替換的那張表")
+    }
+    let start = starts[wanted - 1], end = ends[wanted - 1]
+    var combined = Array(oldLines[..<start]) + newLines + Array(oldLines[end...])
+    while combined.last == "" { combined.removeLast() }
+    if o.backup { try makeInPlaceBackup(input) }
+    let sink = try ByteSink(atomicPath: input)
+    sink.write(Array((combined.joined(separator: "\n") + "\n").utf8))
+    try sink.close()
+}
+
 /// A selection without `-t` produces DATA ROWS, not a valid file of that
 /// format. Writing them to a `.csv2` path means the next read eats the first
 /// two records as headers -- the exact error this tool exists to prevent.
@@ -937,6 +1029,7 @@ func runSelect(_ o: Options) throws {
     plan.source.close()
     try sink.close()
     aborted = false
+
     // Only when a FILE was written. `-so` and the bare stdout path have no
     // rename to report, and saying "atomic rename OK" about a stream would be
     // a line that is false in the one word that matters.
@@ -1021,7 +1114,7 @@ func runSelect(_ o: Options) throws {
 // ---------------------------------------------------------------------
 
 func runEdit(_ o: Options) throws {
-    let plan = try openInput(o)
+    var plan = try openInput(o)
     defer { plan.source.close() }
     if let p = o.input {
         try checkTornAppend(path: p, format: plan.format, truncatePartial: o.truncatePartial)
@@ -1050,7 +1143,7 @@ func runEdit(_ o: Options) throws {
     var inserts: [Int: [String]] = [:]
     var appends: [String] = []
     var deletes: [(Int, Int)] = []
-    var updates: [Int: [(String, String)]] = [:]
+    var updates: [Int: [(String, [UInt8])]] = [:]
     var blanks: [Int: [String]] = [:]
     var dropTokens: [String] = []
 
@@ -1068,11 +1161,116 @@ func runEdit(_ o: Options) throws {
         case .insert(let at, let row): inserts[at, default: []].append(row)
         case .append(let row): appends.append(row)
         case .deleteRange(let a, let b): deletes.append((a, b))
-        case .update(let r, let c, let v): updates[r, default: []].append((c, v))
+        case .update(let r, let c, let v): updates[r, default: []].append((c, [UInt8](v.utf8)))
         case .deleteCell(let r, let c): blanks[r, default: []].append(c)
         case .deleteColumn(let c): dropTokens.append(c)
         case .addColumn(let at, let name, let value): addCols.append((at, name, value))
+        case .updateWhere: break
         }
+    }
+
+    if o.valueFile != nil || o.valueStdin {
+        let bytes: [UInt8]
+        if let path = o.valueFile {
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
+                throw fault("--value-file (path): cannot read the value file",
+                            "--value-file (path)：無法讀取值檔案")
+            }
+            bytes = [UInt8](data)
+        } else {
+            bytes = [UInt8](FileHandle.standardInput.readDataToEndOfFile())
+        }
+        guard case .update(let record, let column, _) = o.edits[0] else {
+            throw fault("--value-file/--value-stdin requires -update",
+                        "--value-file／--value-stdin 需要搭配 -update")
+        }
+        updates[record] = [(column, bytes)]
+    }
+
+    let anchored = o.edits.compactMap { edit -> (String, String)? in
+        if case .updateWhere(let old, let value) = edit { return (old, value) }
+        return nil
+    }
+    if !anchored.isEmpty {
+        guard let path = o.input, !o.useStdin else {
+            throw fault(
+                "-update-where needs -i FILE because it must scan the complete input before writing; it cannot be used with -si",
+                "-update-where 需要搭配 -i FILE，因為它必須在寫出前掃描完整輸入；不可與 -si 併用")
+        }
+
+        // Content-anchored edits must know whether each OLD value is unique
+        // before a destination or stdout receives any bytes. A second pass is
+        // deliberate: refusing after partial output would not be recoverable.
+        // 依內容定位的編輯必須在任何目的地或 stdout 收到位元組之前，先知道每個 OLD 是否唯一。
+        // 第二次掃描是刻意的：寫出部分內容後才拒絕，結果無法復原。
+        plan.source.close()
+        let scan = try ByteSource(path: path, chunkSize: 1 << 16)
+        var scanHeaders: [Record] = []
+        var scanExpected = 0
+        var scanError: Error?
+        var found: [[(record: Int, column: Int)]] = Array(repeating: [], count: anchored.count)
+        let parser = RecordParser(format: plan.format) { rec in
+            do {
+                if scanHeaders.count < plan.headerRows {
+                    var h = rec
+                    h.number = 0
+                    scanHeaders.append(h)
+                    if scanHeaders.count == plan.headerRows {
+                        try validateHeaders(scanHeaders, want: plan.headerRows, path: plan.describedPath)
+                        scanExpected = scanHeaders[0].count
+                    }
+                } else {
+                    var data = rec
+                    data.number = rec.number - plan.headerRows
+                    if scanExpected == 0 { scanExpected = data.count }
+                    try checkFieldCount(data, expected: scanExpected,
+                                        what: "record \(data.number) (line \(data.line))")
+                    for (i, target) in anchored.enumerated() {
+                        let old = Array(target.0.utf8)
+                        for (column, field) in data.fields.enumerated()
+                                where field.value == old {
+                            found[i].append((data.number, column + 1))
+                        }
+                    }
+                }
+            } catch {
+                scanError = error
+                return false
+            }
+            return true
+        }
+        while !parser.stopped, let chunk = scan.next() { try parser.feed(chunk) }
+        if !parser.stopped { try parser.finish() }
+        if let scanError { throw scanError }
+        if scanHeaders.count < plan.headerRows {
+            try validateHeaders(scanHeaders, want: plan.headerRows, path: plan.describedPath)
+        }
+
+        var occupied = Set<String>()
+        for (i, hits) in found.enumerated() {
+            guard hits.count == 1 else {
+                let old = echoValue(Array(anchored[i].0.utf8))
+                if hits.isEmpty {
+                    throw fault(
+                        "-update-where \"\(old)\": no data cell equals OLD in full",
+                        "-update-where「\(old)」：沒有任何資料儲存格的完整內容等於 OLD")
+                }
+                let addresses = hits.map { "\($0.record):\($0.column)" }.joined(separator: ", ")
+                throw fault(
+                    "-update-where \"\(old)\": more than one data cell matches (\(addresses)); refusing an ambiguous update",
+                    "-update-where「\(old)」：有多個資料儲存格符合（\(addresses)）；拒絕這個有歧義的更新")
+            }
+            let hit = hits[0]
+            let key = "\(hit.record):\(hit.column)"
+            guard occupied.insert(key).inserted else {
+                throw fault(
+                    "-update-where edits overlap at \(key); refusing to choose which value should survive",
+                    "-update-where 編輯在 \(key) 重疊；拒絕猜測哪一個值應該留下")
+            }
+            updates[hit.record, default: []].append((String(hit.column), [UInt8](anchored[i].1.utf8)))
+        }
+        scan.close()
+        plan.source = try ByteSource(path: path, chunkSize: 1 << 16)
     }
 
     // The same clash, one axis over. `-delete -col X` combined with an edit
@@ -1149,7 +1347,8 @@ func runEdit(_ o: Options) throws {
         }
     }
 
-    let sink = try makeSink(o)
+    if o.backup, let path = o.input { try makeInPlaceBackup(path) }
+    let sink = o.dryRun ? ByteSink(stdout: 1 << 16) : try makeSink(o)
     var aborted = true
     defer { if aborted { sink.abort() } }
 
@@ -1278,7 +1477,9 @@ func runEdit(_ o: Options) throws {
     // 裡數，而標頭列走的是這一個：於是它們推進了偏移量卻沒有推進行號，一次寫入建出的索引
     // 便說第 1 筆在第 1 行，而 `.csv2` 會把它放在第 3 行。在 --verify-index 學會比對它自己
     // 存的行號之前，沒有任何東西檢查過這件事。
+    var dryRunChanges: [String] = []
     func emit(_ r: Record) {
+        if o.dryRun { return }
         let bytes = FieldEncoder.encodeRecord(r, format: plan.format, preserveRaw: true)
         sink.write(bytes)
         outOffset += bytes.count
@@ -1576,7 +1777,10 @@ func runEdit(_ o: Options) throws {
                                     "\(colToken)：這個檔案沒有標頭列，因此在這裡只能以「編號」定址欄位")
                     }
                     let old = r.fields[c].value
-                    r.fields[c].set([UInt8](value.utf8))
+                    r.fields[c].set(value)
+                    if o.dryRun {
+                        dryRunChanges.append("update \(r.number):\(name): \(Logger.shared.redact(column: name, value: old)) -> \(Logger.shared.redact(column: name, value: r.fields[c].value))")
+                    }
                     // The log records the value in full, so say so when "in
                     // full" is a megabyte. This is a WARN and not a cap: the
                     // decision (2026-08-19) was that an audit trail must not
@@ -1731,6 +1935,10 @@ func runEdit(_ o: Options) throws {
     plan.source.close()
     try sink.close()
     aborted = false
+
+    if o.dryRun {
+        for change in dryRunChanges { print(change) }
+    }
 
     // After the data file is renamed into place, never before. Interrupted
     // between the two, the index is absent or fails validation, and both fall

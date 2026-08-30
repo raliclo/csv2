@@ -129,6 +129,8 @@ csv2：vs-sqlite.csv2 的副檔名宣告了 2 列標頭，但 --headers 說 1 �
 
 ```sh
 csv2 -update 12:3 'new value' -i data.csv --in-place
+csv2 -update-where 'pending' 'done' -i data.csv --in-place
+csv2 -update 12:3 --value-file value.bin -i data.csv --in-place
 csv2 -insert 4 'a,b,c' -i data.csv --in-place
 csv2 -append 'a,b,c' -i data.csv --in-place
 csv2 -delete 4 -i data.csv --in-place
@@ -138,7 +140,7 @@ csv2 -add-column 3 'note,備註' 'todo' -i data.csv2 --in-place
 ```
 
 Supported edit verbs are `-insert`, `-append`, `-delete`, `-update`, and
-`-add-column`. All indexes refer to the original input and are applied in one
+`-add-column`, plus content-anchored `-update-where`. All indexes refer to the original input and are applied in one
 pass. `-delete -cell` clears a field without changing the field count.
 `-delete -col` removes a column from every record and every header row.
 `-add-column` takes both header titles for `.csv2`; omitting the Traditional
@@ -153,6 +155,25 @@ not supported.
 
 `--truncate-partial` discards a trailing incomplete record during a rewrite.
 It is refused with `-append`, which cannot remove existing bytes.
+
+`-update-where OLD VALUE` requires exactly one data cell to equal `OLD` in
+full. Zero matches, multiple matches, or overlapping repeated updates are
+refused before output is written. It is a whole-cell update, not substring
+replacement.
+
+`--value-file PATH` and `--value-stdin` supply the `-update` value as exact
+bytes, including trailing newlines and whitespace. They require exactly one
+`-update` and cannot be combined with a literal value or `-si`.
+
+`--dry-run` prints each changed cell as `old -> new` and writes nothing.
+`--backup` with `--in-place` saves the original beside the input as `INPUT.bak`
+and refuses to overwrite an existing backup. Under `--json`, refusals are one
+JSON error object on stderr with a stable `code`, `message`, and `message_zh`;
+the exit status remains 1.
+
+An edit may use `-md` when the destination is Markdown. With
+`--md-table N --in-place`, only the selected table is replaced; surrounding
+prose is carried across and all output line endings are LF.
 
 ## Protection and audit logging
 

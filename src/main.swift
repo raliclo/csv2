@@ -30,6 +30,7 @@ enum EditVerb {
     /// 標題，逗號分隔；`value` 會填進每一筆資料列，省略時為空。
     case addColumn(at: Int, name: String, value: String)
     case update(record: Int, column: String, value: String)
+    case updateWhere(old: String, value: String)
 }
 
 struct Options {
@@ -66,6 +67,8 @@ struct Options {
     var useStdin = false
     var useStdout = false
     var inPlace = false
+    var dryRun = false
+    var backup = false
     var headersOverride: Int?
 
     var markdown = false
@@ -105,6 +108,9 @@ struct Options {
     var hashCols: String?
     var keyfile: String?
     var assumeYes = false
+    var valueFile: String?
+    var valueStdin = false
+    var literalUpdateValueProvided = false
 
     var debug = false
     var trace = false
@@ -115,6 +121,17 @@ struct Options {
 }
 
 func usageError(_ en: String, _ zh: String) -> CSV2Error { fault(en, zh) }
+
+func errorCode(_ message: String) -> String {
+    let lower = message.lowercased()
+    if lower.contains("unknown flag") { return "unknown-flag" }
+    if lower.contains("does not exist") || lower.contains("cannot open") { return "not-found" }
+    if lower.contains("more than one") || lower.contains("ambiguous") { return "ambiguous-match" }
+    if lower.contains("no data cell equals") { return "no-match" }
+    if lower.contains("out of range") || lower.contains("no field") { return "invalid-address" }
+    if lower.contains("mutually exclusive") || lower.contains("cannot be combined") { return "conflicting-options" }
+    return "invalid-input"
+}
 
 /// A path with symlinks followed and the spelling normalised.
 ///
@@ -216,6 +233,8 @@ let KNOWN_FLAGS: Set<String> = [
     "help",
     "i",
     "in-place",
+    "dry-run",
+    "backup",
     "include-headers",
     "insert",
     "json",
@@ -240,6 +259,9 @@ let KNOWN_FLAGS: Set<String> = [
     "tail",
     "truncate-partial",
     "update",
+    "update-where",
+    "value-file",
+    "value-stdin",
     "verify-index",
     // Four names the parser answers to that this list did not carry: version
     // with its single-letter alias, and the three context flags. A flag absent
@@ -377,6 +399,18 @@ func parseArgs(_ argv: [String]) throws -> Options {
         return v
     }
 
+    /// A value may be supplied by the next argument or by one of the explicit
+    /// byte sources. The source flag can appear before or after the verb.
+    /// 值可以來自下一個引數，或來自明確的位元組來源；來源旗標可放在動詞前後。
+    func needLiteralValue(_ flag: String) throws -> String? {
+        if o.valueFile != nil || o.valueStdin { return nil }
+        if i + 1 < argv.count {
+            let next = normalizeFlag(argv[i + 1])
+            if next == "value-file" || next == "value-stdin" { return nil }
+        }
+        return try needData(flag)
+    }
+
     func need(_ flag: String) throws -> String {
         i += 1
         guard i < argv.count else {
@@ -508,6 +542,8 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "si": o.useStdin = true
         case "so": o.useStdout = true
         case "in-place": o.inPlace = true
+        case "dry-run": o.dryRun = true
+        case "backup": o.backup = true
         case "headers": try once("--headers"); o.headersOverride = try intVal(arg, try need(arg))
         case "md": o.markdown = true
         case "pretty": o.pretty = true; o.mdStyle = .pretty
@@ -642,14 +678,23 @@ func parseArgs(_ argv: [String]) throws -> Options {
             o.cellModifier = false; o.colModifier = false
         case "update":
             let addr = try need(arg)
-            let val = try needData(arg)
+            let literal = try needLiteralValue(arg)
+            if literal != nil { o.literalUpdateValueProvided = true }
+            let val = literal ?? ""
             let (r, c) = try parseCellAddress(addr, flag: arg)
             o.edits.append(.update(record: r, column: c, value: val))
+            o.cellModifier = false; o.colModifier = false
+        case "update-where":
+            let old = try needData(arg)
+            let val = try needData(arg)
+            o.edits.append(.updateWhere(old: old, value: val))
             o.cellModifier = false; o.colModifier = false
         case "encrypt": try once("-encrypt"); o.encryptCols = try need(arg)
         case "decrypt": try once("-decrypt"); o.decryptCols = try need(arg)
         case "hash": try once("-hash"); o.hashCols = try need(arg)
         case "keyfile": try once("-keyfile"); o.keyfile = try need(arg)
+        case "value-file": try once("--value-file"); o.valueFile = try need(arg)
+        case "value-stdin": try once("--value-stdin"); o.valueStdin = true
         case "yes": o.assumeYes = true
         case "key":
             // Deliberately NOT implemented, and it says why rather than
@@ -882,6 +927,12 @@ func validate(_ o: inout Options) throws {
     if o.output != nil && o.inPlace {
         throw usageError("-o and --in-place are mutually exclusive: one names a destination and the other says the input IS the destination",
                          "-o 與 --in-place 互斥：一個指名了目的地，另一個說「輸入就是目的地」")
+    }
+    if o.backup && !o.inPlace {
+        throw usageError("--backup requires --in-place", "--backup 需要搭配 --in-place")
+    }
+    if o.backup && o.dryRun {
+        throw usageError("--backup cannot be combined with --dry-run: a dry run writes nothing", "--backup 不可與 --dry-run 併用：試跑不會寫入任何東西")
     }
     if o.useStdout && o.inPlace {
         throw usageError("-so and --in-place are mutually exclusive", "-so 與 --in-place 互斥")
@@ -1198,9 +1249,23 @@ func validate(_ o: inout Options) throws {
             throw usageError("editing and selection cannot be combined in one call",
                              "編輯與選取不可在同一次呼叫中混用")
         }
-        if o.output == nil && !o.useStdout && !o.inPlace {
+        if o.output == nil && !o.useStdout && !o.inPlace && !o.dryRun {
             throw usageError("an edit needs an explicit destination: -o FILE, -so, or --in-place",
                              "編輯需要明確的目的地：-o FILE、-so 或 --in-place")
+        }
+    }
+    if o.valueFile != nil || o.valueStdin {
+        guard !o.useStdin else {
+            throw usageError("--value-file/--value-stdin cannot be combined with -si: the input and the value would compete for stdin",
+                             "--value-file／--value-stdin 不可與 -si 併用：輸入與值會爭用 stdin")
+        }
+        guard o.edits.count == 1, case .update = o.edits[0] else {
+            throw usageError("--value-file/--value-stdin requires exactly one -update verb",
+                             "--value-file／--value-stdin 必須搭配恰好一個 -update 動詞")
+        }
+        guard !o.literalUpdateValueProvided else {
+            throw usageError("a literal -update value cannot be combined with --value-file/--value-stdin",
+                             "-update 的字面值不可與 --value-file／--value-stdin 併用")
         }
     }
     if o.contextGiven {
@@ -1791,7 +1856,11 @@ func validate(_ o: inout Options) throws {
         // 意思。那是第 11 階段的 2a，後面還跟著 `--md-table N --in-place`；那也正是
         // `--md-style preserve` 目前幫不上編輯情境的原因：文件記載的那個兩趟做法，第二趟讀的是
         // 一個 `.csv`，沒有任何排版可以保留。
-        if let shape = shape {
+        if o.markdown, let destination = o.output ?? o.input,
+           destination.lowercased().hasSuffix(".md") {
+            // Markdown edits are rendered through MarkdownEmitter after the
+            // CSV edit pass; the destination must also declare Markdown.
+        } else if let shape = shape {
             throw usageError(
                 "\(shape) is an output shape and an edit writes CSV, so the two cannot be combined. Read with \(shape) in a separate run",
                 "\(shape) 是一種輸出形狀，而編輯寫出的是 CSV，兩者不能併用。要用 \(shape) 讀，請另外執行一次")
@@ -2421,6 +2490,8 @@ func printHelp() {
                          {"record","field","header_en","header_zh","value",
                          "line"}. Same flag, two shapes.
                          --json-ascii escapes non-ASCII
+                         On refusal, --json emits one stderr object with
+                         code, message, and message_zh; exit status is 1.
       --en  --zh         which header row to name columns by
 
     EDITING / 編輯
@@ -2441,6 +2512,13 @@ func printHelp() {
       -get r:c           print that cell's value and nothing else. The read
                          that matches -update r:c VAL
       -update r:c VAL    set that cell
+      -update-where OLD VAL
+                         replace the one cell equal to OLD; zero or multiple
+                         matches are refused
+      --value-file PATH  read the -update value as exact file bytes
+      --value-stdin      read the -update value as exact stdin bytes
+      --dry-run          show per-cell changes and write nothing
+      --backup           save INPUT as INPUT.bak before --in-place
       --truncate-partial drop a trailing incomplete record instead of failing
       All indexes refer to the INPUT and are applied in one pass.
 
@@ -2526,6 +2604,11 @@ func sanitizedCommandLine(_ argv: [String]) -> String {
             if i + 2 < argv.count { out.append("<value>") }
             i += 3
             continue
+        case "update-where":
+            if i + 1 < argv.count { out.append("<old>") }
+            if i + 2 < argv.count { out.append("<value>") }
+            i += 3
+            continue
         case "insert":
             if i + 1 < argv.count { out.append(loggedArg(argv[i + 1])) }
             if i + 2 < argv.count { out.append("<row>") }
@@ -2578,7 +2661,9 @@ func main() -> Int32 {
         } else if o.verifyIndex {
             try runVerifyIndex(o)
         } else if !o.edits.isEmpty {
-            if canUseAppendFastPath(o) {
+            if o.markdown {
+                try runMarkdownEdit(o)
+            } else if canUseAppendFastPath(o) && !o.dryRun {
                 try runAppendFast(o)
             } else {
                 try runEdit(o)
@@ -2601,8 +2686,19 @@ func main() -> Int32 {
         // 與 log 那一行同理，而且它自己還有一個承諾：stderr 上的錯誤在文件裡是「恰好兩行」，
         // 英文在前中文在後。一則插入了含換行欄名的訊息會產生四行，而依「兩行」去讀的腳本
         // 會把被注入的那一行當成錯誤訊息的一部分。
-        Platform.writeStderr(
-            "csv2: \(lineEscape(e.message))\ncsv2：\(lineEscape(e.messageZh))\n")
+        let wantsJSON = CommandLine.arguments.dropFirst().contains {
+            let f = normalizeFlag($0)
+            return f == "json" || f == "json-ascii"
+        }
+        if wantsJSON {
+            let code = JSONOut.string(Array(errorCode(e.message).utf8), asciiOnly: false)
+            let en = JSONOut.string(Array(e.message.utf8), asciiOnly: false)
+            let zh = JSONOut.string(Array(e.messageZh.utf8), asciiOnly: false)
+            Platform.writeStderr("{\"error\":{\"code\":\(code),\"message\":\(en),\"message_zh\":\(zh)}}\n")
+        } else {
+            Platform.writeStderr(
+                "csv2: \(lineEscape(e.message))\ncsv2：\(lineEscape(e.messageZh))\n")
+        }
         // Recorded in the -log FILE, not echoed to stderr again. ERROR is above
         // the default WARN threshold, so routing it through Logger printed the
         // same failure a third time, with a timestamp, even when no -log was

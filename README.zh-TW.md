@@ -113,6 +113,8 @@ csv2 -r -si --headers 1 -so < data.csv
 
 ```sh
 csv2 -update 12:3 'new value' -i data.csv --in-place
+csv2 -update-where 'pending' 'done' -i data.csv --in-place
+csv2 -update 12:3 --value-file value.bin -i data.csv --in-place
 csv2 -insert 4 'a,b,c' -i data.csv --in-place
 csv2 -append 'a,b,c' -i data.csv --in-place
 csv2 -delete 4 -i data.csv --in-place
@@ -121,7 +123,8 @@ csv2 -delete -col 3 -i data.csv --in-place
 csv2 -add-column 3 'note,備註' 'todo' -i data.csv2 --in-place
 ```
 
-支援的編輯動詞是 `-insert`、`-append`、`-delete`、`-update` 與 `-add-column`。
+支援的編輯動詞是 `-insert`、`-append`、`-delete`、`-update`、`-add-column`，以及依內容定位的
+`-update-where`。
 所有索引都以原始輸入為準，並在一次通過中套用。`-delete -cell` 會清空欄位，
 不改變欄數；`-delete -col` 會從每筆紀錄及每列標頭移除欄位。`.csv2` 的
 `-add-column` 需要兩個標頭名稱；省略繁中名稱時會留下空白標頭並發出警告。
@@ -132,6 +135,21 @@ csv2 -add-column 3 'note,備註' 'todo' -i data.csv2 --in-place
 
 `--truncate-partial` 在重寫時丟棄結尾不完整的紀錄。它與 `-append` 併用會被拒絕，
 因為追加無法移除既有位元組。
+
+`-update-where OLD VALUE` 要求資料區中恰好有一個儲存格的完整內容等於 `OLD`。
+零個命中、多個命中，或重複指定而命中同一格，都會在寫出任何內容前被拒絕。
+這是整格更新，不是子字串取代。
+
+`--value-file PATH` 與 `--value-stdin` 會把 `-update` 的值當成原始位元組讀取，
+包括結尾換行與空白。它們必須恰好搭配一個 `-update`，不可與字面值或 `-si` 併用。
+
+`--dry-run` 會以 `old -> new` 印出每個變更儲存格，且不寫入任何檔案。`--in-place` 搭配
+`--backup` 會把原始輸入備份為旁邊的 `INPUT.bak`，若備份已存在則拒絕覆寫。在 `--json` 下，
+拒絕會以 stderr 上的一個 JSON 錯誤物件輸出，包含穩定的 `code`、`message` 與 `message_zh`；
+離開碼仍為 1。
+
+當目的地是 Markdown 時，編輯可以搭配 `-md`。搭配 `--md-table N --in-place` 時，只替換選定的表格；
+周邊散文會被帶回，所有輸出行尾統一為 LF。
 
 ## 保護與稽核記錄
 

@@ -6976,7 +6976,7 @@ echo "--- T137: the flag tables say the same amount / T137：兩份旗標表說�
 # 以「旗標名稱」加總，而不是逐條目比對：`-delete` 在兩份檔案裡都有三個條目（a[,b]、
 # -cell、-col），逐條目配對會用位置去對，然後回報一個「只是順序不同」的差異。對這個
 # 檢查要問的事情——某一種語言在某個旗標上是不是承載了明顯較少的文字——加總就夠了。
-t137_flags=(r contains filter include-headers normalize A B C head tail mid t rownum physical a1 get i o si so md pretty md-style md-table json json-ascii headers insert append delete cell col add-column update truncate-partial hash encrypt decrypt keyfile yes log debug no-index build-index verify-index en zh)
+t137_flags=(r contains filter include-headers normalize A B C head tail mid t rownum physical a1 get i o si so in-place dry-run backup md pretty md-style md-table json json-ascii headers insert append delete cell col add-column update update-where value-file value-stdin truncate-partial hash encrypt decrypt keyfile yes log debug no-index build-index verify-index en zh)
 t137_missing=""
 for t137_flag in $t137_flags; do
     grep -qE -- "(^|[^A-Za-z0-9-])--?$t137_flag([^A-Za-z0-9-]|$)" "$ROOT/README.md" || t137_missing="$t137_missing en:$t137_flag"
@@ -12588,20 +12588,10 @@ else
     bad "T217i $_t217_changed of 4 lines differ (want 3); orig=${#_t217_a} compact=${#_t217_b} lines / 實得如上"
 fi
 
-# The refusal that stops an edit writing -md is still there. Relaxing it was
-# tried and reverted the same hour: the edit path writes bytes through
-# FieldEncoder, so with the guard gone the run accepted -md, reported success,
-# and wrote CSV into a file named .md. This case is why the revert is not
-# silently undone later.
-# 那道「阻止編輯輸出 -md」的拒絕仍然在。放寬它試過並在同一個小時內撤回：編輯路徑是透過
-# FieldEncoder 直接寫位元組的，因此守衛一拿掉，那次執行就接受了 -md、回報成功、然後把 CSV
-# 寫進一個叫 .md 的檔案。這個案例就是為了讓那次撤回不會在日後被無聲地取消。
-_t217h=$("$CSV2" -update 1:1 'X' -md -t -i "$TMP/t217v.md" -o "$TMP/t217out.md" 2>&1 >/dev/null)
-if [[ $? != 0 && $_t217h == *"output shape"* ]]; then
-    ok "T217h an edit still cannot write -md, and the reason is still the shape / 編輯仍然不能輸出 -md，而理由仍然是「形狀」"
-else
-    bad "T217h rc=$? said: $_t217h / 實得如上"
-fi
+assert_succeeds "T217h an edit can write a matching Markdown destination / 編輯可以寫入相符的 Markdown 目的地" -- \
+    "$CSV2" -update 1:1 'X' -md -t -i "$TMP/t217v.md" -o "$TMP/t217out.md"
+assert_eq "$(grep -c '^|X|' "$TMP/t217out.md")" "1" \
+    "T217h2 the Markdown edit is rendered as a table / Markdown 編輯會算繪成表格"
 
 echo
 echo "--- T218: the zstat rule holds across every script here / T218：zstat 規則在這裡每一支腳本上都成立 ---"
@@ -12819,6 +12809,83 @@ fi
 (( ${T191A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T200A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T200B_SKIPPED:-0} )) && (( want_skip += 1 ))
+
+# T219 -- content-anchored updates. The match is a whole data cell, and the
+# refusal must happen before the destination is created.
+# T219 —— 依內容定位的更新。比對的是完整資料儲格，而且拒絕必須發生在建立目的地之前。
+printf 'name,status\na,pending\nb,done\n' > "$TMP/t218.csv"
+"$CSV2" -update-where pending done -i "$TMP/t218.csv" -o "$TMP/t218.out" >/dev/null 2>&1
+assert_eq "$(sed -n '2p' "$TMP/t218.out")" 'a,done' "T219a a unique whole-cell match is updated / 唯一的完整儲存格命中會被更新"
+
+rm -f "$TMP/t218_zero.out"
+assert_fails "T219b zero matches are refused / 零個命中會被拒絕" -- \
+    "$CSV2" -update-where absent done -i "$TMP/t218.csv" -o "$TMP/t218_zero.out"
+if [[ -e "$TMP/t218_zero.out" ]]; then
+    bad "T219c zero-match refusal creates no output / 零命中拒絕不會建立輸出"
+else
+    ok "T219c zero-match refusal creates no output / 零命中拒絕不會建立輸出"
+fi
+
+printf 'name,status\na,pending\nb,pending\n' > "$TMP/t218_multi.csv"
+rm -f "$TMP/t218_multi.out"
+assert_fails "T219d multiple matches are refused / 多個命中會被拒絕" -- \
+    "$CSV2" -update-where pending done -i "$TMP/t218_multi.csv" -o "$TMP/t218_multi.out"
+if [[ -e "$TMP/t218_multi.out" ]]; then
+    bad "T219e multiple-match refusal creates no output / 多命中拒絕不會建立輸出"
+else
+    ok "T219e multiple-match refusal creates no output / 多命中拒絕不會建立輸出"
+fi
+
+# A repeated OLD that resolves to the same cell is an overlap, not two writes.
+assert_fails "T219f overlapping anchored updates are refused / 重疊的內容定位更新會被拒絕" -- \
+    "$CSV2" -update-where pending done -update-where pending closed -i "$TMP/t218.csv" -o "$TMP/t218_overlap.out"
+
+# T220 -- value sources carry bytes outside shell argument substitution.
+# T220 —— 值來源承載 shell 命令替換無法可靠保留的位元組。
+printf 'name,status\na,old\n' > "$TMP/t220.csv"
+printf 'new \nvalue\n' > "$TMP/t220.value"
+printf 'name,status\na,"new \nvalue\n"\n' > "$TMP/t220.expected"
+assert_succeeds "T220a --value-file keeps trailing newline and spaces / --value-file 保留結尾換行與空白" -- \
+    "$CSV2" -update 1:2 --value-file "$TMP/t220.value" -i "$TMP/t220.csv" -o "$TMP/t220.out"
+assert_same "$TMP/t220.expected" "$TMP/t220.out" \
+    "T220b --value-file writes the exact value bytes / --value-file 寫入完全相同的值位元組"
+
+printf 'stdin-value\n' | "$CSV2" -update 1:2 --value-stdin -i "$TMP/t220.csv" -o "$TMP/t220.stdin.csv"
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t220.stdin.csv")" "stdin-value" \
+    "T220c --value-stdin supplies the update value / --value-stdin 提供更新值"
+assert_fails "T220d a literal value and a value source cannot be combined / 字面值不可與值來源併用" -- \
+    "$CSV2" -update 1:2 literal --value-file "$TMP/t220.value" -i "$TMP/t220.csv" -o "$TMP/t220_bad.out"
+assert_fails "T220e a value source cannot compete with input stdin / 值來源不可與輸入 stdin 競用" -- \
+    "$CSV2" -update 1:2 --value-stdin -si --headers 1 -o "$TMP/t220_stdin_bad.out"
+
+# T221 -- previews, machine-readable refusals, and recoverable in-place edits.
+# T221 —— 預覽、機器可讀拒絕，以及可復原的就地編輯。
+printf 'name,status\na,old\n' > "$TMP/t221.csv"
+dry_before=$(sed -n '1,$p' "$TMP/t221.csv")
+dry_out=$("$CSV2" -update 1:2 new --dry-run -i "$TMP/t221.csv")
+dry_out=${dry_out//$'\r'/}
+assert_eq "$dry_out" 'update 1:status: "old" -> "new"' \
+    "T221a --dry-run prints the per-cell change / --dry-run 印出逐格變更"
+assert_eq "$dry_before" "$(sed -n '1,$p' "$TMP/t221.csv")" \
+    "T221b --dry-run leaves the input untouched / --dry-run 不改動輸入"
+json_err=$("$CSV2" --json -get 9:2 -i "$TMP/t221.csv" 2>&1 >/dev/null)
+assert_eq "$(printf '%s' "$json_err" | awk -F'"code":"' 'NF > 1 { split($2,a,"\""); print a[1] }')" "invalid-input" \
+    "T221c --json errors carry a stable code / --json 錯誤帶有穩定代碼"
+printf 'name,status\na,old\n' > "$TMP/t221_backup.csv"
+assert_succeeds "T221d --backup creates INPUT.bak / --backup 建立 INPUT.bak" -- \
+    "$CSV2" -update 1:2 new -i "$TMP/t221_backup.csv" --in-place --backup
+assert_same "$TMP/t220.csv" "$TMP/t221_backup.csv.bak" \
+    "T221e the backup contains the original bytes / 備份保留原始位元組"
+
+printf 'before\n\n| name | status |\n|---|---|\n| a | old |\n\nafter\n' > "$TMP/t222.md"
+assert_succeeds "T222a Markdown edit writes a table / Markdown 編輯可以寫出表格" -- \
+    "$CSV2" -update 1:2 new -md -t --md-table 1 -i "$TMP/t222.md" -o "$TMP/t222.out.md"
+assert_eq "$(grep -c '^|a|new|$' "$TMP/t222.out.md")" "1" \
+    "T222b direct Markdown output contains the edit / 直接 Markdown 輸出包含編輯"
+assert_succeeds "T222c --md-table --in-place preserves prose / --md-table --in-place 保留散文" -- \
+    "$CSV2" -update 1:2 newer -md -t --md-table 1 -i "$TMP/t222.md" --in-place
+assert_eq "$(grep -c '^before$' "$TMP/t222.md")$(grep -c '^after$' "$TMP/t222.md")" "11" \
+    "T222d in-place Markdown keeps surrounding prose / 就地 Markdown 保留周邊散文"
 if [[ "$skip" == "$want_skip" ]]; then
     ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
 else

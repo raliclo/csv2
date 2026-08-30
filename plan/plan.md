@@ -3393,7 +3393,7 @@ tested.
 - [x] a protected column is carried across intact -- T215l, T215m / 受保護欄位被完整帶過去——T215l、T215m
 - [x] the "not offered" row changes from "nothing does" to the verb, in BOTH READMEs / 「不提供」那一列從「沒有任何東西做得到」改成那個動詞，**兩份** README 都改
 - [x] `--help` lists it, and T154c/T154e pin that it stays listed / `--help` 列出它，而 T154c／T154e 釘住「它會一直被列著」
-- [ ] four platforms / 四個平台
+- [x] four platforms / 四個平台
 
 ## Phase 11: what an editor has and this did not / 第 11 階段：一個編輯器有、而這個沒有的東西
 
@@ -3767,16 +3767,16 @@ README 把這件事明說了；`--backup` 是讓它從「已揭露」變成「�
   第一輪要給多少既有的拒絕配上代碼。「全部」是正確的目的地；「在一個 commit 裡做完」不見得是
   正確的路線。
 
-- [ ] the decisions above, in this file, before code / 上面那些決定寫在這個檔案裡，然後才寫程式
-- [ ] 1. `-update-where OLD NEW`, whole-cell, 0 and >1 both refused
-- [ ] 2. `--value-file` / `--value-stdin`, bytes verbatim, one value-taking verb
-- [ ] 2a. an edit may write `-md` when the shape and the destination agree / 形狀與目的地一致時，編輯可以輸出 `-md`
-- [ ] 3. `--md-table N --in-place`, prose carried across, LF everywhere
-- [ ] 3a. `--md-style preserve|compact|pretty`, default preserve / 預設 preserve
-- [ ] 4. `--dry-run`, per-cell before-and-after, to stdout
-- [ ] 6. `--json` error object on stderr, exit code unchanged
-- [ ] 7. `--backup` for `--in-place`
-- [ ] both READMEs and `--help` for each / 每一條都要進兩份 README 與 `--help`
+- [x] the decisions above, in this file, before code / 上面那些決定寫在這個檔案裡，然後才寫程式
+- [x] 1. `-update-where OLD NEW`, whole-cell, 0 and >1 both refused
+- [x] 2. `--value-file` / `--value-stdin`, bytes verbatim, one value-taking verb
+- [x] 2a. an edit may write `-md` when the shape and the destination agree / 形狀與目的地一致時，編輯可以輸出 `-md`
+- [x] 3. `--md-table N --in-place`, prose carried across, LF everywhere
+- [x] 3a. `--md-style preserve|compact|pretty`, default preserve / 預設 preserve
+- [x] 4. `--dry-run`, per-cell before-and-after, to stdout
+- [x] 6. `--json` error object on stderr, exit code unchanged
+- [x] 7. `--backup` for `--in-place`
+- [x] both READMEs and `--help` for each / 每一條都要進兩份 README 與 `--help`
 - [ ] four platforms / 四個平台
 
 ## 待決問題
