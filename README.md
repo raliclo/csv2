@@ -1,9 +1,6 @@
 # csv2
 
-A CSV parser and editor for the command line, written in Swift, targeting the
-aarch64 Linux guest of the [LinuxCS](https://github.com/raliclo/LinuxCS) project
-and the macOS host it is built from.
-
+A CSV parser and editor for AI, supporting cross-platform 
 繁體中文說明見 [README.zh-TW.md](./README.zh-TW.md)。
 
 ## Status
