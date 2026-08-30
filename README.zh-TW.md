@@ -83,7 +83,11 @@ $ csv2 -contains busybox --json -i test/fixtures/TARGET_PACKAGES.csv
 ```
 
 紀錄號計算資料紀錄，不是實體行。`.csv` 標頭位址是 `0`，`.csv2` 標頭位址是
-`0a`／`0b`。`-contains` 會搜尋所有欄位，沒有只搜尋指定欄位的選項。
+`0a`／`0b`。`-contains` 預設搜尋所有欄位；使用 `--search-cell R:C`、
+`--search-row R` 或 `--search-column C`，即可限定只搜尋一格、一筆或一欄。
+這些範圍選項互斥，且必須搭配 `-contains`。
+欄名不可包含 `:`，因為該字元保留給 `r:c` 定址語法。`:hash`、`:hmac:` 與 `:enc:`
+後綴是 csv2 保留的保護標記，不是使用者定義的欄名。
 
 ## 輸出格式與串流
 
@@ -95,6 +99,8 @@ csv2 -r -si --headers 1 -so < data.csv
 ```
 
 `--json` 輸出 JSON Lines；第一行與最後一行是 metadata，中間才是紀錄。
+對 `.csv2`，第一行 metadata 會以按位置排列的 `header_zh` 陣列提供第二列標頭，
+讓消費端可以使用任一列標頭。
 `--json-ascii` 會跳脫非 ASCII 字元。`-md` 輸出 Markdown，必須搭配 `-t`；
 `--md-style preserve|compact|pretty` 選擇排版。`--pretty` 會把選取的表格
 保留在記憶體中，受 `CSV2_PRETTY_MAX_BYTES` 限制。
@@ -133,6 +139,10 @@ csv2 -add-column 3 'note,備註' 'todo' -i data.csv2 --in-place
 `--in-place` 透過私有暫存檔與 rename 寫回，`-append` 除外：它使用追加快路徑。
 `-append` 寫入前會驗證輸入，只寫入新增的位元組，但仍會讀取既有檔案以驗證最後
 一筆紀錄。平行追加可保證完整寫入，但不支援一般平行編輯。
+
+`-append --in-place` 不使用暫存檔，也不會 rename 結果；它會開啟既有檔案並直接追加。
+如果程序在寫入開始後被訊號中斷，檔案可能留下部分紀錄。一般就地編輯所提供的「失敗時
+原檔完整保留」保證，不適用於這條只追加的快路徑。
 
 `--truncate-partial` 在重寫時丟棄結尾不完整的紀錄。它與 `-append` 併用會被拒絕，
 因為追加無法移除既有位元組。
@@ -222,6 +232,22 @@ sidecar 不存在或無效時以非零結束。`--no-index` 同時停用讀取�
 
 原始量測保存在 `verifications/measure_output*.txt`，由
 `verifications/measure.zsh` 以 best-of-N 時間產生。
+
+### 平行搜尋吞吐量與 RSS
+
+平行搜尋量測使用相同的 10,000,000 筆資料：`.csv` 檔案為
+1,307,777,815 位元組，`.csv2` 檔案為 1,307,777,833 位元組。每筆資料都命中
+`needle`；以下是在 macOS arm64、10 個工作者、4 MiB 區塊下，每種格式與上限各執行一次的結果。
+
+| 格式 | `CSV2_PARALLEL_MAX_BYTES` | 時間 | 吞吐量 | 峰值 RSS |
+|---|---:|---:|---:|---:|
+| `.csv` | 預設 1 GiB | 34.886 秒 | 35.8 MiB/s | 9.28 MiB |
+| `.csv2` | 預設 1 GiB | 39.609 秒 | 31.5 MiB/s | 51.84 MiB |
+| `.csv` | 8 MiB | 34.354 秒 | 36.3 MiB/s | 9.30 MiB |
+| `.csv2` | 8 MiB | 32.376 秒 | 38.5 MiB/s | 51.69 MiB |
+
+這是量測結果，不是效能保證；只有在二進位檔、資料筆數、主機與搜尋條件相同時才適合比較。
+原始輸出見 [`verifications/measure_parallel_rss_output.txt`](verifications/measure_parallel_rss_output.txt)。
 
 ## 授權
 

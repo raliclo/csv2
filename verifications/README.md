@@ -23,5 +23,25 @@ the same.
 
 The parser measurement uses quoted fields containing commas and searches for a
 non-matching value, so the result represents parsing rather than output
-encoding. Parallel efficiency is below linear speedup because boundary finding
-remains single-threaded.
+encoding. It also measures identical data rows in `.csv` and `.csv2` form and
+reports the `.csv2`/`.csv` ratio. Parallel efficiency is below linear speedup
+because boundary finding remains single-threaded.
+
+Latest comparison (2026-08-30, macOS arm64, 200,000 records, best of five,
+single-threaded and no index): `.csv` took 0.551 s and `.csv2` took 0.925 s,
+for a `.csv2`/`.csv` ratio of 1.68x. The complete run is in
+[`measure_output.txt`](measure_output.txt).
+
+For a comparable parallel-search throughput and RSS measurement, run
+`./measure_parallel_rss.zsh`. It uses matching `.csv` and `.csv2` corpora with
+at least 10,000,000 records and approximately 1 GiB each, with every record
+matching. It runs both formats under the default and 8 MiB
+`CSV2_PARALLEL_MAX_BYTES` settings; results are written to
+`measure_parallel_rss_output.txt`.
+
+Latest result (2026-08-30, macOS arm64, `csv2 0.1.0`, 10,000,000 records,
+10 workers, 4 MiB chunks, every record matching): `.csv` ran at 35.8/36.3 MiB/s
+with 9.28/9.30 MiB peak RSS, while `.csv2` ran at 31.5/38.5 MiB/s with
+51.84/51.69 MiB peak RSS, for the default/8 MiB maximum respectively. The
+`.csv` corpus was 1,307,777,815 bytes and the `.csv2` corpus was 1,307,777,833
+bytes.

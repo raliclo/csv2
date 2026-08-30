@@ -11627,11 +11627,14 @@ case $_t208_ascii in
     *) bad "T208d got: $_t208_ascii / 實得如上" ;;
 esac
 
-# r:c splits at the FIRST colon, so a column named a:b is reachable.
-# r:c 分在「第一個」冒號，因此一個叫 a:b 的欄位叫得出來。
+# A colon is reserved by the r:c address syntax and is not allowed in a
+# user-defined column name. Protected-column markers are the only headers that
+# may contain one, because they are csv2's internal metadata.
+# 冒號保留給 r:c 定址語法，使用者定義的欄名不可包含冒號。受保護欄位標記是唯一可以
+# 含有冒號的標頭，因為那是 csv2 的內部 metadata。
 printf 'pkg,a:b\nx,y\n' > "$TMP/t208colon.csv"
-assert_eq "$("$CSV2" -get 1:a:b -i "$TMP/t208colon.csv")" "y" \
-    "T208e r:c splits at the first colon, reaching a column named a:b / r:c 分在第一個冒號，取得到叫 a:b 的欄位"
+assert_fails "T208e a colon in a column name is refused / 欄名含冒號會被拒絕" -- \
+    "$CSV2" -r -i "$TMP/t208colon.csv"
 
 # Nothing scopes a search to one column. Asserted so the README's new warning
 # has something behind it -- and so the day a -col filter appears, this case
@@ -12592,6 +12595,29 @@ assert_succeeds "T217h an edit can write a matching Markdown destination / 編�
     "$CSV2" -update 1:1 'X' -md -t -i "$TMP/t217v.md" -o "$TMP/t217out.md"
 assert_eq "$(grep -c '^|X|' "$TMP/t217out.md")" "1" \
     "T217h2 the Markdown edit is rendered as a table / Markdown 編輯會算繪成表格"
+
+echo
+echo "--- T223: scoped search / T223：限定範圍搜尋 ---"
+printf 'pkg,license,source\nlibA,MIT,upstream\ntransMITter,BSD,relicensed from MIT in 2019\n' > "$TMP/t223.csv"
+
+assert_eq "$($CSV2 -contains MIT --search-cell 1:2 -i "$TMP/t223.csv" 2>/dev/null)" \
+          $'1:2\tlicense\tMIT' \
+          "T223a --search-cell searches only the selected cell / --search-cell 只搜尋指定儲存格"
+assert_eq "$($CSV2 -contains MIT --search-row 1 -i "$TMP/t223.csv" 2>/dev/null)" \
+          $'1:2\tlicense\tMIT' \
+          "T223b --search-row searches only the selected record / --search-row 只搜尋指定紀錄"
+assert_eq "$($CSV2 -contains MIT --search-column license -i "$TMP/t223.csv" 2>/dev/null)" \
+          $'1:2\tlicense\tMIT' \
+          "T223c --search-column accepts a header name / --search-column 接受欄名"
+assert_eq "$($CSV2 -contains MIT --search-column 2 --json -i "$TMP/t223.csv" 2>/dev/null | tail -1)" \
+          '{"meta":{"records":2,"matched":1}}' \
+          "T223d a scoped JSON search excludes other columns / 限定範圍的 JSON 搜尋排除其他欄位"
+assert_fails "T223e a scope needs -contains / 限定範圍需要搭配 -contains" -- \
+    "$CSV2" --search-row 1 -i "$TMP/t223.csv"
+assert_fails "T223f scope options are mutually exclusive / 搜尋範圍選項互斥" -- \
+    "$CSV2" -contains MIT --search-row 1 --search-column 2 -i "$TMP/t223.csv"
+assert_fails "T223g an out-of-range scoped record is refused / 超出範圍的限定紀錄會被拒絕" -- \
+    "$CSV2" -contains MIT --search-row 9 -i "$TMP/t223.csv"
 
 echo
 echo "--- T218: the zstat rule holds across every script here / T218：zstat 規則在這裡每一支腳本上都成立 ---"

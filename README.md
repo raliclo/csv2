@@ -90,7 +90,12 @@ Available reading options:
 
 Record numbers count data records, not physical lines. Header addresses are
 `0` for `.csv`, and `0a`/`0b` for `.csv2`. `-contains` searches every column;
-there is no column-restriction option.
+use `--search-cell R:C`, `--search-row R`, or `--search-column C` to restrict
+the search to one cell, record, or column. These scope options are mutually
+exclusive and require `-contains`. Column names cannot contain `:` because
+that character is reserved by the `r:c` address syntax. The `:hash`, `:hmac:`,
+and `:enc:` suffixes are reserved csv2 protection markers, not user-defined
+column names.
 
 ## Output formats and streams
 
@@ -102,7 +107,8 @@ csv2 -r -si --headers 1 -so < data.csv
 ```
 
 `--json` emits JSON Lines. The first and last lines are metadata; record lines
-contain record data. `--json-ascii` escapes non-ASCII characters. `-md` emits
+contain record data. For `.csv2`, the first metadata line includes the positional
+`header_zh` array so consumers can use either header row. `--json-ascii` escapes non-ASCII characters. `-md` emits
 Markdown and requires `-t`; `--md-style preserve|compact|pretty` selects its
 layout. `--pretty` holds the selected table in memory and is bounded by
 `CSV2_PRETTY_MAX_BYTES`.
@@ -152,6 +158,12 @@ before writing and writes only the appended bytes, while still reading the
 existing file to validate its final record. Concurrent appends are serialized
 by the operating system for complete writes, but general concurrent edits are
 not supported.
+
+`-append --in-place` does not use a temporary file and does not rename the
+result. It opens the existing file for append and writes directly to it. If the
+process is interrupted after the write begins, the file may contain a partial
+record; the all-or-nothing preservation guarantee for ordinary in-place edits
+does not apply to this append-only path.
 
 `--truncate-partial` discards a trailing incomplete record during a rewrite.
 It is refused with `-append`, which cannot remove existing bytes.
@@ -252,6 +264,24 @@ runs used 200,000 records (25.4 MiB); the Linux guest run used 20,000 records
 
 The source measurements are kept in `verifications/measure_output*.txt` and
 are produced by `verifications/measure.zsh` using best-of-N timings.
+
+### Parallel-search throughput and RSS
+
+The parallel-search measurement uses the same 10,000,000 data records in a
+1,307,777,815-byte `.csv` file and a 1,307,777,833-byte `.csv2` file. Every
+record matches `needle`; the values below are one run per format and cap on
+macOS arm64, with 10 workers and 4 MiB chunks.
+
+| Format | `CSV2_PARALLEL_MAX_BYTES` | Elapsed | Throughput | Peak RSS |
+|---|---:|---:|---:|---:|
+| `.csv` | default 1 GiB | 34.886 s | 35.8 MiB/s | 9.28 MiB |
+| `.csv2` | default 1 GiB | 39.609 s | 31.5 MiB/s | 51.84 MiB |
+| `.csv` | 8 MiB | 34.354 s | 36.3 MiB/s | 9.30 MiB |
+| `.csv2` | 8 MiB | 32.376 s | 38.5 MiB/s | 51.69 MiB |
+
+This is a measurement, not a performance guarantee; compare only runs with
+the same binary, record count, host, and search conditions. The raw output is
+[`verifications/measure_parallel_rss_output.txt`](verifications/measure_parallel_rss_output.txt).
 
 ## License
 

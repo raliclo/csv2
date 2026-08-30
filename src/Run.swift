@@ -5,6 +5,15 @@
 
 import Foundation
 
+func resolveSearchColumn(_ token: String, headers: [Record], path: String) throws -> Int {
+    if let header = headers.first { return try resolveColumn(token, header: header) }
+    guard let number = Int(token), number == 1 else {
+        throw fault("\(path): a file with no header row has one searchable column; use --search-column 1",
+                    "\(path)：沒有標頭列的檔案只有一個可搜尋欄位；請使用 --search-column 1")
+    }
+    return 0
+}
+
 // ---------------------------------------------------------------------
 // MARK: - Shared setup / 共用的前置
 // ---------------------------------------------------------------------
@@ -153,6 +162,23 @@ func validateHeaders(_ headers: [Record], want: Int, path: String) throws {
         throw fault(
             "\(path): header row 0a has \(headers[0].count) fields, row 0b has \(headers[1].count); a .csv2 header must have the same field count on both rows",
             "\(path)：標頭 0a 有 \(headers[0].count) 欄，0b 有 \(headers[1].count) 欄；.csv2 的兩列標頭欄數必須相同")
+    }
+    for (row, header) in headers.enumerated() {
+        let rowName = headers.count == 1 ? "0" : (row == 0 ? "0a" : "0b")
+        for (column, field) in header.fields.enumerated() {
+            let name = headerName(field)
+            guard name.contains(":") else { continue }
+            let isProtectedMarker = (EncMarker.parse(name).map { !$0.base.contains(":") } ?? false)
+                || (name.hasSuffix(":hash") && !name.dropLast(5).contains(":"))
+                || (name.range(of: ":hmac:", options: .backwards).map {
+                    !name[..<$0.lowerBound].contains(":") && name[$0.upperBound...].isEmpty == false
+                } ?? false)
+            guard isProtectedMarker else {
+                throw fault(
+                    "\(path): column \(column + 1) in header row \(rowName) is named \"\(name)\"; column names cannot contain ':'",
+                    "\(path)：標頭 \(rowName) 的第 \(column + 1) 欄名稱為「\(name)」；欄名不可包含「:」")
+            }
+        }
     }
     try checkProtectionAgreement(headers, path: path)
 }
@@ -745,11 +771,41 @@ func runSelect(_ o: Options) throws {
     var matchedCount = 0
     var tailRing: [Record] = []
     let builder = ip.builder
+    var scopedColumn: Int?
+    var scopedRecord: Int?
+    var scopedRecordSeen = false
+
+    func prepareSearchScope() throws {
+        guard let scope = o.searchScope else { return }
+        switch scope {
+        case .cell(let record, let column):
+            scopedRecord = record
+            scopedColumn = try resolveSearchColumn(column, headers: headers,
+                                                   path: plan.describedPath)
+        case .row(let record):
+            scopedRecord = record
+        case .column(let column):
+            scopedColumn = try resolveSearchColumn(column, headers: headers,
+                                                   path: plan.describedPath)
+        }
+    }
 
     func matchesIn(_ r: Record) -> [Int] {
         guard searching else { return [] }
         var hits: [Int] = []
         for (i, f) in r.fields.enumerated() {
+            switch o.searchScope {
+            case .cell:
+                guard r.headerRow == nil, scopedColumn == i else { continue }
+                if let scopedRecord, r.number != scopedRecord { continue }
+            case .column:
+                guard scopedColumn == i else { continue }
+                if r.headerRow != nil && !o.includeHeaders { continue }
+            case .row:
+                guard r.headerRow == nil, scopedRecord == r.number else { continue }
+            case nil:
+                break
+            }
             let hay = o.normalize ? normalizedBytes(f.value) : f.value
             if bytesContain(hay, needle) { hits.append(i) }
         }
@@ -841,6 +897,7 @@ func runSelect(_ o: Options) throws {
             rownum: o.rownum, zh: o.zh, physical: o.physical, a1: o.a1,
             jsonASCII: o.jsonASCII, enOnly: o.enOnly, preserveRaw: true,
             contextActive: o.after > 0 || o.before > 0)
+        try prepareSearchScope()
         try emitter.begin(ctx!)
         if searching && o.includeHeaders {
             for (i, h) in headers.enumerated() {
@@ -902,6 +959,7 @@ func runSelect(_ o: Options) throws {
             var r = rec
             r.number = rec.number - plan.headerRows
             seen = r.number
+            if scopedRecord == r.number { scopedRecordSeen = true }
             // With no header rows the first RECORD sets the width. `.lines`
             // has none by definition, and a headed file has already set this
             // from its header, so this is inert there.
@@ -1001,6 +1059,10 @@ func runSelect(_ o: Options) throws {
     if headers.count < plan.headerRows {
         throw fault("\(plan.describedPath): expected \(plan.headerRows) header row(s), found \(headers.count)",
                     "\(plan.describedPath)：預期 \(plan.headerRows) 列標頭，實際只有 \(headers.count) 列")
+    }
+    if let scopedRecord, !scopedRecordSeen {
+        throw fault("search scope requested record \(scopedRecord), but the file has only \(seen) records",
+                    "搜尋範圍要求第 \(scopedRecord) 筆，但本檔案只有 \(seen) 筆紀錄")
     }
     if let c = ctx {
         for r in tailRing { try emitRecord(r, matches: matchesIn(r)) }

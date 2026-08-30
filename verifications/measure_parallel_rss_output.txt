@@ -1,0 +1,31 @@
+# csv2 parallel RSS measurement
+date    : 2026-08-30T15:11:34Z
+host    : Darwin arm64
+binary  : csv2 0.1.0 (05edec9-dirty)
+csv corpus bytes : 1307777815
+csv2 corpus bytes: 1307777833
+corpus records   : 10000000
+search       : every data record matches 'needle'
+workers      : 10
+chunk bytes  : default
+
+## default max
+csv elapsed_seconds: 34.886
+csv throughput_mib_per_sec: 35.8
+csv peak_rss_bytes: 9732096
+csv2 elapsed_seconds: 39.609
+csv2 throughput_mib_per_sec: 31.5
+csv2 peak_rss_bytes: 54362112
+
+## 8 MiB max
+csv elapsed_seconds: 34.354
+csv throughput_mib_per_sec: 36.3
+csv peak_rss_bytes: 9748480
+csv2 elapsed_seconds: 32.376
+csv2 throughput_mib_per_sec: 38.5
+csv2 peak_rss_bytes: 54198272
+csv2: 2026-08-30T23:13:47.250+08:00 DEBUG parallel: holding 2 chunk(s) in flight instead of 10; the last batch held about 4194304 bytes per chunk and CSV2_PARALLEL_MAX_BYTES is 8388608
+
+Each CSV and CSV2 pair used the same data records and command; only format and CSV2_PARALLEL_MAX_BYTES differed.
+每一組 CSV 與 CSV2 使用相同資料列與指令；差異只有格式與 CSV2_PARALLEL_MAX_BYTES。
+written to /Volumes/LinuxCS/sos/csv2/verifications/measure_parallel_rss_output.txt

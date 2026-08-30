@@ -78,10 +78,11 @@ func parallelMinBytes() -> Int {
 /// chunk order, which is what makes the parallel output byte-identical to the
 /// single-threaded output.
 ///
-/// Measured on a 615 MB file whose every record matched: peak RSS 52 MB with
-/// one chunk in flight, 63 MB with two, 102 MB with five, 160 MB with ten. It
-/// is the one part of this path that concurrency really does drive, so it is
-/// the one part a cap can control.
+/// A reproducible large-corpus measurement is maintained by
+/// `verifications/measure_parallel_rss.zsh`; it records the corpus, worker,
+/// chunk, matching, and `CSV2_PARALLEL_MAX_BYTES` conditions together with RSS.
+/// This is the one part of the path that concurrency really does drive, so it
+/// is the one part a cap can control.
 ///
 /// 「同時在飛的區塊」可以持有的位元組上限。
 ///
@@ -90,9 +91,9 @@ func parallelMinBytes() -> Int {
 /// 產生的報告會和資料一樣大——而一整批的輸出必須被持有，才能依區塊順序寫出，
 /// 那正是平行輸出能與單執行緒逐位元相同的原因。
 ///
-/// 在一個「每一筆都命中」的 615 MB 檔案上實測：同時 1 個區塊時峰值 RSS 52 MB、
-/// 2 個 63 MB、5 個 102 MB、10 個 160 MB。這是這條路徑上唯一真的由並行度驅動的部分，
-/// 因此也是唯一一個「設上限」管得到的部分。
+/// 可重現的大型語料量測由 `verifications/measure_parallel_rss.zsh` 維護；它會連同語料、
+/// 工作者、區塊、命中條件與 `CSV2_PARALLEL_MAX_BYTES` 一起記錄 RSS。這是這條路徑上唯一
+/// 真正由並行度驅動的部分，因此也是唯一一個「設上限」管得到的部分。
 func parallelMaxBytes() -> Int {
     if let v = ProcessInfo.processInfo.environment["CSV2_PARALLEL_MAX_BYTES"], let n = Int(v), n > 0 {
         return n
@@ -136,6 +137,7 @@ func workerCount() -> Int {
 /// 把那稱為通過。
 func parallelDeclineReason(_ o: Options, format: Format) -> String? {
     if o.contains == nil { return "not a search; parallelism applies to -contains only" }
+    if o.searchScope != nil { return "a scoped search" }
     if o.filter { return "--filter" }
     if o.markdown { return "-md" }
     if o.after != 0 || o.before != 0 { return "-A/-B/-C" }

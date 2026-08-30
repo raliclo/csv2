@@ -68,17 +68,24 @@ say ""
 # 建立語料。列的形狀要接近真實：含逗號的引號欄位——因為拿 `a,b,c` 去量解析器，
 # 量到的是它「不必費力」的那個案例。
 # ---------------------------------------------------------------------
-corpus=$TMP/big.csv2
-{
+make_corpus() {
+  local format=$1
   print -r -- 'pkg,version,size,source,purpose,notes,license'
-  print -r -- '套件,版本,大小,來源,用途,註記,授權'
+  if [[ $format == csv2 ]]; then
+    print -r -- '套件,版本,大小,來源,用途,註記,授權'
+  fi
   i=0
   while (( i < RECORDS )); do
     print -r -- "pkg$i,1.$i.0,$((i % 900)) KiB,buildroot package,\"purpose, with a comma\",\"CORRECTED $i: prose with, commas and \"\"quotes\"\" in it\",MIT"
     (( i++ ))
   done
-} > $corpus
+}
+corpus=$TMP/big.csv2
+csv_corpus=$TMP/big.csv
+make_corpus csv2 > $corpus
+make_corpus csv > $csv_corpus
 actual=$(wc -c < $corpus | tr -d ' ')
+csv_actual=$(wc -c < $csv_corpus | tr -d ' ')
 records=$($CSV2 -r --json -i $corpus 2>/dev/null | tail -1 | grep -o '"records":[0-9]*' | cut -d: -f2)
 say "corpus bytes : $actual"
 say "corpus records: $records"
@@ -98,7 +105,7 @@ say ""
 # ---------------------------------------------------------------------
 say "## 1. full RFC 4180 parse throughput / 完整解析吞吐量"
 best=999999
-for run in 1 2 3; do
+for run in 1 2 3 4 5; do
     s=$EPOCHREALTIME
     CSV2_PARALLEL_MIN_BYTES=999999999 $CSV2 -contains 'ZZ_NO_SUCH_STRING_ZZ' -i $corpus -so >/dev/null 2>&1
     e=$EPOCHREALTIME
@@ -107,6 +114,24 @@ for run in 1 2 3; do
 done
 mbs=$(( actual / 1048576.0 / best ))
 say "single-threaded : $(printf '%.3f' $best) s   $(printf '%.0f' $mbs) MiB/s"
+
+# Compare the same data records in one-header `.csv` and two-header `.csv2`
+# form. The `.csv2` cost includes its second header row and its format-specific
+# escape handling; both runs use the same non-matching search and no index.
+# 比較相同資料列在單標頭 `.csv` 與雙標頭 `.csv2` 的成本。`.csv2` 的成本包含第二列標頭
+# 與該格式的跳脫處理；兩次都搜尋不會命中的值，且都不使用索引。
+csvbest=999999
+for run in 1 2 3 4 5; do
+    s=$EPOCHREALTIME
+    CSV2_PARALLEL_MIN_BYTES=999999999 $CSV2 -contains 'ZZ_NO_SUCH_STRING_ZZ' -i $csv_corpus -so >/dev/null 2>&1
+    e=$EPOCHREALTIME
+    d=$(( e - s ))
+    (( d < csvbest )) && csvbest=$d
+done
+csv_mbs=$(( csv_actual / 1048576.0 / csvbest ))
+csv2_ratio=$(( best / csvbest ))
+say "csv             : $(printf '%.3f' $csvbest) s   $(printf '%.0f' $csv_mbs) MiB/s"
+say "csv2/csv        : $(printf '%.2f' $csv2_ratio)x"
 
 # The worker count comes from csv2's own -debug, not from `getconf
 # _NPROCESSORS_ONLN`. busybox has no getconf, so on the guest that call fails

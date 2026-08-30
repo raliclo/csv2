@@ -33,9 +33,17 @@ enum EditVerb {
     case updateWhere(old: String, value: String)
 }
 
+enum SearchScope {
+    case cell(record: Int, column: String)
+    case row(Int)
+    case column(String)
+}
+
 struct Options {
     var read = false
     var contains: String?
+    var searchScope: SearchScope?
+    var searchScopeFlags = 0
     var filter = false
     var includeHeaders = false
     var normalize = false
@@ -218,6 +226,9 @@ let KNOWN_FLAGS: Set<String> = [
     "cell",
     "col",
     "contains",
+    "search-cell",
+    "search-row",
+    "search-column",
     "debug",
     "decrypt",
     "delete",
@@ -509,6 +520,19 @@ func parseArgs(_ argv: [String]) throws -> Options {
                     "-contains 收到一個空字串，而它會匹配每一個儲存格。「搜尋空字串」與「某個變數算成了空字串」無法區分；要讀每一筆請用 -r")
             }
             o.contains = needle
+        case "search-cell":
+            try once("--search-cell")
+            let (record, column) = try parseCellAddress(try needData(arg), flag: "--search-cell")
+            o.searchScopeFlags += 1
+            o.searchScope = .cell(record: record, column: column)
+        case "search-row":
+            try once("--search-row")
+            o.searchScopeFlags += 1
+            o.searchScope = .row(try positiveInt(arg, try need(arg)))
+        case "search-column":
+            try once("--search-column")
+            o.searchScopeFlags += 1
+            o.searchScope = .column(try needData(arg))
         case "filter": o.filter = true
         case "include-headers": o.includeHeaders = true
         case "normalize": o.normalize = true
@@ -1816,6 +1840,13 @@ func validate(_ o: inout Options) throws {
         throw usageError("--normalize decides how -contains compares, so it needs -contains; storage is never normalised",
                          "--normalize 決定的是 -contains 怎麼比較，因此需要搭配 -contains；儲存的內容永遠不會被正規化")
     }
+    if o.searchScope != nil && o.contains == nil {
+        throw usageError("a search scope needs -contains", "搜尋範圍需要搭配 -contains")
+    }
+    if o.searchScopeFlags > 1 {
+        throw usageError("search scope options are mutually exclusive; use only one of --search-cell, --search-row or --search-column",
+                         "搜尋範圍選項互斥；請只使用 --search-cell、--search-row 或 --search-column 其中一個")
+    }
     // An output SHAPE with an edit verb. An edit writes CSV -- that is what it
     // is for -- so --json and -md were accepted, ignored and exited 0, while
     // --a1 in the same position was refused and -md without -t on an edit was
@@ -2436,6 +2467,9 @@ func printHelp() {
     READING / 讀取
       -r                 read
       -contains S        report every CELL containing S, as record:field
+      --search-cell R:C  with -contains, search only one data cell
+      --search-row R     with -contains, search only data record R
+      --search-column C  with -contains, search only column C (number or name)
       --filter           with -contains, emit the matching records instead
       --include-headers  search the header rows too (reported as record 0)
       --normalize        compare in NFC; storage is never normalised
