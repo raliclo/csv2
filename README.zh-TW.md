@@ -154,7 +154,9 @@ csv2 -add-column 3 'note,備註' 'todo' -i data.csv2 --in-place
 `--value-file PATH` 與 `--value-stdin` 會把 `-update` 的值當成原始位元組讀取，
 包括結尾換行與空白。它們必須恰好搭配一個 `-update`，不可與字面值或 `-si` 併用。
 
-`--dry-run` 會以 `old -> new` 印出每個變更儲存格，且不寫入任何檔案。`--in-place` 搭配
+`--dry-run` 目前預覽 `-update` 與 `-update-where`，會以 `old -> new` 印出每個變更
+儲存格，且不寫入任何檔案。其他編輯動詞會被拒絕，而不是回傳一個可能被誤認為「沒有變更」的
+空輸出。`--in-place` 搭配
 `--backup` 會把原始輸入備份為旁邊的 `INPUT.bak`，若備份已存在則拒絕覆寫。在 `--json` 下，
 拒絕會以 stderr 上的一個 JSON 錯誤物件輸出，包含穩定的 `code`、`message` 與 `message_zh`；
 離開碼仍為 1。

@@ -8351,3 +8351,147 @@ _t217_b=("${(@f)$(cat "$TMP/t217c.md")}")
 
 **這一條也許屬於母專案的 `mistakes.md`**(它與 mistakes_prevention skill 的「關口 3:寫過濾器」
 同族),但那份紀錄是母專案的,由它自己決定一次發生該歸在哪一條。此處只記 csv2 這一側。
+
+## KG. `--backup` 正好漏掉它最需要保護的追加快路徑(2026-08-30 修正,T224)
+
+第 11 階段留下 `--backup` 的理由，指名的就是 `-append --in-place`：它是唯一直接改原檔、沒有
+temp+rename 可以退回的編輯。但 dispatch 只讓 `--dry-run` 離開快路徑，`--backup` 仍走
+`runAppendFast`，而那個函式完全沒有建立備份。
+
+重現於 `csv2 0.1.0 (05edec9)`：
+
+```console
+$ csv2 -append "$row" -i copy.csv --in-place --backup
+$ echo $?
+0
+$ test -e copy.csv.bak; echo $?
+1
+```
+
+資料確實被追加，stderr 為空，`.bak` 不存在。這不是「功能少做一點」：那個旗標的整個用途，
+就是讓這條沒有原子替換可依靠的路徑能復原。修法必須在所有驗證與 payload 編碼成功之後、第一次
+寫入之前複製原檔；T224 釘住快路徑仍被使用、備份逐位元等於追加前內容、追加後內容也正確。
+
+## KH. `-add-column` 對 NAME 的三種無效輸入都以成功姿態收下(2026-08-30 修正,T225a-c)
+
+計畫寫的是：英文標題必填，NAME 以**一筆 CSV 紀錄**承載標頭列。`splitHeaderName` 卻用 `try?`
+吞掉解析錯誤，並在失敗時把整個字串當成一個名稱；呼叫端也不檢查解析出的標題是否比檔案的標頭列
+更多，或英文標題是否為空。
+
+在一列標頭的 `.csv` 上實測：
+
+```console
+$ csv2 -add-column 2 'new,ignored' -i f.csv --in-place
+# rc=0；new 被加入，ignored 無聲消失
+$ csv2 -add-column 2 '' -i f.csv --in-place
+# rc=0；產生一個名稱為空、無法以名稱定址的欄
+$ csv2 -add-column 2 '"unterminated' -i f.csv --in-place
+# rc=0；無效的 CSV NAME 被改當成字面標題
+```
+
+修法：解析函式改為 throwing、要求恰好一筆紀錄、拒絕空英文標題，並拒絕超過輸入標頭列數的名稱；
+`.csv2` 的單一英文名稱仍依既定決策警告並把中文列留空。T225a–c 釘住三種拒絕，T215g/h/i/k
+守住原有合法形狀。
+
+## KI. `-add-column` 的選填 VALUE 把所有 `-` 開頭值都當成旗標(2026-08-30 修正,T225d/e)
+
+本工具既有規則只拒絕**已知旗標名稱**，負數是合法資料；`needData` 與 T172 也提供 `--` 讓值本身
+等於旗標名稱。但 `-add-column` 為了分辨「省略 VALUE」與「下一個旗標」，直接用
+`hasPrefix("-")`：
+
+```console
+$ csv2 -add-column 2 delta -5 -i f.csv --in-place
+csv2: unknown flag -5; run csv2 --help
+# rc=1
+```
+
+同一個 `-5` 可由 `-update` 正常儲存。修法是只把 KNOWN_FLAGS 中的 token 視為「下一個旗標」，
+並讓放在 VALUE 正前方的 `--` 走既有 literal 規則。T225d/e 釘住兩種值。
+
+## KJ. 兩個值來源一起給時，`--value-file` 靜默吃掉 `--value-stdin`(2026-08-30 修正,T226)
+
+驗證只檢查「有沒有任一來源」，沒有檢查兩者互斥。執行端以 `if let valueFile ... else stdin` 選擇，
+因此兩個同時出現時檔案無聲勝出、stdin 完全不讀、rc=0。這與 `-i`／`-si` 已經拒絕的理由相同：
+兩個來源不能靠程式暗自挑一個。修法是驗證階段拒絕，T226 釘住。
+
+## KK. `--dry-run` 的 log 宣稱完成了一次不存在的原子替換(2026-08-30 修正,T227a/b)
+
+stdout 的預覽正確、輸入也未變，但 `runEdit` 無條件留下成功摘要：
+
+```console
+$ csv2 -update 1:2 review-value --dry-run -log d.log -i f.csv
+update 1:version: "old" -> "review-value"
+$ tail -1 d.log
+... INFO  wrote 21 records, 7 fields, atomic rename OK
+```
+
+試跑沒有寫出任何紀錄，也沒有 rename。這一行在三個關鍵詞上都不真。修法是試跑記錄
+`dry run: N change(s), wrote nothing`，且不得留下一般寫入摘要；T227 釘住兩者。
+
+## KM. `--dry-run` 只預覽 `-update`，其餘編輯全部成功而沉默(2026-08-30 修正,T227c-i)
+
+README 承諾「印出每個變更儲存格」。實作的 `dryRunChanges` 只在 `.update` 分支加入內容；其他
+動詞照樣跑完整個編輯流程、因 `emit` 被關掉而不寫檔，最後以 rc=0 與空 stdout 結束：
+
+```console
+$ csv2 -delete -cell 1:2 --dry-run -i f.csv       # rc=0, stdout 0 bytes
+$ csv2 -delete 1 --dry-run -i f.csv               # rc=0, stdout 0 bytes
+$ csv2 -add-column 2 new value --dry-run -i f.csv # rc=0, stdout 0 bytes
+$ csv2 -insert 1 "$row" --dry-run -i f.csv        # rc=0, stdout 0 bytes
+$ csv2 -append "$row" --dry-run -i f.csv          # rc=0, stdout 0 bytes
+```
+
+一個名為「先看會做什麼」的旗標，對大多數動詞回答空字串，比拒絕更糟。完整逐格預覽還牽涉
+整欄、整列與轉換的輸出文法；在那套文法定案並實作前，修法先大聲拒絕非 `-update`／
+`-update-where` 的動詞與保護轉換，絕不再回傳一個看似「沒有變更」的成功。T227c–g 釘住；
+沒有任何編輯動詞的 `--dry-run` 也會拒絕，不會沾在一次普通讀取上被忽略。T227c–i 釘住；擴充成
+完整預覽仍留在第 11 階段，不把這次拒絕寫成已完成。
+
+## KL. Markdown preserve 用「值」當單值 dictionary key，重複列無法原樣往返(2026-08-30 修正,T228)
+
+T217a 的 fixture 每列值都不同。兩筆值相同、排版不同時，後一筆覆蓋前一筆的原始行：
+
+```markdown
+| name | status |
+|---|---|
+| same | open |
+|same|open|
+```
+
+`csv2 -r -t -md` 的輸出把兩筆都寫成 `|same|open|`，所以「沒被編輯的表逐位元往返」不成立。
+此外 key 以 NUL 串接儲存格，註解說 NUL 不可能在 UTF-8 Markdown 中；UTF-8 與 Swift String
+都容許 NUL，而且 T159e 已明確把 NUL 定為資料。不同欄位陣列因此可以撞成同一個 key，最壞會把
+另一列的原文寫回，而不只是排版漂移。
+
+修法以 `[String]` 本身作為 Hashable key，並為每組相同值保留一個依出現順序消耗的原始行佇列；
+不再自行發明分隔字元。單靠佇列仍不足以處理編輯：刪掉兩筆相同列中的第一筆，會把第一筆排版
+錯套給真正存活的第二筆；把第一筆 update 成與第二筆相同也一樣。因此編輯路徑另以輸入列身分
+套用批次 insert／delete／append，只有「同一筆且值沒變」才拿回它自己的原始行。這也補上原本
+`-o` 編輯完全繞過 preserve、把整表 compact 的缺口。T228a 釘住重複列逐位元往返，T228b 釘住
+含 NUL 的不同欄位不碰撞，T228c–e 釘住另存新檔與就地刪除都保留正確的那一次。
+
+## KN. symlink 輸入的 `.bak` 是另一個指向被修改目標的 symlink(2026-08-30 修正,T229)
+
+`makeInPlaceBackup` 對使用者輸入路徑直接呼叫 `FileManager.copyItem`。輸入是 symlink 時，複製的是
+連結而非它當下指向的內容；接著 `--in-place` 正確地修改目標，但 `.bak` 也指著同一個目標，
+所以「備份」跟著一起變了。Windows 實測：
+
+```console
+$ csv2 -update 1:2 changed -i link.csv --in-place --backup
+$ test -L link.csv.bak; echo $?
+0
+```
+
+這與 `-o`／`--in-place` 早已定案的 symlink 規則是同一件事：寫入要落到目標，備份則要保存寫入前
+的**內容**。修法是先解析來源 symlink，再把目標複製成旁邊的一個普通備份檔；T229 驗證 `.bak`
+不是 symlink、逐位元等於原內容，而且原 symlink 仍保留並指向已編輯的目標。
+
+## KO. 限定列搜尋在 `-head` 提早停止後謊報檔案長度(2026-08-31 修正,T223h)
+
+遠端加入限定搜尋後，`--search-row 9 -head 1` 只讀第一筆便停止，接著把「只讀到 1 筆」當成
+「檔案只有 1 筆」：對一份確實有 10 筆的檔案回報 `the file has only 1 records`。資料沒有寫壞，
+但拒絕理由是可被下一條指令直接推翻的錯誤事實。
+
+修法是在讀檔前交叉檢查 cell／row scope 與 `-head`／`-mid` 的選取範圍；scope 落在選取外就
+直接指出兩者衝突，不為了驗證一句錯誤訊息而破壞 `-head`／`-mid` 提早停止的效能承諾。T223h
+以一份確實含該紀錄的 fixture 釘住這條拒絕。

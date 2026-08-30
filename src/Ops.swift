@@ -608,7 +608,7 @@ final class MarkdownEmitter: RecordEmitter {
     /// means with nothing to preserve.
     /// `preserve` 需要輸入表送達時的那些原始行。輸入不是 Markdown 時它不存在，而「不存在」正是
     /// `preserve` 以 `compact` 算繪的時候——沒有排版可以保留，那就是「保留」在無物可保留時的意思。
-    private let layout: MarkdownLayout?
+    private var layout: MarkdownLayout?
 
     init(sink: ByteSink, pretty: Bool = false, layout: MarkdownLayout? = nil) {
         self.sink = sink
@@ -688,7 +688,7 @@ final class MarkdownEmitter: RecordEmitter {
         // 標頭與分隔列在沒有改變時取自來源。分隔列尤其如此：--pretty 會把 `|---|` 加寬成
         // `|------|`，因此即使一次什麼都沒編輯的執行也會重寫它，而那一行根本不承載任何資料
         // ——它純粹是格式，重寫它純粹是 diff 雜訊。
-        if let lay = layout, let orig = lay.header[MarkdownLayout.key(names)] {
+        if let lay = layout, let orig = lay.header[names] {
             sink.write(orig + "\n")
             sink.write((lay.separator.isEmpty
                         ? "|" + names.map { _ in "---" }.joined(separator: "|") + "|"
@@ -726,7 +726,10 @@ final class MarkdownEmitter: RecordEmitter {
         // formatting for a value that was never there.
         // 值沒有改變的列，會以它送進來時的那一行寫回去。被編輯過的列則以 compact 算繪——它原本
         // 那一行已經描述不了它了，而把它補齊到舊的寬度，等於替一個從來不存在的值發明格式。
-        if let lay = layout, let orig = lay.rows[MarkdownLayout.key(cells)] {
+        if var lay = layout, var originals = lay.rows[cells], !originals.isEmpty {
+            let orig = originals.removeFirst()
+            lay.rows[cells] = originals
+            layout = lay
             sink.write(orig + "\n")
             return
         }
@@ -1293,13 +1296,22 @@ func parseRowLiteral(_ text: String, format: Format, expected: Int, what: String
 /// 它是以一筆 CSV 紀錄來解析的，不是用逗號切開，因為一個欄位名稱可能含有逗號，而這個工具在其他
 /// 任何地方都拒絕弄丟它。`'note,備註'` 是兩個標題；`'"a,b",備註'` 是一個「名字就叫 a,b」的欄位
 /// 加上它的中文標題。
-func splitHeaderName(_ s: String) -> [String] {
-    var out: [String] = []
+func splitHeaderName(_ s: String) throws -> [String] {
+    var records: [[String]] = []
     let parser = RecordParser(format: .csv) { r in
-        out = r.fields.map { String(bytes: $0.value, encoding: .utf8) ?? "" }
-        return false
+        records.append(r.fields.map { String(decoding: $0.value, as: UTF8.self) })
+        return true
     }
-    try? parser.feed(Array(s.utf8) + [BYTE_LF])
-    if out.isEmpty { out = [s] }
-    return out
+    do {
+        try parser.feed(Array(s.utf8) + [BYTE_LF])
+        if !parser.stopped { try parser.finish() }
+    } catch let e as CSV2Error {
+        throw fault("-add-column NAME is not one valid CSV record: \(e.message)",
+                    "-add-column 的 NAME 不是一筆合法的 CSV 紀錄：\(e.messageZh)")
+    }
+    guard records.count == 1 else {
+        throw fault("-add-column NAME must be one CSV record, not \(records.count)",
+                    "-add-column 的 NAME 必須是一筆 CSV 紀錄，不是 \(records.count) 筆")
+    }
+    return records[0]
 }

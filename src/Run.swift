@@ -30,7 +30,14 @@ func makeInPlaceBackup(_ path: String) throws {
                     "備份路徑已存在：\(backup)；拒絕覆寫")
     }
     do {
-        try FileManager.default.copyItem(atPath: path, toPath: backup)
+        // A backup must freeze the bytes, not duplicate a symlink that keeps
+        // following the target we are about to edit. `--in-place` deliberately
+        // follows the input link; copying that link made INPUT.bak follow the
+        // same newly edited file and left no old content anywhere. KN, T229.
+        // 備份必須凍結位元組，不是複製一個會繼續跟著「即將被編輯之目標」的 symlink。
+        // `--in-place` 刻意跟隨輸入連結；把連結本身複製成 INPUT.bak，會讓它同樣指向編輯後檔案，
+        // 舊內容完全沒有留下。KN、T229。
+        try FileManager.default.copyItem(atPath: resolved(path), toPath: backup)
     } catch {
         throw fault("cannot create backup \(backup): \(error.localizedDescription)",
                     "無法建立備份 \(backup)：\(error.localizedDescription)")
@@ -59,16 +66,14 @@ func runMarkdownEdit(_ o: Options) throws {
     var rendered = o
     rendered.edits = []
     rendered.input = temp
-    let renderedPath = o.inPlace
-        ? FileManager.default.temporaryDirectory.appendingPathComponent("csv2-render-\(UUID().uuidString).md").path
-        : o.output
+    let renderedPath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("csv2-render-\(UUID().uuidString).md").path
+    defer { try? FileManager.default.removeItem(atPath: renderedPath) }
     rendered.output = renderedPath
     rendered.inPlace = false
     rendered.markdown = true
     try runSelect(rendered)
 
-    guard o.inPlace, let renderedPath else { return }
-    defer { try? FileManager.default.removeItem(atPath: renderedPath) }
     let original = try String(contentsOfFile: input, encoding: .utf8)
         .replacingOccurrences(of: "\r\n", with: "\n")
         .replacingOccurrences(of: "\r", with: "\n")
@@ -78,15 +83,57 @@ func runMarkdownEdit(_ o: Options) throws {
     while newLines.last == "" { newLines.removeLast() }
     if o.mdStyle == .preserve, newLines.count >= 2 {
         let layout = try MarkdownIn.translate(path: input, table: o.mdTable).layout
-        let headerKey = MarkdownLayout.key(MarkdownIn.cells(of: newLines[0]))
+        let headerKey = MarkdownIn.cells(of: newLines[0])
         if let original = layout.header[headerKey] { newLines[0] = original }
         newLines[1] = layout.separator
-        if newLines.count > 2 {
-            for row in 2..<newLines.count {
-                let key = MarkdownLayout.key(MarkdownIn.cells(of: newLines[row]))
-                if let original = layout.rows[key] { newLines[row] = original }
+        // Keep row OCCURRENCES aligned with the batch row operations. Value
+        // lookup alone cannot tell which equal row survived a deletion, or
+        // whether an update merely changed one row into another row's value.
+        // A nil entry is a newly inserted/appended row and has no old layout.
+        // 依批次列操作對齊每一次「列的出現」。只查值分不出刪除後是哪一筆相同列活下來，
+        // 也分不出某次 update 是否剛好把一列改成另一列的值。nil 表示新插入／追加的列，
+        // 本來就沒有舊排版可保留。
+        var inserts: [Int: Int] = [:]
+        var deletes: [(Int, Int)] = []
+        var appendCount = 0
+        for edit in o.edits {
+            switch edit {
+            case .insert(let at, _): inserts[at, default: 0] += 1
+            case .append: appendCount += 1
+            case .deleteRange(let from, let to): deletes.append((from, to))
+            default: break
             }
         }
+        var identities: [(cells: [String], line: String)?] = []
+        for (offset, originalRow) in layout.orderedRows.enumerated() {
+            let record = offset + 1
+            identities.append(contentsOf: repeatElement(nil, count: inserts[record] ?? 0))
+            if !deletes.contains(where: { record >= $0.0 && record <= $0.1 }) {
+                identities.append(originalRow)
+            }
+        }
+        identities.append(contentsOf: repeatElement(nil, count: appendCount))
+        let outputRows = max(0, newLines.count - 2)
+        guard identities.count == outputRows else {
+            throw fault("Markdown preserve lost row identity: expected \(identities.count) output row(s), rendered \(outputRows)",
+                        "Markdown preserve 遺失列身分：預期 \(identities.count) 筆輸出列，實際算繪 \(outputRows) 筆")
+        }
+        for offset in 0..<outputRows {
+            if let identity = identities[offset],
+               MarkdownIn.cells(of: newLines[offset + 2]) == identity.cells {
+                newLines[offset + 2] = identity.line
+            }
+        }
+    }
+    if !o.inPlace {
+        guard let output = o.output else {
+            throw fault("Markdown editing needs -o FILE or --in-place",
+                        "Markdown 編輯需要 -o FILE 或 --in-place")
+        }
+        let sink = try ByteSink(atomicPath: output)
+        sink.write(newLines.joined(separator: "\n") + "\n")
+        try sink.close()
+        return
     }
     let wanted = o.mdTable ?? 1
     var starts: [Int] = []
@@ -1217,7 +1264,7 @@ func runEdit(_ o: Options) throws {
     // 第 10 階段。套用在標頭與每一筆資料紀錄上，位置是 1-based，且對「檔案送達時的樣子」計數
     // ——那是其他四個編輯動詞遵守的同一條批次規則，如此 `-add-column 2 x -delete -col 2` 的兩半
     // 指的都是「送達時的第 2 欄」，而不是一個在改動前、一個在改動後。
-    var addCols: [(at: Int, name: String, value: String)] = []
+    var addCols: [(at: Int, name: String, titles: [String], value: String)] = []
     for e in o.edits {
         switch e {
         case .insert(let at, let row): inserts[at, default: []].append(row)
@@ -1226,7 +1273,18 @@ func runEdit(_ o: Options) throws {
         case .update(let r, let c, let v): updates[r, default: []].append((c, [UInt8](v.utf8)))
         case .deleteCell(let r, let c): blanks[r, default: []].append(c)
         case .deleteColumn(let c): dropTokens.append(c)
-        case .addColumn(let at, let name, let value): addCols.append((at, name, value))
+        case .addColumn(let at, let name, let value):
+            let titles = try splitHeaderName(name)
+            guard let english = titles.first, !english.isEmpty else {
+                throw fault("-add-column \(at): the English title is required and cannot be empty",
+                            "-add-column \(at)：英文標題是必填，且不可為空")
+            }
+            guard titles.count <= plan.headerRows else {
+                throw fault(
+                    "-add-column \(at) NAME has \(titles.count) titles, but this input has \(plan.headerRows) header row(s); no title may be silently ignored",
+                    "-add-column \(at) 的 NAME 有 \(titles.count) 個標題，但輸入只有 \(plan.headerRows) 列標頭；任何標題都不可被靜默忽略")
+            }
+            addCols.append((at, name, titles, value))
         case .updateWhere: break
         }
     }
@@ -1489,8 +1547,7 @@ func runEdit(_ o: Options) throws {
                 // itself contains a comma can be quoted like anything else.
                 // 那個名字以「標頭列的方式」承載兩個標題：一筆 CSV 紀錄，因此 `note,備註` 是兩個
                 // 欄位，而一個「名字本身含逗號」的欄位可以像其他任何東西一樣加引號。
-                let parts = splitHeaderName(a.name)
-                text = hr < parts.count ? parts[hr] : ""
+                text = hr < a.titles.count ? a.titles[hr] : ""
             } else {
                 text = a.value
             }
@@ -1725,7 +1782,7 @@ func runEdit(_ o: Options) throws {
                     // 未必就是「能翻譯它的人」。拿英文標題去填等於發明一個翻譯，而一個錯的翻譯
                     // 日後比一個空格更難被發現。
                     if plan.headerRows >= 2 {
-                        for a in addCols where splitHeaderName(a.name).count < 2 {
+                        for a in addCols where a.titles.count < 2 {
                             Platform.writeStderr(
                                 "csv2: -add-column \(a.at) \(a.name): no Chinese title given, row 2 left empty; supply both as 'english,中文'\n"
                                 + "csv2：-add-column \(a.at) \(a.name)：未提供中文標題，第 2 列留空；請以 'english,中文' 一併給出\n")
@@ -2030,7 +2087,11 @@ func runEdit(_ o: Options) throws {
     //
     // `outRecords` 在 emitData 裡遞增，因此它數的是「真的到達輸出端」的紀錄；而執行到這裡時，
     // `headers[0]` 已經移除過被刪掉的欄位，所以它的寬度就是輸出的寬度。
-    Logger.shared.info("wrote \(outRecords) records, \(headers.first?.count ?? expectedFields) fields, atomic rename OK")
+    if o.dryRun {
+        Logger.shared.info("dry run: \(dryRunChanges.count) change(s), wrote nothing")
+    } else {
+        Logger.shared.info("wrote \(outRecords) records, \(headers.first?.count ?? expectedFields) fields, atomic rename OK")
+    }
     // "a metrics: line on every path" was true of the reads and of nothing
     // else: every --in-place edit and both index commands printed none, and
     // those are the runs whose cost a caller most wants to see.
@@ -2343,6 +2404,18 @@ func runAppendFast(_ o: Options) throws {
             at += UInt64(terminated(FieldEncoder.encodeRecord(rec, format: fmt, preserveRaw: false)).count)
         }
     }
+
+    // `--backup` was requested for this path above every other one: an append
+    // changes the original inode directly and has no temp+rename to fall back
+    // on. The first implementation put backup creation only in runEdit, which
+    // this O(1) path deliberately bypasses, so the append succeeded at rc=0
+    // and no .bak existed. Validate and encode everything first; then copy the
+    // exact pre-append bytes immediately before the first write. KG, T224.
+    // `--backup` 最需要保護的正是這條路：追加直接改原 inode，沒有 temp+rename 可以退回。
+    // 第一版只在 runEdit 建備份，而這條 O(1) 路徑刻意繞過它，因此追加以 rc=0 成功、.bak 卻不存在。
+    // 先完成全部驗證與編碼，再於第一次寫入正前方複製「追加前」的精確位元組。KG、T224。
+    try h.close()
+    if o.backup { try makeInPlaceBackup(path) }
 
     // ONE write() through a descriptor opened O_APPEND. POSIX makes the offset
     // update and the write atomic there, so two concurrent appends cannot land

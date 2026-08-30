@@ -669,14 +669,22 @@ func parseArgs(_ argv: [String]) throws -> Options {
                     "-add-column \(colNum)：這裡的欄位從 1 開始編號，與 -delete -col 及 -get r:c 相同。0 是標頭，那正是它不能表示第一欄的原因")
             }
             let colName = try needData(arg)
-            // One argument or two. A value that begins with `-` is a flag, and
-            // needData refuses it -- so `-add-column 3 note -i f.csv2` reads
-            // the value as absent rather than swallowing `-i`.
-            // 一個引數或兩個。一個以 `-` 開頭的值是旗標，而 needData 會拒絕它——因此
-            // `-add-column 3 note -i f.csv2` 會把那個值讀成「沒有給」，而不是把 `-i` 吞掉。
+            // One argument or two. Only a KNOWN flag starts the next option;
+            // `-5` and an unknown dash-leading string are data, exactly as
+            // needData treats them everywhere else. `--` makes even a known
+            // flag name literal. KI, T225d/e.
+            // 一個引數或兩個。只有「已知旗標」會開始下一個選項；`-5` 與未知的減號開頭字串是
+            // 資料，與 needData 在其他地方的規則完全相同。`--` 連已知旗標名稱也能標成字面值。
+            // KI、T225d/e。
             var colValue = ""
-            if i + 1 < argv.count, !argv[i + 1].hasPrefix("-") {
-                colValue = try needData(arg)
+            if i + 1 < argv.count {
+                let candidate = argv[i + 1]
+                let isFollowingFlag = candidate.hasPrefix("-")
+                    && candidate != "--"
+                    && KNOWN_FLAGS.contains(normalizeFlag(candidate))
+                if !isFollowingFlag {
+                    colValue = try needData(arg)
+                }
             }
             o.edits.append(.addColumn(at: colNum, name: colName, value: colValue))
             o.cellModifier = false; o.colModifier = false
@@ -1278,6 +1286,10 @@ func validate(_ o: inout Options) throws {
                              "編輯需要明確的目的地：-o FILE、-so 或 --in-place")
         }
     }
+    if o.valueFile != nil && o.valueStdin {
+        throw usageError("--value-file and --value-stdin are mutually exclusive: both are sources for the same update value, so csv2 will not silently choose one",
+                         "--value-file 與 --value-stdin 互斥：兩者都是同一個更新值的來源，因此 csv2 不會靜默挑選其中之一")
+    }
     if o.valueFile != nil || o.valueStdin {
         guard !o.useStdin else {
             throw usageError("--value-file/--value-stdin cannot be combined with -si: the input and the value would compete for stdin",
@@ -1290,6 +1302,23 @@ func validate(_ o: inout Options) throws {
         guard !o.literalUpdateValueProvided else {
             throw usageError("a literal -update value cannot be combined with --value-file/--value-stdin",
                              "-update 的字面值不可與 --value-file／--value-stdin 併用")
+        }
+    }
+    if o.dryRun {
+        if o.edits.isEmpty && o.encryptCols == nil && o.decryptCols == nil && o.hashCols == nil {
+            throw usageError("--dry-run needs an edit to preview",
+                             "--dry-run 需要一個可預覽的編輯")
+        }
+        let unsupported = o.edits.contains { edit in
+            switch edit {
+            case .update, .updateWhere: return false
+            default: return true
+            }
+        }
+        if unsupported || o.encryptCols != nil || o.decryptCols != nil || o.hashCols != nil {
+            throw usageError(
+                "--dry-run currently previews -update and -update-where only; refusing this edit rather than returning empty output that looks like 'nothing would change'",
+                "--dry-run 目前只預覽 -update 與 -update-where；本次編輯會被拒絕，而不是回傳一個看似「不會有任何變更」的空輸出")
         }
     }
     if o.contextGiven {
@@ -1846,6 +1875,26 @@ func validate(_ o: inout Options) throws {
     if o.searchScopeFlags > 1 {
         throw usageError("search scope options are mutually exclusive; use only one of --search-cell, --search-row or --search-column",
                          "搜尋範圍選項互斥；請只使用 --search-cell、--search-row 或 --search-column 其中一個")
+    }
+    let scopedRecord: Int? = {
+        switch o.searchScope {
+        case .cell(let record, _), .row(let record): return record
+        case .column, nil: return nil
+        }
+    }()
+    if let record = scopedRecord {
+        if let head = o.head, record > head {
+            throw usageError(
+                "search scope requests record \(record), which is outside -head \(head); csv2 will not stop early and then falsely report that the file has only \(head) record(s)",
+                "搜尋範圍要求第 \(record) 筆，但它在 -head \(head) 之外；csv2 不會先提早停止，再誤稱本檔案只有 \(head) 筆紀錄")
+        }
+        if let (lower, upper) = o.mid,
+           record < lower || upper.map({ record > $0 }) == true {
+            let range = upper.map { "\(lower),\($0)" } ?? "\(lower),"
+            throw usageError(
+                "search scope requests record \(record), which is outside -mid \(range)",
+                "搜尋範圍要求第 \(record) 筆，但它在 -mid \(range) 之外")
+        }
     }
     // An output SHAPE with an edit verb. An edit writes CSV -- that is what it
     // is for -- so --json and -md were accepted, ignored and exited 0, while
@@ -2551,7 +2600,9 @@ func printHelp() {
                          matches are refused
       --value-file PATH  read the -update value as exact file bytes
       --value-stdin      read the -update value as exact stdin bytes
-      --dry-run          show per-cell changes and write nothing
+      --dry-run          preview -update/-update-where per cell and write
+                         nothing; other edits are refused, never shown as an
+                         empty "no changes" result
       --backup           save INPUT as INPUT.bak before --in-place
       --truncate-partial drop a trailing incomplete record instead of failing
       All indexes refer to the INPUT and are applied in one pass.

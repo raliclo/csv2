@@ -12618,6 +12618,8 @@ assert_fails "T223f scope options are mutually exclusive / 搜尋範圍選項互
     "$CSV2" -contains MIT --search-row 1 --search-column 2 -i "$TMP/t223.csv"
 assert_fails "T223g an out-of-range scoped record is refused / 超出範圍的限定紀錄會被拒絕" -- \
     "$CSV2" -contains MIT --search-row 9 -i "$TMP/t223.csv"
+assert_fails "T223h a scope outside -head is refused before an early stop can lie about the file length / 位於 -head 外的範圍會先被拒絕，不讓提早停止謊報檔案長度" -- \
+    "$CSV2" -contains MIT --search-row 2 -head 1 -i "$TMP/t223.csv"
 
 echo
 echo "--- T218: the zstat rule holds across every script here / T218：zstat 規則在這裡每一支腳本上都成立 ---"
@@ -12912,6 +12914,133 @@ assert_succeeds "T222c --md-table --in-place preserves prose / --md-table --in-p
     "$CSV2" -update 1:2 newer -md -t --md-table 1 -i "$TMP/t222.md" --in-place
 assert_eq "$(grep -c '^before$' "$TMP/t222.md")$(grep -c '^after$' "$TMP/t222.md")" "11" \
     "T222d in-place Markdown keeps surrounding prose / 就地 Markdown 保留周邊散文"
+
+# T224 -- --backup must cover the append fast path, the path that motivated it.
+# T224 —— --backup 必須涵蓋追加快路徑；那正是提出它的路徑。
+printf 'name,status\na,old\nb,done\n' > "$TMP/t224.csv"
+cp "$TMP/t224.csv" "$TMP/t224.before.csv"
+_t224_debug=$("$CSV2" -append 'c,new' -i "$TMP/t224.csv" --in-place --backup -debug 2>&1 >/dev/null)
+assert_same "$TMP/t224.before.csv" "$TMP/t224.csv.bak" \
+    "T224a append --backup contains the exact pre-append bytes / 追加的 --backup 保留追加前的精確位元組"
+assert_eq "$("$CSV2" -get 3:2 -i "$TMP/t224.csv")" "new" \
+    "T224b the append still lands / 追加本身仍然落地"
+if [[ $_t224_debug == *'append fast path:'* ]]; then
+    ok "T224c backup does not disable the append fast path / 備份不會關掉追加快路徑"
+else
+    bad "T224c no fast-path diagnostic: $_t224_debug / 沒有快路徑診斷"
+fi
+
+# T225 -- -add-column parses exactly one honest header record, and its optional
+# value follows the same dash-leading-data rule as every other edit value.
+# T225 —— -add-column 只解析一筆誠實的標頭紀錄；它的選填值與其他編輯值遵守相同的減號資料規則。
+printf 'name,status\na,old\n' > "$TMP/t225.csv"
+for _t225_case in extra empty malformed; do cp "$TMP/t225.csv" "$TMP/t225_${_t225_case}.csv"; done
+assert_fails "T225a a one-header file refuses a second title instead of dropping it / 一列標頭的檔案拒絕第二個標題，不會丟掉它" -- \
+    "$CSV2" -add-column 2 'new,ignored' -i "$TMP/t225_extra.csv" --in-place
+assert_same "$TMP/t225.csv" "$TMP/t225_extra.csv" \
+    "T225a2 the extra-title refusal leaves the file untouched / 額外標題的拒絕讓檔案保持不動"
+assert_fails "T225b an empty English title is refused / 空的英文標題被拒絕" -- \
+    "$CSV2" -add-column 2 '' -i "$TMP/t225_empty.csv" --in-place
+assert_fails "T225c malformed CSV in NAME is refused / NAME 裡格式錯誤的 CSV 被拒絕" -- \
+    "$CSV2" -add-column 2 '"unterminated' -i "$TMP/t225_malformed.csv" --in-place
+cp "$TMP/t225.csv" "$TMP/t225_negative.csv"
+assert_succeeds "T225d a negative add-column value is data / add-column 的負數值是資料" -- \
+    "$CSV2" -add-column 2 delta -5 -i "$TMP/t225_negative.csv" --in-place
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t225_negative.csv")" "-5" \
+    "T225d2 the negative value is stored / 負數值確實被儲存"
+cp "$TMP/t225.csv" "$TMP/t225_literal.csv"
+assert_succeeds "T225e -- makes a known flag name the optional value / -- 讓已知旗標名稱成為選填值" -- \
+    "$CSV2" -add-column 2 flag -- -t -i "$TMP/t225_literal.csv" --in-place
+assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t225_literal.csv")" "-t" \
+    "T225e2 the literal flag value is stored / 字面的旗標值確實被儲存"
+
+# T226 -- two sources for one value are an ambiguity, never an order.
+# T226 —— 同一個值有兩個來源就是歧義，絕不是優先順序。
+printf 'from-file' > "$TMP/t226.value"
+assert_fails "T226 --value-file and --value-stdin are mutually exclusive / --value-file 與 --value-stdin 互斥" -- \
+    "$CSV2" -update 1:2 --value-file "$TMP/t226.value" --value-stdin -i "$TMP/t225.csv" --dry-run
+
+# T227 -- a dry run must not claim a write, and unsupported previews refuse
+# rather than returning an empty success that reads as "nothing changes".
+# T227 —— 試跑不得宣稱完成寫入；尚未支援的預覽要拒絕，不以空白成功冒充「沒有變更」。
+: > "$TMP/t227.log"
+"$CSV2" -update 1:2 new --dry-run -log "$TMP/t227.log" -i "$TMP/t225.csv" >/dev/null
+if grep -q 'dry run: 1 change(s), wrote nothing' "$TMP/t227.log" \
+   && ! grep -q 'atomic rename OK' "$TMP/t227.log"; then
+    ok "T227a the dry-run log says it wrote nothing / 試跑 log 說明它沒有寫入"
+else
+    bad "T227a log: $(tail -3 "$TMP/t227.log" | tr '\n' ' ') / 實得如上"
+fi
+assert_eq "$(sed -n '2p' "$TMP/t225.csv")" 'a,old' \
+    "T227b the logged dry run still leaves input untouched / 有 log 的試跑仍不動輸入"
+assert_fails "T227c delete-cell preview is refused until it has an honest shape / delete-cell 預覽在有誠實形狀前會被拒絕" -- \
+    "$CSV2" -delete -cell 1:2 --dry-run -i "$TMP/t225.csv"
+assert_fails "T227d delete-record preview is refused / delete-record 預覽被拒絕" -- \
+    "$CSV2" -delete 1 --dry-run -i "$TMP/t225.csv"
+assert_fails "T227e add-column preview is refused / add-column 預覽被拒絕" -- \
+    "$CSV2" -add-column 2 new value --dry-run -i "$TMP/t225.csv"
+assert_fails "T227f insert preview is refused / insert 預覽被拒絕" -- \
+    "$CSV2" -insert 1 'x,x' --dry-run -i "$TMP/t225.csv"
+assert_fails "T227g append preview is refused / append 預覽被拒絕" -- \
+    "$CSV2" -append 'x,x' --dry-run -i "$TMP/t225.csv"
+assert_fails "T227h protection preview is refused / 保護轉換預覽被拒絕" -- \
+    "$CSV2" -hash status --yes --dry-run -i "$TMP/t225.csv"
+assert_fails "T227i --dry-run without an edit is refused, not ignored by a read / 沒有編輯的 --dry-run 會被拒絕，不會被普通讀取忽略" -- \
+    "$CSV2" -r --dry-run -i "$TMP/t225.csv"
+
+# T228 -- preserve distinguishes occurrences and uses a collision-free key.
+# T228 —— preserve 分得出每一次出現，並使用不會碰撞的 key。
+cat > "$TMP/t228a.md" <<'T228EOF'
+| name | status |
+|---|---|
+| same | open |
+|same|open|
+T228EOF
+"$CSV2" -r -t -md -i "$TMP/t228a.md" > "$TMP/t228a.out.md"
+assert_same "$TMP/t228a.md" "$TMP/t228a.out.md" \
+    "T228a equal rows with different layout round-trip byte-identically / 值相同、排版不同的列逐位元往返"
+printf '|left|right|\n|---|---|\n|a\0b|c|\n|a|b\0c|\n' > "$TMP/t228b.md"
+"$CSV2" -r -t -md -i "$TMP/t228b.md" > "$TMP/t228b.out.md"
+assert_same "$TMP/t228b.md" "$TMP/t228b.out.md" \
+    "T228b NUL in different cells cannot collide / 位於不同儲存格的 NUL 不會碰撞"
+"$CSV2" -update 1:2 closed -md -t -i "$TMP/t228a.md" -o "$TMP/t228c.md"
+assert_eq "$(sed -n '3,4p' "$TMP/t228c.md")" $'|same|closed|\n|same|open|' \
+    "T228c an edit to -o preserves the untouched occurrence only / 編輯另存新檔只保留未改那一次的排版"
+"$CSV2" -delete 1 -md -t -i "$TMP/t228a.md" -o "$TMP/t228d.md"
+assert_eq "$(sed -n '3p' "$TMP/t228d.md")" '|same|open|' \
+    "T228d deleting the first equal row preserves the second row's identity / 刪除第一筆相同列後保留第二筆的身分"
+cp "$TMP/t228a.md" "$TMP/t228e.md"
+"$CSV2" -delete 1 -md -t -i "$TMP/t228e.md" --in-place
+assert_eq "$(sed -n '3p' "$TMP/t228e.md")" '|same|open|' \
+    "T228e in-place deletion preserves the surviving occurrence / 就地刪除保留真正存活的那一次"
+
+# T229 -- a backup of a symlink freezes the old target bytes; it must not be a
+# second link that follows the target through the edit.
+# T229 —— symlink 的備份凍結目標舊位元組；不可成為另一個跟著目標一起被改的連結。
+printf 'name,status\na,old\n' > "$TMP/t229_target.csv"
+cp "$TMP/t229_target.csv" "$TMP/t229_before.csv"
+if ln -s "$TMP/t229_target.csv" "$TMP/t229_link.csv" 2>/dev/null; then
+    assert_succeeds "T229a --backup through a symlink succeeds / 經 symlink 的 --backup 成功" -- \
+        "$CSV2" -update 1:2 new -i "$TMP/t229_link.csv" --in-place --backup
+    if [[ -f "$TMP/t229_link.csv.bak" && ! -L "$TMP/t229_link.csv.bak" ]]; then
+        ok "T229b the backup is a file, not another symlink / 備份是檔案，不是另一個 symlink"
+    else
+        bad "T229b backup is not a regular file / 備份不是普通檔案"
+    fi
+    assert_same "$TMP/t229_before.csv" "$TMP/t229_link.csv.bak" \
+        "T229c the backup contains the pre-edit bytes / 備份保留編輯前位元組"
+    assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t229_target.csv")" "new" \
+        "T229d the edit still reaches the symlink target / 編輯仍抵達 symlink 目標"
+    if [[ -L "$TMP/t229_link.csv" ]]; then
+        ok "T229e the input symlink itself survives / 輸入 symlink 本身仍存在"
+    else
+        bad "T229e the input symlink was replaced / 輸入 symlink 被替換"
+    fi
+else
+    T229_SKIPPED=1
+    skipt "T229 symlink backup semantics / symlink 備份語意 (symlinks unavailable / 無法建立 symlink)"
+    (( want_skip += 1 ))
+fi
 if [[ "$skip" == "$want_skip" ]]; then
     ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
 else

@@ -34,18 +34,20 @@ import Foundation
 /// 以「儲存格的值」為鍵，而不是以列號為鍵，因為一次編輯可能插入或刪除列，改動之後的每一個號碼
 /// 都會是錯的。而「值沒有變」本來就是「這一列沒被改」的意思。
 struct MarkdownLayout {
-    var header: [String: String] = [:]
+    // Use the cells themselves as the key. UTF-8 text CAN contain NUL, so a
+    // hand-picked separator can collide: ["a\0b", "c"] and ["a", "b\0c"]
+    // are different rows but joined(separator: "\0") makes them identical.
+    // The row value is a queue rather than one string because equal rows may
+    // deliberately have different padding, and preserve must return each
+    // occurrence in the order it arrived.
+    // 直接以儲存格陣列作為 key。UTF-8 文字**可以**含 NUL，因此自行挑一個分隔字元會碰撞：
+    // ["a\0b", "c"] 與 ["a", "b\0c"] 是不同的兩列，但用 NUL 串接後完全相同。
+    // 列的值是一個佇列，不是單一字串，因為內容相同的列可以刻意使用不同 padding；preserve
+    // 必須依送達順序把每一次出現各自送回去。KL。
+    var header: [[String]: String] = [:]
     var separator: String = ""
-    var rows: [String: String] = [:]
-
-    static func key(_ cells: [String]) -> String {
-        // NUL cannot appear in a Markdown cell -- the file is UTF-8 text --
-        // so it separates fields without ever colliding with content. Joining
-        // on a printable character would make `a|b` and `a`,`b` the same key.
-        // NUL 不可能出現在一個 Markdown 儲存格裡——那個檔案是 UTF-8 文字——因此用它分隔欄位
-        // 永遠不會與內容相撞。用一個可列印字元來接，會讓 `a|b` 與 `a`、`b` 變成同一個鍵。
-        cells.joined(separator: "\u{0}")
-    }
+    var rows: [[String]: [String]] = [:]
+    var orderedRows: [(cells: [String], line: String)] = []
 }
 
 enum MarkdownIn {
@@ -144,6 +146,17 @@ enum MarkdownIn {
         if parts.first?.trimmingCharacters(in: .whitespaces).isEmpty == true { parts.removeFirst() }
         if parts.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { parts.removeLast() }
         return parts.map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    /// The spelling MarkdownOut will use for these logical cell bytes. Layout
+    /// matching must compare values in one representation: a raw NUL and the
+    /// `\\x00` spelling both decode to the same byte, while comparing the raw
+    /// source text to the emitter's escaped text would miss an unchanged row.
+    /// 這些邏輯儲存格位元組經 MarkdownOut 寫出時所採用的拼法。排版配對必須在同一種表示法
+    /// 比較值：原始 NUL 與 `\\x00` 都解成同一個位元組；若拿來源原文與 emitter 的跳脫文字
+    /// 直接比，會錯過一筆其實完全沒變的列。
+    static func layoutKey(_ cells: [String]) throws -> [String] {
+        try cells.map { MarkdownOut.cell(try unescape($0)) }
     }
 
     /// Is this the `|---|:--:|` row? That row is what makes a block of lines a
@@ -305,9 +318,11 @@ extension MarkdownIn {
 
         var layout = MarkdownLayout()
         layout.separator = chosen.separatorLine
-        layout.header[MarkdownLayout.key(chosen.header)] = chosen.headerLine
+        layout.header[try layoutKey(chosen.header)] = chosen.headerLine
         for (n, r) in chosen.rows.enumerated() where n < chosen.rowLines.count {
-            layout.rows[MarkdownLayout.key(r.1)] = chosen.rowLines[n]
+            let key = try layoutKey(r.1)
+            layout.rows[key, default: []].append(chosen.rowLines[n])
+            layout.orderedRows.append((key, chosen.rowLines[n]))
         }
         let headerRows = try headerRowCount(of: chosen.header, path: path)
         // The bytes are handed to the reader as the format the recovered header

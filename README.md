@@ -177,7 +177,9 @@ replacement.
 bytes, including trailing newlines and whitespace. They require exactly one
 `-update` and cannot be combined with a literal value or `-si`.
 
-`--dry-run` prints each changed cell as `old -> new` and writes nothing.
+`--dry-run` currently previews `-update` and `-update-where`, printing each
+changed cell as `old -> new`, and writes nothing. Other edit verbs are refused
+rather than returning empty output that could be mistaken for “no changes”.
 `--backup` with `--in-place` saves the original beside the input as `INPUT.bak`
 and refuses to overwrite an existing backup. Under `--json`, refusals are one
 JSON error object on stderr with a stable `code`, `message`, and `message_zh`;

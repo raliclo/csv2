@@ -3699,6 +3699,19 @@ asked for by name.
 ——並且不寫入任何東西。**走 stdout**，因為它是這次執行的產物，必須能被接進管線；「正常路徑上
 不輸出任何東西」講的是「沒有人要求的輸出」，而這一個是被指名要求的。
 
+**2026-08-30 code review correction:** the first implementation only emitted
+that preview for `-update`; delete, insert, append and add-column all returned
+an empty stdout at rc=0. Until the per-cell grammar for whole-row and
+whole-column changes is decided and implemented, `--dry-run` is intentionally
+limited to `-update` and `-update-where`, and refuses the other verbs loudly.
+An empty successful preview is not an acceptable stand-in for unfinished
+coverage. KM in `todo/known-defects.md`.
+
+**2026-08-30 code review 更正：**第一版只有 `-update` 會產生預覽；delete、insert、append 與
+add-column 全部在 rc=0 下回傳空 stdout。在「整列／整欄變更」的逐格文法定案並實作之前，
+`--dry-run` 刻意只支援 `-update` 與 `-update-where`，其餘動詞大聲拒絕。不能拿一個成功的空預覽
+冒充尚未完成的覆蓋。見 `todo/known-defects.md` 的 KM。
+
 ### 5. Not built: it already works / 不做：它已經可用
 
 Measured, not assumed. `.txt`, `.swift` and every other suffix that is not
