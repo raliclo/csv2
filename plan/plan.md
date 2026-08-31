@@ -3790,7 +3790,7 @@ README 把這件事明說了；`--backup` 是讓它從「已揭露」變成「�
 - [x] 6. `--json` error object on stderr, exit code unchanged
 - [x] 7. `--backup` for `--in-place`
 - [x] both READMEs and `--help` for each / 每一條都要進兩份 README 與 `--help`
-- [ ] four platforms / 四個平台
+- [x] four platforms / 四個平台 — 2026-09-01 @ 4542fed
 
 ## 待決問題
 
