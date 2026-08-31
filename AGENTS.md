@@ -11,7 +11,19 @@ through it; each rule there carries the round number where it was learned.
 [blind-test-flow.md](./blind-test-flow.md)。已經跑過七十九個回合；那裡的每一條規則都帶著
 「它是在哪一回合被學到的」那個編號。
 
-## Status: phases 1–6 and 8–10 done; phase 7 (shipping) deferred / 狀態：第 1–6 與 8–10 階段完成；第 7 階段（出貨）暫緩
+## Status / 狀態
+
+Everything the plan describes is implemented except shipping (phase 7), which
+is a deliberate deferral rather than a gap. Both READMEs describe the state in
+prose; this heading used to carry a list of phase numbers and fell behind the
+plan twice -- once when phases 8-10 landed, and again when phase 11 did. A
+status line built from numbers goes stale every time a phase lands, and nothing
+reports it. What the checkboxes in `plan/plan.md` say is the answer.
+
+計畫描述的一切都已實作，唯獨出貨（第 7 階段）除外，那是刻意暫緩而非缺口。兩份 README 以散文
+描述現況；這個標題原本帶著一串階段編號，而它落後於計畫兩次——第 8–10 階段落地時一次，第 11
+階段落地時又一次。一行由編號組成的狀態，每有一個階段落地就過期一次，而且沒有任何東西會回報它。
+答案以 `plan/plan.md` 的核取方塊為準。
 
 ```zsh
 ./compile_csv2.zsh      # auto-detects macOS/Linux/Windows / 自動偵測 macOS／Linux／Windows
@@ -38,7 +50,17 @@ suffix-less file as one column, all five edit verbs -- `-insert`, `-append`,
 `-delete`, `-update` and `-add-column` -- `-hash`/`-encrypt`/`-decrypt`,
 `-debug`, `-log`, the `-append` O(1) fast path, the `.index` sidecar with
 `--verify-index`, parallel search, and a library surface of seven public types
-importable as a module.
+importable as a module. Phase 11 added the editing flags an editor is expected
+to have: `-update-where OLD NEW` (whole-cell match; zero matches and more than
+one are both refused, the latter naming every address it found),
+`--value-file`/`--value-stdin` (the file's bytes ARE the value -- nothing is
+stripped, and NUL survives, which the command line cannot carry at all),
+`--dry-run` (per-cell before-and-after to stdout, writing nothing),
+`--backup` (`INPUT.bak`, refusing to overwrite an existing one),
+`--md-style preserve|compact|pretty` (preserve is the default and puts an
+unedited row back as the line it arrived on), and a JSON error object on
+stderr under `--json` with a stable kebab-case `code`, the exit status
+unchanged at 1.
 
 Phase 6 is done: csv2 builds inside the aarch64 Linux guest and its output is
 byte-identical to macOS across 12 compared invocations. Not implemented:
@@ -51,7 +73,13 @@ Windows through the standalone module/client check.
 把沒有副檔名的檔案讀成一欄、**五個**編輯動詞——`-insert`、`-append`、`-delete`、
 `-update` 與 `-add-column`——`-hash`／`-encrypt`／`-decrypt`、`-debug`、`-log`、
 `-append` 的 O(1) 快路徑、`.index` sidecar 與 `--verify-index`、平行搜尋，以及一個
-「可當 module 匯入」的七個 public 型別的 library 表面。
+「可當 module 匯入」的七個 public 型別的 library 表面。第 11 階段補上了「一個編輯器該有」的那些
+編輯旗標：`-update-where OLD NEW`（整格相等才算命中；零命中與多重命中都拒絕，後者會列出它找到
+的每一個位址）、`--value-file`／`--value-stdin`（檔案的位元組**就是**值，不做任何裁切，而且 NUL
+活得下來——那是命令列根本傳不了的東西）、`--dry-run`（逐格前後對照走 stdout，不寫入任何東西）、
+`--backup`（`INPUT.bak`，已存在時拒絕覆寫）、`--md-style preserve|compact|pretty`（preserve 是
+預設，會把沒被編輯的列寫回成它送達時的那一行），以及 `--json` 之下走 stderr 的 JSON 錯誤物件，
+帶一個穩定的 kebab-case `code`，而結束狀態維持 1。
 第 6 階段已完成：csv2 能在 aarch64 Linux guest 內建置，且 12 組比對的輸出與 macOS
 逐位元相同。未實作：出貨（第 7 階段），那是刻意暫緩而非缺口。Swift 6 module 驗證也已透過
 獨立 module／client 檢查，在 macOS、aarch64 Linux、WSL 與 Windows 執行完成。
