@@ -27,9 +27,10 @@ encoding. It also measures identical data rows in `.csv` and `.csv2` form and
 reports the `.csv2`/`.csv` ratio. Parallel efficiency is below linear speedup
 because boundary finding remains single-threaded.
 
-Latest comparison (2026-08-30, macOS arm64, 200,000 records, best of five,
-single-threaded and no index): `.csv` took 0.551 s and `.csv2` took 0.925 s,
-for a `.csv2`/`.csv` ratio of 1.68x. The complete run is in
+Latest comparison (2026-08-31, macOS arm64, 200,000 records, best of five,
+single-threaded and no index): `.csv` took 0.556 s and `.csv2` took 0.563 s,
+for a `.csv2`/`.csv` ratio of 1.01x after the no-backslash fast path was added.
+The complete run is in
 [`measure_output.txt`](measure_output.txt).
 
 For a comparable parallel-search throughput and RSS measurement, run

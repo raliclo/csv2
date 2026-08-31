@@ -298,10 +298,6 @@ enum CSV2Escape {
     /// 未定義的跳脫序列（`\q`）是錯誤，不是「原樣保留」。原樣保留會讓兩個
     /// 不同的位元組序列讀回同一個值，破壞無損性。
     static func unescape(_ v: [UInt8], at: String, atZh: String, field: Int) throws -> [UInt8] {
-        var hasBackslash = false
-        for b in v where b == BYTE_BACKSLASH { hasBackslash = true; break }
-        if !hasBackslash { return v }
-
         var out = [UInt8]()
         out.reserveCapacity(v.count)
         var i = 0
@@ -512,6 +508,7 @@ public final class RecordParser {
     private var fields: [Field] = []
     private var rawBuf: [UInt8] = []
     private var valBuf: [UInt8] = []
+    private var fieldHasBackslash = false
     private var pendingCR = false
     private var recordDirty = false
 
@@ -768,6 +765,7 @@ public final class RecordParser {
             } else {
                 if b == BYTE_LF { line += 1; quotedNewlineInField = true }
                 if b == BYTE_CR { quotedNewlineInField = true }
+                if format == .csv2 && b == BYTE_BACKSLASH { fieldHasBackslash = true }
                 rawBuf.append(b)
                 valBuf.append(b)
             }
@@ -816,6 +814,7 @@ public final class RecordParser {
     }
 
     private func appendDataByte(_ b: UInt8) throws {
+        if format == .csv2 && b == BYTE_BACKSLASH { fieldHasBackslash = true }
         rawBuf.append(b)
         valBuf.append(b)
         recordDirty = true
@@ -828,7 +827,7 @@ public final class RecordParser {
                 "\(faultAtZh)第 \(fields.count + 1) 欄：儲存格內有原始換行；.csv2 保證一筆一行，換行必須寫成 \\n")
         }
         var value = valBuf
-        if format == .csv2 {
+        if format == .csv2 && fieldHasBackslash {
             value = try CSV2Escape.unescape(
                 value, at: faultAt, atZh: faultAtZh, field: fields.count + 1)
         }
@@ -837,6 +836,7 @@ public final class RecordParser {
         valBuf = []
         state = .fieldStart
         quotedNewlineInField = false
+        fieldHasBackslash = false
         recordDirty = true
     }
 
