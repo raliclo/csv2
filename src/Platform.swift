@@ -614,6 +614,22 @@ enum Platform {
         _ = writeAll(fd: 2, [UInt8](text.utf8))
     }
 
+    /// The same for stdout, and it exists because `print()` is not equivalent
+    /// here. On Windows `print()` goes through the CRT's TEXT-mode stdout,
+    /// which turns every `\n` into `\r\n` -- so `--dry-run`, `--version` and
+    /// `--help` were emitting CRLF while the data path emitted LF, in the same
+    /// program, on the same stream. "Output always uses LF as the end of line"
+    /// is the constraint phase 11 was given, and phase 11's own `--dry-run`
+    /// broke it. KT.
+    /// stdout 的同一件事，而它之所以存在，是因為 `print()` 在這裡並不等價。Windows 上的
+    /// `print()` 走的是 CRT 的**文字模式** stdout，那會把每一個 `\n` 換成 `\r\n`——於是
+    /// `--dry-run`、`--version` 與 `--help` 輸出的是 CRLF，而資料路徑輸出的是 LF，同一支程式、
+    /// 同一條流。「輸出永遠以 LF 作為行尾」是第 11 階段被給予的約束，而第 11 階段自己的
+    /// `--dry-run` 違反了它。KT。
+    static func writeStdout(_ text: String) {
+        _ = writeAll(fd: 1, [UInt8](text.utf8))
+    }
+
     /// What kind of thing a path names, for the one question csv2 asks about
     /// it: can a temp file be renamed onto this?
     ///

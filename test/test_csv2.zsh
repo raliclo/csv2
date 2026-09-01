@@ -12883,6 +12883,51 @@ for _t232_r in README.md README.zh-TW.md; do
 done
 
 echo
+echo "--- T233: stdout messages end in LF, like everything else / T233：stdout 上的訊息以 LF 結尾，與其他一切相同 ---"
+# KT. "Output always uses LF as the end of line" is the constraint phase 11 was
+# given, and phase 11's own --dry-run broke it: `print()` goes through the
+# CRT's TEXT-mode stdout on Windows and turns every LF into CRLF. --version and
+# --help went the same way. The data path and stderr never did, because they
+# write bytes through writeAll.
+# KT。「輸出永遠以 LF 作為行尾」是第 11 階段被給予的約束，而第 11 階段自己的 --dry-run 違反了它：
+# `print()` 在 Windows 上走 CRT 的**文字模式** stdout，把每一個 LF 換成 CRLF。--version 與
+# --help 也是同一條路。資料路徑與 stderr 從來沒有這個問題，因為它們是用 writeAll 直接寫位元組。
+#
+# It survived because nothing had ever compared the BYTES of a message on
+# stdout. T47 compares the data path sha256 by sha256; T58 compares the TEXT of
+# messages on stderr. This is the gap between them, and T232 fell into it by
+# accident -- one of its twelve README examples is a --dry-run.
+# 它之所以活下來，是因為從來沒有東西比對過 stdout 上一則**訊息的位元組**。T47 逐一以 sha256
+# 比對資料路徑；T58 比對 stderr 上訊息的**文字**。這是那兩者之間的縫，而 T232 是意外掉進去的
+# ——它十二道 README 範例裡有一道正好是 --dry-run。
+printf 'k,v\n甲,乙\na,1\n' > "$TMP/t233.csv2"
+_t233_bad=""
+for _t233_case in version help dryrun; do
+    case $_t233_case in
+        version) _t233_out=$("$CSV2" --version 2>/dev/null | od -c | tr -d ' \n') ;;
+        help)    _t233_out=$("$CSV2" --help 2>/dev/null | od -c | tr -d ' \n') ;;
+        dryrun)  _t233_out=$("$CSV2" -update 1:v '2' --dry-run -i "$TMP/t233.csv2" --in-place 2>/dev/null | od -c | tr -d ' \n') ;;
+    esac
+    [[ -z $_t233_out ]] && { _t233_bad="$_t233_bad $_t233_case(no-output)"; continue }
+    [[ $_t233_out == *'\r'* ]] && _t233_bad="$_t233_bad $_t233_case(CR)"
+done
+if [[ -z ${_t233_bad// /} ]]; then
+    ok "T233a --version, --help and --dry-run carry no CR on stdout / --version、--help 與 --dry-run 在 stdout 上不帶 CR"
+else
+    bad "T233a CR on stdout from:${_t233_bad} / 這些在 stdout 上帶了 CR"
+fi
+
+# The guard: an empty capture would make the CR test vacuously true, and this
+# is a test whose whole subject is a byte that is easy not to look for.
+# 守衛：一個空的捕捉會讓上面那個 CR 檢查空洞地成立，而這正是一個「全部主題就是一個很容易不去找
+# 的位元組」的測試。
+if [[ $("$CSV2" --version 2>/dev/null | wc -c) -gt 10 && $("$CSV2" --help 2>/dev/null | wc -l) -gt 50 ]]; then
+    ok "T233b and both actually produced output to inspect / 而兩者確實產生了可供檢查的輸出"
+else
+    bad "T233b --version or --help produced too little to inspect / --version 或 --help 產生的輸出少到無從檢查"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

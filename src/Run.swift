@@ -2070,7 +2070,12 @@ func runEdit(_ o: Options) throws {
     aborted = false
 
     if o.dryRun {
-        for change in dryRunChanges { print(change) }
+        // Not `print()`: on Windows that goes through the CRT's text-mode
+        // stdout and turns the LF into CRLF, while every data path here emits
+        // LF. Same program, same stream, two line endings. KT.
+        // 不用 `print()`：在 Windows 上它走的是 CRT 的文字模式 stdout，會把那個 LF 換成 CRLF，
+        // 而這裡每一條資料路徑輸出的都是 LF。同一支程式、同一條流、兩種行尾。KT。
+        for change in dryRunChanges { Platform.writeStdout(change + "\n") }
     }
 
     // After the data file is renamed into place, never before. Interrupted

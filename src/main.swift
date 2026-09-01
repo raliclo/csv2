@@ -761,7 +761,7 @@ func parseArgs(_ argv: [String]) throws -> Options {
             // 而它回報同一個字串（NN，2026-08-20）；以及一次安裝複製了 496,128 位元組的檔案而不是
             // 剛建好的 543,744 位元組那個，兩者都說自己是 `csv2 0.1.0`（2026-08-27）。那些檢查現在
             // 比對的是**檔案**，那是對的，而這一項讓版本字串也答得出來。
-            print("csv2 \(CSV2_VERSION) (\(CSV2_BUILD))")
+            Platform.writeStdout("csv2 \(CSV2_VERSION) (\(CSV2_BUILD))\n")
             exit(0)
         case "h", "help":
             printHelp()
@@ -2520,7 +2520,7 @@ func checkFieldCount(_ r: Record, expected: Int, what: String) throws {
 // ---------------------------------------------------------------------
 
 func printHelp() {
-    print("""
+    Platform.writeStdout("""
     csv2 \(CSV2_VERSION) — a CSV parser and editor that fails loudly
     csv2 \(CSV2_VERSION) —— 會大聲失敗的 CSV 解析器與編輯器
 
@@ -2646,7 +2646,7 @@ func printHelp() {
       * 寫出的紀錄分隔符永遠是 LF；引號內的位元組是資料，原樣保留（含 CR）。
       * 紀錄號數的是資料筆數，標頭是 0（0a / 0b）。
       * 不加 -t 就把資料列寫進 .csv/.csv2 會被拒絕。
-    """)
+    """ + "\n")
 }
 
 // ---------------------------------------------------------------------

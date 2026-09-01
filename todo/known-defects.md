@@ -8637,3 +8637,39 @@ sleep 1
 
 修法有兩半:把「沒測到」與「洩漏」分成兩個清單,各自用自己的話回報;以及把固定的 `sleep 1` 換成
 「輪詢到出現為止,最多 N 秒」,好讓忙碌的機器不會把它變成一次假的失敗。
+
+## KT. stdout 上的「訊息」在 Windows 是 CRLF,而同一支程式的資料是 LF(2026-09-01,T232 抓到)
+
+第 11 階段的決定連同一條貫穿約束一起給出:**輸出永遠以 LF 作為行尾。** `--dry-run` 是那一階段
+加的功能,而它違反了同一階段的約束。
+
+在 Windows 節點上實測(`csv2 0.1.0 (3eca4da)`):
+
+```console
+$ csv2 -update 1:version '1.3.2' --dry-run -i pkgs.csv2 --in-place | od -c
+...   "   1   .   3   .   2   "  \r  \n        <- CRLF
+$ csv2 -r -i pkgs.csv2 | od -c
+...   B   S   D  \n                            <- LF
+```
+
+**同一支程式、同一個 stdout、兩種行尾。** 不只 `--dry-run`:
+
+| 路徑 | Windows 上的行尾 | 用什麼寫 |
+|---|---|---|
+| 資料(`-r`、`-get`、`-md`…) | `\n` | `ByteSink` → `writeAll` |
+| `--dry-run` | `\r\n` | Swift 的 `print()` |
+| `--version` | `\r\n` | `print()` |
+| `--help` | `\r\n` | `print()` |
+| 錯誤訊息(stderr) | `\n` | `Platform.writeStderr` → `writeAll` |
+
+原因是 `print()` 走 CRT 的**文字模式** stdout,而那在 Windows 上會把 `\n` 換成 `\r\n`。
+資料路徑與 stderr 都用 `writeAll` 直接寫位元組,不經過那層轉換。
+
+**為什麼到現在才被發現。** 這棵樹的跨平台測試比對的是**資料**路徑的位元組(T47 逐一 sha256)、
+以及 stderr 上的訊息文字;沒有任何一個測試比對過 **stdout 上的訊息**的位元組。T232 是第一個
+——它把 README 範例的預期輸出拿去和實際輸出比,而 `--dry-run` 那一道正好在裡面。
+
+**它在四個平台的第一次執行就抓到了。** macOS、guest、WSL 三個通過,Windows 兩份 README 各一道
+不符,而印出來的 want 與 got **看起來完全相同**——差異是不可見的那一個位元組。
+
+修法:那三條路徑改用與資料相同的位元組寫出,不要用 `print()`。
