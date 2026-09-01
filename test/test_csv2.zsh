@@ -27,6 +27,46 @@ set -uo pipefail
 HERE="${0:A:h}"
 ROOT="${HERE:h}"
 
+# What this file looked like when the run began. zsh reads a script AS it
+# executes it, so editing this file mid-run means the second half runs code the
+# first half never saw -- and nothing says so. On 2026-09-01 a rerun started to
+# answer whether T131f was flaky reported a total two higher than the file held
+# when it began, because T232 had been added while it ran. A test whose input
+# changes partway is not answering the question it was started for. KR.
+# 這個檔案在這次執行「開始時」的樣子。zsh 是**邊讀邊執行**一個腳本的，因此在執行中修改它，
+# 意味著後半段跑的是前半段從未見過的程式碼——而沒有任何東西會說出來。2026-09-01，一次為了回答
+# 「T131f 是不是偶發」而啟動的重跑，回報的總數比它啟動時檔案裡的案例數多了兩個，因為 T232 是在
+# 它跑的期間被加進去的。一個「輸入中途改變」的測試，回答的不是它被啟動時要問的那個問題。KR。
+#
+# size AND mtime: mtime alone is seconds-resolution and an edit inside the same
+# second leaves it unchanged -- measured, when probing this. Together they miss
+# only a same-second edit that also preserves the byte count, which a run
+# lasting minutes makes vanishingly unlikely. Stating the limit beats implying
+# there is none.
+# 用 size **與** mtime：只靠 mtime 的話，它是秒級解析度，同一秒內的編輯不會改變它——這是在
+# 探測這件事時實際量到的。兩者合起來只漏掉「同一秒內、且位元組數不變」的編輯，而在一次持續數
+# 分鐘的執行裡那幾乎不可能發生。說出限界，好過假裝沒有限界。
+zmodload -F zsh/stat b:zstat 2>/dev/null
+# The path is captured HERE, at file scope, not inside the function. zsh sets
+# `$0` to the FUNCTION NAME inside a function (FUNCTION_ARGZERO), so
+# `zstat -- "${0:A}"` in there stats a file called `suite_stamp` that does not
+# exist -- the stamp comes back empty and the guard reports "could not stamp
+# itself" on every single run. Caught by driving the guard against a stand-in
+# script rather than by running the real suite, where one more FAIL among 1141
+# would have been read as something else entirely.
+# 路徑是在**這裡**、在檔案層級取得的，不是在函式內。zsh 在函式內會把 `$0` 設成**函式名稱**
+# （FUNCTION_ARGZERO），因此在裡面寫 `zstat -- "${0:A}"` 會去 stat 一個叫 `suite_stamp` 的
+# 不存在的檔案——戳記回來是空的，而那道守衛會在**每一次**執行都回報「無法為自己取得戳記」。
+# 這是靠「用一個替身腳本去驅動那道守衛」抓到的，而不是靠跑真正的測試——在 1141 個案例裡多一個
+# FAIL，會被讀成完全另一回事。
+SUITE_PATH="${0:A}"
+suite_stamp() {
+    local -A _st
+    zstat -H _st -- "$SUITE_PATH" 2>/dev/null || return 1
+    print -r -- "${_st[size]}:${_st[mtime]}"
+}
+SUITE_STAMP_AT_START=$(suite_stamp) || SUITE_STAMP_AT_START=""
+
 # Which platform this is running on. Three cases need it, and all three are the
 # ENVIRONMENT's limits rather than csv2's -- a POSIX FIFO that a native Windows
 # binary cannot see, and a command line that arrives as UTF-16 with no raw
@@ -13296,6 +13336,21 @@ fi
 # FAIL 會跟著呼叫端的 stdout 走。當那個不存在的指令位在 `x=$(...)` 裡時，那一行會被收進
 # 一個變數、永遠到不了 log：guest 於是回報了八個「沒有名字」的失敗，而那比它取代掉的報告
 # 更糟。
+# Checked last, because the answer only matters once everything above has run.
+# A changed stamp does not mean any particular case is wrong -- it means the
+# whole total is describing a file that no longer exists, so it is reported as
+# a failure rather than a note.
+# 最後才檢查，因為這個答案要等上面全部跑完才有意義。戳記改變並不表示某個特定案例錯了——它表示
+# 整個總數描述的是一個已經不存在的檔案，因此它以「失敗」而不是「附註」的身分被回報。
+_suite_stamp_now=$(suite_stamp) || _suite_stamp_now=""
+if [[ -z $SUITE_STAMP_AT_START || -z $_suite_stamp_now ]]; then
+    print -r -- "FAIL  the suite could not stamp itself, so a mid-run edit would go unnoticed / 這份測試無法為自己取得戳記，因此執行期間的修改不會被察覺"
+    fail=$((fail + 1))
+elif [[ $SUITE_STAMP_AT_START != $_suite_stamp_now ]]; then
+    print -r -- "FAIL  this file changed while the run was in progress ($SUITE_STAMP_AT_START -> $_suite_stamp_now); the totals below describe a file that no longer exists / 這個檔案在執行期間被改動過（如上）；下面的統計描述的是一個已經不存在的檔案"
+    fail=$((fail + 1))
+fi
+
 if [[ -s $MISSING_LOG ]]; then
     for _missing in ${(f)"$(sort -u "$MISSING_LOG")"}; do
         print -r -- "FAIL  the suite called \"$_missing\", which does not exist here / 測試呼叫了「$_missing」，而它在這個平台上不存在"
