@@ -41,6 +41,15 @@ let BYTE_DQUOTE: UInt8 = 0x22
 let BYTE_LF: UInt8 = 0x0A
 let BYTE_CR: UInt8 = 0x0D
 let BYTE_BACKSLASH: UInt8 = 0x5C
+/// Only ever used to RECOGNISE a line someone meant as a comment, never to
+/// skip one. CSV has no comment syntax and `#id` is a legal column name, so
+/// treating this byte as anything but data would mean guessing which lines
+/// are data -- the guess this tool exists to refuse. It appears solely inside
+/// two refusal messages, to say WHY the count did not match. KP.
+/// 這個位元組只被用來「認出」一行別人打算當註解的東西，從不用來跳過它。CSV 沒有註解語法，
+/// 而 `#id` 是合法的欄名，因此把這個位元組當成資料以外的任何東西，就等於去猜哪些行是資料
+/// ——那正是這個工具存在所要拒絕的猜測。它只出現在兩則拒絕訊息裡，用來說出「為什麼欄數對不上」。KP。
+let BYTE_HASH: UInt8 = 0x23
 let BYTE_SPACE: UInt8 = 0x20
 let BYTE_TAB: UInt8 = 0x09
 let BOM: [UInt8] = [0xEF, 0xBB, 0xBF]

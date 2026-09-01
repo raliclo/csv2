@@ -131,6 +131,13 @@ csv2: vs-sqlite.csv2 declares 2 header row(s) by its suffix, but --headers says 
 csv2：vs-sqlite.csv2 的副檔名宣告了 2 列標頭，但 --headers 說 1 列。副檔名宣告格式，--headers 是給「沒有副檔名可宣告」的輸入用的。請拿掉 --headers，照這個檔案原本的樣子讀它。改檔名是讓副檔名去遷就 --headers，那不是同一件事：一列標頭會因此變成第 1 筆資料，rc=0，而事後沒有任何東西看得出它曾經是標頭
 ```
 
+**A `#` line is data, not a comment.** CSV has no comment syntax, and a
+column named `#id` is legal, so skipping such a line would mean guessing which
+lines are data. A file with `# ...` at the top is refused by naming the `#`
+rather than by counting fields, because the count is two steps from the cause.
+Remove the line, or read the file under a name with no `.csv`/`.csv2` suffix,
+where every line is one field.
+
 ## Editing
 
 ```sh

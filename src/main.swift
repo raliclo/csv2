@@ -2498,6 +2498,17 @@ func checkFieldCount(_ r: Record, expected: Int, what: String) throws {
                 "\(what) is a blank line, and a blank line is not a record with \(expected) empty fields; remove it. A file that ends with two newlines has one",
                 "\(what) 是一個空白行，而空白行不是「一筆有 \(expected) 個空欄位的紀錄」；請把它移除。以兩個換行結尾的檔案就有一個")
         }
+        // The same shape as the blank line above, and more common: a `#` line
+        // is what many tools put at the top of a CSV. The reader sees a
+        // message about field counts and goes looking for a missing comma,
+        // when the answer is the line they wrote themselves.
+        // 與上面那個空白行是同一個形狀，而且更常見：`#` 開頭的一行，是許多工具放在 CSV 最前面
+        // 的東西。讀者看到的是一則關於欄數的訊息，於是去找一個少掉的逗號，而答案是他自己寫的那一行。
+        if r.count == 1, r.fields.first?.value.first == BYTE_HASH {
+            throw fault(
+                "\(what) starts with '#'. csv2 has no comment syntax: in CSV a '#' is data, and a column named '#id' is legal, so skipping such a line would mean guessing which lines are data. Remove the line, or read the file under a name with no .csv/.csv2 suffix, where every line is one field",
+                "\(what) 以 '#' 開頭。csv2 沒有註解語法：在 CSV 裡 '#' 是資料，而一個叫 '#id' 的欄位是合法的，因此跳過這樣的一行就等於去猜哪些行是資料。請移除那一行，或把這個檔案以「沒有 .csv／.csv2 副檔名」的名字讀取——那時每一行就是一個欄位")
+        }
         throw fault(
             "\(what) has \(r.count) fields but the header has \(expected); csv2 will not pad or truncate to fit",
             "\(what) 有 \(r.count) 欄，標頭有 \(expected) 欄；csv2 不會補空或截斷來湊合")

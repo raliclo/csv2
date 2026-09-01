@@ -205,6 +205,20 @@ func validateHeaders(_ headers: [Record], want: Int, path: String) throws {
     // match it. Never pad to fit -- this is the check artifacts.csv lacked.
     // 兩列標頭必須有相同的欄數，且與資料相同。絕不補空湊合——這正是
     // artifacts.csv 當時缺少的檢查。
+    // Checked BEFORE the field-count comparison, because a leading `# ...`
+    // line becomes the header and the mismatch is then reported against rows
+    // that are all correct. This is the most common shape of KP: the comment
+    // is the FIRST line, so it is the header that is wrong, and every message
+    // downstream describes a symptom two steps from the cause.
+    // 這一項排在欄數比較**之前**，因為一行開頭的 `# ...` 會變成標頭，於是那個不符會被回報在
+    // 一堆本身完全正確的列上。這是 KP 最常見的形狀：註解是**第一行**，因此錯的是標頭，
+    // 而它下游的每一則訊息描述的都是離原因兩步之遙的症狀。
+    if let first = headers.first, first.count == 1,
+       first.fields.first?.value.first == BYTE_HASH {
+        throw fault(
+            "\(path): the header row starts with '#'. csv2 has no comment syntax: in CSV a '#' is data, and a column named '#id' is legal, so skipping such a line would mean guessing which lines are data. Remove the line, or read the file under a name with no .csv/.csv2 suffix, where every line is one field",
+            "\(path)：標頭列以 '#' 開頭。csv2 沒有註解語法：在 CSV 裡 '#' 是資料，而一個叫 '#id' 的欄位是合法的，因此跳過這樣的一行就等於去猜哪些行是資料。請移除那一行，或把這個檔案以「沒有 .csv／.csv2 副檔名」的名字讀取——那時每一行就是一個欄位")
+    }
     if headers.count > 1 && headers[0].count != headers[1].count {
         throw fault(
             "\(path): header row 0a has \(headers[0].count) fields, row 0b has \(headers[1].count); a .csv2 header must have the same field count on both rows",

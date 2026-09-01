@@ -12689,6 +12689,106 @@ fi
 rm -f "$TMP/t218probe.zsh"
 
 echo
+echo "--- T230: a '#' comment line names itself / T230：`#` 註解行會指名自己 ---"
+# KP. Many tools put a `# ...` line at the top of a CSV. csv2 refuses those --
+# correctly, because CSV has no comment syntax and `#id` is a legal column
+# name, so skipping one would mean guessing which lines are data. What was
+# missing is that the refusal talked about FIELD COUNTS: a reader sees "record
+# 1 has 2 fields but the header has 1" and goes looking for a missing comma,
+# when the answer is the line they wrote themselves.
+# KP。許多工具會在 CSV 最前面放一行 `# ...`。csv2 拒絕它們——而那是對的，因為 CSV 沒有註解語法，
+# 而 `#id` 是合法的欄名，跳過它就等於去猜哪些行是資料。缺的是：那道拒絕講的是**欄數**。讀者看到
+# 「record 1 有 2 欄，標頭有 1 欄」就去找一個少掉的逗號，而答案是他自己寫的那一行。
+printf '# this is a comment\nk,v\na,b\n' > "$TMP/t230head.csv"
+printf 'k,v\n# mid comment\na,b\n' > "$TMP/t230mid.csv"
+printf '# c\nk,v\n甲,乙\na,b\n' > "$TMP/t230.csv2"
+_t230_ok=1
+for _t230_f in t230head.csv t230mid.csv t230.csv2; do
+    _t230_e=$("$CSV2" -r -i "$TMP/$_t230_f" 2>&1 >/dev/null)
+    if [[ $? == 0 || $_t230_e != *"no comment syntax"* ]]; then
+        _t230_ok=0
+        bad "T230a $_t230_f: ${_t230_e:0:80} / 實得如上"
+    fi
+done
+(( _t230_ok )) && ok "T230a a '#' line is refused by naming itself, at the head of a .csv, mid-file, and in a .csv2 / `#` 開頭的一行會以「指名自己」的方式被拒絕——.csv 的開頭、檔案中段，以及 .csv2 裡"
+
+# The claim the message itself makes, and the one that would break real files
+# if the recognition were turned into a skip: `#id` is a legal column name.
+# 那則訊息自己做出的宣稱，也是「如果把『認出』變成『跳過』就會弄壞真實檔案」的那一項：
+# `#id` 是一個合法的欄名。
+printf '#id,v\n1,b\n' > "$TMP/t230legal.csv"
+if [[ $("$CSV2" -r -i "$TMP/t230legal.csv" 2>/dev/null) == '1,b' \
+      && $("$CSV2" -get 1:'#id' -i "$TMP/t230legal.csv" 2>/dev/null) == '1' ]]; then
+    ok "T230b while a column actually NAMED #id still reads and is addressable / 而一個真的叫 #id 的欄位仍然讀得出來、也定址得到"
+else
+    bad "T230b got: $("$CSV2" -r -i "$TMP/t230legal.csv" 2>&1 | head -1) / 實得如上"
+fi
+
+# The way out the message offers has to work, or it is worse than no advice.
+# 那則訊息提供的出路必須真的可行，否則它比沒有建議更糟。
+printf '# c\na\nb\n' > "$TMP/t230lines"
+if [[ $("$CSV2" -r -i "$TMP/t230lines" 2>/dev/null) == '# c
+a
+b' ]]; then
+    ok "T230c and the way out the message names works: no suffix, one field per line / 而訊息指出的那條出路可行：沒有副檔名時，一行就是一個欄位"
+else
+    bad "T230c the suggested way out did not work / 訊息建議的出路行不通"
+fi
+
+echo
+echo "--- T231: no case number is used twice / T231：沒有案例編號被用兩次 ---"
+# Written after colliding twice. T214 collided with the Windows node's
+# warnings-as-errors cases; T219 collided with -update-where's. The second
+# time the evidence was on screen -- `grep -c 'T219'` printed 10 -- and it was
+# not read. Numbers had reached 229 while I assumed the next free one was 219.
+# 寫在撞號兩次之後。T214 與 Windows 節點那組「警告即錯誤」的案例撞號；T219 與 -update-where 的
+# 撞號。第二次時證據就在螢幕上——`grep -c 'T219'` 印出 10——而它沒有被讀。編號早已到 229，
+# 而我假設下一個空號是 219。
+#
+# The test is a SPAN, not a count: one case legitimately has several ok/bad
+# lines (loops, multiple failure branches), so counting occurrences flags a
+# dozen false positives. A collision instead puts the same number in two parts
+# of the file far apart. At 1135 cases the only span over 100 lines was the
+# real collision -- zero false positives.
+# 這個測試看的是**跨度**，不是次數：一個案例合理地會有好幾行 ok/bad（迴圈、多個失敗分支），
+# 因此用「出現次數」去判會標出十幾個誤報。而撞號會把同一個編號放在檔案裡相距很遠的兩處。
+# 在 1135 個案例上，唯一跨度超過 100 行的就是那個真正的撞號——零誤報。
+_t231_dups=$(awk '
+  match($0, /^[[:space:]]*(ok|bad)[[:space:]]+"T[0-9]+[a-z]*/) {
+    s = substr($0, RSTART, RLENGTH)
+    sub(/^[[:space:]]*(ok|bad)[[:space:]]+"/, "", s)
+    if (!(s in lo)) lo[s] = NR
+    hi[s] = NR
+  }
+  END { for (k in lo) if (hi[k] - lo[k] > 100) printf "%s (lines %d and %d) ", k, lo[k], hi[k] }
+' "${0:A}")
+if [[ -z $_t231_dups ]]; then
+    ok "T231a no case number appears in two distant parts of this file / 沒有任何案例編號出現在這個檔案相距很遠的兩處"
+else
+    bad "T231a numbers used twice: $_t231_dups / 有編號被用了兩次"
+fi
+
+# The span rule only works if the scan sees the file at all. Same guard as
+# T218a: a check that silently reads nothing passes hardest when it has
+# stopped working.
+# 跨度規則只在「掃描真的讀到這個檔案」時才有效。與 T218a 同一道守衛：一個安靜地什麼都沒讀的
+# 檢查，會在它停止運作時通過得最徹底。
+_t231_seen=$(awk 'match($0, /^[[:space:]]*(ok|bad)[[:space:]]+"T[0-9]+/) { n++ } END { print n+0 }' "${0:A}")
+# The threshold is far below the real figure on purpose. It was first written
+# as 500 against an actual 502 -- a guard two lines from firing on an unrelated
+# edit, and a guard that cries wolf is one somebody switches off. What it has
+# to tell apart is "read the file" from "read nothing", and those differ by
+# hundreds, not by two.
+# 這個門檻刻意遠低於實際數字。它第一版寫的是 500，而實際是 502——一道「差兩行就會被無關改動觸發」
+# 的守衛，而一道會亂叫的守衛，是會被人關掉的那種。它要分辨的是「讀到了檔案」與「什麼都沒讀到」，
+# 而那兩者相差的是好幾百，不是二。
+if (( _t231_seen > 100 )); then
+    ok "T231b and the scan actually read this file ($_t231_seen case lines) / 而那次掃描真的讀到了這個檔案（$_t231_seen 行案例）"
+else
+    bad "T231b the scan saw only $_t231_seen case lines, so it checked nothing / 掃描只看到 $_t231_seen 行案例，等於什麼都沒檢查"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
