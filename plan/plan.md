@@ -3892,7 +3892,7 @@ first. `--headers 1|2` against a `.csv`/`.csv2` is still refused.
 - [x] `--headers 1|2` against a declaring suffix still refused -- T235e / 仍然拒絕——T235e
 - [x] `.md` without it still means a table -- T235d / 不給它的 `.md` 仍然表示一張表——T235d
 - [x] both READMEs and `--help` / 兩份 README 與 `--help`
-- [ ] four platforms / 四個平台
+- [x] four platforms / 四個平台 — 2026-09-01 @ eae55a1
 
 ### Decided while implementing / 實作時定下的
 
