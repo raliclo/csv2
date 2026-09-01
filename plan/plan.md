@@ -3792,6 +3792,127 @@ README 把這件事明說了；`--backup` 是讓它從「已揭露」變成「�
 - [x] both READMEs and `--help` for each / 每一條都要進兩份 README 與 `--help`
 - [x] four platforms / 四個平台 — 2026-09-01 @ 4542fed
 
+## Phase 12: `--headers 0`, so the line-oriented format can be asked for / 第 12 階段：`--headers 0`，讓「逐行」那個格式可以被指名
+
+Requested 2026-09-01, from a user trying to edit prose `.md` files and finding
+no way in that was not a workaround.
+
+2026-09-01 提出，來自一位試圖編輯散文 `.md`、而發現「沒有一條路不是繞道」的使用者。
+
+### The gap, measured / 那個缺口，量過的
+
+`.lines` -- zero header rows, one column, bytes verbatim -- is a first-class
+format in the README's own table. It is also the only format that **cannot be
+asked for**. It is declared by the ABSENCE of a suffix, and absence is not
+something a caller can supply:
+
+`.lines`——零列標頭、一欄、位元組原樣——在 README 自己的格式表裡是一等格式。它同時也是唯一一個
+**無法被指名**的格式。它是靠「沒有副檔名」來宣告的，而「沒有」不是呼叫端給得出來的東西：
+
+```console
+$ csv2 -r -si --headers 0 < doc.md
+csv2: --headers takes 1 or 2
+
+$ csv2 -r -si < doc.md
+csv2: -si needs --headers 1 or --headers 2: stdin has no extension to declare
+the format
+```
+
+**stdin has no extension, and the one format built for exactly that case is
+the one it cannot name.** The same wall stands in front of a prose `.md`: the
+suffix says "a table", and the only way through today is to copy the file to a
+name with no suffix, edit that, and copy it back.
+
+**stdin 沒有副檔名，而那個「正是為這種情況而生」的格式，恰恰是它指名不了的那一個。** 同一道牆
+也擋在散文 `.md` 前面：那個副檔名說的是「一張表」，而今天唯一的走法是把檔案複製成一個沒有副檔名
+的名字、編輯它、再複製回去。
+
+### Decided / 已定案
+
+**`--headers 0` means "do not parse structure; read this line by line".** It is
+not a third value on the same axis as 1 and 2. Those two argue about how many
+header rows a CSV has; 0 says the file is not being read as CSV at all. That
+distinction is what makes the rest of this coherent.
+
+**`--headers 0` 的意思是「不要解析結構，把這個逐行讀」。** 它不是「1 和 2 那條軸上的第三個值」。
+那兩個在爭論「這個 CSV 有幾列標頭」；0 說的是「這個檔案根本不當 CSV 讀」。這個區分，是底下其餘
+每一件事說得通的原因。
+
+**Allowed on ANY input, including one whose suffix declares a format.** The
+alternative -- allowing it only for stdin and `.md` -- was considered and
+rejected: it would need a list of which suffixes it works on, and a list like
+that drifts away from the code it describes. One rule is easier to state and
+harder to get wrong:
+
+**允許用於任何輸入，包括副檔名已經宣告了格式的那些。** 另一個選項——只對 stdin 與 `.md` 開放
+——考慮過並否決了：那需要一份「它對哪些副檔名有效」的清單，而那種清單會與它描述的程式反向漂移。
+一條規則比較容易說清楚，也比較難搞錯：
+
+| | 與有副檔名的輸入併用 |
+|---|---|
+| `--headers 1` / `--headers 2` | **拒絕** — 副檔名已經回答了「幾列標頭」，而這是在同一個問題上給出第二個答案 |
+| `--headers 0` | **允許** — 這不是在回答那個問題，是在說不要問它 |
+
+**Reading is only half.** A run that reads with `--headers 0` must be able to
+write back, or the flag solves nothing for the case it was asked for. What it
+writes is what it read: one field per line, bytes verbatim. The guard that
+refuses "this run writes CSV into a `.md`" must not fire, because this run is
+not writing CSV -- it is writing the lines it was given.
+
+**讀只是一半。** 一次以 `--headers 0` 讀進來的執行必須能寫回去，否則這個旗標對它被要求的那個
+情況等於什麼也沒解決。它寫出的就是它讀進來的：每行一個欄位，位元組原樣。那道「這次執行把 CSV
+寫進一個 `.md`」的守衛不該觸發，因為這次執行寫的不是 CSV——它寫的是它拿到的那些行。
+
+**What does NOT change.** `.md` without `--headers 0` still means a table, and
+reading one line by line is still refused with a pointer to `--md-table N`.
+KC still holds: `-add-column` on a line-oriented file is refused, because a
+comma there is data and a second column would be read back as part of the
+first. `--headers 1|2` against a `.csv`/`.csv2` is still refused.
+
+**不改變的部分。** 不給 `--headers 0` 的 `.md` 仍然表示一張表，而逐行讀它仍然會被拒絕並指向
+`--md-table N`。KC 仍然成立：對一個逐行的檔案用 `-add-column` 會被拒絕，因為那裡的逗號是資料，
+而第二欄讀回來時會變成第一欄的一部分。`.csv`／`.csv2` 搭配 `--headers 1|2` 仍然被拒。
+
+### To decide while implementing / 實作時要定的
+
+- Whether `--headers 0` with `-o out.csv` is a refusal. Writing lines into a
+  `.csv` name produces a one-column CSV, which is legal -- but the suffix would
+  then describe something the run never parsed as CSV.
+  `--headers 0` 搭配 `-o out.csv` 該不該拒絕。把「行」寫進一個 `.csv` 名字會產生一個單欄的 CSV，
+  那是合法的——但那個副檔名描述的，會是一個這次執行從未當作 CSV 解析過的東西。
+- Whether the existing `.md` + `--headers` refusal message needs to name the
+  new case, or whether refusing 1|2 by their own reason is enough.
+  既有那則「`.md` + `--headers`」的拒絕訊息，需不需要指名這個新情況；還是「以 1|2 自己的理由拒絕
+  它們」就夠了。
+
+- [x] the decisions above, in this file, before code / 上面那些決定寫在這個檔案裡，然後才寫程式
+- [x] `--headers 0` accepted, meaning line-oriented -- T235a / `--headers 0` 被接受，意思是「逐行」——T235a
+- [x] works for stdin, which could not name this format at all -- T235b / 對 stdin 有效——T235b
+- [x] works for a prose `.md`, read AND written back -- T235c / 對散文 `.md` 有效，讀與寫回去——T235c
+- [x] `--headers 1|2` against a declaring suffix still refused -- T235e / 仍然拒絕——T235e
+- [x] `.md` without it still means a table -- T235d / 不給它的 `.md` 仍然表示一張表——T235d
+- [x] both READMEs and `--help` / 兩份 README 與 `--help`
+- [ ] four platforms / 四個平台
+
+### Decided while implementing / 實作時定下的
+
+- **Reading was only half, and the second half was already refused.** The
+  first working version read a prose `.md` and then hit the output guard on
+  the way back: *"this run writes CSV"* into a `.md`. But it does not -- it
+  writes back the lines it was given, bytes verbatim. `--headers 0` is exempt
+  there for the same reason it is exempt from the suffix conflict: the run
+  never parsed the input as CSV, so there is no CSV to be writing. Without
+  that exemption phase 12 would READ a prose `.md` and never write one, which
+  solves nothing for the case it was asked for. The plan named this before the
+  code did, which is why it read as the expected second half rather than a
+  surprise.
+  **讀只是一半，而第二半原本是被拒絕的。** 第一個能動的版本讀得了散文 `.md`，卻在寫回去時撞上
+  輸出側的守衛：「這次執行把 CSV 寫進一個 `.md`」。但它並沒有——它寫回去的是它拿到的那些行，
+  位元組原樣。`--headers 0` 在那裡獲得豁免，理由與它豁免於副檔名衝突是同一個：這次執行從未把
+  輸入當 CSV 解析，因此沒有「CSV」正在被寫出。少了那個豁免，第 12 階段會變成「讀得了散文 `.md`、
+  卻永遠寫不出一份」，而那對它被要求的情況等於什麼也沒解決。**計畫在程式碼之前就指名了這一點**，
+  那正是它讀起來像「預期中的第二半」而不是一個意外的原因。
+
 ## 待決問題
 
 1. ~~submodule 掛在哪裡~~ —— 已定：`sos/csv2`。

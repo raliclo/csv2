@@ -1135,8 +1135,8 @@ func validate(_ o: inout Options) throws {
         // wrong eats the first record as a header without saying anything.
         // stdin 沒有檔名就沒有副檔名，格式無法成為被宣告的事實。此處的預設值
         // 就是猜測，而猜錯會把第一筆資料當成標頭吃掉，且什麼都不說。
-        throw usageError("-si needs --headers 1 or --headers 2: stdin has no extension to declare the format",
-                         "-si 需要 --headers 1 或 --headers 2：stdin 沒有可宣告格式的副檔名")
+        throw usageError("-si needs --headers 0, 1 or 2: stdin has no extension to declare the format. 0 reads it as lines -- one field each, bytes verbatim",
+                         "-si 需要 --headers 0、1 或 2：stdin 沒有可宣告格式的副檔名。0 表示把它當成一行行來讀——每行一個欄位，位元組原樣")
     }
     // `--md-table` picks a table out of a Markdown document, and there are no
     // tables to pick out of anything else. It was ACCEPTED and IGNORED on any
@@ -1171,8 +1171,21 @@ func validate(_ o: inout Options) throws {
                 "--md-table 是從一份 Markdown 文件裡取出一張表，而 \(o.input.map { "\($0)" } ?? "這個輸入") 不是；它裡面沒有可供挑選的表")
         }
     }
-    if let h = o.headersOverride, h != 1 && h != 2 {
-        throw usageError("--headers takes 1 or 2", "--headers 只能是 1 或 2")
+    // 0 is accepted and means something different in kind from 1 and 2: those
+    // two argue about how many header rows a CSV has, while 0 says the file is
+    // not being read as CSV at all -- one field per line, bytes verbatim. That
+    // is the `.lines` format, which until now was the only one that could not
+    // be ASKED for: it is declared by the ABSENCE of a suffix, and absence is
+    // not something a caller can supply. stdin has no suffix, so the format
+    // built for exactly that case was the one it could not name. Phase 12.
+    // 0 是被接受的，而且它與 1、2 在「種類」上就不同：那兩個在爭論「這個 CSV 有幾列標頭」，
+    // 而 0 說的是「這個檔案根本不當 CSV 讀」——每行一個欄位，位元組原樣。那就是 `.lines` 格式，
+    // 而它在此之前是唯一一個**無法被指名**的格式：它靠「沒有副檔名」來宣告，而「沒有」不是呼叫端
+    // 給得出來的東西。stdin 沒有副檔名，於是那個「正是為這種情況而生」的格式，恰恰是它指名不了的
+    // 那一個。第 12 階段。
+    if let h = o.headersOverride, h != 0 && h != 1 && h != 2 {
+        throw usageError("--headers takes 0, 1 or 2. 0 means one field per line, bytes verbatim -- the format a file with no .csv/.csv2 suffix already has, now available to stdin and to a .md read as prose",
+                         "--headers 只能是 0、1 或 2。0 表示每行一個欄位、位元組原樣——那是「沒有 .csv／.csv2 副檔名的檔案」本來就有的格式，現在 stdin 與「當成散文讀的 .md」也用得到")
     }
     if o.markdown && !o.withHeader {
         // A Markdown table needs a header row and its `|---|` separator. Not
@@ -1636,7 +1649,17 @@ func validate(_ o: inout Options) throws {
     // 副檔名「宣告」格式；--headers 的存在是為了「沒有副檔名可宣告」的輸入。當兩者
     // 都發言且互相牴觸時，其中一個是錯的而 csv2 分不出是哪一個——因此拒絕，與
     // `--build-index --no-index` 因自相矛盾而被拒是同一條規則。
-    if let h = o.headersOverride, let inp = o.input, let fmt = Format.from(path: inp) {
+    // `--headers 0` is exempt, and the exemption is the whole point of it: it
+    // does not offer a second answer to "how many header rows", it declines
+    // the question. A `.md` read that way is prose, not a table; a `.csv` read
+    // that way is lines, not records. Refusing it here would leave the flag
+    // useful only where there is no suffix -- which is exactly where it was
+    // never needed.
+    // `--headers 0` 是例外，而那個例外正是它存在的全部意義：它不是對「有幾列標頭」給出第二個
+    // 答案，它是拒絕回答那個問題。以那種方式讀的 `.md` 是散文而不是表；以那種方式讀的 `.csv`
+    // 是一行行的文字而不是紀錄。在這裡拒絕它，會讓這個旗標只在「沒有副檔名」時有用——而那正是
+    // 它從來不被需要的地方。
+    if let h = o.headersOverride, h != 0, let inp = o.input, let fmt = Format.from(path: inp) {
         if h != fmt.headerRows {
             throw usageError(
                 // Two remedies were offered as equals and they are not.
@@ -1683,7 +1706,15 @@ func validate(_ o: inout Options) throws {
     // 把 CSV 的位元組寫進一個 `.md`，會產生一個 csv2 自己拒讀的檔案，而且 rc=0。它的鏡像
     // ——`-md -o x.csv2`——早在 Markdown 還讀不回來之前就已經被拒絕；這個方向從來沒有守衛，
     // 而它是在 `.md` 開始宣告一種格式之後才變得走得到。
-    if let out = o.output, out.lowercased().hasSuffix(".md"), !o.markdown {
+    // `--headers 0` is exempt: the run did not parse the input as CSV and does
+    // not write CSV -- it writes back the lines it was given, bytes verbatim.
+    // Refusing here would have left phase 12 able to READ a prose `.md` and
+    // never write one, which solves nothing for the case it was asked for.
+    // `--headers 0` 是例外：這次執行並沒有把輸入當 CSV 解析，也不會寫出 CSV——它寫回去的是它
+    // 拿到的那些行，位元組原樣。在這裡拒絕，會讓第 12 階段變成「讀得了散文 `.md`、卻永遠寫不出
+    // 一份」，而那對它被要求的那個情況等於什麼也沒解決。
+    if let out = o.output, out.lowercased().hasSuffix(".md"), !o.markdown,
+       o.headersOverride != 0 {
         throw usageError(
             "\(out) ends in .md, which declares a Markdown table, and this run writes CSV. Add -md to render one, or choose a .csv/.csv2 destination",
             "\(out) 以 .md 結尾，那宣告的是一張 Markdown 表，而這次執行寫出的是 CSV。請加上 -md 來算繪一張，或改用 .csv／.csv2 的目的地")
@@ -2277,7 +2308,12 @@ func refuseLogAliases(_ o: Options) throws {
 func openInput(_ o: Options) throws -> InputPlan {
     if o.useStdin {
         let h = o.headersOverride ?? 1
-        return InputPlan(format: h == 2 ? .csv2 : .csv, headerRows: h,
+        // 0 is the line-oriented format, which stdin could not name before:
+        // it is declared by the absence of a suffix, and stdin has no name to
+        // be absent from. Phase 12.
+        // 0 是那個「逐行」的格式，而 stdin 在此之前指名不到它：它靠「沒有副檔名」宣告，
+        // 而 stdin 連一個「可以沒有副檔名」的名字都沒有。第 12 階段。
+        return InputPlan(format: h == 0 ? .lines : (h == 2 ? .csv2 : .csv), headerRows: h,
                          source: ByteSource(stdin: 1 << 16), describedPath: "<stdin>")
     }
     let path = o.input!
@@ -2290,6 +2326,17 @@ func openInput(_ o: Options) throws -> InputPlan {
     // 而沒有任何東西讀得回一張。標頭列數由那次翻譯回傳，因為它是**還原得出來**的——`-md` 用一個
     // 未跳脫的 `<br>` 把 .csv2 的兩個標題接起來——因此這裡不需要 --headers，也不可能被告知一個
     // 錯的值。
+    // `--headers 0` on a `.md` means "read this as prose, line by line" -- the
+    // case a user hit trying to edit a document whose suffix says "table". It
+    // is handled BEFORE the Markdown translation, because the whole point is
+    // not to translate. Phase 12.
+    // 對一個 `.md` 給 `--headers 0`，意思是「把它當散文、逐行讀」——那正是一位使用者在試圖編輯
+    // 一份「副檔名說它是表」的文件時撞到的情況。它排在 Markdown 翻譯**之前**處理，因為重點就是
+    // 不要翻譯。第 12 階段。
+    if path.lowercased().hasSuffix(".md"), o.headersOverride == 0 {
+        return InputPlan(format: .lines, headerRows: 0,
+                         source: try ByteSource(path: path), describedPath: path)
+    }
     if path.lowercased().hasSuffix(".md") {
         if o.headersOverride != nil {
             throw fault(
@@ -2544,7 +2591,14 @@ func printHelp() {
     INPUT / OUTPUT / 輸入輸出
       -i FILE  -o FILE   file paths; -o writes a temp file and renames
       -si  -so           stdin / stdout; neither buffers the whole file
-      --headers 1|2      required with -si: stdin has no extension
+      --headers 0|1|2    required with -si: stdin has no extension. 0 is the
+                         line-oriented format -- one field per line, bytes
+                         verbatim -- which until now could only be had by
+                         having no suffix, so stdin could not ask for it and
+                         neither could a prose .md. It is the one value a
+                         declaring suffix does NOT override: 1 and 2 argue
+                         about how many header rows a CSV has and the suffix
+                         has already answered, while 0 declines the question
       --in-place         edit -i in place, via temp file + rename
 
     FORMAT / 格式
@@ -2563,9 +2617,12 @@ func printHelp() {
                          to the column widths, so it rewrites the whole table
                          on first contact even when nothing was edited
       foo.md             READ a Markdown table back. Header rows are recovered
-                         from the table, so --headers is refused here.
+                         from the table, so --headers 1|2 is refused here.
                          --md-table N takes the Nth table out of a document;
-                         without it the file must BE a table
+                         without it the file must BE a table.
+                         --headers 0 reads it as PROSE instead, line by line,
+                         and can write it back the same way -- for documents
+                         that merely contain a table rather than being one
       --json             JSON Lines, and TWO of those lines are metadata, not
                          records. The FIRST is the format csv2 believes it is
                          reading -- {"meta":{"format","headers","fields"}},

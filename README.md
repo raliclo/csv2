@@ -126,7 +126,18 @@ Use `--en` or `--zh` to choose the header language in human-readable output.
 option list.
 
 `-si` reads stdin and `-so` writes stdout. Neither streams the whole input into
-memory. When stdin is used, `--headers 1` or `--headers 2` is required.
+memory. When stdin is used, `--headers` is required, because stdin has no
+extension to declare a format with.
+
+**`--headers 0` reads the input line by line** — one field per line, bytes
+verbatim. That is the format a file with no `.csv`/`.csv2` suffix already has,
+and until now it could only be had by *having no suffix*, so neither stdin nor
+a prose `.md` could ask for it. It is also the one value a declaring suffix
+does not override: `--headers 1|2` against a `.csv2` is refused because the
+suffix has already answered how many header rows there are, while `0` declines
+that question rather than answering it differently. A `.md` read this way is
+prose, and can be edited and written back as prose — for documents that merely
+CONTAIN a table rather than being one.
 
 ## Errors
 

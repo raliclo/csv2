@@ -13030,6 +13030,81 @@ done
 (( _t234_kept )) && ok "T234d while a .csv or .csv2 holding one is still refused, because there the suffix claims otherwise / 而含分隔列的 .csv 或 .csv2 仍然被拒絕，因為那裡的副檔名宣告的是另一回事"
 
 echo
+echo "--- T235: --headers 0 names the line-oriented format / T235：--headers 0 指名那個「逐行」的格式 ---"
+# Phase 12. `.lines` -- zero header rows, one field per line, bytes verbatim --
+# is a first-class format in both READMEs and was the only one that could not
+# be ASKED for: it is declared by the ABSENCE of a suffix, and absence is not
+# something a caller can supply. stdin has no suffix at all, so the format
+# built for exactly that case was the one it could not name.
+# 第 12 階段。`.lines`——零列標頭、每行一個欄位、位元組原樣——在兩份 README 裡都是一等格式，
+# 而它是唯一一個**無法被指名**的：它靠「沒有副檔名」宣告，而「沒有」不是呼叫端給得出來的東西。
+# stdin 根本沒有副檔名，於是那個正是為這種情況而生的格式，恰恰是它指名不了的那一個。
+printf '# Notes\n\nprose here\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nmore prose\n' > "$TMP/t235.md"
+cp "$TMP/t235.md" "$TMP/t235orig.md"
+
+if [[ $("$CSV2" -r --headers 0 -i "$TMP/t235.md" 2>/dev/null | wc -l) -eq 9 ]]; then
+    ok "T235a a prose .md reads line by line with --headers 0 / 給了 --headers 0，散文 .md 就逐行讀得出來"
+else
+    bad "T235a $("$CSV2" -r --headers 0 -i "$TMP/t235.md" 2>&1 | head -1) / 實得如上"
+fi
+
+# stdin could not reach this format at all before: --headers took 1 or 2, and
+# there was no suffix to declare 0 with.
+# stdin 在此之前根本到不了這個格式：--headers 只收 1 或 2，而它沒有副檔名可以用來宣告 0。
+if [[ $("$CSV2" -r -si --headers 0 < "$TMP/t235.md" 2>/dev/null | wc -l) -eq 9 ]]; then
+    ok "T235b and stdin can name it too, which it never could / 而 stdin 也指名得到它了——它從來做不到這件事"
+else
+    bad "T235b stdin gave: $("$CSV2" -r -si --headers 0 < "$TMP/t235.md" 2>&1 | head -1) / 實得如上"
+fi
+
+# Reading is only half. A flag that reads a prose .md and can never write one
+# back solves nothing for the case it was asked for.
+# 讀只是一半。一個「讀得了散文 .md、卻永遠寫不回去」的旗標，對它被要求的那個情況等於沒解決。
+"$CSV2" -update 3:1 'edited prose' --headers 0 -i "$TMP/t235.md" --in-place 2>/dev/null
+if [[ $(sed -n 3p "$TMP/t235.md") == 'edited prose' \
+      && $(sed -n 6p "$TMP/t235.md") == '|---|---|' \
+      && $(wc -l < "$TMP/t235.md") -eq 9 ]]; then
+    ok "T235c and such a file can be edited in place, with only the target line changed / 而這種檔案可以就地編輯，只有目標那一行改變"
+else
+    bad "T235c line 3=$(sed -n 3p "$TMP/t235.md") lines=$(wc -l < "$TMP/t235.md") / 實得如上"
+fi
+
+# Without the flag a .md still means a table, and the refusal still points at
+# --md-table. Phase 12 adds a way in; it does not change what .md means.
+# 不給那個旗標時，`.md` 仍然表示一張表，而那道拒絕仍然指向 --md-table。第 12 階段加的是一條進得去
+# 的路，它沒有改變 `.md` 的意思。
+_t235_e=$("$CSV2" -r -i "$TMP/t235orig.md" 2>&1 >/dev/null)
+if [[ $? != 0 && $_t235_e == *"--md-table"* ]]; then
+    ok "T235d while a .md without it is still a table, and still says so / 而不給它的 .md 仍然是一張表，也仍然這麼說"
+else
+    bad "T235d rc=$? said: ${_t235_e:0:70} / 實得如上"
+fi
+
+# 1 and 2 argue about how many header rows a CSV has, and a declaring suffix
+# has already answered that -- so they are still refused. 0 declines the
+# question instead, which is why it is exempt.
+# 1 與 2 在爭論「這個 CSV 有幾列標頭」，而一個會宣告的副檔名已經回答過了——因此它們仍然被拒。
+# 0 是拒絕回答那個問題，那正是它獲得豁免的原因。
+printf 'a,b\n1,2\n' > "$TMP/t235.csv"
+_t235_h1=$("$CSV2" -r --headers 2 -i "$TMP/t235.csv" 2>&1 >/dev/null); _t235_h1rc=$?
+_t235_h0=$("$CSV2" -r --headers 0 -i "$TMP/t235.csv" 2>/dev/null)
+if (( _t235_h1rc != 0 )) && [[ $_t235_h0 == 'a,b
+1,2' ]]; then
+    ok "T235e --headers 2 on a .csv is still refused, while --headers 0 reads it as lines / .csv 搭配 --headers 2 仍被拒，而 --headers 0 把它當成一行行讀出來"
+else
+    bad "T235e h2rc=$_t235_h1rc h0=${_t235_h0//$'\n'/ | } / 實得如上"
+fi
+
+# An out-of-range value now names all three, and says what the new one means.
+# 超出範圍的值現在會指名全部三個，並說出新的那個是什麼意思。
+_t235_bad=$("$CSV2" -r --headers 3 -i "$TMP/t235.csv" 2>&1 >/dev/null)
+if [[ $? != 0 && $_t235_bad == *"0, 1 or 2"* && $_t235_bad == *"bytes verbatim"* ]]; then
+    ok "T235f and an invalid count names all three, saying what 0 does / 而無效的數字會指名全部三個，並說出 0 的作用"
+else
+    bad "T235f said: ${_t235_bad:0:80} / 實得如上"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
