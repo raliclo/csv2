@@ -292,6 +292,130 @@ This is a measurement, not a performance guarantee; compare only runs with
 the same binary, record count, host, and search conditions. The raw output is
 [`verifications/measure_parallel_rss_output.txt`](verifications/measure_parallel_rss_output.txt).
 
+## When to stop using this
+
+Every row here was measured on 2026-09-01, not carried forward from an earlier
+list. Two entries that used to be on it are gone because the feature landed.
+
+| Not offered | What to do instead |
+|---|---|
+| column projection (`-cols`) | `--json` and `jq`, or `-get` per cell |
+| case-insensitive matching | nothing does — `-contains mit` finds no `MIT`. Use `--json` and one pass of your own |
+| scoping a search to ONE column | nothing does. `-contains` matches a substring in EVERY column, so `-contains MIT` also finds `transMITter` — see the last example below. Counting with it is silently wrong the moment the word appears elsewhere |
+| skipping `#` comment lines | nothing does, and deliberately: a `#` is data and `#id` is a legal column name, so skipping one would mean guessing which lines are data. The refusal names the `#` |
+| counting without reading the file | `records` on the trailing `--json` meta line — but the obvious way to get it reads every byte |
+| converting between `.csv` and `.csv2` | refused on purpose; write the records out and read them back in |
+| safe concurrent writers | serialise them yourself; two writers silently lose one edit. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one finishing SECOND warns it could not update the index |
+
+Two things this table used to say and no longer does: **editing a Markdown
+table** is supported, and **telling refusals apart programmatically** is done
+with the `--json` error object — both are in the examples below.
+
+## Examples
+
+Self-contained: every command here runs against a file the first block makes,
+and every output is what this version actually prints.
+
+```console
+$ printf 'pkg,version,license\n套件,版本,授權\nzlib,1.3.1,MIT\nzstd,1.5.6,BSD\n' > pkgs.csv2
+```
+
+Read the records. The two header rows are not records, so they are not printed:
+
+```console
+$ csv2 -r -i pkgs.csv2
+zlib,1.3.1,MIT
+zstd,1.5.6,BSD
+
+$ csv2 -r -t -i pkgs.csv2
+pkg,version,license
+套件,版本,授權
+zlib,1.3.1,MIT
+zstd,1.5.6,BSD
+```
+
+One cell, by name, with nothing around it:
+
+```console
+$ csv2 -get 1:license -i pkgs.csv2
+MIT
+```
+
+**The locating report is three TAB-separated fields: address, column name,
+value.** It is not CSV, and that is on purpose — a value containing a comma
+would break a CSV report:
+
+```console
+$ csv2 -contains MIT -i pkgs.csv2
+1:3	license	MIT
+```
+
+**`--json` emits TWO metadata lines, and neither is a record.** The first says
+what csv2 believes it is reading; the last carries the counts. A parser that
+treats every line as a record meets the first one immediately:
+
+```console
+$ csv2 -r --json -i pkgs.csv2
+{"meta":{"format":"csv2","headers":2,"fields":3,"header_zh":["套件","版本","授權"]}}
+{"record":1,"line":3,"fields":{"pkg":"zlib","version":"1.3.1","license":"MIT"}}
+{"record":2,"line":4,"fields":{"pkg":"zstd","version":"1.5.6","license":"BSD"}}
+{"meta":{"records":2,"matched":0}}
+```
+
+A Markdown table. Both header rows travel in one cell separated by `<br>`, and
+`--pretty` aligns by DISPLAY width, so the CJK titles count two columns each:
+
+```console
+$ csv2 -r -t -md --pretty -i pkgs.csv2
+| pkg<br>套件 | version<br>版本 | license<br>授權 |
+|-------------|-----------------|-----------------|
+| zlib        | 1.3.1           | MIT             |
+| zstd        | 1.5.6           | BSD             |
+```
+
+**See an edit before making it.** `--dry-run` prints the change and writes
+nothing:
+
+```console
+$ csv2 -update 1:version '1.3.2' --dry-run -i pkgs.csv2 --in-place
+update 1:version: "1.3.1" -> "1.3.2"
+
+$ csv2 -update 1:version '1.3.2' --backup -i pkgs.csv2 --in-place
+$ csv2 -r -i pkgs.csv2
+zlib,1.3.2,MIT
+zstd,1.5.6,BSD
+$ ls pkgs.csv2*
+pkgs.csv2	pkgs.csv2.bak
+```
+
+**An edit anchored on content refuses when the match is not unique**, and names
+every address it found rather than picking one:
+
+```console
+$ printf 'k,v\n甲,乙\na,x\nb,x\n' > dup.csv2
+$ csv2 -update-where x Z -i dup.csv2 --in-place
+csv2: -update-where "x": more than one data cell matches (1:2, 2:2); refusing an ambiguous update
+csv2：-update-where「x」：有多個資料儲存格符合（1:2, 2:2）；拒絕這個有歧義的更新
+```
+
+**Refusals are readable by a program under `--json`** — one line on stderr,
+with a stable `code`. The exit status stays 1:
+
+```console
+$ csv2 --json -i nosuch.csv
+{"error":{"code":"not-found","message":"cannot open input file: nosuch.csv","message_zh":"無法開啟輸入檔：nosuch.csv"}}
+```
+
+**And the trap worth seeing once:** `-contains` is a substring search across
+every column, so it finds the word inside another value too:
+
+```console
+$ printf 'pkg,license\n套件,授權\nzlib,MIT\ntransMITter,BSD\n' > lic.csv2
+$ csv2 -contains MIT -i lic.csv2
+1:2	license	MIT
+2:1	pkg	transMITter
+```
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

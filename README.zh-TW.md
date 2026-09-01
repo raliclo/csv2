@@ -256,6 +256,124 @@ sidecar 不存在或無效時以非零結束。`--no-index` 同時停用讀取�
 這是量測結果，不是效能保證；只有在二進位檔、資料筆數、主機與搜尋條件相同時才適合比較。
 原始輸出見 [`verifications/measure_parallel_rss_output.txt`](verifications/measure_parallel_rss_output.txt)。
 
+## 什麼時候該停止使用它
+
+下表每一列都是 2026-09-01 實測的，不是從舊清單抄過來的。原本在表上的兩項已經移除，因為那兩個
+功能做出來了。
+
+| 不提供 | 改用什麼 |
+|---|---|
+| 欄位投影（`-cols`） | `--json` 加 `jq`，或逐格 `-get` |
+| 不分大小寫比對 | 沒有任何東西做得到——`-contains mit` 找不到 `MIT`。請用 `--json` 加一次你自己的處理 |
+| 把搜尋限定在「一欄」 | 沒有任何東西做得到。`-contains` 比對的是**每一欄**裡的子字串，因此 `-contains MIT` 也會找到 `transMITter`——見下方最後一個範例。只要那個字在別處出現過，用它來計數就會安靜地錯 |
+| 跳過 `#` 註解行 | 沒有任何東西做得到，而且是刻意的：`#` 是資料，而 `#id` 是合法的欄名，跳過它就等於去猜哪些行是資料。那道拒絕會指名那個 `#` |
+| 不讀檔就計數 | `--json` 最後那行 meta 上的 `records`——但取得它最直覺的做法會讀完每一個位元組 |
+| 在 `.csv` 與 `.csv2` 之間轉換 | 刻意拒絕；請把紀錄寫出去，再讀回來 |
+| 安全的並行寫入 | 請自己把寫入者排成序列；兩個寫入者會靜默地弄丟其中一次編輯。兩個並行的 `-append --in-place` 是例外：兩筆紀錄都會完整落地，而「後完成的那一個」會警告自己無法更新索引 |
+
+這張表原本還說了兩件事，現在不再說：**編輯 Markdown 表**已經支援，而**以程式分辨不同的拒絕**
+可以用 `--json` 的錯誤物件做到——兩者都在下方的範例裡。
+
+## 範例
+
+自足：這裡每一道指令都對著第一個區塊建出來的檔案執行，而每一段輸出都是這個版本實際印出來的。
+
+```console
+$ printf 'pkg,version,license\n套件,版本,授權\nzlib,1.3.1,MIT\nzstd,1.5.6,BSD\n' > pkgs.csv2
+```
+
+讀出紀錄。兩列標頭不是紀錄，因此不會被印出來：
+
+```console
+$ csv2 -r -i pkgs.csv2
+zlib,1.3.1,MIT
+zstd,1.5.6,BSD
+
+$ csv2 -r -t -i pkgs.csv2
+pkg,version,license
+套件,版本,授權
+zlib,1.3.1,MIT
+zstd,1.5.6,BSD
+```
+
+一格的值，以名稱定址，前後不帶任何東西：
+
+```console
+$ csv2 -get 1:license -i pkgs.csv2
+MIT
+```
+
+**定位報告是以 TAB 分隔的三個欄位：位址、欄位名稱、值。** 它不是 CSV，而那是刻意的——一個含
+逗號的值會弄壞 CSV 格式的報告：
+
+```console
+$ csv2 -contains MIT -i pkgs.csv2
+1:3	license	MIT
+```
+
+**`--json` 會輸出兩行 metadata，而它們都不是紀錄。** 第一行說出 csv2 認為自己在讀什麼；
+最後一行帶著計數。一個「把每一行都當紀錄」的解析器，第一筆輸入就會撞上它：
+
+```console
+$ csv2 -r --json -i pkgs.csv2
+{"meta":{"format":"csv2","headers":2,"fields":3,"header_zh":["套件","版本","授權"]}}
+{"record":1,"line":3,"fields":{"pkg":"zlib","version":"1.3.1","license":"MIT"}}
+{"record":2,"line":4,"fields":{"pkg":"zstd","version":"1.5.6","license":"BSD"}}
+{"meta":{"records":2,"matched":0}}
+```
+
+一張 Markdown 表。兩列標頭以 `<br>` 分隔、裝在同一格裡，而 `--pretty` 是依**顯示寬度**對齊的，
+因此那些中日韓標題各算兩欄：
+
+```console
+$ csv2 -r -t -md --pretty -i pkgs.csv2
+| pkg<br>套件 | version<br>版本 | license<br>授權 |
+|-------------|-----------------|-----------------|
+| zlib        | 1.3.1           | MIT             |
+| zstd        | 1.5.6           | BSD             |
+```
+
+**動手之前先看見那次編輯。** `--dry-run` 印出將要發生的改變，而且不寫入任何東西：
+
+```console
+$ csv2 -update 1:version '1.3.2' --dry-run -i pkgs.csv2 --in-place
+update 1:version: "1.3.1" -> "1.3.2"
+
+$ csv2 -update 1:version '1.3.2' --backup -i pkgs.csv2 --in-place
+$ csv2 -r -i pkgs.csv2
+zlib,1.3.2,MIT
+zstd,1.5.6,BSD
+$ ls pkgs.csv2*
+pkgs.csv2	pkgs.csv2.bak
+```
+
+**以「內容」定位的編輯，在命中不唯一時會拒絕**，而且會列出它找到的每一個位址，不會替你挑一個：
+
+```console
+$ printf 'k,v\n甲,乙\na,x\nb,x\n' > dup.csv2
+$ csv2 -update-where x Z -i dup.csv2 --in-place
+csv2: -update-where "x": more than one data cell matches (1:2, 2:2); refusing an ambiguous update
+csv2：-update-where「x」：有多個資料儲存格符合（1:2, 2:2）；拒絕這個有歧義的更新
+```
+
+**在 `--json` 之下，拒絕是程式讀得懂的**——stderr 上的一行，帶一個穩定的 `code`。結束狀態
+仍然是 1：
+
+```console
+$ csv2 --json -i nosuch.csv
+{"error":{"code":"not-found","message":"cannot open input file: nosuch.csv","message_zh":"無法開啟輸入檔：nosuch.csv"}}
+```
+
+**還有一個值得看一次的陷阱：** `-contains` 是「跨每一欄」的子字串搜尋，因此它也會在另一個值
+的內部找到那個字：
+
+```console
+$ printf 'pkg,license\n套件,授權\nzlib,MIT\ntransMITter,BSD\n' > lic.csv2
+$ csv2 -contains MIT -i lic.csv2
+1:2	license	MIT
+2:1	pkg	transMITter
+```
+
 ## 授權
 
 MIT。見 [LICENSE](LICENSE)。

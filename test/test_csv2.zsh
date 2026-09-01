@@ -9144,22 +9144,48 @@ else
     # 一次編輯，每次都留下一個隱藏的暫存檔——而 SIGXFSZ 正是 `ulimit -f` 或檔案系統配額會
     # 產生的那一個，一點也不罕見。
     _t131_leaks=""
+    _t131_untested=""
     for _t131_sig in HUP QUIT XFSZ ALRM USR1 PIPE; do
         rm -f "$TMP"/.t131_out.csv.csv2tmp.*(N) "$TMP/t131_out.csv"
         ( print -r -- 'a,b'; print -r -- '1,x'; sleep 5 ) \
             | "$CSV2" -r -t -si --headers 1 -o "$TMP/t131_out.csv" 2>/dev/null &
         _t131_pid=$!
-        sleep 1
+        # Poll for the temp file rather than assuming one second is enough.
+        # A fixed `sleep 1` failed twice on 2026-09-01 while T212 was running
+        # three swift-frontend processes: csv2 had not reached the point of
+        # creating the temp file yet, so there was nothing for the signal to
+        # leave behind -- and that "nothing to test" went into the LEAK list
+        # and printed as "a temp file survived", which is its opposite. KS.
+        # 輪詢等那個暫存檔出現，而不是假設一秒就夠。2026-09-01 有兩次固定的 `sleep 1` 失敗，
+        # 而當時 T212 正跑著三個 swift-frontend：csv2 還沒走到「建立暫存檔」那一步，因此那個訊號
+        # 根本沒有東西可以留下——而那個「沒有東西可測」被放進了**洩漏**清單，印出來是
+        # 「暫存檔還在」，恰好是它的相反。KS。
+        _t131_waited=0
+        while (( _t131_waited < 50 )) && \
+              [[ -z $(print -r -- "$TMP"/.t131_out.csv.csv2tmp.*(N)) ]]; do
+            sleep 0.1
+            _t131_waited=$(( _t131_waited + 1 ))
+        done
+        # Still absent after five seconds is a case that could not be run, and
+        # it is reported as that -- in its own list, in its own sentence.
+        # 五秒之後仍然沒有出現，那是一個「跑不成的案例」，並且就以那個身分回報——用它自己的清單、
+        # 自己的句子。
         [[ -z $(print -r -- "$TMP"/.t131_out.csv.csv2tmp.*(N)) ]] && \
-            { _t131_leaks="$_t131_leaks $_t131_sig(no-temp-to-lose)"; kill -TERM $_t131_pid 2>/dev/null; continue }
+            { _t131_untested="$_t131_untested $_t131_sig"; kill -TERM $_t131_pid 2>/dev/null; continue }
         kill -$_t131_sig $_t131_pid 2>/dev/null
         wait $_t131_pid 2>/dev/null
         [[ -n $(print -r -- "$TMP"/.t131_out.csv.csv2tmp.*(N)) ]] && _t131_leaks="$_t131_leaks $_t131_sig"
     done
-    if [[ -z ${_t131_leaks// /} ]]; then
-        ok "T131f and the same holds for every catchable signal that ends a run / 而每一個「可攔截且會結束執行」的訊號都是如此"
-    else
+    # Three outcomes, three sentences. A signal whose temp file never appeared
+    # was not tested, and saying so is not the same as saying it leaked.
+    # 三種結果，三句話。一個「暫存檔從未出現」的訊號是沒有被測到，而說出這件事，與說它洩漏了
+    # 不是同一句話。
+    if [[ -n ${_t131_leaks// /} ]]; then
         bad "T131f a temp file survived:${_t131_leaks} / 這些訊號之後暫存檔還在"
+    elif [[ -n ${_t131_untested// /} ]]; then
+        bad "T131f no temp file appeared within 5s for:${_t131_untested}, so those signals were not tested / 這些訊號在 5 秒內沒有等到暫存檔出現，因此它們沒有被測到"
+    else
+        ok "T131f and the same holds for every catchable signal that ends a run / 而每一個「可攔截且會結束執行」的訊號都是如此"
     fi
     rm -f "$TMP"/.t131_out.csv.csv2tmp.*(N)
 fi
@@ -12787,6 +12813,74 @@ if (( _t231_seen > 100 )); then
 else
     bad "T231b the scan saw only $_t231_seen case lines, so it checked nothing / 掃描只看到 $_t231_seen 行案例，等於什麼都沒檢查"
 fi
+
+echo
+echo "--- T232: every example in both READMEs still prints what it claims / T232：兩份 README 裡的每一個範例，仍然印出它宣稱的東西 ---"
+# The README was rewritten from 2722 lines to 297 for public readers, and the
+# worked examples went with it: 62 blocks showing a command AND its output
+# became one. A reader cannot confirm they did it right without seeing what
+# right looks like -- and this tool's whole subject is output SHAPE (--json's
+# two meta lines, the TAB-separated locating report, the Markdown table).
+# The examples were put back. This is what stops them going stale.
+# README 為了公開讀者從 2722 行改寫成 297 行，而那些「做過一遍」的範例也跟著走了：62 個「指令
+# 加上它的輸出」的區塊變成一個。一個讀者若看不到「對的樣子」，就無法確認自己做對了——而這個工具
+# 的全部主題就是輸出的**形狀**（`--json` 的兩行 meta、TAB 分隔的定位報告、Markdown 表）。
+# 範例被放了回去。這個案例就是阻止它們腐爛的東西。
+#
+# It found a real error before it was even a test: the -update-where refusal is
+# two lines, English then Chinese, and the README carried only the first --
+# because the sample had been taken with `head -1`.
+# 它在還沒成為測試之前就找到了一個真的錯誤：-update-where 那道拒絕是兩行、英文在前中文在後，
+# 而 README 裡只有第一行——因為當初取樣本時用了 `head -1`。
+_t232_check() {   # $1 = README path -> prints "checked bad"
+    local readme=${1:A} work=$(mktemp -d "$TMP/t232.XXXXXX")
+    local -i checked=0 nbad=0
+    local cmd="" expect="" line got
+    ( cd "$work" || return
+      run_one() {
+          [[ -z $cmd ]] && return
+          got=$(eval "${cmd/#csv2 /$CSV2 }" 2>&1)
+          # printf builds the fixture and ls formats differently per platform;
+          # both are run, neither is compared.
+          # printf 是用來建出那個 fixture 的，而 ls 的格式逐平台不同；兩者都執行，都不比對。
+          if [[ $cmd == printf* || $cmd == ls\ * ]]; then cmd=""; expect=""; return; fi
+          checked+=1
+          while [[ $expect == *$'\n' ]]; do expect=${expect%$'\n'}; done
+          if [[ $got != $expect ]]; then
+              nbad+=1
+              print -u2 "  T232 $readme: $cmd"
+              print -u2 "    want: ${expect//$'\n'/ | }"
+              print -u2 "    got : ${got//$'\n'/ | }"
+          fi
+          cmd=""; expect=""
+      }
+      local -i in_block=0
+      while IFS= read -r line; do
+          if [[ $line == '```console' ]]; then in_block=1; continue; fi
+          if [[ $line == '```' ]]; then run_one; in_block=0; continue; fi
+          (( in_block )) || continue
+          if [[ $line == '$ '* ]]; then run_one; cmd=${line#\$ }; expect=""
+          elif [[ -n $cmd ]]; then [[ -n $expect ]] && expect+=$'\n'; expect+=$line
+          fi
+      done < <(awk '/^## Examples|^## 範例/,0' "$readme")
+      run_one
+      print "$checked $nbad" )
+}
+for _t232_r in README.md README.zh-TW.md; do
+    _t232_res=($(_t232_check "$ROOT/$_t232_r"))
+    # Zero commands checked means the section was not found or the extraction
+    # broke -- and "0 mismatches out of 0" is the vacuous pass this file keeps
+    # writing guards against.
+    # 檢查了零道指令，代表那一節沒被找到、或抽取壞了——而「0 個不符，總共 0 個」正是這個檔案
+    # 一再為它加守衛的那種空洞通過。
+    if (( ${_t232_res[1]:-0} < 8 )); then
+        bad "T232 $_t232_r: only ${_t232_res[1]:-0} commands were checked, so nothing was verified / 只檢查了 ${_t232_res[1]:-0} 道指令，等於什麼都沒驗證"
+    elif (( ${_t232_res[2]:-1} == 0 )); then
+        ok "T232 $_t232_r: all ${_t232_res[1]} example commands print exactly what the file claims / 全部 ${_t232_res[1]} 道範例指令都印出這個檔案宣稱的東西"
+    else
+        bad "T232 $_t232_r: ${_t232_res[2]} of ${_t232_res[1]} examples disagree with the program / ${_t232_res[1]} 道範例中有 ${_t232_res[2]} 道與程式不符"
+    fi
+done
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
