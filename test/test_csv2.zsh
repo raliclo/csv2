@@ -12968,6 +12968,68 @@ else
 fi
 
 echo
+echo "--- T234: a separator row is data in a suffix-less file / T234：無後綴檔案裡的分隔列是資料 ---"
+# KU. The guard that refuses a Markdown separator row had no format condition,
+# and a file with no .csv/.csv2 suffix IS one column by definition -- so
+# `r.count == 1` was true of every record in it, and a check aimed at "a file
+# that CLAIMS to be CSV yet looks like Markdown" fired unconditionally there.
+# KU。那道拒絕 Markdown 分隔列的守衛沒有格式條件，而一個沒有 .csv／.csv2 副檔名的檔案依定義
+# **就是**一欄——因此 `r.count == 1` 對它裡面每一筆都成立，一道瞄準「自稱是 CSV 卻長得像
+# Markdown 的檔案」的檢查，在那裡無條件地觸發。
+#
+# The inconsistency is visible within one table: every other kind of
+# foreign-looking line passed through, INCLUDING the table's own data rows.
+# 那個不一致在一張表裡就看得出來：其他每一種「長得像別的格式」的行都通過了，**包括那張表自己的
+# 資料列**。
+printf '# Notes\n\nprose\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nmore prose\n' > "$TMP/t234doc"
+if [[ $("$CSV2" -r -i "$TMP/t234doc" 2>/dev/null | wc -l) -eq 9 ]]; then
+    ok "T234a a suffix-less document containing a Markdown table reads line by line / 一份含 Markdown 表、沒有副檔名的文件，逐行讀得出來"
+else
+    bad "T234a $("$CSV2" -r -i "$TMP/t234doc" 2>&1 | head -1) / 實得如上"
+fi
+
+# Every foreign-looking line is data there, and the separator was the only one
+# singled out. Listing them together is what made the inconsistency obvious.
+# 在那裡，每一種「長得像別的格式」的行都是資料，而分隔列是唯一被挑出來的。把它們並列，正是那個
+# 不一致變得明顯的原因。
+_t234_odd=""
+for _t234_line in '# comment' '{"json":1}' '<?xml?>' '| a | b |' '|---|---|' '|:--:|:--|'; do
+    printf '%s\n' "$_t234_line" > "$TMP/t234probe"
+    [[ $("$CSV2" -r -i "$TMP/t234probe" 2>/dev/null) == $_t234_line ]] || _t234_odd="$_t234_odd [$_t234_line]"
+done
+if [[ -z $_t234_odd ]]; then
+    ok "T234b and every foreign-looking line comes back as its own bytes, separators included / 而每一種「長得像別的格式」的行都以自己的位元組回來，包含分隔列"
+else
+    bad "T234b these did not survive:${_t234_odd} / 這些沒有原樣回來"
+fi
+
+# The use the user actually wanted: edit one line of a document that has a
+# table in it, and leave the table alone.
+# 使用者真正要的用途：編輯一份「裡面有表」的文件中的某一行，而不動那張表。
+cp "$TMP/t234doc" "$TMP/t234edit"
+"$CSV2" -update 3:1 'edited prose' -i "$TMP/t234edit" --in-place 2>/dev/null
+if [[ $(sed -n 3p "$TMP/t234edit") == 'edited prose' \
+      && $(sed -n 6p "$TMP/t234edit") == '|---|---|' \
+      && $(sed -n 7p "$TMP/t234edit") == '| 1 | 2 |' ]]; then
+    ok "T234c one line of such a document can be edited, and the table is untouched / 這種文件裡的某一行可以被編輯，而那張表沒有被動到"
+else
+    bad "T234c line 3=$(sed -n 3p "$TMP/t234edit") line 6=$(sed -n 6p "$TMP/t234edit") / 實得如上"
+fi
+
+# The guard is still right where the suffix DOES claim a structure, and that
+# half must not be lost: a .csv holding a separator row is genuinely suspect.
+# 在副檔名**確實**宣告了結構的地方，那道守衛仍然是對的，而那一半不能弄丟：一個 .csv 裡出現分隔列，
+# 是真的可疑。
+_t234_kept=1
+printf 'a,b\n|---|---|\n' > "$TMP/t234.csv"
+printf 'a,b\n甲,乙\n|---|---|\n' > "$TMP/t234.csv2"
+for _t234_f in t234.csv t234.csv2; do
+    _t234_e=$("$CSV2" -r -i "$TMP/$_t234_f" 2>&1 >/dev/null)
+    [[ $? != 0 && $_t234_e == *"Markdown separator"* ]] || { _t234_kept=0; bad "T234d $_t234_f was not refused: ${_t234_e:0:60} / 沒有被拒絕" }
+done
+(( _t234_kept )) && ok "T234d while a .csv or .csv2 holding one is still refused, because there the suffix claims otherwise / 而含分隔列的 .csv 或 .csv2 仍然被拒絕，因為那裡的副檔名宣告的是另一回事"
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

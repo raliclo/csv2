@@ -893,7 +893,35 @@ public final class RecordParser {
         var r = Record(fields: fields, offset: recOffset, line: recLine)
         recordsEmitted += 1
         r.number = recordsEmitted
-        if r.count == 1 && looksLikeMarkdownSeparator(r.fields[0].value) {
+        // `format != .lines` is the whole of this fix, and it is where the
+        // guard should always have been scoped. A file with no .csv/.csv2
+        // suffix IS one column by definition, so `r.count == 1` is true of
+        // every record in it -- which turned a check aimed at "a file that
+        // CLAIMS to be CSV yet looks like Markdown" into an unconditional one
+        // there.
+        //
+        // In `.lines` nothing is claimed, so nothing is ambiguous: `#`, JSON,
+        // XML and a Markdown table's own DATA rows all pass through as bytes,
+        // and only the separator was singled out. Same table, one row refused
+        // and the rows above and below it fine. It also protected against
+        // nothing: reading `-md` output as `.lines` gives one field per line,
+        // which is exactly what `.lines` means.
+        //
+        // The cost was a real one -- no text file containing a Markdown table
+        // could be edited line by line, which is the case a user hit. KU.
+        // `format != .lines` 就是這次修正的全部，而這道守衛本來就該有這個範圍。一個沒有
+        // .csv／.csv2 副檔名的檔案，依定義**就是**一欄，因此 `r.count == 1` 對它裡面每一筆都成立
+        // ——那讓一道原本瞄準「一個**自稱**是 CSV、卻長得像 Markdown 的檔案」的檢查，在那裡變成
+        // 無條件的。
+        //
+        // 在 `.lines` 裡什麼都沒有被宣稱，因此沒有任何歧義：`#`、JSON、XML，以及一張 Markdown 表
+        // 自己的**資料列**，全都以位元組原樣通過，只有分隔列被挑了出來。同一張表，一列被拒，
+        // 而它上下的每一列都沒事。它保護的也是一個不存在的危險：用 `.lines` 讀 `-md` 的輸出會
+        // 得到「每行一個欄位」，而那正是 `.lines` 的意思。
+        //
+        // 代價是真實的——任何含 Markdown 表的文字檔都無法逐行編輯，而那正是一位使用者撞到的
+        // 情況。KU。
+        if format != .lines && r.count == 1 && looksLikeMarkdownSeparator(r.fields[0].value) {
             throw fault(
                 "record \(r.number) (line \(r.line)) is a Markdown separator row in a file with one column, so this is -md output rather than CSV. Name it with a .md suffix and csv2 reads it as a table -- until 2026-08-26 this sentence ended \"-md is one-way and csv2 cannot read it back\", which stopped being true when it learned to",
                 "第 \(r.number) 筆（第 \(r.line) 行）是一列 Markdown 分隔列，且此檔只有一欄，因此這是 -md 的輸出而不是 CSV。把它命名為 .md 副檔名，csv2 就會把它當成一張表來讀——在 2026-08-26 之前，這句話的結尾是「-md 是單向的，csv2 讀不回來」，而在它學會讀回來的那一刻，那句話就不再為真")

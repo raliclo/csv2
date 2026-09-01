@@ -42,6 +42,14 @@ The input suffix declares the format:
 | `.md` | recovered | A Markdown table; use `--md-table N` for a selected table |
 | other or none | 0 | One column per line; bytes are preserved verbatim |
 
+**A suffix-less file has no structure to contradict, so nothing in it is
+suspect.** A `#`, a JSON object, an XML declaration, a Markdown table's rows
+and its `|---|` separator all come back as their own bytes -- which is what
+makes a document containing a table editable line by line. A `.csv` or `.csv2`
+holding a `|---|` row IS refused, because there the suffix claims otherwise
+and a one-column file that looks like Markdown is `-md` output under the wrong
+name.
+
 Output record separators are always LF. CR and other bytes inside quoted CSV
 fields remain data. UTF-8 BOMs are removed; UTF-16 input is refused with a
 conversion instruction.
