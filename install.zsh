@@ -146,7 +146,19 @@ rc_files() {
         # by default, so .bashrc plus a login file is as far as bash goes.
         # bash 沒有 .zshenv 的對應物。BASH_ENV 是對應的機制但預設沒有設定，因此 bash 能做到
         # 的就是 .bashrc 加上一個登入檔。
-        bash) print -r -- $HOME/.bashrc ;;
+        # No bash branch. A bash account falls to `*)` and gets ~/.profile,
+        # which a bash LOGIN shell reads -- and install.zsh reports that as
+        # "login shells only", which is true. zsh is the one shell where a
+        # single file is read by EVERY invocation, non-interactive and
+        # non-login included, and that is the property this tree needs: the
+        # thing that wanted csv2 on the WSL node was a script over multissh.
+        # See IW, where writing .zshrc instead of .zshenv looked correct and
+        # was not.
+        # 沒有 bash 分支。一個 bash 帳號會落到 `*)`、拿到 ~/.profile，而 bash 的**登入** shell
+        # 會讀它——install.zsh 則把那回報成「只有登入 shell」，而那是實話。zsh 是唯一一個
+        # 「單一檔案會被**每一種**呼叫讀到」的 shell，非互動與非登入都包含在內，而那正是這棵樹
+        # 需要的性質：在 WSL 節點上需要 csv2 的，是一支經 multissh 執行的腳本。見 IW——那次把
+        # .zshrc 寫成了正確答案，而它不是。
         *)    print -r -- $HOME/.profile ;;
     esac
 }

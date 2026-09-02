@@ -11176,54 +11176,35 @@ else
     # 以 install.zsh 的問法去問，**連同那道守衛**：macOS 上沒有 `getent`，而在這份測試裡「呼叫一個
     # 不存在的指令」依設計就是一次失敗——於是一個為了「可攜性問題」而寫的探測，觸發了那道「防打錯字」
     # 的守衛。與 stat_mode 學到的是同一課，發生在一個「為了套用那一課而寫」的案例裡。
-    _t203_login=""
-    if (( $+commands[getent] )); then
-        _t203_login=$(getent passwd "$(id -un)" 2>/dev/null | awk -F: '{print $NF}')
-    fi
-    # Where there is no getent, install.zsh falls back to $SHELL -- and the case
-    # below SETS that to bash, so bash IS the answer there and the case is
-    # valid. Reading the current $SHELL instead asked what shell is running the
-    # suite, which is a different question and made macOS skip a case it had
-    # been running correctly all along.
-    # 沒有 getent 的地方，install.zsh 會退回 $SHELL——而下面那個案例**會把它設成** bash，因此在那裡
-    # 答案就是 bash，這個案例是有效的。改讀當前的 $SHELL，問的是「是哪個 shell 在跑這份測試」，
-    # 那是另一個問題，而它會讓 macOS 跳過一個它一直正確執行著的案例。
-    [[ -n $_t203_login ]] || _t203_login=$(command -v bash)
-    # Two different reasons, and the message used to give the second one for
-    # both. In the guest `command -v bash` returns nothing, so the fallback is
-    # empty too and the sentence printed "the login shell is , and SHELL=
-    # cannot simulate one" -- an empty value where a shell name belongs,
-    # sending the reader after a setting that does not exist. On WSL the same
-    # line correctly says "zsh". One message, right on one platform and wrong
-    # on another.
-    # 兩個不同的理由，而那則訊息原本對兩者都給第二個。在 guest 裡 `command -v bash` 什麼也沒回傳，
-    # 因此那個退路也是空的，於是那句話印出「this account's login shell is , and SHELL= cannot
-    # simulate one」——在該有 shell 名字的地方是一個空值，把讀者送去找一個不存在的設定。在 WSL 上
-    # 同一行正確地說了「zsh」。同一則訊息，在一個平台上說對、在另一個平台上說錯。
-    if [[ -z $_t203_login ]]; then
-        skipt "T203e/f there is no bash on this platform, so the two-file case cannot be exercised / 這個平台上沒有 bash，因此那個「兩個檔案」的案例無法執行"
-    elif [[ ${_t203_login:t} != bash ]]; then
-        skipt "T203e/f this account's login shell is ${_t203_login:t}, and SHELL= cannot simulate one / 這個帳號的登入 shell 是 ${_t203_login:t}，而 SHELL= 模擬不了一個帳號"
-        T203_BASH_SKIPPED=1
-    elif command -v bash > /dev/null 2>&1; then
-        _t203_bhome="$TMP/t203bash"; mkdir -p "$_t203_bhome"
-        env HOME="$_t203_bhome" SHELL="$(command -v bash)" \
-            "$ROOT/install.zsh" --dir "$_t203_pfx" > /dev/null 2>&1
-        _t203_wrote=$(grep -lF '>>> csv2 install.zsh >>>' "$_t203_bhome"/.* 2>/dev/null | wc -l | tr -d ' ')
-        if (( _t203_wrote >= 2 )); then
-            ok "T203e a bash account gets both an interactive and a login file / bash 帳號拿到互動與登入兩個檔案"
-        else
-            bad "T203e bash install wrote $_t203_wrote file(s) carrying the block / bash 安裝只寫了 $_t203_wrote 個帶有區塊的檔案"
-        fi
-        env HOME="$_t203_bhome" SHELL="$(command -v bash)" \
-            "$ROOT/install.zsh" --dir "$_t203_pfx" --uninstall > /dev/null 2>&1
-        _t203_left=$(grep -lF '>>> csv2 install.zsh >>>' "$_t203_bhome"/.* 2>/dev/null | wc -l | tr -d ' ')
-        assert_eq "$_t203_left" "0" \
-            "T203f and --uninstall takes back every one of them / 而 --uninstall 把它們全部收回"
-    else
-        skipt "T203e/f no bash on this platform / 本平台沒有 bash"
-        T203_BASH_SKIPPED=1
-    fi
+    # T203e/f were here and have been removed with the bash branch they tested.
+    #
+    # They asked whether a bash ACCOUNT gets both an interactive and a login
+    # file. No node has one: macOS and WSL log in with zsh, Windows uses the
+    # MSYS zsh, and the guest has no bash at all. Worse, on macOS the case did
+    # not skip -- it RAN, on a false premise. The probe reads the account's
+    # shell with `getent`, macOS has no getent, and the fallback is
+    # `command -v bash`, which finds /bin/bash on a machine whose account uses
+    # /bin/zsh. So it believed it was testing a bash account and was testing
+    # "this machine has bash installed". It never once ran where a login shell
+    # really was bash.
+    #
+    # Removing the branch does not leave bash users with nothing: they fall to
+    # the `*)` case and get ~/.profile, which a bash LOGIN shell reads, and
+    # install.zsh reports that honestly as "login shells only". zsh is the one
+    # shell where a single file (.zshenv) is read by every invocation, which is
+    # why it is the one this tree targets -- see IW.
+    # T203e/f 曾經在這裡，已隨著它們所測試的那個 bash 分支一起移除。
+    #
+    # 它們問的是「一個 bash **帳號**會不會同時拿到互動與登入兩個檔案」。沒有任何一個節點是那樣：
+    # macOS 與 WSL 以 zsh 登入，Windows 用 MSYS 的 zsh，而 guest 根本沒有 bash。更糟的是，在
+    # macOS 上這個案例並沒有跳過——它**執行了**，而且建立在一個假前提上。那個探測用 `getent` 讀
+    # 帳號的 shell，而 macOS 沒有 getent，退路是 `command -v bash`，它在一台「帳號用 /bin/zsh」的
+    # 機器上找到了 /bin/bash。於是它以為自己在測一個 bash 帳號，實際上測的是「這台機器裝了 bash」。
+    # 它從來沒有在「登入 shell 真的是 bash」的地方執行過。
+    #
+    # 移除那個分支不會讓 bash 使用者一無所有：他們會落到 `*)` 那一支、拿到 ~/.profile，而 bash 的
+    # **登入** shell 會讀它，install.zsh 也會誠實地把那回報成「只有登入 shell」。zsh 是唯一一個
+    # 「單一檔案（.zshenv）會被每一種呼叫讀到」的 shell，那正是這棵樹以它為目標的原因——見 IW。
 
     # The probe must not answer out of the caller's PATH. With --no-rc and the
     # prefix exported into PATH, the OLD code called that a verified install.
@@ -13296,7 +13277,6 @@ fi
 # 不是平台名字的性質。
 (( ${T161_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T203_SKIPPED:-0} )) && (( want_skip += 1 ))
-(( ${T203_BASH_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T204_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T166E_XSKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T212_SKIPPED:-0} )) && (( want_skip += 1 ))
