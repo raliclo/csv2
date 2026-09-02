@@ -7551,7 +7551,19 @@ else
         # 一次失敗。這裡要測的性質是「失敗時那則訊息說了什麼」，因此此處沒有東西可檢查，
         # 而不是「有東西通過了」。
         T145E_SKIPPED=1
-        skipt "T145e -o into a directory that cannot take a new file / -o 指向一個放不下新檔案的目錄 (this system can create one beside /dev/fd/1 / 此系統在 /dev/fd/1 旁邊建得了檔案)"
+        # The reason, not the case's own title. `-o /dev/stdout` is refused
+        # because a new file cannot be created in /dev -- and root can create
+        # one there, so in the guest the run SUCCEEDS and there is nothing to
+        # assert. Saying "-o into a directory that cannot take a new file" as
+        # the REASON tells the reader what the case is about, not why it did
+        # not run, and sends them looking for a directory rather than for the
+        # uid. Same shape as T203e/f, fixed the same day.
+        # 說出理由，而不是這個案例自己的標題。`-o /dev/stdout` 之所以被拒絕，是因為「無法在
+        # /dev 裡建立新檔案」——而 root 在那裡建得出來，於是在 guest 裡那次執行**成功**了，
+        # 沒有東西可以斷言。把「-o 指向一個放不下新檔案的目錄」當成**理由**寫出來，說的是這個
+        # 案例在講什麼，不是它為什麼沒有執行，會把讀者送去找一個目錄而不是去看 uid。
+        # 與 T203e/f 同一個形狀，同一天修正。
+        skipt "T145e -o into a directory that cannot take a new file / -o 指向一個放不下新檔案的目錄 (this user can create a file in /dev, so the refusal never fires / 這個使用者在 /dev 裡建得出檔案，因此那道拒絕不會觸發)"
     elif [[ $_t145_dev == *"/dev/stdout"* && $_t145_dev == *"-so"* && $_t145_dev != *"/dev/fd/1"* ]]; then
         ok "T145e it names the path as typed and points at -so / 它指名打出來的那個路徑，並指向 -so"
     else
@@ -8895,9 +8907,28 @@ fi
 # 一份讀不到的 sidecar。在「以 root 執行」或「權限咬不住」的地方跳過：chmod 000 擋不住 root，
 # 而一個 csv2 仍讀得到的檔案會讓這個案例因為錯誤的理由通過。
 "$CSV2" --build-index -i "$TMP/t135.csv" >/dev/null 2>&1
-chmod 000 "$TMP/t135.csv.index" 2>/dev/null
-if [[ -r "$TMP/t135.csv.index" ]]; then
-    skipt "T135c an unreadable sidecar reports why / 讀不到的 sidecar 會說出為什麼 (this user can read a mode-000 file / 此使用者讀得到 mode 000 的檔案)"
+# A DIRECTORY where the sidecar should be, not `chmod 000`. Permission cannot
+# be made to bite in the guest, which runs as root and reads anything -- so
+# this case skipped there, on the one platform whose whole purpose is to be a
+# second implementation of the runtime. A directory fails the open for every
+# user including root, takes the same code path, and produces the same
+# sentence with a different reason after it:
+#
+#   chmod 000  -> exists but cannot be read: Permission denied
+#   directory  -> exists but cannot be read: Operation ...
+#
+# The assertion was never about permissions. It is that the sidecar's failure
+# is REPORTED WITH ITS REASON rather than as a bare "cannot be used", and a
+# directory exercises that just as well.
+# 在 sidecar 該在的位置放一個**目錄**，而不是 `chmod 000`。權限在 guest 裡咬不住——它以 root
+# 執行、什麼都讀得到——因此這個案例在那裡跳過了，而那個平台存在的全部意義，正是「作為執行期的
+# 第二份實作」。一個目錄會讓每一個使用者（包含 root）的 open 都失敗，走的是同一條程式碼路徑，
+# 印出同一句話、後面接著不同的原因。這個斷言從來就不是關於權限的：它要的是「sidecar 的失敗會
+# 連同它的原因一起被說出來」，而不是只說一句「無法使用」——一個目錄同樣能運動到那件事。
+rm -f "$TMP/t135.csv.index" 2>/dev/null
+mkdir -p "$TMP/t135.csv.index" 2>/dev/null
+if [[ ! -d "$TMP/t135.csv.index" ]]; then
+    skipt "T135c an unreadable sidecar reports why / 讀不到的 sidecar 會說出為什麼 (could not create a directory in its place / 無法在它的位置建立一個目錄)"
 else
     _t135_out=$("$CSV2" --verify-index -i "$TMP/t135.csv" 2>&1)
     if [[ $_t135_out == *"cannot be read"* && $_t135_out != *"reason not recorded"* ]]; then
@@ -8906,7 +8937,7 @@ else
         bad "T135c $(print -r -- $_t135_out | head -1) / 訊息如上"
     fi
 fi
-chmod 644 "$TMP/t135.csv.index" 2>/dev/null
+rmdir "$TMP/t135.csv.index" 2>/dev/null
 
 # ---------------------------------------------------------------------
 # T134 -- a sidecar that belongs to a different file.
