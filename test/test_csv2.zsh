@@ -13271,10 +13271,24 @@ else
     # T135c 需要一個「它讀不到」的檔案。root 什麼都讀得到，因此在以 root 執行的 guest 上
     # 那個案例會 SKIP，而這個數字必須知道這件事。用與 T135c 相同的方式、在一個為此建立的
     # 檔案上探測。
-    : > "$TMP/t69_probe_unreadable"
-    chmod 000 "$TMP/t69_probe_unreadable" 2>/dev/null
-    [[ -r "$TMP/t69_probe_unreadable" ]] && (( want_skip += 1 ))   # T135c
-    chmod 644 "$TMP/t69_probe_unreadable" 2>/dev/null
+    # T135c no longer needs a probe here. It used to make its unreadable
+    # sidecar with `chmod 000` and skip where that does not bite, so this
+    # mirrored the same question; now it puts a DIRECTORY in the sidecar's
+    # place, which fails the open for root as well, and it skips only if the
+    # directory itself cannot be created. That is not a platform property
+    # worth predicting -- if it ever happens, the SKIP will be one this count
+    # did not expect and T69b will say so, which is exactly what it is for.
+    #
+    # Changing the case without changing this line is what produced
+    # "expected 6 SKIP(s), the suite produced 5" in the guest: the case ran
+    # for the first time there, and the count still assumed it would not.
+    # T135c 這裡不再需要探測。它以前用 `chmod 000` 製造那份讀不到的 sidecar，並在「權限咬不住」
+    # 的地方跳過，因此這裡照樣問了同一個問題；現在它在 sidecar 的位置放一個**目錄**，那對 root
+    # 一樣會讓 open 失敗，而它只在「連目錄都建不出來」時才跳過。那不是一個值得預測的平台性質
+    # ——真的發生時，那會是一個「這個計數沒有預期到」的 SKIP，而 T69b 會說出來，那正是它的用途。
+    #
+    # 改了案例卻沒改這一行，正是 guest 上「預期 6 個 SKIP，實際 5 個」的來源：那個案例在那裡
+    # 第一次執行了，而這個計數仍然假設它不會。
     # T143, which skips where `touch -r` does not carry nanoseconds. Taken from
     # the flag that case sets rather than re-derived: reading a timestamp to
     # that precision needs stat, and the platform that skips is the one without
