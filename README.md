@@ -57,6 +57,12 @@ holding a `|---|` row IS refused, because there the suffix claims otherwise
 and a one-column file that looks like Markdown is `-md` output under the wrong
 name.
 
+**A blank line is a record there too**, so `-insert N ''` and `-append ''` put
+a real empty line in -- prose is mostly blank lines, and a document you cannot
+insert one into is not editable. A `.csv` or `.csv2` still refuses `''`,
+because there the suffix has said how many fields a record has and an empty
+string is not one of them.
+
 Output record separators are always LF. CR and other bytes inside quoted CSV
 fields remain data. UTF-8 BOMs are removed; UTF-16 input is refused with a
 conversion instruction.

@@ -7528,6 +7528,32 @@ fi
 # hit; the message must name the path as typed and the way out.
 # -o 指向一個放不下暫存檔的目錄。第 55 回合撞到的是 /dev；訊息必須指名「打出來的那個路徑」
 # 與出路。
+# T145g: the same refusal, reached in a way every platform can reach. A path
+# whose PARENT is a regular file cannot hold a new file for anyone -- not root,
+# not Windows -- and it lands on the same throw as /dev does, with the same
+# sentence. `fileKind` returns .regular rather than nil for the parent, so this
+# is "cannot create here", not "the directory does not exist".
+#
+# T145e below asks the same question through /dev/stdout, which is a POSIX
+# path and refused for a reason root can defeat: root creates files in /dev.
+# That case stays as it is and stays skipped where it cannot bite. This one
+# exists so the refusal itself is covered everywhere, rather than only where
+# the uid happens to be unprivileged.
+# T145g：同一道拒絕，換一條每個平台都走得到的路。一個「父路徑是一般檔案」的路徑，對任何人都
+# 放不下新檔案——root 不行，Windows 也不行——而它落在與 /dev 相同的那個 throw 上，印出同一句話。
+# 那個父路徑的 `fileKind` 回傳的是 .regular 而不是 nil，因此這是「在這裡建不了」而不是「目錄不存在」。
+#
+# 底下的 T145e 透過 /dev/stdout 問同一個問題，那是一條 POSIX 路徑，而它被拒絕的理由是 root 能夠
+# 打敗的：root 在 /dev 裡建得出檔案。那個案例維持原樣，並在咬不住的地方繼續跳過。這一個的存在，
+# 是為了讓「那道拒絕本身」在每個地方都有覆蓋，而不是只在「uid 剛好沒有特權」的地方。
+printf 'x' > "$TMP/t145_notadir"
+_t145_nd=$("$CSV2" -r -t -i "$TMP/t145.csv" -o "$TMP/t145_notadir/out.csv" 2>&1 >/dev/null)
+if [[ $_t145_nd == *"cannot be created"* && $_t145_nd == *"t145_notadir"* ]]; then
+    ok "T145g a path whose parent is a file is refused for what it is, on every platform / 父路徑是一個檔案的路徑，會以「它是什麼」被拒絕——在每一個平台上"
+else
+    bad "T145g $(print -r -- $_t145_nd | head -1) / 訊息如上"
+fi
+
 if (( IS_WINDOWS )); then
     T145E_SKIPPED=1
     skipt "T145e -o into a directory that cannot take a new file / -o 指向一個放不下新檔案的目錄 (no /dev here / 這裡沒有 /dev)"
@@ -13191,6 +13217,93 @@ fi
 #
 # 它原本想守的東西——install.zsh 對可及性的回報必須為真——早已由 T203g 守著，那個案例的名字
 # 就是缺陷 KW 本身：「憑呼叫端的 PATH 就宣稱每一種 shell 都找得到」。
+echo
+echo "--- T237: a blank line is a record where nothing was declared / T237：在什麼都沒被宣告的地方，空行是一筆紀錄 ---"
+# KX. Reported by a user editing prose .md: a prose document is full of blank
+# lines and -insert could not put one in. The refusal was never a deliberate
+# rule -- the parser emits nothing for empty input, and `guard let out else`
+# reported that as "empty row", turning a parser detail into a rule.
+# KX。由一位編輯散文 .md 的使用者回報：一份散文文件充滿空行，而 -insert 放不進去。那道拒絕
+# 從來不是一條刻意的規則——解析器對空輸入不吐出任何東西，而 `guard let out else` 把那件事
+# 回報成「空的一列」，於是一個解析器的細節變成了一條規則。
+#
+# csv2 had already disagreed with it twice in the same format, which is what
+# made it a contradiction rather than a design: a blank line reads back whole,
+# and -update makes one happily. Only -insert/-append refused.
+# csv2 自己在同一個格式裡已經反對過它兩次，那正是「它是矛盾而不是設計」的原因：空行讀得回來，
+# 而 -update 做得出一個。只有 -insert／-append 拒絕。
+printf 'para one\npara two\n' > "$TMP/t237doc"
+
+cp "$TMP/t237doc" "$TMP/t237i"
+"$CSV2" -insert 2 '' -i "$TMP/t237i" --in-place 2>/dev/null
+# Compared against the bytes themselves. The first version ran the file
+# through `od -An -c | tr -s ' '` and matched a pattern with TWO spaces in it
+# -- which `tr -s` had just squeezed to one. The program was right and the
+# assertion could not match anything.
+# 直接與位元組本身比對。第一版把檔案送過 `od -An -c | tr -s ' '`，然後拿一個「含兩個空白」的
+# 樣式去比——而 `tr -s` 剛剛才把它壓成一個。程式是對的，而那個斷言不可能比中任何東西。
+printf 'para one\n\npara two\n' > "$TMP/t237want"
+if cmp -s "$TMP/t237i" "$TMP/t237want"; then
+    ok "T237a -insert '' puts a real blank line into a suffix-less file / -insert '' 會把一個真正的空行放進沒有副檔名的檔案"
+else
+    bad "T237a got: $(od -An -c < "$TMP/t237i" | head -2 | tr '\n' ' ') / 實得如上"
+fi
+
+cp "$TMP/t237doc" "$TMP/t237ap"
+"$CSV2" -append '' -i "$TMP/t237ap" --in-place 2>/dev/null
+if [[ $(wc -l < "$TMP/t237ap") -eq 3 ]]; then
+    ok "T237b and -append '' adds one at the end / 而 -append '' 會在最後加上一個"
+else
+    bad "T237b file has $(wc -l < "$TMP/t237ap") lines, wanted 3 / 實得如上"
+fi
+
+# The case it was reported from: a .md read as prose, where the blank lines
+# ARE the paragraph structure.
+# 它被回報時的那個情境：一個當成散文讀的 .md，而那些空行**就是**段落結構。
+printf '# T\n\nprose\n' > "$TMP/t237.md"
+"$CSV2" -insert 3 '' --headers 0 -i "$TMP/t237.md" --in-place 2>/dev/null
+if [[ $(wc -l < "$TMP/t237.md") -eq 4 && $(sed -n 3p "$TMP/t237.md") == '' ]]; then
+    ok "T237c and a prose .md read with --headers 0 takes one too / 而一個以 --headers 0 當散文讀的 .md 也放得進去"
+else
+    bad "T237c lines=$(wc -l < "$TMP/t237.md") line3=[$(sed -n 3p "$TMP/t237.md")] / 實得如上"
+fi
+
+# Where a suffix DID declare a shape, the refusal stays: an empty string is not
+# a record with the file's field count, and T159a/b pin the same distinction
+# for a blank line met while reading.
+# 在副檔名**確實**宣告了形狀的地方，那道拒絕留著：一個空字串不是「一筆有這個檔案欄數的紀錄」，
+# 而 T159a/b 對「讀取時遇到的空白行」釘的正是同一個區分。
+_t237_kept=1
+printf 'a,b\n1,2\n3,4\n' > "$TMP/t237.csv"
+printf 'a,b\n甲,乙\n1,2\n' > "$TMP/t237.csv2"
+# Written out rather than assembled with `eval`. The eval version reported an
+# EMPTY stderr for a command that refuses when typed by hand -- the quoting
+# went somewhere between the two layers, and the case then failed while saying
+# nothing about why. Two branches are longer and cannot do that.
+# 寫開來，而不是用 `eval` 組出來。eval 那個版本對一個「手打時會拒絕」的指令回報了**空的**
+# stderr——引號在兩層之間的某處走失了，而那個案例接著失敗、卻對原因隻字未提。兩個分支比較長，
+# 而它們做不出那件事。
+#
+# The scratch copy KEEPS the suffix. The first version copied both fixtures to
+# `t237w` -- no suffix -- and the suffix is the entire mechanism under test, so
+# csv2 correctly read the copy as .lines and correctly inserted the blank line.
+# All four cases failed while the program was right, and the empty stderr they
+# printed was the truthful report of a successful run.
+# 暫存複本**保留副檔名**。第一版把兩個 fixture 都複製成 `t237w`——沒有副檔名——而副檔名正是
+# 這裡被測的整個機制，於是 csv2 正確地把複本當 .lines 讀、正確地插進了空行。四個案例全部失敗，
+# 而程式是對的；它們印出的空 stderr 是「那次執行成功了」的忠實回報。
+for _t237_f in t237.csv t237.csv2; do
+    cp "$TMP/$_t237_f" "$TMP/w_$_t237_f"
+    _t237_e=$("$CSV2" -insert 1 '' -i "$TMP/w_$_t237_f" --in-place 2>&1 >/dev/null)
+    [[ $? != 0 && $_t237_e == *"empty row"* ]] || { _t237_kept=0
+        bad "T237d $_t237_f -insert: ${_t237_e:0:50} / 實得如上" }
+    cp "$TMP/$_t237_f" "$TMP/w_$_t237_f"
+    _t237_e=$("$CSV2" -append '' -i "$TMP/w_$_t237_f" --in-place 2>&1 >/dev/null)
+    [[ $? != 0 && $_t237_e == *"empty row"* ]] || { _t237_kept=0
+        bad "T237d $_t237_f -append: ${_t237_e:0:50} / 實得如上" }
+done
+(( _t237_kept )) && ok "T237d while a .csv or .csv2 still refuses one, because there the suffix says how many fields a record has / 而 .csv 或 .csv2 仍然拒絕，因為那裡的副檔名說了一筆紀錄有幾欄"
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

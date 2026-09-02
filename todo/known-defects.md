@@ -8877,3 +8877,59 @@ verified: a fresh zsh runs /usr/local/bin/csv2, and it is the file just installe
 跨動詞的一半」),而這一次連「該怎麼問」都已經被寫在同一個檔案的註解裡了。
 
 修法:`resolves_to_dest` 改用 `-ef`,與二十行下方那段一致。
+
+## KX. 逐行格式裡插不進一個空行,而同一個檔案讀得進空行、也改得出空行(2026-09-02,使用者回報)
+
+使用者在編輯散文 `.md` 時撞到:一份散文文件充滿空行(段落分隔),而 `-insert` 放不進去。
+
+```console
+$ printf 'para one\n\npara two\n' > doc      # 沒有副檔名 = lines
+$ csv2 -insert 2 '' -i doc --in-place
+csv2: -insert 2: empty row                                               rc=1
+$ csv2 -append '' -i doc --in-place
+csv2: -append: empty row                                                 rc=1
+```
+
+**而同一個檔案、同一個格式,另外兩件事是允許的:**
+
+```console
+$ csv2 -r -i doc | od -c
+0000000   p a r a   o n e \n \n p a r a   t w o \n     <- 空行讀得進來
+$ csv2 -update 1:1 '' -i doc --in-place                     <- 改成空的：rc=0
+```
+
+**讀得進來、改得成空的,卻插不進去。** 那是 csv2 內部的矛盾,而不是一條規則。
+
+原因在 `src/Ops.swift` 的 `parseRowLiteral`:那道拒絕**不是刻意寫下的規則**,而是 parser 對空
+輸入不產生任何紀錄的自然結果——
+
+```swift
+try parser.feed([UInt8](text.utf8))
+try parser.finish()
+guard var r = out else { throw fault("\(what): empty row", ...) }
+```
+
+`out` 是 nil,於是 throw。那個訊息把「解析器沒有吐出東西」講成了「空的一列」,而在 `.lines` 裡,
+**一行什麼都沒有就是一筆紀錄——一個空欄位**。
+
+**這是同一個形狀的第三次。** KC 是 `-add-column` 對 `.lines`;KU 是 Markdown 分隔列對 `.lines`;
+這是第三個:**CSV 的規則被套用到一個從未自稱是 CSV 的檔案上。** 前兩次的結論都寫在同一句話裡
+——「在一個從未宣稱任何結構的檔案裡,那就是資料」——而這一次連 csv2 自己都已經同意了兩次
+(讀取與 `-update`),只有 `-insert`／`-append` 還沒有。
+
+對 `.csv`／`.csv2` 那道拒絕要留著:那裡的空字串不是「空列」,而是「一筆有一個空欄位的紀錄」,
+與檔案宣告的欄數對不上——T159a/b 釘的正是這件事。
+
+修法:`parseRowLiteral` 在 `format == .lines` 時,把空字串解析成「單一空欄位的紀錄」,而不是拋出。
+
+**釘住它的測試：T237a–d。** T237a／b 證明無後綴檔的 `-insert`／`-append` 放得進一個真正的
+空行，T237c 對一份以 `--headers 0` 讀的散文 `.md` 做同一件事，T237d 證明 `.csv` 與 `.csv2`
+仍然拒絕。
+
+T237d 自己先失敗了四次，而程式四次都是對的：它把 fixture 複製到一個叫 `t237w` 的暫存檔，
+**弄丟了副檔名**——而副檔名正是這裡被測的整個機制。詳見 [`mistakes.md`](../mistakes.md) 第 1 條
+第七次發生。
+
+Pinned by T237a-d. T237d itself failed four times while the program was right every
+time: its scratch copy was named `t237w`, dropping the suffix -- and the suffix is the
+entire mechanism under test.

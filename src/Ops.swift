@@ -1252,6 +1252,26 @@ func parseRowLiteral(_ text: String, format: Format, expected: Int, what: String
     try parser.feed([UInt8](text.utf8))
     try parser.finish()
     guard var r = out else {
+        // In `.lines` a line with nothing on it IS a record: one empty field.
+        // The parser emits nothing for empty input, and reading that as "empty
+        // row" turned a parser detail into a rule -- one csv2 had already
+        // disagreed with twice in the same format. It reads such a line back
+        // fine (`para one\n\npara two\n` round-trips whole), and `-update
+        // 1:1 ''` makes one happily. Only -insert/-append refused, so a prose
+        // document could be edited except for the blank lines that separate
+        // its paragraphs -- which is what a user hit. KX, and the third time
+        // a CSV rule reached a file that never claimed to be CSV (KC, KU).
+        // 在 `.lines` 裡，一行什麼都沒有**就是**一筆紀錄：一個空欄位。解析器對空輸入不吐出任何
+        // 東西，而把那讀成「空的一列」，是把一個解析器的細節變成了一條規則——一條 csv2 自己在
+        // 同一個格式裡已經反對過兩次的規則。它讀得回這樣的一行（`para one\n\npara two\n` 完整
+        // 往返），`-update 1:1 ''` 也做得出一個。只有 -insert／-append 拒絕，於是一份散文文件
+        // 除了「分隔段落的那些空行」以外都編輯得了——而那正是一位使用者撞到的。KX，也是「CSV 的
+        // 規則伸進一個從未自稱是 CSV 的檔案」的第三次（KC、KU）。
+        if format == .lines {
+            var blank = Record(fields: [Field(value: [])], offset: 0, line: 0)
+            blank.number = 0
+            return blank
+        }
         throw fault("\(what): empty row", "\(what)：空的一列")
     }
     if parser.recordsEmitted > 1 {
