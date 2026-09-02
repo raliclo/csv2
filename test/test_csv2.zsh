@@ -11110,7 +11110,7 @@ else
     _t203_home="$TMP/t203home"; _t203_pfx="$TMP/t203bin"
     mkdir -p "$_t203_home" "$_t203_pfx"
     _t203_run() {   # <shell> <extra args...>
-        env HOME="$_t203_home" SHELL="$1" "$ROOT/install.zsh" --prefix "$_t203_pfx" "${@:2}" 2>&1
+        env HOME="$_t203_home" SHELL="$1" "$ROOT/install.zsh" --dir "$_t203_pfx" "${@:2}" 2>&1
     }
 
     # zsh: .zshenv, because that is the file a non-interactive shell reads.
@@ -11195,7 +11195,7 @@ else
     elif command -v bash > /dev/null 2>&1; then
         _t203_bhome="$TMP/t203bash"; mkdir -p "$_t203_bhome"
         env HOME="$_t203_bhome" SHELL="$(command -v bash)" \
-            "$ROOT/install.zsh" --prefix "$_t203_pfx" > /dev/null 2>&1
+            "$ROOT/install.zsh" --dir "$_t203_pfx" > /dev/null 2>&1
         _t203_wrote=$(grep -lF '>>> csv2 install.zsh >>>' "$_t203_bhome"/.* 2>/dev/null | wc -l | tr -d ' ')
         if (( _t203_wrote >= 2 )); then
             ok "T203e a bash account gets both an interactive and a login file / bash 帳號拿到互動與登入兩個檔案"
@@ -11203,7 +11203,7 @@ else
             bad "T203e bash install wrote $_t203_wrote file(s) carrying the block / bash 安裝只寫了 $_t203_wrote 個帶有區塊的檔案"
         fi
         env HOME="$_t203_bhome" SHELL="$(command -v bash)" \
-            "$ROOT/install.zsh" --prefix "$_t203_pfx" --uninstall > /dev/null 2>&1
+            "$ROOT/install.zsh" --dir "$_t203_pfx" --uninstall > /dev/null 2>&1
         _t203_left=$(grep -lF '>>> csv2 install.zsh >>>' "$_t203_bhome"/.* 2>/dev/null | wc -l | tr -d ' ')
         assert_eq "$_t203_left" "0" \
             "T203f and --uninstall takes back every one of them / 而 --uninstall 把它們全部收回"
@@ -11218,7 +11218,7 @@ else
     # 會把那稱為一次「已驗證」的安裝。
     _t203_home2="$TMP/t203home2"; mkdir -p "$_t203_home2"
     _t203_out2=$(env HOME="$_t203_home2" SHELL="$(command -v zsh)" PATH="$_t203_pfx:$PATH" \
-        "$ROOT/install.zsh" --prefix "$_t203_pfx" 2>&1)
+        "$ROOT/install.zsh" --dir "$_t203_pfx" 2>&1)
     case $_t203_out2 in
         *"reachable from: every shell"*)
             bad "T203g claimed every shell finds it, on the strength of the caller's PATH / 憑呼叫端的 PATH 就宣稱每一種 shell 都找得到" ;;
@@ -11255,7 +11255,7 @@ else
     mkdir -p "$_t203_home3" "$_t203_decoy" "$_t203_pfx"
     cp "$CSV2" "$_t203_decoy/csv2"
     env HOME="$_t203_home3" SHELL="$(command -v zsh)" PATH="$_t203_decoy:$PATH" \
-        "$ROOT/install.zsh" --prefix "$_t203_pfx" > /dev/null 2>&1
+        "$ROOT/install.zsh" --dir "$_t203_pfx" > /dev/null 2>&1
     if [[ -f $_t203_home3/.zshenv ]]; then
         ok "T203i an identical copy elsewhere is not mistaken for the install / 別處一份相同的複本不會被誤認為這次安裝"
     else
@@ -13102,6 +13102,67 @@ if [[ $? != 0 && $_t235_bad == *"0, 1 or 2"* && $_t235_bad == *"bytes verbatim"*
     ok "T235f and an invalid count names all three, saying what 0 does / 而無效的數字會指名全部三個，並說出 0 的作用"
 else
     bad "T235f said: ${_t235_bad:0:80} / 實得如上"
+fi
+
+echo
+echo "--- T236: --prefix means DIR/bin, as it does everywhere else / T236：--prefix 表示 DIR/bin，與它在其他每個地方一樣 ---"
+# KV. `--prefix /usr/local` installed into /usr/local/csv2 -- a file on no
+# PATH -- and then offered to add a PATH line to an rc file to reach it,
+# turning a misreading into configuration. install.zsh already handled the
+# convention correctly six lines away: `brew --prefix` returns /opt/homebrew
+# and the code appends /bin to it.
+# KV。`--prefix /usr/local` 會裝進 /usr/local/csv2——一個不在任何 PATH 上的檔案——然後主動提議
+# 在 rc 檔裡加一行 PATH 去搆到它，把一個誤讀固化成設定。而 install.zsh 在相隔六行的地方本來就
+# 正確地處理了那個慣例：`brew --prefix` 回傳 /opt/homebrew，程式碼替它補上 /bin。
+_t236_run() { "$ROOT/install.zsh" "$@" --dry-run 2>&1 | grep -m1 '^  to  ' | sed 's/.*: //' }
+_t236_p=$(_t236_run --prefix "$TMP/t236p")
+_t236_d=$(_t236_run --dir "$TMP/t236d")
+if [[ $_t236_p == "$TMP/t236p/bin/csv2" ]]; then
+    ok "T236a --prefix DIR installs into DIR/bin / --prefix DIR 裝進 DIR/bin"
+else
+    bad "T236a --prefix gave $_t236_p / 實得如上"
+fi
+if [[ $_t236_d == "$TMP/t236d/csv2" ]]; then
+    ok "T236b while --dir DIR uses DIR exactly, which is what its name says / 而 --dir DIR 就用 DIR 這個目錄，那正是它的名字說的"
+else
+    bad "T236b --dir gave $_t236_d / 實得如上"
+fi
+
+# Two ways to name one destination. Picking a winner silently would put the
+# binary somewhere the caller did not ask for and report success.
+# 指定同一個目的地的兩種方式。靜默地挑一個贏家，會把執行檔放到呼叫端沒有要求的地方，並回報成功。
+_t236_both=$("$ROOT/install.zsh" --prefix "$TMP/a" --dir "$TMP/b" --dry-run 2>&1)
+if [[ $? != 0 && $_t236_both == *"give one"* ]]; then
+    ok "T236c and giving both is refused rather than resolved by precedence / 而同時給兩個會被拒絕，不是靠優先順序解決"
+else
+    bad "T236c rc=$? said: ${_t236_both:0:70} / 實得如上"
+fi
+
+# The value this whole fix exists for: the default install must stay reachable
+# from a NON-login shell, which is where a script over ssh runs. /usr/local/bin
+# is in the clean default PATH; /opt/homebrew/bin is not, because path_helper
+# adds it from /etc/zprofile and that runs for login shells only.
+# 這整個修正存在的理由：預設的安裝必須從**非登入** shell 也搆得到，而經 ssh 執行的腳本就在那裡。
+# /usr/local/bin 在乾淨的預設 PATH 裡；/opt/homebrew/bin 不在，因為那是 path_helper 從
+# /etc/zprofile 加的，而那只在登入 shell 執行。
+# `uname -s`, not a variable: this file sets IS_WINDOWS and nothing else about
+# the platform, and the first version of this case used a `$PLATFORM` that does
+# not exist. Under `setopt no_unset` that ABORTS the suite -- everything after
+# this line stopped running, including the totals, and the failure showed only
+# as a missing summary. My own grep filter then hid the one line that said so.
+# 用 `uname -s`，不是變數：這個檔案只設了 IS_WINDOWS，沒有其他關於平台的變數，而這個案例的
+# 第一版用了一個不存在的 `$PLATFORM`。在 `setopt no_unset` 之下那會**中止**整份測試——這一行
+# 之後的一切都沒有執行，包括統計，而那次失敗的外顯症狀只是「總計不見了」。接著我自己的 grep
+# 過濾器把唯一說出這件事的那一行藏了起來。
+if [[ $(uname -s 2>/dev/null) == Darwin ]]; then
+    _t236_clean=$(env -i /bin/zsh -c 'print -r -- $PATH' 2>/dev/null)
+    if [[ $_t236_clean == */usr/local/bin* && $_t236_clean != */opt/homebrew/bin* ]]; then
+        ok "T236d a clean non-login PATH has /usr/local/bin and not /opt/homebrew/bin / 乾淨的非登入 PATH 裡有 /usr/local/bin，沒有 /opt/homebrew/bin"
+    else
+        bad "T236d clean PATH is: $_t236_clean / 實得如上"
+    fi
+else
+    skipt "T236d the login/non-login PATH split is a macOS path_helper behaviour / 登入與非登入 PATH 的差別是 macOS path_helper 的行為"
 fi
 
 echo

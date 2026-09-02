@@ -26,7 +26,13 @@ Dispatch，不使用 SwiftPM 或 SwiftNIO。
 
 建置腳本會自動辨識 macOS、Linux 與 Windows。POSIX 系統輸出
 `release/csv2`，Windows 輸出 `release/csv2.exe`。`install.zsh` 支援
-`--dry-run`、`--prefix DIR`、`--no-rc` 與 `--uninstall`。
+`--dry-run`、`--prefix DIR`（裝進 `DIR/bin`）、`--dir DIR`（就裝進 `DIR` 這個目錄）、
+`--no-rc` 與 `--uninstall`。
+
+在 macOS 上，如果有「經 ssh 執行的腳本」需要找到它，請裝到 `/usr/local/bin` 而不是 Homebrew
+的目錄：一個乾淨的非登入 shell，PATH 裡有 `/usr/local/bin`，而**沒有** `/opt/homebrew/bin`
+——後者是 `path_helper` 從 `/etc/zprofile` 加的，那只在登入 shell 執行。install.zsh 會說出
+你拿到的是哪一種。
 
 ## 格式
 

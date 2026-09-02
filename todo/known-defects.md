@@ -8748,3 +8748,119 @@ if r.count == 1 && looksLikeMarkdownSeparator(r.fields[0].value) {
 兩份 README 對這個行為一個字都沒有(各 0 處提及)。
 
 修法:那道守衛加上格式條件,只在 `.csv`／`.csv2` 觸發。
+
+## KV. `--prefix DIR` 裝進 `DIR` 而不是 `DIR/bin`,而同一個函式裡就有正確的用法(2026-09-02)
+
+Unix 的慣例是 `--prefix /usr/local` 表示裝到 `/usr/local/bin`。install.zsh 把它當成「目標目錄」:
+
+```console
+$ ./install.zsh --prefix /usr/local --dry-run
+  to      : /usr/local/csv2
+  DRY  cp -f .../release/csv2 /usr/local/csv2
+```
+
+`/usr/local/csv2` **不在任何 PATH 上**。而接下來那一步讓它更糟:
+
+```
+  DRY  ask a fresh shell whether it runs /usr/local/csv2, and add a PATH line if not
+```
+
+一個照慣例寫下 `--prefix /usr/local` 的人,會得到一個放錯地方的執行檔,**外加一行被寫進他 rc 檔
+的 PATH**——一個誤解因此被固化成設定。
+
+**同一個函式裡就有正確的用法,相隔六行:**
+
+```zsh
+target_dir() {
+    if [[ -n $PREFIX ]]; then
+        print -r -- $PREFIX      # ← 旗標:直接當目錄
+        return
+    fi
+    if p=$(brew --prefix 2>/dev/null) && [[ -d $p/bin ]]; then
+        print -r -- $p/bin       # ← brew 的 prefix:加上 /bin
+```
+
+`brew --prefix` 回傳 `/opt/homebrew`,而這段程式碼**正確地**替它補上 `/bin`。也就是說,這個檔案
+知道那個慣例、依它處理外來的值,卻在自己的旗標上採用了相反的意思。
+
+修法:`--prefix DIR` 改為裝到 `DIR/bin`(與同檔案裡對 brew 的處理一致),另外新增 `--dir DIR`
+表示「就用這個目錄」——也就是舊的行為,換一個名副其實的名字。兩者同時給是拒絕。
+
+### 修它的時候弄壞了六個既有案例,而證據是我自己截掉的
+
+改完 `--prefix` 的語意之後,T203a/c/d/e/g/i 六個案例失敗:它們用 `--prefix <暫存目錄>` 安裝,
+而測試檢查的是 `<暫存目錄>/csv2`——現在那裡是 `<暫存目錄>/bin/csv2` 了。修法是把那五處呼叫改成
+`--dir`,因為它們要的本來就是「就這個目錄」。
+
+**動手之前我查過既有用法,而我把證據截掉了:**
+
+```sh
+grep -rn -- '--prefix' . --include='*.zsh' --include='*.md' | head -5
+```
+
+`test/test_csv2.zsh` 裡有 **14 處** `--prefix`,而 `| head -5` 讓輸出停在 README 與 install.zsh
+——那五行看起來像是全部。於是我在「已經查過、沒有其他呼叫端」的認知下改了語意。
+
+這是 mistakes.md 第 2 條的第三次:**證據就在輸出裡,而我沒有讀它。** 前兩次是「查了沒看」,
+這一次是「查了,然後親手把它截斷」——`head` 的存在理由是讓輸出好讀,而它同時讓「還有多少沒顯示」
+變得看不見。`grep -c` 先數一次,只要一個指令,而它回答的正是「有沒有被截斷」這個問題。
+
+發現的經過值得記:它是在回答「怎麼讓非登入 shell 也找得到 csv2」時撞到的。答案是裝到
+`/usr/local/bin`(那在乾淨的非登入 PATH 裡,而 `/opt/homebrew/bin` 不在),而我第一次寫的正是
+`--prefix /usr/local`——照慣例。dry-run 印出 `/usr/local/csv2` 才看見。**如果那次沒有先 dry-run,
+它會裝到一個不在 PATH 的地方,然後「成功」地在 rc 檔裡加一行去遷就它。**
+
+## KW. 2026-08-25 修過的那個「位元組相等」問法,同一個檔案裡還有第二處(2026-09-02,T203 抓到)
+
+install.zsh 第 535 行附近有一段寫得很清楚的註解:
+
+> Same FILE, not same bytes. A hash comparison here matched
+> /opt/homebrew/bin/csv2 against an install into a temp prefix -- a different
+> file at a different path with identical contents, because both were the same
+> build -- and concluded that this shell already ran the new install, so no rc
+> file was written and the temp prefix stayed unreachable. **Byte equality is
+> the right question for "will the shell run this program" and the wrong one
+> for "is this the copy I just placed".**
+
+那次的修法是改用 `-ef`(同一個 inode)。**而同一個檔案裡還有一處問同樣的錯問題,相隔約二十行:**
+
+```zsh
+resolves_to_dest() {
+    in_user_shell 'command -v csv2' || return 1
+    RESOLVED=$PROBE_OUT; REACH=$PROBE_KIND
+    TARGET=$(resolved_target $RESOLVED)
+    [[ "$(sum_of "$TARGET")" == "$(sum_of "$DEST")" ]]     # ← 位元組相等
+}
+```
+
+### 為什麼到今天才被觸發
+
+觸發條件是「乾淨的預設 PATH 上,有一份與剛裝的那個**位元組相同**的 csv2」。
+
+在 2026-09-02 之前,這台機器的 csv2 裝在 `/opt/homebrew/bin`——而那**不在**乾淨的非登入 PATH 裡
+(它是 `path_helper` 從 `/etc/zprofile` 加的,只在登入 shell 執行)。探測用 `env -i`,所以它看不到
+那一份,條件從未成立。
+
+今天為了讓「經 ssh 的腳本」也找得到 csv2,它被改裝到 `/usr/local/bin`——**那在乾淨的預設 PATH
+裡**。於是任何一次「裝到別處」的安裝(T203 全部都是,它們裝進暫存目錄),都會在探測時找到
+`/usr/local/bin/csv2`,位元組相同,被當成「就是剛裝的那個」,回報:
+
+```
+verified: a fresh zsh runs /usr/local/bin/csv2, and it is the file just installed
+  reachable from: every shell, scripts over ssh included
+```
+
+**兩句話都是假的**:那不是剛裝的那個檔案,而「every shell 都找得到」講的是別人。rc 檔因此沒有被
+寫,那個暫存目錄仍然叫不出來——與 2026-08-25 記下的症狀一字不差。
+
+### 這是既有缺陷,不是今天的改動造成的
+
+今天改的是 `--prefix` 的語意(KV)與安裝位置。兩者都沒有碰到這個比較。**改變的是環境,而環境的
+改變讓一個一直都在的缺陷變得可觸發。** T203a/c/d/e/g/i 六個案例正確地報告了它——尤其 T203i,
+它的名字就是「an identical copy on PATH was taken for the installed file」,那個案例存在的理由
+正是這件事。
+
+**這棵樹熟悉的形狀:一條規則只被套用到它成立範圍的一部分。** KB 是同一個(那次是「批次規則只擋了
+跨動詞的一半」),而這一次連「該怎麼問」都已經被寫在同一個檔案的註解裡了。
+
+修法:`resolves_to_dest` 改用 `-ef`,與二十行下方那段一致。

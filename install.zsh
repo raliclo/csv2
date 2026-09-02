@@ -7,7 +7,8 @@
 #   ./install.zsh              install / 安裝
 #   ./install.zsh --uninstall  remove it again / 移除
 #   ./install.zsh --dry-run    say what would happen, touch nothing / 只說會做什麼，不動任何東西
-#   ./install.zsh --prefix DIR install into DIR instead / 改裝到 DIR
+#   ./install.zsh --prefix DIR install into DIR/bin / 裝到 DIR/bin
+#   ./install.zsh --dir DIR    install into DIR exactly / 就裝到 DIR 這個目錄
 #   ./install.zsh --no-rc     do not touch any shell rc file / 不要改動任何 shell rc 檔
 #
 # THIS IS NOT A HOMEBREW INSTALL. Read the warning it prints.
@@ -57,7 +58,16 @@ case "$(uname -s 2>/dev/null)" in
 esac
 DRY=0
 MODE=install
+# Two ways to name a destination, because "prefix" already means something.
+# --prefix DIR installs into DIR/bin, which is what --prefix means everywhere
+# else and what this file already does with `brew --prefix` six lines below
+# target_dir(). --dir DIR is the older behaviour under a name that says it:
+# use exactly this directory.
+# 兩種指定目的地的方式，因為「prefix」這個詞早就有意思了。--prefix DIR 會裝進 DIR/bin，
+# 那是 --prefix 在其他每個地方的意思，也是這個檔案在 target_dir() 底下六行處理 `brew --prefix`
+# 時本來就在做的事。--dir DIR 是舊的行為，換一個名副其實的名字：就用這個目錄。
 PREFIX=""
+DEST_DIR=""
 RC=1
 
 while (( $# )); do
@@ -66,6 +76,7 @@ while (( $# )); do
         --dry-run)   DRY=1 ;;
         --no-rc)     RC=0 ;;
         --prefix)    shift; [[ $# -gt 0 ]] || { print -u2 -- "--prefix needs a directory / --prefix 需要一個目錄"; exit 2 }; PREFIX=$1 ;;
+        --dir)       shift; [[ $# -gt 0 ]] || { print -u2 -- "--dir needs a directory / --dir 需要一個目錄"; exit 2 }; DEST_DIR=$1 ;;
         -h|--help)   sed -n '3,21p' ${0:A}; exit 0 ;;
         *) print -u2 -- "unknown option: $1 / 未知選項：$1"; exit 2 ;;
     esac
@@ -273,9 +284,33 @@ in_user_shell() {
 # /usr/local、Linuxbrew 上是 /home/linuxbrew/.linuxbrew——三個不同的答案，寫死任何
 # 一個都會安靜地裝進「存在、但不是 brew 正在使用」的目錄。
 # ---------------------------------------------------------------------
+# Both at once is a refusal, not a precedence rule. They are two ways to name
+# one destination, and picking a winner silently would put the binary somewhere
+# the caller did not ask for -- while telling them it succeeded.
+# 同時給兩個是拒絕，不是「誰優先」的規則。它們是指定「同一個目的地」的兩種方式，而靜默地挑一個
+# 贏家，會把執行檔放到呼叫端沒有要求的地方——同時告訴他成功了。
+if [[ -n $PREFIX && -n $DEST_DIR ]]; then
+    print -u2 -- "--prefix and --dir both name the destination; give one. --prefix DIR installs into DIR/bin, --dir DIR into DIR exactly"
+    print -u2 -- "--prefix 與 --dir 都在指定目的地；請只給一個。--prefix DIR 裝進 DIR/bin，--dir DIR 就裝進 DIR"
+    exit 2
+fi
+
 target_dir() {
+    # --dir is taken as given; --prefix gets /bin, exactly as the brew branch
+    # below does with the prefix IT is handed. Until 2026-09-02 the flag was
+    # taken as given too, so `--prefix /usr/local` wrote /usr/local/csv2 --
+    # a file on no PATH -- and then offered to add a PATH line to an rc file
+    # to reach it, turning a misreading into configuration. KV.
+    # --dir 照給的用；--prefix 會加上 /bin，與底下 brew 那一支對它拿到的 prefix 所做的完全相同。
+    # 在 2026-09-02 之前，這個旗標也是照給的用，於是 `--prefix /usr/local` 寫出 /usr/local/csv2
+    # ——一個不在任何 PATH 上的檔案——然後主動提議在 rc 檔裡加一行 PATH 去搆到它，把一個誤讀
+    # 固化成設定。KV。
+    if [[ -n $DEST_DIR ]]; then
+        print -r -- $DEST_DIR
+        return
+    fi
     if [[ -n $PREFIX ]]; then
-        print -r -- $PREFIX
+        print -r -- $PREFIX/bin
         return
     fi
     local p
@@ -466,7 +501,19 @@ resolves_to_dest() {
     in_user_shell 'command -v csv2' || return 1
     RESOLVED=$PROBE_OUT; REACH=$PROBE_KIND
     TARGET=$(resolved_target $RESOLVED)
-    [[ "$(sum_of "$TARGET")" == "$(sum_of "$DEST")" ]]
+    # `-ef`, not a hash. Two builds of the same commit have identical bytes at
+    # different paths, and this question is "is the shell running THE FILE I
+    # just placed", not "is it running something that looks like it". The same
+    # mistake was fixed twenty lines below on 2026-08-25 and its comment spells
+    # out the distinction; this second site was left asking the wrong one. It
+    # only became reachable on 2026-09-02, when csv2 moved to /usr/local/bin --
+    # a directory that IS on the clean default PATH, unlike Homebrew's. KW.
+    # 用 `-ef`，不是雜湊。同一個 commit 的兩份建置在不同路徑上有相同的位元組，而這裡要問的是
+    # 「這個 shell 執行到的是不是我剛放下的**那個檔案**」，不是「它執行到的東西看起來像不像」。
+    # 同一個錯誤在二十行之下已於 2026-08-25 修過，那段註解把這個區分寫得很清楚；而這第二處被留著
+    # 問了錯的問題。它一直到 2026-09-02 才變得可觸發——那天 csv2 搬到了 /usr/local/bin，
+    # 一個與 Homebrew 的目錄不同、確實在乾淨預設 PATH 上的地方。KW。
+    [[ -n $TARGET && "$TARGET" -ef "$DEST" ]]
 }
 
 if (( DRY )); then

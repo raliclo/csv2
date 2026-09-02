@@ -29,7 +29,14 @@ SwiftNIO.
 
 The build detects macOS, Linux, and Windows. It writes `release/csv2` on
 POSIX systems and `release/csv2.exe` on Windows. `install.zsh` supports
-`--dry-run`, `--prefix DIR`, `--no-rc`, and `--uninstall`.
+`--dry-run`, `--prefix DIR` (installs into `DIR/bin`), `--dir DIR` (installs
+into `DIR` exactly), `--no-rc`, and `--uninstall`.
+
+On macOS, install into `/usr/local/bin` rather than Homebrew's directory if a
+script run over ssh needs to find it: a clean non-login shell has
+`/usr/local/bin` on its PATH and does not have `/opt/homebrew/bin`, which
+`path_helper` adds from `/etc/zprofile` for login shells only. install.zsh
+says which of the two you got.
 
 ## Formats
 
