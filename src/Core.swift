@@ -468,8 +468,8 @@ func refuseUTF16BOM(_ head: [UInt8]) throws {
     guard (b0 == 0xFF && b1 == 0xFE) || (b0 == 0xFE && b1 == 0xFF) else { return }
     let which = b0 == 0xFF ? "UTF-16LE" : "UTF-16BE"
     throw fault(
-        "this file begins with a \(which) byte-order mark; csv2 reads bytes and does not convert encodings, so it would parse as records that mean nothing. Convert it first with: iconv -f \(which) -t UTF-8 file > converted.csv -- the new name has to keep a .csv or .csv2 suffix, because the suffix is what declares the format",
-        "本檔案以 \(which) 的位元組順序記號開頭；csv2 讀的是位元組、不做編碼轉換，因此它會被解析成一堆沒有意義的紀錄。請先轉換：iconv -f \(which) -t UTF-8 file > converted.csv——新檔名必須保留 .csv 或 .csv2 副檔名，因為宣告格式的正是副檔名")
+        "this file begins with a \(which) byte-order mark; csv2 reads bytes and does not convert encodings, so it would parse as records that mean nothing. Convert it first with: iconv -f \(which) -t UTF-8 file > converted.csv -- the new name has to keep a .csv or .csv2 suffix, because the suffix is what declares the format. Where there is no iconv -- a trimmed rootfs, for instance -- convert on a machine that has one and copy the result in; csv2 will not do it, because guessing an encoding wrong produces records that look fine",
+        "本檔案以 \(which) 的位元組順序記號開頭；csv2 讀的是位元組、不做編碼轉換，因此它會被解析成一堆沒有意義的紀錄。請先轉換：iconv -f \(which) -t UTF-8 file > converted.csv——新檔名必須保留 .csv 或 .csv2 副檔名，因為宣告格式的正是副檔名。在沒有 iconv 的地方——例如一個精簡過的 rootfs——請在有 iconv 的機器上轉好再複製進來；csv2 不會代勞，因為猜錯編碼產生的是一堆「看起來沒問題」的紀錄")
 }
 
 

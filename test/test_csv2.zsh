@@ -11189,7 +11189,20 @@ else
     # 答案就是 bash，這個案例是有效的。改讀當前的 $SHELL，問的是「是哪個 shell 在跑這份測試」，
     # 那是另一個問題，而它會讓 macOS 跳過一個它一直正確執行著的案例。
     [[ -n $_t203_login ]] || _t203_login=$(command -v bash)
-    if [[ ${_t203_login:t} != bash ]]; then
+    # Two different reasons, and the message used to give the second one for
+    # both. In the guest `command -v bash` returns nothing, so the fallback is
+    # empty too and the sentence printed "the login shell is , and SHELL=
+    # cannot simulate one" -- an empty value where a shell name belongs,
+    # sending the reader after a setting that does not exist. On WSL the same
+    # line correctly says "zsh". One message, right on one platform and wrong
+    # on another.
+    # 兩個不同的理由，而那則訊息原本對兩者都給第二個。在 guest 裡 `command -v bash` 什麼也沒回傳，
+    # 因此那個退路也是空的，於是那句話印出「this account's login shell is , and SHELL= cannot
+    # simulate one」——在該有 shell 名字的地方是一個空值，把讀者送去找一個不存在的設定。在 WSL 上
+    # 同一行正確地說了「zsh」。同一則訊息，在一個平台上說對、在另一個平台上說錯。
+    if [[ -z $_t203_login ]]; then
+        skipt "T203e/f there is no bash on this platform, so the two-file case cannot be exercised / 這個平台上沒有 bash，因此那個「兩個檔案」的案例無法執行"
+    elif [[ ${_t203_login:t} != bash ]]; then
         skipt "T203e/f this account's login shell is ${_t203_login:t}, and SHELL= cannot simulate one / 這個帳號的登入 shell 是 ${_t203_login:t}，而 SHELL= 模擬不了一個帳號"
         T203_BASH_SKIPPED=1
     elif command -v bash > /dev/null 2>&1; then
@@ -13114,15 +13127,27 @@ echo "--- T236: --prefix means DIR/bin, as it does everywhere else / T236：--pr
 # KV。`--prefix /usr/local` 會裝進 /usr/local/csv2——一個不在任何 PATH 上的檔案——然後主動提議
 # 在 rc 檔裡加一行 PATH 去搆到它，把一個誤讀固化成設定。而 install.zsh 在相隔六行的地方本來就
 # 正確地處理了那個慣例：`brew --prefix` 回傳 /opt/homebrew，程式碼替它補上 /bin。
+# The binary is csv2.exe on Windows, and the first version of these two cases
+# asserted a bare `csv2`. They failed there while REPORTING the correct path --
+# `--prefix gave .../t236p/bin/csv2.exe` is exactly right, and the assertion
+# was what was wrong. This tree has paid for the missing `.exe` before: an
+# install that copied a file beside the one just built, and a stale-binary
+# guard that compared release/csv2 while the build wrote release/csv2.exe.
+# 那個執行檔在 Windows 上是 csv2.exe，而這兩個案例的第一版斷言的是不帶副檔名的 `csv2`。它們在
+# 那裡失敗，而**回報的路徑是正確的**——`--prefix gave .../t236p/bin/csv2.exe` 完全正確，錯的是
+# 那個斷言。這棵樹為「少了 .exe」付過帳：一次安裝複製了剛建好那個檔案「旁邊」的檔案，以及一道
+# 比對 release/csv2 而建置寫的是 release/csv2.exe 的過期守衛。
+_t236_bin=csv2
+[[ $CSV2 == *.exe ]] && _t236_bin=csv2.exe
 _t236_run() { "$ROOT/install.zsh" "$@" --dry-run 2>&1 | grep -m1 '^  to  ' | sed 's/.*: //' }
 _t236_p=$(_t236_run --prefix "$TMP/t236p")
 _t236_d=$(_t236_run --dir "$TMP/t236d")
-if [[ $_t236_p == "$TMP/t236p/bin/csv2" ]]; then
+if [[ $_t236_p == "$TMP/t236p/bin/$_t236_bin" ]]; then
     ok "T236a --prefix DIR installs into DIR/bin / --prefix DIR 裝進 DIR/bin"
 else
     bad "T236a --prefix gave $_t236_p / 實得如上"
 fi
-if [[ $_t236_d == "$TMP/t236d/csv2" ]]; then
+if [[ $_t236_d == "$TMP/t236d/$_t236_bin" ]]; then
     ok "T236b while --dir DIR uses DIR exactly, which is what its name says / 而 --dir DIR 就用 DIR 這個目錄，那正是它的名字說的"
 else
     bad "T236b --dir gave $_t236_d / 實得如上"
@@ -13138,33 +13163,22 @@ else
     bad "T236c rc=$? said: ${_t236_both:0:70} / 實得如上"
 fi
 
-# The value this whole fix exists for: the default install must stay reachable
-# from a NON-login shell, which is where a script over ssh runs. /usr/local/bin
-# is in the clean default PATH; /opt/homebrew/bin is not, because path_helper
-# adds it from /etc/zprofile and that runs for login shells only.
-# 這整個修正存在的理由：預設的安裝必須從**非登入** shell 也搆得到，而經 ssh 執行的腳本就在那裡。
-# /usr/local/bin 在乾淨的預設 PATH 裡；/opt/homebrew/bin 不在，因為那是 path_helper 從
-# /etc/zprofile 加的，而那只在登入 shell 執行。
-# `uname -s`, not a variable: this file sets IS_WINDOWS and nothing else about
-# the platform, and the first version of this case used a `$PLATFORM` that does
-# not exist. Under `setopt no_unset` that ABORTS the suite -- everything after
-# this line stopped running, including the totals, and the failure showed only
-# as a missing summary. My own grep filter then hid the one line that said so.
-# 用 `uname -s`，不是變數：這個檔案只設了 IS_WINDOWS，沒有其他關於平台的變數，而這個案例的
-# 第一版用了一個不存在的 `$PLATFORM`。在 `setopt no_unset` 之下那會**中止**整份測試——這一行
-# 之後的一切都沒有執行，包括統計，而那次失敗的外顯症狀只是「總計不見了」。接著我自己的 grep
-# 過濾器把唯一說出這件事的那一行藏了起來。
-if [[ $(uname -s 2>/dev/null) == Darwin ]]; then
-    _t236_clean=$(env -i /bin/zsh -c 'print -r -- $PATH' 2>/dev/null)
-    if [[ $_t236_clean == */usr/local/bin* && $_t236_clean != */opt/homebrew/bin* ]]; then
-        ok "T236d a clean non-login PATH has /usr/local/bin and not /opt/homebrew/bin / 乾淨的非登入 PATH 裡有 /usr/local/bin，沒有 /opt/homebrew/bin"
-    else
-        bad "T236d clean PATH is: $_t236_clean / 實得如上"
-    fi
-else
-    skipt "T236d the login/non-login PATH split is a macOS path_helper behaviour / 登入與非登入 PATH 的差別是 macOS path_helper 的行為"
-fi
-
+# T236d was here and has been removed. It asserted that a clean non-login PATH
+# holds /usr/local/bin and not /opt/homebrew/bin -- an ENVIRONMENT FACT, not a
+# behaviour of csv2, and the exact shape mistakes.md entry 1 is about. It also
+# skipped on three of four platforms, which is what made the mismatch visible:
+# a case that can only run in one place is usually measuring that place.
+#
+# What it meant to guard -- that install.zsh's reachability report is true --
+# is already guarded by T203g, "claimed every shell finds it, on the strength
+# of the caller's PATH", which is the name of defect KW itself.
+# T236d 曾經在這裡，已經移除。它斷言的是「乾淨的非登入 PATH 裡有 /usr/local/bin、沒有
+# /opt/homebrew/bin」——那是一個**環境事實**，不是 csv2 的行為，也正是 mistakes.md 第 1 條講的
+# 形狀。它同時在四個平台中的三個跳過，而那正是讓這個不搭調變得看得見的東西：一個「只能在一個
+# 地方執行」的案例，通常量的就是那個地方。
+#
+# 它原本想守的東西——install.zsh 對可及性的回報必須為真——早已由 T203g 守著，那個案例的名字
+# 就是缺陷 KW 本身：「憑呼叫端的 PATH 就宣稱每一種 shell 都找得到」。
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
