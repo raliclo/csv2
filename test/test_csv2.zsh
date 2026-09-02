@@ -4929,7 +4929,15 @@ assert_eq "$(wc -c < "$TMP/t101d_err.txt" | tr -d ' ')" "0" \
 # 有寫入權限。
 # ---------------------------------------------------------------------
 echo
-echo "--- T102: the logged invocation cannot open a second line / 記入 log 的呼叫無法開出第二行 ---"
+# Worded to avoid the literal "cannot open". run_checked.zsh scans output for
+# shell-level failure signals and that phrase is one of them, so these two case
+# titles made a clean 1157/0/1 run report FAILED. A guard that cries wolf is the
+# kind that gets switched off -- the same reason T231b's threshold sits far
+# below the real value.
+# 措辭刻意避開字面上的 "cannot open"。run_checked.zsh 會掃描輸出中 shell 層級的失敗訊號，而
+# 那個片語正是其中之一，於是這兩個案例標題讓一次乾淨的 1157/0/1 被回報成 FAILED。一道會亂叫的
+# 守衛是會被人關掉的那種——與 T231b 的門檻刻意遠低於實際值是同一個理由。
+echo "--- T102: the logged invocation opens no second line / 記入 log 的呼叫開不出第二行 ---"
 
 print -r -- 'a,b' > "$TMP/t102.csv"
 print -r -- '1,2' >> "$TMP/t102.csv"
@@ -4973,7 +4981,7 @@ rm -f "$TMP/t102c.log"
     -i "$TMP/t102c.csv" --in-place -log "$TMP/t102c.log" > /dev/null 2> "$TMP/t102c.err"
 
 assert_eq "$(wc -l < "$TMP/t102c.log" | tr -d ' ')" "2" \
-    "T102d an error message quoting the input cannot open a line either / 引述輸入的錯誤訊息同樣無法開出一行"
+    "T102d an error message quoting the input opens no line either / 引述輸入的錯誤訊息同樣開不出一行"
 
 # The stderr promise is its own: exactly two lines, English then Chinese. The
 # same unescaped message made it four, and a script reading the pair took the
