@@ -780,6 +780,41 @@ enum Platform {
         #endif
     }
 
+    /// `nil` if the path could be examined; otherwise the `errno` that stopped
+    /// it.
+    ///
+    /// `fileKind` answers nil for BOTH "there is nothing there" and "I was not
+    /// allowed to look", and a caller reading nil as the first says something
+    /// false whenever it was the second. `-o` did exactly that: every stat
+    /// failure came back as "the directory X does not exist", so a permission
+    /// error, an ELOOP, or a name too long all reported a missing directory --
+    /// on every platform, not just the one that made it visible.
+    ///
+    /// The errno was always there. Discarding it turned four different
+    /// situations into one sentence, and three of them were wrong.
+    ///
+    /// `nil` 代表那條路徑檢視得了；否則回傳「阻止了它」的那個 errno。
+    ///
+    /// `fileKind` 對「那裡什麼都沒有」與「我不被允許去看」都回答 nil，而一個把 nil 讀成前者
+    /// 的呼叫端，在它其實是後者時說的就是一句假話。`-o` 正是如此：每一種 stat 失敗都回來成為
+    /// 「the directory X does not exist」，於是權限錯誤、ELOOP、名稱過長全都被回報成「目錄
+    /// 不存在」——在每一個平台上，不只在那個讓它現形的平台上。
+    ///
+    /// errno 一直都在。丟掉它，讓四種不同的處境變成同一句話，而其中三種是錯的。
+    static func statFailure(_ path: String) -> Int32? {
+        var st = stat()
+        if stat(path, &st) == 0 { return nil }
+        return errno
+    }
+
+    /// The text of an errno, for a message that has to say what actually
+    /// stopped it rather than what usually stops things.
+    /// 一個 errno 的文字，供「必須說出真正阻止了它的東西、而不是通常會阻止東西的那個」的訊息使用。
+    static func errnoText(_ e: Int32) -> String {
+        guard let p = strerror(e) else { return "errno \(e)" }
+        return String(cString: p)
+    }
+
     static func fileKind(path: String) -> FileKind? {
         var st = stat()
         guard stat(path, &st) == 0 else { return nil }

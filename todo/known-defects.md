@@ -8953,6 +8953,29 @@ entire mechanism under test.
 cmd.exe //c "<批次檔的絕對路徑>"
 ```
 
+### 更正（同日稍晚）：這棵樹的 dispatcher 早就擋掉了，而我叫節點繞過它
+
+`compile_csv2.zsh` 的 Windows 分支寫的是：
+
+```zsh
+MSYS2_ARG_CONV_EXCL='*' cmd.exe /d /c '.\compile_csv2_win.bat' "$@"
+exit $?
+```
+
+`MSYS2_ARG_CONV_EXCL='*'` 防的正是 `/c` 被改寫；`.\` 前綴是 2026-08-19 付過代價寫上去的
+（cmd 不搜尋工作目錄）；`exit $?` 把退出碼傳回來。**兩個陷阱都已經被擋掉。**
+
+**而這次無效建置的成因，是 macOS session（我）在請求裡叫節點跑 `compile_csv2_win.bat`，
+繞過了那個 dispatcher。** 因此 KY 的一半不是「這棵樹缺一道守衛」，是**一個錯的指示**。
+
+修法因此是文件而不是程式：`AGENTS.md` 現在寫明 Windows 上的建置指令是 `./compile_csv2.zsh`，
+並說明為什麼不要自己叫批次檔。
+
+Correction, later the same day: the dispatcher's Windows branch already carries both guards.
+The no-op build happened because the macOS session asked the node to run the batch file
+directly, stepping around it. Half of KY is a wrong instruction, not a missing guard, and the
+fix is documentation: AGENTS.md now says to build with ./compile_csv2.zsh.
+
 `//c` 讓 MSYS 不去改寫它；**絕對路徑**是因為 cmd 從 MSYS 啟動時工作目錄與呼叫端不同，相對
 路徑會找不到那個批次檔——而找不到時它一樣安靜。
 

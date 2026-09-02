@@ -11187,12 +11187,36 @@ echo
 echo "--- T203: where install.zsh writes, and what it can prove / T203：install.zsh 寫到哪裡，以及它證明得了什麼 ---"
 
 if (( IS_WINDOWS )); then
-    # install.zsh's Windows target is a scoop shim path and `env -i` drops the
-    # variables an MSYS shell needs to start at all; the case would test the
-    # harness, not the installer.
-    # install.zsh 在 Windows 的目標是一條 scoop shim 路徑，而 `env -i` 會拿掉 MSYS shell
-    # 啟動所必需的變數；這個案例會變成在測試環境而不是測試安裝程式。
-    skipt "T203 install.zsh rc placement -- needs a POSIX home and env -i / 需要 POSIX 家目錄與 env -i"
+    # The reason this case skips here is that on Windows PATH comes from the
+    # PROCESS ENVIRONMENT, not from any rc file, so writing a line into one
+    # proves nothing about whether a new shell will find the binary. The case
+    # would pass while testing nothing.
+    #
+    # The two reasons that used to be written here were both MEASURED FALSE on
+    # 2026-09-02, and they are kept alongside because a skip reason nobody
+    # rechecks is how a stale one survives:
+    #   * "env -i drops the variables an MSYS shell needs to start at all" --
+    #     `env -i /usr/bin/zsh -c 'echo alive'` prints `alive` on that node.
+    #   * "the target is a scoop shim path" -- it is
+    #     C:/Users/<user>/AppData/Local/csv2/csv2.exe, an ordinary path.
+    # The skip was right and its stated reason had drifted away from it, which
+    # is the same failure as a defect list kept in an instruction file: nothing
+    # reports the drift, and the next reader spends a round measuring two
+    # premises that stopped being true.
+    #
+    # 這個案例在這裡跳過的理由是：Windows 上的 PATH 來自**行程環境**，不是任何 rc 檔，因此
+    # 往 rc 檔寫一行，對「新開的 shell 找不找得到那個執行檔」不構成任何證明。這個案例會通過，
+    # 而它什麼都沒測到。
+    #
+    # 先前寫在這裡的兩個理由在 2026-09-02 **實測皆不成立**，一併留著，因為「沒有人回頭複查的
+    # skip 理由」正是一個過期理由能存活的方式：
+    #   * 「env -i 會拿掉 MSYS shell 啟動所必需的變數」——在那個節點上
+    #     `env -i /usr/bin/zsh -c 'echo alive'` 印出 `alive`。
+    #   * 「目標是一條 scoop shim 路徑」——它是
+    #     C:/Users/<user>/AppData/Local/csv2/csv2.exe，一條普通路徑。
+    # 跳過是對的，而它寫下的理由已經與它漂開——那與「把缺陷清單放進指令檔」是同一種失敗：
+    # 沒有任何東西會回報這件漂移，而下一個讀者要花一整輪去量兩個已經不成立的前提。
+    skipt "T203 install.zsh rc placement -- on Windows PATH comes from the process environment, not an rc file / Windows 的 PATH 來自行程環境而非 rc 檔"
     T203_SKIPPED=1
 else
     # Say once that the file is missing, rather than five times that its
@@ -13463,6 +13487,56 @@ if [[ -n ${$(_t239_scan "$TMP/t239probe.zsh")// /} ]]; then
     ok "T239b and the scan catches one when it is there / 而那個掃描在它存在時抓得到"
 else
     bad "T239b the scan found nothing in a file that contains one / 那個掃描在一個確實含有它的檔案裡什麼也沒找到"
+fi
+
+echo
+echo "--- T240: a directory that cannot be examined is not a missing one / T240：一個檢視不了的目錄，不是一個不存在的目錄 ---"
+# From LB's investigation. `fileKind` answers nil for EVERY stat failure, and
+# `-o` read nil as "the directory does not exist", so a permission error or a
+# symlink loop was reported as an absent directory -- on every platform, not
+# only on the one whose report started this. The errno was always there.
+#
+# The loop is used rather than a mode-000 directory because root defeats
+# permissions and the guest runs as root: chmod would have made this yet
+# another case that skips exactly where it would bite. ELOOP stops everyone.
+#
+# 來自 LB 的追查。`fileKind` 對**每一種** stat 失敗都回答 nil，而 `-o` 把 nil 讀成「目錄不
+# 存在」，於是一個權限錯誤或一個 symlink 迴圈都被回報成「目錄不存在」——在每一個平台上，不只
+# 在那個引發追查的平台上。errno 一直都在。
+#
+# 這裡用迴圈而不是一個 mode-000 的目錄，因為 root 打得贏權限、而 guest 是以 root 執行的：
+# chmod 只會讓這個案例又變成「正好在它咬得到的地方跳過」。ELOOP 攔得住每一個人。
+printf 'a,b\n1,2\n' > "$TMP/t240.csv"
+if (( IS_WINDOWS )); then
+    skipt "T240 a symlink loop needs a privilege to create on Windows / 在 Windows 上建立 symlink 迴圈需要特權"
+else
+    ln -s "$TMP/t240loopb" "$TMP/t240loopa" 2>/dev/null
+    ln -s "$TMP/t240loopa" "$TMP/t240loopb" 2>/dev/null
+    _t240=$("$CSV2" -r -t -i "$TMP/t240.csv" -o "$TMP/t240loopa/out.csv" 2>&1 >/dev/null)
+    if [[ $_t240 == *"cannot be examined"* && $_t240 != *"does not exist"* ]]; then
+        ok "T240a a directory it could not examine is not reported as absent / 一個它檢視不了的目錄，不會被回報成不存在"
+    else
+        bad "T240a $(print -r -- $_t240 | head -1) / 訊息如上"
+    fi
+    # The errno has to reach the message. Without this the case would pass on a
+    # sentence that named no cause, which is the shape it exists to remove.
+    # errno 必須抵達那則訊息。少了這一條，這個案例會在一句「沒有指出任何原因」的話上通過，
+    # 而那正是它存在所要移除的形狀。
+    if [[ $_t240 == *"oop"* || $_t240 == *"迴圈"* || $_t240 == *"link"* ]]; then
+        ok "T240b and it says what actually stopped it / 而且它說出了真正阻止它的東西"
+    else
+        bad "T240b the message named no cause: $(print -r -- $_t240 | head -1) / 訊息未指出原因"
+    fi
+fi
+# The good case must stay good: a directory that really is absent still gets
+# the sentence that says so, or this change traded one false message for another.
+# 好的那一種要維持好：一個真的不存在的目錄，仍然要拿到那句說它不存在的話，否則這次改動只是
+# 把一句假話換成另一句假話。
+_t240_m=$("$CSV2" -r -t -i "$TMP/t240.csv" -o "$TMP/t240nosuchdir/out.csv" 2>&1 >/dev/null)
+if [[ $_t240_m == *"does not exist"* ]]; then
+    ok "T240c while a directory that truly is absent still says so / 而一個真的不存在的目錄，仍然照實說"
+else
+    bad "T240c $(print -r -- $_t240_m | head -1) / 訊息如上"
 fi
 
 echo

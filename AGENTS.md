@@ -34,22 +34,40 @@ reports it. What the checkboxes in `plan/plan.md` say is the answer.
 ../test_submodules/run_csv2_test.zsh   # 0 FAIL
 ```
 
-**On Windows, run the batch file as `cmd.exe //c "<absolute path>"`.** Both
-halves are load-bearing and each fails silently on its own. MSYS rewrites an
-argument that looks like a path, so a plain `/c` is consumed and **the batch
-file never runs** -- exit status 0, a log carrying only the banner, and a
-binary that is byte-identical to the one already there. And `cmd` started from
-MSYS does not inherit the caller's working directory, so a relative path finds
-nothing, equally quietly. Every test afterwards then reports on a program that
-was never made, and they pass, because they are testing the previous build.
-Reported by the Windows node on 2026-09-03; recorded as KY.
+**On Windows, build with `./compile_csv2.zsh` like everywhere else. Do not
+invoke `compile_csv2_win.bat` yourself.** The dispatcher's Windows branch
+already carries both things that invocation needs, and each of them fails
+silently when it is missing:
 
-**在 Windows 上，批次檔要以 `cmd.exe //c "<絕對路徑>"` 執行。** 兩半都是承重的，而且各自
-會安靜地失敗。MSYS 會改寫看起來像路徑的引數，於是單純的 `/c` 被吃掉、**批次檔根本不會執行**
-——退出碼 0、log 只有橫幅、二進位檔與原本那個一個位元組都不差。而從 MSYS 啟動的 `cmd` 不會
-繼承呼叫端的工作目錄，因此相對路徑什麼也找不到，一樣安靜。之後的每一個測試都在回報一個從未被
-造出來的程式，而它們全部通過，因為它們測的是上一次的建置。2026-09-03 由 Windows 節點回報，
-記為 KY。
+```zsh
+MSYS2_ARG_CONV_EXCL='*' cmd.exe /d /c '.\compile_csv2_win.bat' "$@"
+```
+
+`MSYS2_ARG_CONV_EXCL='*'` stops MSYS rewriting `/c` into a path -- without it
+the switch is consumed, **the batch file never runs**, and the result is exit
+status 0, a log carrying only the banner, and a binary byte-identical to the
+one already there. The `.\` is there because cmd does not search the working
+directory for an executable; a bare name is looked up on PATH only, and that
+cost a `build: FAILED` on 2026-08-19 with the file sitting one `ls` away.
+
+This is worth stating because the instruction to run the batch file directly is
+what produced KY on 2026-09-03: the request came from the macOS session, the
+node followed it, and the dispatcher that already knew all of this was stepped
+around. If you must invoke it by hand, the form is
+`cmd.exe //c "<absolute path>"` -- but there is no reason to.
+
+**在 Windows 上，用 `./compile_csv2.zsh` 建置，與其他平台一樣。不要自己去叫
+`compile_csv2_win.bat`。** dispatcher 的 Windows 分支已經帶著那個呼叫所需要的兩件事，
+而它們各自在缺席時都會安靜地失敗（見上方程式碼）。
+
+`MSYS2_ARG_CONV_EXCL='*'` 阻止 MSYS 把 `/c` 改寫成路徑——少了它，那個開關會被吃掉、
+**批次檔根本不會執行**，結果是退出碼 0、log 只有橫幅、二進位檔與原本那個一個位元組都不差。
+`.\` 的存在是因為 cmd 不會為了找執行檔而搜尋工作目錄；一個裸名字只會在 PATH 上被查找，
+而那在 2026-08-19 換來一次 `build: FAILED`，當時那個檔案就在旁邊、`ls` 一下就看得到。
+
+這件事值得寫下來，是因為 **KY 的成因正是「叫人直接跑那個批次檔」這個指示**：要求來自 macOS
+的 session，節點照做了，而那個早就知道這一切的 dispatcher 被繞了過去。若非得手動呼叫不可，
+形式是 `cmd.exe //c "<絕對路徑>"`——但沒有理由那樣做。
 
 **Do not run the suite with `zsh -f`.** It reads no start-up files, so a
 packaged zsh never builds its `module_path` and `zsh/stat` cannot load. The

@@ -1589,9 +1589,23 @@ func validate(_ o: inout Options) throws {
             // reply to a typo.
             // 「目錄不存在」與「目錄不可寫」需要不同的句子：「請用 -so」是 /dev 的答案，
             // 拿來回答一個打錯的路徑則毫無意義。
-            if Platform.fileKind(path: dirName) == nil {
-                throw usageError("-o \(out): the directory \(dirName) does not exist",
-                                 "-o \(out)：目錄 \(dirName) 不存在")
+            // And a third: a directory that could not be EXAMINED is neither
+            // of those. It used to be folded into "does not exist" because
+            // fileKind answers nil for every stat failure alike -- so a
+            // permission error on a parent, or a symlink loop, was reported as
+            // a missing directory. The path may be sitting right there.
+            // 還有第三種：一個**檢視不了**的目錄，兩者都不是。它先前被併進「不存在」，因為
+            // fileKind 對每一種 stat 失敗一律回答 nil——於是父目錄的權限錯誤、或一個 symlink
+            // 迴圈，都被回報成「目錄不存在」。那條路徑可能就好端端地在那裡。
+            if let e = Platform.statFailure(dirName) {
+                if e == ENOENT {
+                    throw usageError("-o \(out): the directory \(dirName) does not exist",
+                                     "-o \(out)：目錄 \(dirName) 不存在")
+                }
+                let why = Platform.errnoText(e)
+                throw usageError(
+                    "-o \(out): the directory \(dirName) cannot be examined: \(why)",
+                    "-o \(out)：無法檢視目錄 \(dirName)：\(why)")
             }
             throw usageError(
                 "-o \(out): a new file cannot be created in \(dirName), and -o needs one there for the temp file it renames into place. Use -so to write to a stream",
