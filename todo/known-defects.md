@@ -8933,3 +8933,83 @@ T237d 自己先失敗了四次，而程式四次都是對的：它把 fixture �
 Pinned by T237a-d. T237d itself failed four times while the program was right every
 time: its scratch copy was named `t237w`, dropping the suffix -- and the suffix is the
 entire mechanism under test.
+
+---
+
+## KY. `cmd.exe /c` 被 MSYS 改寫，批次檔沒有執行，而 rc=0（2026-09-03，Windows 節點回報）
+
+從 mac 端請 Windows 節點建置時，第一次「建置」的 log 只有 Windows 的橫幅、退出碼是 0，而
+**二進位檔一個位元組都沒有變**。
+
+這比這棵樹先前記過的「建置失敗、節點保留先前的二進位檔」更難察覺：那一種至少留下一則錯誤
+訊息，而這一種**連錯誤都沒有**。之後的每一個測試都在回報一個從未被造出來的程式，而它們全部
+通過——因為它們測的是上一次的建置。
+
+成因：MSYS 會改寫看起來像路徑的引數，`/c` 被當成一個路徑處理掉了。
+
+正確的叫法（兩處都必要）：
+
+```
+cmd.exe //c "<批次檔的絕對路徑>"
+```
+
+`//c` 讓 MSYS 不去改寫它；**絕對路徑**是因為 cmd 從 MSYS 啟動時工作目錄與呼叫端不同，相對
+路徑會找不到那個批次檔——而找不到時它一樣安靜。
+
+**防範不是「記得寫對」，是讓沒發生的建置說不出「我做完了」——而那道守衛已經存在。**
+這套測試在開頭（`test_csv2.zsh`，`STALE BINARY` 那一段）就會比對：任何一個 `src/*.swift`
+比 `$CSV2` 新，就 `exit 1`。它是 2026-08-22 由**同一台 Windows 節點**逼出來的，那次是建置
+失敗、節點保留舊二進位檔、拿新測試去跑它。
+
+因此這一條還缺一個答案：**這次那道守衛有沒有觸發？** 症狀（原始碼被拉新、二進位檔沒動）
+正是它設計要攔的形狀。已向該節點問過，尚未回覆。
+
+- 若**有**觸發，那它做對了，這一條要記的只是「`cmd.exe /c` 的正確叫法」，不需要新守衛。
+- 若**沒有**觸發，那才是真正的缺陷所在，要找的是它為什麼沒攔到（`$CSV2` 指向別處？
+  `.exe` 讓 `-nt` 的比較對象不存在？），而不是再加一道同樣的檢查。
+
+**在那個答案回來之前，不要為這一條加新守衛。** 加一道與既有守衛重複的檢查，會讓下一個
+讀者以為那是必要的，而真正的缺口仍在原地。
+
+MSYS rewrites `/c` into a path, so the batch file never runs; exit status is 0, the log
+carries only the banner, and the binary is byte-identical. Every test afterwards reports on
+a program that was never made, and they all pass, because they are testing the previous
+build. Correct form: `cmd.exe //c "<absolute path>"` -- `//c` escapes the rewrite, and the
+absolute path is needed because cmd started from MSYS has a different working directory.
+The guard against this already exists -- the suite's STALE BINARY check refuses to run when
+any src/*.swift is newer than $CSV2, added on 2026-08-22 after this same node kept an old
+binary through a failed build. Whether it fired this time is still unanswered, and no new
+guard should be added until it is: a duplicate check would teach the next reader it was
+needed while the real gap stayed where it was.
+
+---
+
+## KZ. `zsh -f` 讓三個案例變紅，而它們沒有一個說得出原因（2026-09-03，Windows 節點回報）
+
+用 `zsh -f` 跑這套測試會產生三個假失敗：`T129g`、`the suite could not stamp itself`、
+`the suite called "zstat"`，而略過數也跟著變（回報的差異是 19→16→15）。
+
+`-f` 不讀啟動檔，封裝版 zsh 的 `module_path` 因此沒有被建立，`zsh/stat` 與 `zsh/parameter`
+都載不進來。
+
+**而這套測試自己讓它變成三個謎。** 第 49 行是：
+
+```zsh
+zmodload -F zsh/stat b:zstat 2>/dev/null
+```
+
+失敗被丟掉、結果沒有被檢查，於是每一個「後來用得到 zstat」的地方各自以自己的方式失敗，
+沒有一個說得出「這個 zsh 載不進 zsh/stat」。三個紅字指向三個不同的方向，而真正的原因只有
+一個，且不在它們任何一個裡面。
+
+這與 mistakes.md 第 1 條是同一族：**測試碰到的是環境，不是被測物。** 差別在於這一次環境是
+真的壞了——那麼正確的行為不是繼續跑完再給出三個誤導的結果，而是當場拒絕。
+
+修法：啟動時檢查 `zmodload` 的結果，載不進來就以非零結束並指名 `-f`。見 T238a／T238b。
+
+`zsh -f` reads no start-up files, so the packaged zsh never builds its `module_path` and
+`zsh/stat` cannot load. Line 49 discarded the failure and never checked the result, so three
+cases went red in three different directions and none of them named the cause. Same family
+as mistakes.md entry 1 -- the test met the environment, not the thing under test -- except
+that here the environment really is broken, and the right response is to refuse at start-up
+rather than produce three misleading results.

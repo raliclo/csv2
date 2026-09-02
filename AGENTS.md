@@ -34,6 +34,33 @@ reports it. What the checkboxes in `plan/plan.md` say is the answer.
 ../test_submodules/run_csv2_test.zsh   # 0 FAIL
 ```
 
+**On Windows, run the batch file as `cmd.exe //c "<absolute path>"`.** Both
+halves are load-bearing and each fails silently on its own. MSYS rewrites an
+argument that looks like a path, so a plain `/c` is consumed and **the batch
+file never runs** -- exit status 0, a log carrying only the banner, and a
+binary that is byte-identical to the one already there. And `cmd` started from
+MSYS does not inherit the caller's working directory, so a relative path finds
+nothing, equally quietly. Every test afterwards then reports on a program that
+was never made, and they pass, because they are testing the previous build.
+Reported by the Windows node on 2026-09-03; recorded as KY.
+
+**在 Windows 上，批次檔要以 `cmd.exe //c "<絕對路徑>"` 執行。** 兩半都是承重的，而且各自
+會安靜地失敗。MSYS 會改寫看起來像路徑的引數，於是單純的 `/c` 被吃掉、**批次檔根本不會執行**
+——退出碼 0、log 只有橫幅、二進位檔與原本那個一個位元組都不差。而從 MSYS 啟動的 `cmd` 不會
+繼承呼叫端的工作目錄，因此相對路徑什麼也找不到，一樣安靜。之後的每一個測試都在回報一個從未被
+造出來的程式，而它們全部通過，因為它們測的是上一次的建置。2026-09-03 由 Windows 節點回報，
+記為 KY。
+
+**Do not run the suite with `zsh -f`.** It reads no start-up files, so a
+packaged zsh never builds its `module_path` and `zsh/stat` cannot load. The
+suite refuses at start-up with rc=2 and says so; before that refusal existed it
+produced three failures pointing in three different directions and moved the
+skip count. KZ, and T238 proves the refusal bites.
+
+**不要用 `zsh -f` 跑這套測試。** 它不讀啟動檔，封裝版 zsh 因此沒有建立 `module_path`，
+`zsh/stat` 載不進來。現在這套測試會在啟動時以 rc=2 拒絕並說明原因；在那道拒絕存在之前，它會
+產生三個指向三個不同方向的失敗，並讓略過數跟著變。這是 KZ，而 T238 證明那道拒絕會咬。
+
 **The source list lives in `src/sources.list`, read by BOTH build scripts.**
 Add a `.swift` file there, never to a script. The two scripts each carried
 their own copy once and drifted; the Linux build then failed with

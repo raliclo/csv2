@@ -46,7 +46,38 @@ ROOT="${HERE:h}"
 # 用 size **與** mtime：只靠 mtime 的話，它是秒級解析度，同一秒內的編輯不會改變它——這是在
 # 探測這件事時實際量到的。兩者合起來只漏掉「同一秒內、且位元組數不變」的編輯，而在一次持續數
 # 分鐘的執行裡那幾乎不可能發生。說出限界，好過假裝沒有限界。
-zmodload -F zsh/stat b:zstat 2>/dev/null
+
+# KZ. The result is CHECKED, and a failure ends the run here. It used to be
+# discarded, and a zsh that cannot load zsh/stat then produced three red cases
+# pointing in three different directions -- T129g, "the suite could not stamp
+# itself", and "the suite called zstat" -- none of which named the cause. The
+# skip count moved too, so even the totals disagreed between runs.
+#
+# `zsh -f` is how it happens: -f reads no start-up files, so the packaged zsh
+# on Windows never builds its module_path and the module is not findable. All
+# four platforms load zsh/stat when started normally, so failing to load it is
+# a broken environment, not a platform difference -- and the honest response to
+# a broken ruler is to refuse to measure, not to publish three readings.
+#
+# KZ。這裡**檢查**結果，載不進來就在此結束。先前它被丟掉，於是一個載不進 zsh/stat 的 zsh 會
+# 產生三個指向三個不同方向的紅字——T129g、「測試無法為自己蓋章」、「測試呼叫了 zstat」——沒有
+# 一個說得出原因。連略過數都會跟著變，於是不同次執行的總計彼此矛盾。
+#
+# 它的來源是 `zsh -f`：-f 不讀啟動檔，封裝版 zsh 因此沒有建立 module_path，模組找不到。四個
+# 平台在正常啟動時都載得進 zsh/stat，所以載不進來是環境壞了，不是平台差異——而面對一把壞掉的
+# 尺，誠實的做法是拒絕量測，不是發布三個讀數。
+if ! zmodload -F zsh/stat b:zstat 2>/dev/null; then
+    echo "NO zsh/stat / 載不進 zsh/stat" >&2
+    echo "  this zsh cannot load the zsh/stat module, so the suite cannot stat anything" >&2
+    echo "  這個 zsh 載不進 zsh/stat 模組，因此這套測試無法對任何檔案取得狀態" >&2
+    echo "  the usual cause is 'zsh -f': it reads no start-up files, so a packaged" >&2
+    echo "  zsh never builds its module_path. Run it with the packaged zsh WITHOUT -f." >&2
+    echo "  常見原因是 'zsh -f'：它不讀啟動檔，封裝版 zsh 因此沒有建立 module_path。" >&2
+    echo "  請用**不帶 -f** 的封裝 zsh 執行。" >&2
+    echo "  refusing rather than reporting three failures that each name something else" >&2
+    echo "  拒絕執行，而不是回報三個各說各話的失敗" >&2
+    exit 2
+fi
 # The path is captured HERE, at file scope, not inside the function. zsh sets
 # `$0` to the FUNCTION NAME inside a function (FUNCTION_ARGZERO), so
 # `zstat -- "${0:A}"` in there stats a file called `suite_stamp` that does not
@@ -13311,6 +13342,66 @@ for _t237_f in t237.csv t237.csv2; do
         bad "T237d $_t237_f -append: ${_t237_e:0:50} / 實得如上" }
 done
 (( _t237_kept )) && ok "T237d while a .csv or .csv2 still refuses one, because there the suffix says how many fields a record has / 而 .csv 或 .csv2 仍然拒絕，因為那裡的副檔名說了一筆紀錄有幾欄"
+
+echo
+echo "--- T238: a zsh that cannot stat refuses to measure / T238：一個 stat 不了的 zsh 拒絕量測 ---"
+# KZ. Reported by the Windows node: running this suite under `zsh -f` produced
+# three failures -- T129g, "the suite could not stamp itself", and "the suite
+# called zstat" -- and moved the skip count, because -f reads no start-up files
+# and the packaged zsh never builds its module_path. Three red cases, three
+# different directions, and the one real cause named by none of them.
+#
+# The suite now refuses at start-up with rc=2. This case proves that refusal
+# bites, and it is the only kind of proof worth having: the guard is driven
+# against the REAL suite, not a copy of its logic.
+#
+# KZ。由 Windows 節點回報：用 `zsh -f` 跑這套測試會產生三個失敗——T129g、「測試無法為自己
+# 蓋章」、「測試呼叫了 zstat」——並讓略過數跟著變，因為 -f 不讀啟動檔，封裝版 zsh 因此沒有
+# 建立 module_path。三個紅字、三個方向，而唯一真正的原因不在它們任何一個裡面。
+#
+# 現在這套測試會在啟動時以 rc=2 拒絕。這個案例證明那道拒絕會咬，而且是唯一值得有的那種證明：
+# 守衛是對著**真正的**測試檔驅動的，不是對著它邏輯的一份複本。
+#
+# The probe comes FIRST and decides whether the case runs at all. Without it,
+# a platform where poisoning MODULE_PATH does not prevent the load would run
+# the ENTIRE suite recursively inside itself -- the guard would not fire, the
+# child would sail past line 49 and start testing. Checking that the poison
+# works is therefore not tidiness; it is what stops this case from being a
+# fork bomb on a platform nobody has tried yet.
+# 探測放在**最前面**，並決定這個案例跑不跑。少了它，在一個「毒化 MODULE_PATH 並不能阻止載入」
+# 的平台上，這裡會遞迴地把**整套測試**在自己內部再跑一遍——守衛不會觸發，子行程會順順地越過
+# 第 49 行開始測試。因此「確認毒藥有效」不是整潔問題，那是「這個案例在一個還沒有人試過的平台
+# 上不會變成 fork bomb」的原因。
+#
+# The poison is the `module_path` PARAMETER, and the suite is reached with
+# `source`, for one reason each. The MODULE_PATH environment variable is not
+# imported by zsh -- `MODULE_PATH=/nonexistent zsh -c 'echo $module_path'`
+# prints the real path -- so it cannot poison a child. And `exec` from a shell
+# that has set the parameter drops it, because it is a shell parameter and not
+# part of the process environment. `source` is what carries it in.
+# 毒藥用的是 `module_path` **參數**，而抵達測試檔的方式是 `source`，各有一個理由。
+# MODULE_PATH 這個環境變數不會被 zsh 匯入——`MODULE_PATH=/nonexistent zsh -c 'echo $module_path'`
+# 印出來的是真正的路徑——所以它毒不到子行程。而從一個「已經設好那個參數」的 shell 去 `exec`
+# 會把它丟掉，因為那是 shell 參數、不是行程環境的一部分。能把它帶進去的是 `source`。
+if zsh -c 'module_path=(/nonexistent-module-path); zmodload -F zsh/stat b:zstat' 2>/dev/null; then
+    skip "T238 poisoning module_path does not prevent zsh/stat from loading here, so the refusal cannot be driven / 在這裡毒化 module_path 並不能阻止 zsh/stat 載入，因此驅動不了那道拒絕"
+else
+    _t238_out=$(zsh -c 'module_path=(/nonexistent-module-path); source "$1"' zsh "$SUITE_PATH" 2>&1)
+    _t238_rc=$?
+    if [[ $_t238_rc == 2 && $_t238_out == *"NO zsh/stat"* && $_t238_out == *"-f"* ]]; then
+        ok "T238a a zsh without zsh/stat is refused at start-up, by name and with the cause / 一個沒有 zsh/stat 的 zsh 在啟動時就被拒絕，指名而且說出原因"
+    else
+        bad "T238a rc=$_t238_rc out=${_t238_out:0:120} / 實得如上"
+    fi
+    # It must refuse BEFORE running anything. A refusal that arrives after 1157
+    # cases have run is not a refusal, it is a footnote.
+    # 它必須在跑任何東西**之前**拒絕。一道在 1157 個案例跑完之後才到的拒絕不是拒絕，是註腳。
+    if [[ $_t238_out != *"PASS  T"* && $_t238_out != *"通過 "* ]]; then
+        ok "T238b and it refuses before running a single case / 而且它在跑第一個案例之前就拒絕"
+    else
+        bad "T238b the refusal came after cases had already run / 那道拒絕是在案例已經跑過之後才到的"
+    fi
+fi
 
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
