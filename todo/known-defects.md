@@ -9013,3 +9013,89 @@ cases went red in three different directions and none of them named the cause. S
 as mistakes.md entry 1 -- the test met the environment, not the thing under test -- except
 that here the environment really is broken, and the right response is to refuse at start-up
 rather than produce three misleading results.
+
+---
+
+## LA. 建置訊息把架構寫死成 `aarch64`，而它在 WSL2 上印出的是一句假話（2026-09-03，Windows／WSL2 節點回報）
+
+`compile_csv2_linux.zsh` 第 76 行無條件印出：
+
+```
+Building csv2 for aarch64 Linux (-O)
+```
+
+在 WSL2（x86_64）上實測，產物是 **ELF 64-bit x86-64**。功能無礙——這支腳本沒有做任何架構專屬
+的事，沒有 target triple、沒有架構旗標，就是原生建置——但那是一句**會被相信的假話**。
+
+**在四節點矩陣裡這特別危險**，因為讀 log 的人會據此把這一段結果歸給 aarch64 那一個節點。這棵樹
+已經為「歸錯因」付過一次代價：KQ 是我把一次 600 秒的執行寫成「與 guest VM 搶 CPU」，而它在沒有
+任何 VM 執行時再度發生；那句錯的歸因留在 `8fdeede` 的 commit message 裡，改不掉了。
+
+**真相就在兩行之後。** 同一支腳本結尾會跑 `file release/csv2`，那一行印的是正確的架構。也就是說
+log 裡同時有一句假的標題和一句真的細節——而**被引用的是標題**。一個「細節正確、標題錯誤」的 log
+比全錯的更危險，因為它看起來像是被驗證過的。
+
+第 3、5、23 行的註解與輸出說明也同樣把它寫成 aarch64-only，而這支腳本**同時是 WSL2 用的**。
+
+修法：印出 `uname -sm` 實際量到的東西，不要寫死。見 T239。
+
+A build banner hardcodes `aarch64`, so on WSL2 it prints a false statement while producing an
+x86-64 ELF. Nothing breaks, but in a four-node matrix a reader attributes the result to the
+wrong node. The truth is two lines below, from `file`: a log whose detail is right and whose
+headline is wrong is more dangerous than one that is wrong throughout, because it looks
+verified. Print what `uname -sm` measures.
+
+---
+
+## LB. Windows 上「父路徑是一個檔案」被說成「目錄不存在」（2026-09-03，Windows 節點回報，**尚未定位**）
+
+| 情況 | Linux／macOS | Windows |
+|---|---|---|
+| 父路徑是**一個檔案** | `a new file cannot be created in ..., and -o needs one there for the temp file it renames into place. Use -so to write to a stream` | `the directory ... does not exist` |
+| 父路徑**真的不存在** | `the directory ... does not exist` | 相同 |
+
+一個存在的檔案被說成不存在。這是這個工具最不該犯的那一類錯——它整份設計的前提是「拒絕時要說出
+**它是什麼**」，而這裡它說了一件與事實相反的話。T145g 會在 Windows 上失敗，而那正是它被加進來
+要抓的東西。
+
+**關鍵觀察：Windows 在兩種情況下給的是同一句話。** `main.swift` 的分支是
+
+```swift
+if Platform.fileKind(path: dirName) == nil { …「目錄不存在」… }
+throw …「在這裡建不了新檔案」…
+```
+
+所以 Windows 走到第一支，代表 `fileKind` 回傳了 nil，而 `fileKind` 回傳 nil 只有一個來源：
+`stat(path, &st) != 0`。也就是說**在 Windows 上，對一個確實存在的一般檔案呼叫 `stat` 失敗了**，
+或者它拿到的根本不是那個路徑。
+
+兩個候選機制，一次量測就分得開：
+
+1. **`deletingLastPathComponent` 不認得反斜線。** 那是 NSString 的路徑 API，以 `/` 為分隔符。
+   若 csv2.exe 拿到的是 `C:\...\t145_notadir\out.csv`，切不出父路徑，`dirName` 會是**整條路徑**
+   ——包含檔名——那條路徑確實不存在，於是「目錄不存在」在它自己的邏輯裡是對的，只是它指的是錯的
+   東西。**反證**：若真是如此，Windows 上任何用反斜線路徑的 `-o` 都會被拒絕，而測試裡其他 `-o`
+   案例是通過的。所以要嘛 MSYS 送進去的是正斜線，要嘛這個猜測是錯的。
+2. **`stat` 在那個路徑上真的失敗了**，理由未知（CRT 的 `_stat` 對某些形式的路徑會失敗）。
+
+**判別方法**：看那句訊息裡 `the directory` 後面印出來的**完整路徑**。如果它結尾是 `out.csv`，
+那是機制 1；如果它結尾是 `t145_notadir`，那是機制 2。這個工具剛好會把它認定的那個目錄印出來，
+因此訊息本身就是證據——**已向節點索取完整訊息，尚未收到。**
+
+**在那個答案回來之前不要動 `fileKind`。** 兩個機制要改的地方完全不同：機制 1 要改的是路徑切割
+（而且影響 Windows 上每一條反斜線路徑，不只這一個案例），機制 2 要改的是「把 stat 的失敗原因帶
+出來、不要把每一種失敗都塌縮成 nil」。猜錯的那一半會留下一個看起來修好了的缺陷。
+
+**不論是哪一個，有一件事現在就成立且要改：`fileKind` 把每一種 `stat` 失敗都塌縮成 `nil`，而
+呼叫端把 `nil` 讀成「不存在」。** 權限不足、路徑過長、ENOTDIR 都會變成「目錄不存在」，那在每個
+平台上都是一句可能為假的話。errno 就在手邊，而它被丟掉了。
+
+On Windows both rows produce "the directory ... does not exist", so `fileKind` returned nil,
+so `stat` failed on a regular file that exists. Two candidate mechanisms -- NSString path
+splitting not understanding backslashes, or `stat` itself failing -- and the full path in the
+message tells them apart: ending in `out.csv` means the split failed, ending in the directory
+name means stat did. Requested from the node; not yet received. Do not touch `fileKind` until
+then, because the two need opposite fixes. Independently true either way: `fileKind` collapses
+every stat failure into nil and the caller reads nil as "does not exist", so a permission
+error or ENOTDIR is reported as a missing directory on every platform. The errno is right
+there and is thrown away.

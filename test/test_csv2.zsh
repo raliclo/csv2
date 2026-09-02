@@ -13404,6 +13404,68 @@ else
 fi
 
 echo
+echo "--- T239: a build banner may not hardcode an architecture / T239：建置橫幅不得把架構寫死 ---"
+# LA, measured on WSL2: compile_csv2_linux.zsh printed
+# `Building csv2 for aarch64 Linux (-O)` while producing an ELF 64-bit x86-64.
+# Nothing broke -- the script has no target triple and no arch flag, it is a
+# native build wherever it runs -- but in a four-node matrix the reader
+# attributes that section of the log to the wrong node.
+#
+# What makes it worth a case rather than a one-line fix: the TRUTH was already
+# in the log, two lines below, from `file`. A log whose detail is right and
+# whose headline is wrong is more dangerous than one that is wrong throughout,
+# because it reads as verified. The headline is what gets quoted.
+#
+# LA，在 WSL2 上實測：compile_csv2_linux.zsh 印出 `Building csv2 for aarch64 Linux (-O)`，
+# 而產物是 ELF 64-bit x86-64。沒有東西壞掉——那支腳本沒有 target triple、沒有架構旗標，
+# 在哪裡跑就是哪裡的原生建置——但在四節點矩陣裡，讀 log 的人會把那一段結果歸給錯的節點。
+#
+# 它之所以值得一個案例、而不只是改一行：**真相本來就在 log 裡**，就在兩行之後的 `file`。
+# 一個「細節正確、標題錯誤」的 log 比全錯的更危險，因為它讀起來像是被驗證過的。而被引用的是標題。
+_t239_scan() {
+    local f l hits=""
+    for f in "$@"; do
+        [[ -f "$f" ]] || continue
+        while IFS= read -r l; do
+            hits="$hits ${f:t}"
+        done < <(grep -E '^[[:space:]]*(print|echo)' "$f" 2>/dev/null |
+                 grep -E 'aarch64|x86_64|arm64|amd64')
+    done
+    print -r -- "$hits"
+}
+
+_t239_files=($ROOT/*.zsh(N))
+# Fewer than three files means the glob broke, not that the tree is clean.
+# T218a passed on the guest having scanned NOTHING, and T218b is the only
+# reason anyone found out; a count guard is the cheap half of that lesson.
+# 少於三個檔案代表 glob 壞了，不代表這棵樹是乾淨的。T218a 曾在 guest 上「什麼都沒掃」而通過，
+# 而 T218b 是唯一說出這件事的東西；一道數量守衛是那個教訓裡便宜的那一半。
+if (( ${#_t239_files} < 3 )); then
+    bad "T239a the glob found ${#_t239_files} build scripts, so it scanned almost nothing / 那個 glob 只找到 ${#_t239_files} 支建置腳本，等於幾乎什麼都沒掃"
+else
+    _t239_hits=$(_t239_scan $_t239_files)
+    if [[ -z ${_t239_hits// /} ]]; then
+        ok "T239a no build script announces an architecture it did not measure / 沒有建置腳本宣告一個它沒有量過的架構"
+    else
+        bad "T239a hardcoded architecture in:$_t239_hits / 寫死的架構出現在上列檔案"
+    fi
+fi
+
+# The scan is driven against a file that really does contain one. Without this,
+# a scan that silently matched nothing would pass exactly when it stopped
+# working -- and it is the same one implementation, given a different input,
+# not a second copy of the logic.
+# 這個掃描被對著一個「真的含有那種行」的檔案驅動。少了這一步，一個安靜地什麼都沒比中的掃描，
+# 會在它停止運作的那一刻通過得最徹底——而這裡用的是**同一份實作**、只是換了輸入，不是邏輯的
+# 第二份複本。
+print -r -- 'print -- "Building csv2 for aarch64 Linux"' > "$TMP/t239probe.zsh"
+if [[ -n ${$(_t239_scan "$TMP/t239probe.zsh")// /} ]]; then
+    ok "T239b and the scan catches one when it is there / 而那個掃描在它存在時抓得到"
+else
+    bad "T239b the scan found nothing in a file that contains one / 那個掃描在一個確實含有它的檔案裡什麼也沒找到"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

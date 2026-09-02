@@ -1,8 +1,19 @@
 #!/usr/bin/env zsh
 # =====================================================================
-# compile_csv2_linux.zsh — build csv2 as a Linux aarch64 ELF INSIDE the
-#                          guest VM.
-# compile_csv2_linux.zsh — 在 guest VM 內把 csv2 建置成 Linux aarch64 ELF。
+# compile_csv2_linux.zsh — build csv2 as a Linux ELF, natively, wherever it
+#                          is run: the aarch64 guest VM or WSL2 on x86_64.
+# compile_csv2_linux.zsh — 在它被執行的地方原生建置 csv2 成 Linux ELF：aarch64 的
+#                          guest VM，或 x86_64 上的 WSL2。
+#
+# LA. It said "aarch64" here and in its banner, and it is run on WSL2 too, so
+# on that node it announced an architecture it was not building for -- while
+# `file` two lines from the end printed the truth. Nothing broke; a reader of
+# the four-node matrix simply attributed the result to the wrong node. There is
+# no architecture-specific step in this script: no target triple, no arch flag.
+# LA。這裡與它的橫幅都寫著 "aarch64"，而它同時也在 WSL2 上執行，於是在那個節點上它宣告了一個
+# 自己並沒有在建置的架構——同時結尾前兩行的 `file` 印出的是真相。沒有東西壞掉；只是讀四節點
+# 矩陣的人會把結果歸給錯的節點。這支腳本裡沒有任何架構專屬的步驟：沒有 target triple、沒有
+# 架構旗標。
 #
 # Kept separate from the auto-detecting compile_csv2.zsh because the guest
 # requires an explicit toolchain and source location. They otherwise differ
@@ -20,7 +31,7 @@
 #   /workspace/opt/swift/usr/bin/swiftc    Swift toolchain
 #   /workspace/csv2/src/*.swift            source, injected by the host driver
 #
-# Output / 輸出：$SRC_DIR/release/csv2  (aarch64 Linux ELF)
+# Output / 輸出：$SRC_DIR/release/csv2  (a native Linux ELF / 原生 Linux ELF)
 #
 # Usage / 用法：
 #   zsh /workspace/csv2/compile_csv2_linux.zsh
@@ -73,7 +84,10 @@ done
 
 mkdir -p release
 
-print -- "Building csv2 for aarch64 Linux ($OPT) / 正在為 aarch64 Linux 建置 csv2（$OPT）"
+# Say what was MEASURED, not what was assumed. See LA at the top.
+# 說出**量到**的，而不是假設的。見檔首的 LA。
+HOST_UNAME=$(uname -sm)
+print -- "Building csv2 for $HOST_UNAME ($OPT) / 正在為 $HOST_UNAME 建置 csv2（$OPT）"
 "$SWIFTC" -swift-version 6 -warnings-as-errors $OPT -o release/csv2 $SOURCES
 
 # Verify by RUNNING it, not by checking the file exists -- the same rule the
