@@ -190,3 +190,132 @@ skill 說「摘要樣式是附加的，失敗掃描是強制的」。**把整個
 會在它停止運作的那一刻通過得最徹底。那個門檻刻意設在遠低於實際值的地方——第一版寫 100 對上實際
 502 之前，我先寫成 500，那是一道「差兩行就會被無關改動觸發」的守衛，而一道會亂叫的守衛是會被人
 關掉的那種。它要分辨的是「讀到檔案」與「什麼都沒讀到」，那兩者相差好幾百，不是二。
+
+---
+
+## 3. 一條規則只套用到它成立範圍的一部分
+
+**8 次 / 3 天**（2026-09-01、2026-09-02、2026-09-03），單日最多 4 次。
+
+| 日期 | 案例 | 規則被套用到哪裡 | 沒有被套用到哪裡 |
+|---|---|---|---|
+| 2026-09-01 | **KU** | 「無後綴檔案裡沒有東西可疑」用在資料列上 | 同一張表的 `\|---\|` 分隔列 |
+| 2026-09-02 | **KV** | `--prefix` 要裝進 `DIR/bin` | **正確的用法就在同一個函式裡** |
+| 2026-09-02 | **KW** | 2026-08-25 修過的「位元組相等」問法 | 同一個檔案裡的第二處 |
+| 2026-09-02 | **KX** | `.lines` 裡空行是資料（讀取、`-update` 都同意） | `-insert`／`-append` |
+| 2026-09-03 | **LC** | 「不要把跳過寫成數字，讓案例自己記錄」 | Windows 那一支的 `+= 6`，**而那條規則就寫在它上面的註解裡** |
+| 2026-09-03 | **T229** | 每個跳過都要被預期略過數消費 | T229 設了旗標，沒有任何地方消費它 |
+| 2026-09-03 | **strerror** | 「Windows 上不能用 deprecated 的 CRT 函式」 | 既有 5 個呼叫都在 `#if` 分支內，我新加的那個不在——**弄壞了 Windows 建置** |
+| 2026-09-03 | **T241 自己** | T218 記著它的掃描需要兩半：組出探針字串、排除註解裡的反面示範 | 我只套用了第一半——**在為這一條而寫的那道守衛裡** |
+
+### 為什麼它不會報錯
+
+**因為被套用到的那一部分是對的。** 測試通過、編譯器沉默、修正看起來完成了。沒有任何東西
+知道「這條規則還有第二處」——那個知識只存在於「剛剛想通它的那個人」腦中，而那個人已經去
+處理下一件事了。
+
+KV 是最純粹的形式：**正確的寫法就在同一個函式裡**，相隔幾行。LC 更難堪一點——那條規則
+不只存在，還被寫成一段註解放在違反它的那一行**正上方**，說「把數字寫在這裡，是多一個會
+忘記的地方」。它說出了病因，然後留下了病。
+
+### 第八次發生在「為這一條而寫的那道守衛」裡
+
+T241 第一次執行就失敗了，抓到的是**它自己**：探針字串 `T999_SKIPPED=1` 就寫在測試檔裡，於是
+掃描把它當成一個未被計數的旗標。
+
+`mistakes.md` 早就記著這件事——第 1 條裡寫著 T218b 出過一模一樣的事，「探針的文字因此改成組出
+來的」。**我讀過那段，然後照樣寫下了字面值。**
+
+修好之後它再次失敗，這次抓到的是我**註解裡**那句解釋（它提到了旗標樣式）。而 T218 的紀錄裡，
+那個修法有**兩半**：「探針的文字改成組出來的」**和**「註解裡的反面示範被刻意排除」。
+
+**我讀了那個先例，套用了第一半，漏了第二半。** 那正是這一條本身的定義——十分鐘內，在為這一條
+而寫的那道守衛裡面。
+
+這件事對「該用什麼矯正措施」是決定性的：**再寫一次提醒沒有用，因為提醒已經寫過了，而且我讀了
+它。** 有用的是那道會自己失敗的檢查——它在兩輪之內把我的兩次疏漏各指名了一次。
+
+skill 裡有一模一樣的先例：「這一次發生在為了防它而寫的腳本裡。」現在這棵樹有兩個。
+
+### 最危險的形式：兩個方向相反的錯誤互相抵銷
+
+2026-09-03 一天之內出現了一對：**LC** 讓預期略過數多了一，而同一天加入的 **T240** 有跳過
+卻沒有計數、讓它少了一。
+
+**放著不管，它們會抵銷。** 那個檢查會通過、兩個錯都留在原地，而下一次真正的漂移會藏進那個
+總和裡。一道驗證「總數」的守衛可以被兩個錯誤打敗。
+
+這就是矯正措施的形狀：**驗證對應關係，不要驗證總和。**
+
+### 現行防範：T241
+
+**T241a 檢查的是對應關係**——每一個被設定的 `Txxx_SKIPPED` 旗標都必須被預期略過數消費，
+反之亦然。兩個方向相反的錯誤在這裡不會抵銷，因為它比對的是兩個集合而不是兩個數字。
+
+**它在被寫出來的過程中就找到了 T229。** 一道守衛在自己還沒被提交之前就抓到一個既有實例，
+是這條規則普遍程度的直接證據。
+
+T241b 用一個真的含有「未計數旗標」的檔案證明那個掃描會咬，並使用**同一份實作**而不是複本
+——與 T218b、T239b 同一個理由。
+
+**仍缺：一般形式。** T241 擋的是「跳過旗標」這一個具體形狀。KV、KW、strerror 那種
+「程式碼裡同一條規則的第二處」還沒有守衛，而那是這七次裡的三次。目前能做的只有矯正措施
+那一行：**修好一處之後先數，再宣稱修好。**
+
+---
+
+## 4. 說了要做，然後沒有做，而沒有任何東西會回報
+
+**5 次 / 2 天**（2026-09-02、2026-09-03），全部在同一次盤點中被發現。
+
+被說出口、然後沒有做的：
+
+| 說過的 | 它留在原地做了什麼 |
+|---|---|
+| 改寫 `AGENTS.md` 為「跑 dispatcher」 | **仍在教人繞過 dispatcher，而那正是 KY 的成因** |
+| 在 KY 補上「dispatcher 早就擋掉了」 | 一條讀起來像「這棵樹缺守衛」的缺陷記錄 |
+| 改 `fileKind` 不要把每種 stat 失敗塌縮成 nil | 一句在每個平台上都可能為假的訊息 |
+| T203 的 skip 理由實測不成立 | 兩個過期的前提，等下一個人再花一輪去量 |
+| `mistakes.md` 第 2 條記那次 | 一條少算一次的紀錄 |
+
+**是使用者問「有沒有做」才發現的。** 沒有任何機制追蹤一個說出口的意圖——它不是任務、不是
+測試、不是檔案，它只是對話裡的一句話。而其中三件不只是「沒做」，是**留在原地繼續誤導人**。
+
+這與這個 repo 自己的規則是同一件事：`CLAUDE.md` 說「不要在一個被回報的缺陷被寫下來之前就
+去修它」，理由是「一個只存在於 session 逐字稿裡的缺陷，留給下一個讀者的是一棵乾淨的樹和
+一份全過的測試」。**一個只存在於逐字稿裡的承諾是同一種東西。**
+
+### 矯正措施
+
+**在使用者可見的文字裡說出「我會做 X」的當下就記下來**（TaskCreate），不要等做完再回頭數。
+
+依 skill 的判準，這是**單日集中**而不是跨日再犯（兩天，而且全部在同一次盤點中浮現），因此
+需要的是把做法固化，不是強制檢查。若它再跨一天發生，就要有一道真正的檢查。
+
+---
+
+## 3. A rule applied to only part of where it holds
+
+Seven times over three days. The part it WAS applied to is correct, so nothing reports the
+rest: tests pass, the compiler is silent, the fix looks done. With KV the correct usage sat a
+few lines away in the same function; with LC the rule was written as a comment directly above
+the line that broke it, saying "a number written here is a second place to forget".
+
+The dangerous form is a cancelling pair. On 2026-09-03 a stale entry made an expected count
+one too high and a new case added the same day made it one too low. Left alone they cancel:
+the check passes, both errors remain, and the next real drift hides inside the sum. So the
+guard verifies the CORRESPONDENCE, not the total -- T241a pairs every skip flag with its
+consumer in both directions, which two opposite errors cannot defeat. It found a seventh
+instance, T229, while it was being written.
+
+Still missing: the general form. Three of the seven were a second site of the same rule in
+ordinary code, which no check covers.
+
+## 4. Saying it would be done, and nothing tracking that it was not
+
+Five in two days, all surfaced by the user asking whether they had been done. Three of the
+five were not merely undone but actively misleading where they sat -- AGENTS.md went on
+telling readers to bypass the dispatcher, which is what caused KY in the first place. This
+repo already has the rule for its defects: one that exists only in a session transcript
+leaves the next reader a clean tree and a passing suite. A promise that exists only in a
+transcript is the same object. Record the intention when it is stated, not when it is kept.

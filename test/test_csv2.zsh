@@ -13546,6 +13546,84 @@ else
 fi
 
 echo
+echo "--- T241: every skip flag is counted, and every count has a flag / T241：每個跳過旗標都被計數，每個計數都有旗標 ---"
+# The forced check for mistakes.md entry 3: a rule applied to only part of
+# where it holds. Six instances across four days -- KU, KV, KW, KX, LC, and the
+# one this scan found while it was being written -- and the shape has a
+# checkable form here: a case sets `Txxx_SKIPPED=1` and the expected-skip
+# arithmetic must consume it. Set without consumed means the actual count
+# exceeds the expected; consumed without set means the reverse.
+#
+# The pair matters more than either half. LC was a stale entry making the
+# expectation one too HIGH, and the same day T240 was added with a skip and no
+# count, one too LOW. Left alone they would have cancelled: the check passes,
+# both errors remain, and the next real drift hides inside the sum. A guard
+# that verifies a total can be defeated by two mistakes; one that verifies the
+# correspondence cannot.
+#
+# 這是 mistakes.md 第 3 條的強制檢查：一條規則只套用到它成立範圍的一部分。四天內六個實例
+# ——KU、KV、KW、KX、LC，以及這個掃描在被寫出來的過程中自己找到的那一個——而這個形狀在這裡
+# 有一個可檢查的樣子：一個案例設下 `Txxx_SKIPPED=1`，而預期略過數的算式必須消費它。有設定
+# 沒消費，代表實際會超過預期；有消費沒設定，則相反。
+#
+# 成對比任何一半更重要。LC 是一筆過期項目、讓預期**多**了一；而同一天加入的 T240 有跳過沒有
+# 計數、讓預期**少**了一。放著不管它們會互相抵銷：檢查通過、兩個錯都還在，而下一次真正的漂移
+# 會藏在那個總和裡。一道驗證「總數」的守衛可以被兩個錯誤打敗；一道驗證「對應關係」的不行。
+# Comment lines are dropped FIRST. T218 records that its scan needed two halves
+# -- compose the probe string, and exclude the counter-examples written in
+# comments -- and this case applied the first and missed the second, so its own
+# explanatory comment (which names the flag pattern) was reported as an
+# uncounted flag. Reading a precedent and taking half of it is entry 3 of
+# mistakes.md happening inside the guard written for entry 3.
+# 註解行**先**被丟掉。T218 記著它的掃描需要兩半——把探針字串組出來，以及排除註解裡的反面示範
+# ——而這個案例套用了第一半、漏了第二半，於是它自己那段（提到旗標樣式的）說明註解被回報成一個
+# 未被計數的旗標。讀了一個先例卻只拿走一半，就是 mistakes.md 第 3 條在「為第 3 條而寫的守衛」
+# 裡再發生一次。
+_t241_code() { LC_ALL=C grep -vE '^[[:space:]]*#' "$1" }
+_t241_sets() { _t241_code "$1" | LC_ALL=C grep -oE '\bT[0-9A-Za-z_]*SKIPPED=1' | LC_ALL=C sed 's/=1$//' | LC_ALL=C sort -u }
+_t241_uses() { _t241_code "$1" | LC_ALL=C grep -oE '\$\{T[0-9A-Za-z_]*SKIPPED:-0\}' | LC_ALL=C sed 's/[${}]//g; s/:-0//' | LC_ALL=C sort -u }
+
+_t241_s=$(_t241_sets "$SUITE_PATH")
+_t241_u=$(_t241_uses "$SUITE_PATH")
+# Fewer than ten flags means the scan broke, not that the file is clean. T218a
+# passed on the guest having scanned nothing; this is the cheap half of it.
+# 少於十個旗標代表掃描壞了，不代表這個檔案是乾淨的。T218a 曾在 guest 上什麼都沒掃而通過；
+# 這是那個教訓裡便宜的那一半。
+if (( $(print -r -- "$_t241_s" | wc -l) < 10 )); then
+    bad "T241a the scan found $(print -r -- "$_t241_s" | wc -l) flags, so it read almost nothing / 掃描只找到這麼多旗標，等於幾乎沒讀到東西"
+else
+    _t241_only_set=$(comm -23 =(print -r -- "$_t241_s") =(print -r -- "$_t241_u"))
+    _t241_only_use=$(comm -13 =(print -r -- "$_t241_s") =(print -r -- "$_t241_u"))
+    if [[ -z $_t241_only_set && -z $_t241_only_use ]]; then
+        ok "T241a every skip flag set is also counted, and every count has a flag / 每個被設定的跳過旗標都有被計數，而每個計數都有對應的旗標"
+    else
+        bad "T241a set-but-not-counted: ${_t241_only_set:-none}; counted-but-never-set: ${_t241_only_use:-none} / 如上"
+    fi
+fi
+
+# Driven against a file that really has an uncounted flag, using the SAME two
+# functions rather than a second copy of them. Without this the case would pass
+# most convincingly at the moment the greps stopped matching anything.
+# 用**同樣的兩個函式**（不是它們的第二份複本）去掃一個真的含有「未被計數的旗標」的檔案。少了
+# 這一步，這個案例會在那兩個 grep 停止比中任何東西的那一刻通過得最徹底。
+# The probe string is ASSEMBLED, not written out, or the scan finds it in this
+# file and reports T999 as an uncounted flag -- which is exactly what happened
+# on the first run, and exactly what T218b's probe did before it. mistakes.md
+# already carried the fix: "the probe's text was therefore composed". Reading
+# that and then writing the literal anyway is the same shape as entry 3.
+# 探針字串是**組出來的**，不是直接寫出來的，否則掃描會在這個檔案裡找到它、把 T999 回報成一個
+# 未被計數的旗標——那正是第一次執行時發生的事，也正是 T218b 的探針在它之前做過的事。
+# mistakes.md 早就記著那個修法：「探針的文字因此改成組出來的」。讀過它、然後照樣寫下字面值，
+# 與第 3 條是同一個形狀。
+_t241_w="SKIP"; _t241_w="${_t241_w}PED"
+print -r -- "T999_${_t241_w}=1" > "$TMP/t241probe.zsh"
+if [[ -n $(comm -23 =(_t241_sets "$TMP/t241probe.zsh") =(_t241_uses "$TMP/t241probe.zsh")) ]]; then
+    ok "T241b and the scan catches an uncounted flag when there is one / 而那個掃描在有「未被計數的旗標」時抓得到"
+else
+    bad "T241b the scan found nothing in a file that contains an uncounted flag / 掃描在一個確實含有未計數旗標的檔案裡什麼也沒找到"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -13748,6 +13826,12 @@ fi
 # ——與 T240 的第一版不同：一個「漏掉計數」的新跳過，會與一筆過期項目互相抵銷，於是那個檢查
 # 帶著兩個錯誤通過，而那比一個看得見的數量不符更糟。
 (( ${T240_SKIPPED:-0} )) && (( want_skip += 1 ))
+# T229 sets its flag and nothing consumed it until T241a said so -- a skip that
+# would have made the actual count exceed the expected one on any Windows
+# without the symlink privilege. It had been there, unnoticed, the whole time.
+# T229 有設定旗標，而在 T241a 說出來之前沒有任何地方消費它——在任何「沒有 symlink 特權」的
+# Windows 上，那會讓實際的數量超過預期。它一直都在，而沒有人注意到。
+(( ${T229_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T191A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T200A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T200B_SKIPPED:-0} )) && (( want_skip += 1 ))

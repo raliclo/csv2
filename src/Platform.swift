@@ -810,9 +810,38 @@ enum Platform {
     /// The text of an errno, for a message that has to say what actually
     /// stopped it rather than what usually stops things.
     /// 一個 errno 的文字，供「必須說出真正阻止了它的東西、而不是通常會阻止東西的那個」的訊息使用。
+    ///
+    /// `strerror_s` on Windows, `strerror` elsewhere. The plain one is marked
+    /// deprecated by MSVC, and the Windows build passes `-warnings-as-errors`,
+    /// so it is an error there and not a warning. The five other `strerror`
+    /// calls in this tree all sit inside `#if` branches Windows never reaches;
+    /// this one was added on 2026-09-03 outside any of them and broke that
+    /// build -- the same shape as every other entry here, a rule applied to
+    /// only part of where it holds.
+    ///
+    /// Of the three routes the compiler offers -- `strerror_s`, defining
+    /// `_CRT_SECURE_NO_WARNINGS`, or a platform branch -- the macro was
+    /// rejected: it would silence every deprecation in the build, including
+    /// ones nobody has looked at yet, to fix one call.
+    ///
+    /// Windows 用 `strerror_s`，其他平台用 `strerror`。MSVC 把後者標為 deprecated，而 Windows
+    /// 的建置帶著 `-warnings-as-errors`，所以那在那裡是錯誤而不是警告。這棵樹裡另外五個
+    /// `strerror` 呼叫全都在 Windows 走不到的 `#if` 分支內；這一個是 2026-09-03 加的、不在任何
+    /// 一個分支裡，於是弄壞了那個建置——與這裡每一條的形狀相同：一條規則只套用到它成立範圍的
+    /// 一部分。
+    ///
+    /// 編譯器給的三條路——`strerror_s`、定義 `_CRT_SECURE_NO_WARNINGS`、或平台分支——之中，
+    /// 那個巨集被否決了：它會為了修一個呼叫而讓整份建置的每一個 deprecation 靜音，包括還沒有
+    /// 人看過的那些。
     static func errnoText(_ e: Int32) -> String {
+        #if canImport(ucrt)
+        var buf = [CChar](repeating: 0, count: 256)
+        if strerror_s(&buf, buf.count, e) == 0 { return String(cString: buf) }
+        return "errno \(e)"
+        #else
         guard let p = strerror(e) else { return "errno \(e)" }
         return String(cString: p)
+        #endif
     }
 
     static func fileKind(path: String) -> FileKind? {
