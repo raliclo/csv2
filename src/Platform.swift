@@ -835,8 +835,21 @@ enum Platform {
     /// 人看過的那些。
     static func errnoText(_ e: Int32) -> String {
         #if canImport(ucrt)
+        // `numericCast` on the length, not `buf.count`. The C declaration takes
+        // a `size_t`, Swift performs no implicit numeric conversion, and
+        // whether `size_t` imports as `Int` or `UInt` there is a question this
+        // machine cannot answer -- there is no MSVC on it. `numericCast` is
+        // correct either way, which removes the question instead of guessing at
+        // it and spending another round-trip to the node that can compile it.
+        // 長度用 `numericCast`，不用 `buf.count`。C 的宣告收的是 `size_t`，Swift 不做隱式數值
+        // 轉換，而 `size_t` 在那裡被匯入成 `Int` 還是 `UInt`，是這台機器答不了的問題——它上面
+        // 沒有 MSVC。`numericCast` 兩種情況都成立，於是那個問題被移除，而不是被猜測、再花一趟
+        // 往返去問那台編得起來的節點。
         var buf = [CChar](repeating: 0, count: 256)
-        if strerror_s(&buf, buf.count, e) == 0 { return String(cString: buf) }
+        let got: Bool = buf.withUnsafeMutableBufferPointer { p in
+            strerror_s(p.baseAddress, numericCast(p.count), e) == 0
+        }
+        if got { return String(cString: buf) }
         return "errno \(e)"
         #else
         guard let p = strerror(e) else { return "errno \(e)" }

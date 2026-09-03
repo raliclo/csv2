@@ -6248,19 +6248,30 @@ echo "--- T117: both READMEs cite the same cases / 兩份 README 引用同一組
 # Set difference without comm: this rootfs's busybox has no comm applet, and
 # until T137's command-not-found guard existed, its absence turned T117a,
 # T117b and T121h into empty comparisons that reported PASS in the guest --
-# three cases that had never once run there. `grep -Fxv -f` is in every
-# busybox build here and says the same thing: the lines of A that are not
-# whole lines of B.
+# three cases that had never once run there. It was then `grep -Fxv -f`, which
+# is in every busybox build here and says the same thing: the lines of A that
+# are not whole lines of B.
 # 不用 comm 做集合差集：這個 rootfs 的 busybox 沒有 comm applet，而在 T137 那個
 # command-not-found 守衛出現之前，它的缺席會把 T117a、T117b 與 T121h 變成空的比較，
-# 在 guest 上回報 PASS——那三個案例在那裡一次也沒有真的執行過。`grep -Fxv -f` 在這裡的
-# 每一個 busybox 建置裡都有，說的是同一件事：A 當中「不是 B 的完整某一行」的那些行。
+# 在 guest 上回報 PASS——那三個案例在那裡一次也沒有真的執行過。當時改用的是 `grep -Fxv -f`，
+# 它在這裡的每一個 busybox 建置裡都有，說的是同一件事：A 當中「不是 B 的完整某一行」的那些行。
+# Now zsh's own `${A:|B}`, which needs no external tool and no temp file at
+# all. The `grep -Fxv -f` form it replaces was already the SECOND answer to
+# this question -- the first was `comm`, absent from this busybox -- and on
+# 2026-09-03 T241 reached for `comm` a third time, in this same file, eight
+# hundred lines below a comment saying it does not exist here. Keeping one
+# implementation is the point: a second one is where the next divergence goes.
+# 現在用 zsh 自己的 `${A:|B}`，完全不需要外部工具，也不需要暫存檔。它取代的 `grep -Fxv -f`
+# 本身已經是這個問題的**第二個**答案——第一個是 `comm`，而這個 busybox 沒有它——而 2026-09-03
+# T241 在同一個檔案裡、在一句「這裡沒有 comm」的註解下方八百行處，第三次伸手拿了 comm。
+# 保持只有一份實作正是重點：第二份，就是下一次分歧會發生的地方。
 only_in_first() {   # first-list second-list
-    local second_file
-    second_file=$(mktemp "${TMPDIR:-/tmp}/csv2_setdiff.XXXXXX")
-    print -r -- "$2" > "$second_file"
-    print -r -- "$1" | grep -Fxv -f "$second_file"
-    rm -f "$second_file"
+    local -a _a _b _d
+    _a=(${(f)1}); _a=(${_a:#})
+    _b=(${(f)2}); _b=(${_b:#})
+    _d=(${_a:|_b})
+    (( ${#_d} )) && print -rl -- $_d
+    return 0
 }
 
 t117_en=$(grep -oE '\bT[0-9]+[a-z0-9]*\b' "$ROOT/README.md" | sort -u)
@@ -13583,21 +13594,31 @@ _t241_code() { LC_ALL=C grep -vE '^[[:space:]]*#' "$1" }
 _t241_sets() { _t241_code "$1" | LC_ALL=C grep -oE '\bT[0-9A-Za-z_]*SKIPPED=1' | LC_ALL=C sed 's/=1$//' | LC_ALL=C sort -u }
 _t241_uses() { _t241_code "$1" | LC_ALL=C grep -oE '\$\{T[0-9A-Za-z_]*SKIPPED:-0\}' | LC_ALL=C sed 's/[${}]//g; s/:-0//' | LC_ALL=C sort -u }
 
-_t241_s=$(_t241_sets "$SUITE_PATH")
-_t241_u=$(_t241_uses "$SUITE_PATH")
+# zsh's own array subtraction, `${A:|B}`, because `comm` DOES NOT EXIST in the
+# guest's busybox. The first version used it and the guest reported
+# `the suite called "comm", which does not exist here` -- a guard this tree
+# already had, catching mistakes.md entry 1 for the eighth time: a test that
+# depends on an external tool EXISTING. That entry's corrective names `stat`
+# and `getent` by name and I reached for a third one.
+# 用 zsh 自己的陣列減法 `${A:|B}`，因為 **guest 的 busybox 裡沒有 `comm`**。第一版用了它，
+# guest 回報 `the suite called "comm", which does not exist here`——那是這棵樹本來就有的守衛，
+# 抓到 mistakes.md 第 1 條的第八次：一個依賴外部工具**存在**的測試。那一條的矯正措施點名了
+# `stat` 與 `getent`，而我伸手拿了第三個。
+_t241_sa=(${(f)"$(_t241_sets "$SUITE_PATH")"}); _t241_sa=(${_t241_sa:#})
+_t241_ua=(${(f)"$(_t241_uses "$SUITE_PATH")"}); _t241_ua=(${_t241_ua:#})
 # Fewer than ten flags means the scan broke, not that the file is clean. T218a
 # passed on the guest having scanned nothing; this is the cheap half of it.
 # 少於十個旗標代表掃描壞了，不代表這個檔案是乾淨的。T218a 曾在 guest 上什麼都沒掃而通過；
 # 這是那個教訓裡便宜的那一半。
-if (( $(print -r -- "$_t241_s" | wc -l) < 10 )); then
-    bad "T241a the scan found $(print -r -- "$_t241_s" | wc -l) flags, so it read almost nothing / 掃描只找到這麼多旗標，等於幾乎沒讀到東西"
+if (( ${#_t241_sa} < 10 )); then
+    bad "T241a the scan found ${#_t241_sa} flags, so it read almost nothing / 掃描只找到 ${#_t241_sa} 個旗標，等於幾乎沒讀到東西"
 else
-    _t241_only_set=$(comm -23 =(print -r -- "$_t241_s") =(print -r -- "$_t241_u"))
-    _t241_only_use=$(comm -13 =(print -r -- "$_t241_s") =(print -r -- "$_t241_u"))
-    if [[ -z $_t241_only_set && -z $_t241_only_use ]]; then
+    _t241_only_set=(${(f)"$(only_in_first "${(F)_t241_sa}" "${(F)_t241_ua}")"}); _t241_only_set=(${_t241_only_set:#})
+    _t241_only_use=(${(f)"$(only_in_first "${(F)_t241_ua}" "${(F)_t241_sa}")"}); _t241_only_use=(${_t241_only_use:#})
+    if (( ${#_t241_only_set} == 0 && ${#_t241_only_use} == 0 )); then
         ok "T241a every skip flag set is also counted, and every count has a flag / 每個被設定的跳過旗標都有被計數，而每個計數都有對應的旗標"
     else
-        bad "T241a set-but-not-counted: ${_t241_only_set:-none}; counted-but-never-set: ${_t241_only_use:-none} / 如上"
+        bad "T241a set-but-not-counted: ${_t241_only_set[*]:-none}; counted-but-never-set: ${_t241_only_use[*]:-none} / 如上"
     fi
 fi
 
@@ -13617,7 +13638,9 @@ fi
 # 與第 3 條是同一個形狀。
 _t241_w="SKIP"; _t241_w="${_t241_w}PED"
 print -r -- "T999_${_t241_w}=1" > "$TMP/t241probe.zsh"
-if [[ -n $(comm -23 =(_t241_sets "$TMP/t241probe.zsh") =(_t241_uses "$TMP/t241probe.zsh")) ]]; then
+_t241_psa=(${(f)"$(_t241_sets "$TMP/t241probe.zsh")"}); _t241_psa=(${_t241_psa:#})
+_t241_pua=(${(f)"$(_t241_uses "$TMP/t241probe.zsh")"}); _t241_pua=(${_t241_pua:#})
+if [[ -n $(only_in_first "${(F)_t241_psa}" "${(F)_t241_pua}") ]]; then
     ok "T241b and the scan catches an uncounted flag when there is one / 而那個掃描在有「未被計數的旗標」時抓得到"
 else
     bad "T241b the scan found nothing in a file that contains an uncounted flag / 掃描在一個確實含有未計數旗標的檔案裡什麼也沒找到"
