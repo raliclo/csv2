@@ -810,53 +810,6 @@ enum Platform {
     /// The text of an errno, for a message that has to say what actually
     /// stopped it rather than what usually stops things.
     /// 一個 errno 的文字，供「必須說出真正阻止了它的東西、而不是通常會阻止東西的那個」的訊息使用。
-    ///
-    /// `strerror_s` on Windows, `strerror` elsewhere. The plain one is marked
-    /// deprecated by MSVC, and the Windows build passes `-warnings-as-errors`,
-    /// so it is an error there and not a warning. The five other `strerror`
-    /// calls in this tree all sit inside `#if` branches Windows never reaches;
-    /// this one was added on 2026-09-03 outside any of them and broke that
-    /// build -- the same shape as every other entry here, a rule applied to
-    /// only part of where it holds.
-    ///
-    /// Of the three routes the compiler offers -- `strerror_s`, defining
-    /// `_CRT_SECURE_NO_WARNINGS`, or a platform branch -- the macro was
-    /// rejected: it would silence every deprecation in the build, including
-    /// ones nobody has looked at yet, to fix one call.
-    ///
-    /// Windows 用 `strerror_s`，其他平台用 `strerror`。MSVC 把後者標為 deprecated，而 Windows
-    /// 的建置帶著 `-warnings-as-errors`，所以那在那裡是錯誤而不是警告。這棵樹裡另外五個
-    /// `strerror` 呼叫全都在 Windows 走不到的 `#if` 分支內；這一個是 2026-09-03 加的、不在任何
-    /// 一個分支裡，於是弄壞了那個建置——與這裡每一條的形狀相同：一條規則只套用到它成立範圍的
-    /// 一部分。
-    ///
-    /// 編譯器給的三條路——`strerror_s`、定義 `_CRT_SECURE_NO_WARNINGS`、或平台分支——之中，
-    /// 那個巨集被否決了：它會為了修一個呼叫而讓整份建置的每一個 deprecation 靜音，包括還沒有
-    /// 人看過的那些。
-    static func errnoText(_ e: Int32) -> String {
-        #if canImport(ucrt)
-        // `numericCast` on the length, not `buf.count`. The C declaration takes
-        // a `size_t`, Swift performs no implicit numeric conversion, and
-        // whether `size_t` imports as `Int` or `UInt` there is a question this
-        // machine cannot answer -- there is no MSVC on it. `numericCast` is
-        // correct either way, which removes the question instead of guessing at
-        // it and spending another round-trip to the node that can compile it.
-        // 長度用 `numericCast`，不用 `buf.count`。C 的宣告收的是 `size_t`，Swift 不做隱式數值
-        // 轉換，而 `size_t` 在那裡被匯入成 `Int` 還是 `UInt`，是這台機器答不了的問題——它上面
-        // 沒有 MSVC。`numericCast` 兩種情況都成立，於是那個問題被移除，而不是被猜測、再花一趟
-        // 往返去問那台編得起來的節點。
-        var buf = [CChar](repeating: 0, count: 256)
-        let got: Bool = buf.withUnsafeMutableBufferPointer { p in
-            strerror_s(p.baseAddress, numericCast(p.count), e) == 0
-        }
-        if got { return String(cString: buf) }
-        return "errno \(e)"
-        #else
-        guard let p = strerror(e) else { return "errno \(e)" }
-        return String(cString: p)
-        #endif
-    }
-
     static func fileKind(path: String) -> FileKind? {
         var st = stat()
         guard stat(path, &st) == 0 else { return nil }

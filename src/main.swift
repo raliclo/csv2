@@ -1602,7 +1602,19 @@ func validate(_ o: inout Options) throws {
                     throw usageError("-o \(out): the directory \(dirName) does not exist",
                                      "-o \(out)：目錄 \(dirName) 不存在")
                 }
-                let why = Platform.errnoText(e)
+                // Platform.errorText, which already existed and already had
+                // a Windows branch compiled by six other callers. A duplicate
+                // `errnoText` was added here on 2026-09-03 and broke the
+                // Windows build on its second line -- `String(cString:)` taking
+                // an ARRAY is the deprecated overload, while the pointer form
+                // the rest of this tree uses is not. Entry 3 of mistakes.md for
+                // the tenth time, and this one duplicated a whole function.
+                // 用 Platform.errorText——它本來就存在，而且它的 Windows 分支已被另外六個呼叫點
+                // 編譯過。2026-09-03 這裡加了一個重複的 `errnoText`，並在它的第二行弄壞了
+                // Windows 建置——吃**陣列**的 `String(cString:)` 才是被廢棄的那個 overload，
+                // 而這棵樹其他地方用的指標形式不是。mistakes.md 第 3 條的第十次，而這一次
+                // 重複的是一整個函式。
+                let why = Platform.errorText(e)
                 throw usageError(
                     "-o \(out): the directory \(dirName) cannot be examined: \(why)",
                     "-o \(out)：無法檢視目錄 \(dirName)：\(why)")
