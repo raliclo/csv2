@@ -13647,6 +13647,57 @@ else
 fi
 
 echo
+echo "--- T242: a refusal names a way through, and that way works / T242：一則拒絕說出一條路，而那條路走得通 ---"
+# LF. The Windows node met a file under testapp/actions/ with `#` comment lines,
+# was refused twice, and was about to write "csv2 cannot read files with #
+# comments" into its memory. The refusal was right and its reasoning was right;
+# what was wrong is that it named only the route that requires RENAMING the
+# file -- not advice for a path in version control -- so a careful reader
+# concluded there was none.
+#
+# The cost of this defect is not a wrong result. It is a wrong limitation
+# written into someone else's memory, and that outlives a defect, because no
+# test ever reads it.
+#
+# LF。Windows 節點遇到 `testapp/actions/` 底下帶 `#` 註解行的檔案，兩次都被拒，於是正要把
+# 「csv2 讀不了帶 # 註解的檔案」寫進它的 memory。那則拒絕是對的、理由也是對的；錯的是它只說出
+# 那條需要**改檔名**的路——對一個在版控裡的路徑那不是建議——於是一個仔細的讀者得出「沒有路」。
+#
+# 這個缺陷的代價不是一個錯的結果，是一條被寫進別人 memory 的錯誤限制，而那比一個缺陷活得久，
+# 因為沒有任何測試會去讀它。
+printf '# actions for testapp\nname,cmd\nbuild,make\n' > "$TMP/t242.csv"
+_t242_msg=$("$CSV2" -r -i "$TMP/t242.csv" 2>&1 >/dev/null)
+if [[ $_t242_msg == *"-si --headers 0"* ]]; then
+    ok "T242a the '#' refusal names a route that needs no rename / 那則 '#' 拒絕說出一條不需要改檔名的路"
+else
+    bad "T242a the refusal names no rename-free route: ${_t242_msg:0:90} / 訊息如上"
+fi
+
+# The route is EXECUTED, not matched. A message may name a command that does
+# not work, and a case that only greps for the string would pass on one -- the
+# same reason T232 runs the README's examples instead of reading them.
+# 那條路是被**執行**的，不是被比對的。一則訊息可以說出一個其實行不通的指令，而一個只 grep
+# 字串的案例會在那種訊息上通過——與 T232 執行 README 範例而不是閱讀它們，是同一個理由。
+_t242_out=$("$CSV2" -r -si --headers 0 < "$TMP/t242.csv" 2>/dev/null)
+_t242_want=$(printf '# actions for testapp\nname,cmd\nbuild,make')
+if [[ $_t242_out == $_t242_want ]]; then
+    ok "T242b and following it returns every line, the '#' ones included / 而照著它做會拿回每一行，包含 '#' 那幾行"
+else
+    bad "T242b following the message gave: ${_t242_out:0:80} / 照著做的結果如上"
+fi
+
+# The other half of the misunderstanding: on a .csv, --headers 0 means a
+# HEADERLESS CSV, not lines, because the suffix already declared commas. That
+# is why the node's second attempt failed, and the message now says so.
+# 誤解的另一半：在 .csv 上，--headers 0 的意思是「沒有標頭列的 CSV」而不是逐行，因為副檔名已經
+# 宣告了逗號。那就是那個節點第二次嘗試失敗的原因，而訊息現在說了這件事。
+if [[ $_t242_msg == *"HEADERLESS"* || $_t242_msg == *"沒有標頭列"* ]]; then
+    ok "T242c and it distinguishes --headers 0 on a suffixed file from lines / 而它區分了「有副檔名時的 --headers 0」與逐行"
+else
+    bad "T242c the message does not distinguish the two meanings of --headers 0 / 訊息沒有區分 --headers 0 的兩種意義"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

@@ -9297,3 +9297,44 @@ run, which is what an intermittent failure looks like and why one green run is n
 Do NOT fix it by loosening T118b -- the question that case asks is the right one, and
 loosening it would change the tool's promise to "most of the time". The fix belongs in the
 parallel path, where which worker's error arrives first currently decides what the user sees.
+
+---
+
+## LF. 那則「`#` 開頭」的拒絕只說出需要改檔名的那條路（2026-09-04，Windows 節點回報）
+
+節點要讀 `testapp/actions/` 底下帶 `#` 註解行的檔案，兩種試法都被拒，於是改用 Edit，並**正要把
+「csv2 讀不了帶 # 註解的檔案」寫進它的 memory**。
+
+那條限制**太寬了，而且有一條不用動檔案的路**：
+
+```zsh
+csv2 -r -si --headers 0 < actions.csv     # 每一行原樣讀出來，包含 # 那幾行
+```
+
+拒絕本身是對的，理由也是對的——CSV 沒有註解語法，`#` 是資料，`#id` 是合法欄位名，跳過 `#` 開頭
+的行等於去猜哪些行是資料，而猜錯是無聲的。**問題在那則訊息只給了一條出路**：
+
+> Remove the line, or read the file under a name with no .csv/.csv2 suffix
+
+「以沒有副檔名的名字讀取」意思是**改檔名或複製一份**。對一個在版控裡的 `testapp/actions/` 來說
+那不是可行的建議，於是讀到它的人合理地得出「沒有路」。而 `-si --headers 0` 一個旗標就到了。
+
+第二次嘗試失敗的是另一回事，也值得寫在訊息裡：在 `.csv` 上 `--headers 0` 的意思是**沒有標頭列
+的 CSV**（副檔名已經宣告了逗號分隔），不是「逐行讀」。逐行格式由「沒有副檔名」或 `-si` 抵達。
+兩者用同一個旗標名字而意義不同，是這次誤解的第二半。
+
+**這一條的代價形式與別的不同：它不會造成錯誤的結果，它造成的是一個被寫進別人 memory 的錯誤限制。**
+那種東西比一個缺陷活得久，因為沒有任何測試會去讀它。
+
+修法：那則訊息加上 `-si --headers 0`，並說明 `--headers 0` 在有副檔名時的意思。
+
+The refusal for a `#` header names only the route that requires renaming the file, so a node
+reading it concluded there was none and was about to write "csv2 cannot read files with #
+comments" into its memory. There is a route that touches nothing: `-si --headers 0 < file`.
+The refusal and its reasoning are right -- CSV has no comment syntax, `#` is data, `#id` is a
+legal column name, and skipping such lines means guessing which lines are data -- but "read it
+under a name with no suffix" means rename or copy, which is not advice for a file in version
+control. Their second attempt failed for a different reason worth stating too: on a `.csv`,
+`--headers 0` means a HEADERLESS CSV, not the line-oriented format, because the suffix has
+already declared comma separation. This defect's cost is not a wrong result; it is a wrong
+limitation written into someone's memory, which outlives a defect because no test reads it.

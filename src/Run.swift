@@ -216,8 +216,8 @@ func validateHeaders(_ headers: [Record], want: Int, path: String) throws {
     if let first = headers.first, first.count == 1,
        first.fields.first?.value.first == BYTE_HASH {
         throw fault(
-            "\(path): the header row starts with '#'. csv2 has no comment syntax: in CSV a '#' is data, and a column named '#id' is legal, so skipping such a line would mean guessing which lines are data. Remove the line, or read the file under a name with no .csv/.csv2 suffix, where every line is one field",
-            "\(path)：標頭列以 '#' 開頭。csv2 沒有註解語法：在 CSV 裡 '#' 是資料，而一個叫 '#id' 的欄位是合法的，因此跳過這樣的一行就等於去猜哪些行是資料。請移除那一行，或把這個檔案以「沒有 .csv／.csv2 副檔名」的名字讀取——那時每一行就是一個欄位")
+            "\(path): the header row starts with '#'. csv2 has no comment syntax: in CSV a '#' is data, and a column named '#id' is legal, so skipping such a line would mean guessing which lines are data. To read it as lines -- one field each, bytes verbatim -- pipe it in: csv2 -si --headers 0 < FILE. That touches nothing on disk. Reading it under a name with no .csv/.csv2 suffix does the same, and removing the line makes it a CSV. Note that --headers 0 with a .csv/.csv2 suffix means a HEADERLESS CSV, not lines: the suffix has already declared comma separation",
+            "\(path)：標頭列以 '#' 開頭。csv2 沒有註解語法：在 CSV 裡 '#' 是資料，而一個叫 '#id' 的欄位是合法的，因此跳過這樣的一行就等於去猜哪些行是資料。要把它當成一行行來讀（每行一個欄位、位元組原樣），用管線送進來：csv2 -si --headers 0 < FILE，那不會動到磁碟上的任何東西。以「沒有 .csv／.csv2 副檔名」的名字讀取效果相同；移除那一行則會讓它成為一份 CSV。注意：在有 .csv／.csv2 副檔名時，--headers 0 的意思是「沒有標頭列的 CSV」而不是逐行——副檔名已經宣告了逗號分隔")
     }
     if headers.count > 1 && headers[0].count != headers[1].count {
         throw fault(

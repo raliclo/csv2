@@ -167,8 +167,13 @@ csv2：vs-sqlite.csv2 的副檔名宣告了 2 列標頭，但 --headers 說 1 �
 column named `#id` is legal, so skipping such a line would mean guessing which
 lines are data. A file with `# ...` at the top is refused by naming the `#`
 rather than by counting fields, because the count is two steps from the cause.
-Remove the line, or read the file under a name with no `.csv`/`.csv2` suffix,
-where every line is one field.
+To read such a file as lines without touching it, pipe it in:
+`csv2 -si --headers 0 < FILE`. Reading it under a name with no `.csv`/`.csv2`
+suffix does the same, and removing the line makes it a CSV. Note that
+`--headers 0` on a file that HAS one of those suffixes means a headerless CSV,
+not lines: the suffix has already declared comma separation. A node reading the
+earlier message, which named only the rename, concluded the file could not be
+read at all.
 
 ## Editing
 
