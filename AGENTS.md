@@ -69,6 +69,22 @@ around. If you must invoke it by hand, the form is
 的 session，節點照做了，而那個早就知道這一切的 dispatcher 被繞了過去。若非得手動呼叫不可，
 形式是 `cmd.exe //c "<絕對路徑>"`——但沒有理由那樣做。
 
+**On WSL2, run the suite from the native filesystem, not from `/mnt/c`.**
+Measured on 2026-09-03, same machine and same build: on native ext4 the suite
+is clean with T47 the only skip, exactly like macOS, while on `/mnt/c` it
+produces eighteen failures. All of them come from 9p/DrvFs having no POSIX
+permissions, no atomic rename, no FIFOs and different streaming timing. None
+of them is about csv2. There is no start-up refusal for this, deliberately:
+see LD. (The counts are in LD, not here -- T69a fails any document that quotes
+a PASS count, because those go stale silently, and it caught this paragraph.)
+
+**在 WSL2 上，從原生檔案系統執行這套測試，不要從 `/mnt/c`。** 2026-09-03 實測，同一台機器、
+同一個建置：在原生 ext4 上這套測試是乾淨的，唯一的略過是 T47——與 macOS 完全相同；而在 `/mnt/c`
+上它產生十八個失敗。那些全部來自 9p／DrvFs 沒有 POSIX 權限、沒有 rename 原子性、沒有 FIFO，
+以及串流時序不同，**沒有一個和 csv2 有關**。這件事刻意沒有做成啟動期拒絕，理由見 LD。
+（數字寫在 LD，不寫在這裡——T69a 會讓任何引用 PASS 數量的文件失敗，因為那種數字會安靜地過期，
+而它抓到了這一段。）
+
 **Do not run the suite with `zsh -f`.** It reads no start-up files, so a
 packaged zsh never builds its `module_path` and `zsh/stat` cannot load. The
 suite refuses at start-up with rc=2 and says so; before that refusal existed it

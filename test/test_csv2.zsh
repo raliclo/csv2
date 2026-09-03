@@ -2279,6 +2279,7 @@ big_bytes=$(wc -c < "$TMP/t61_big" | tr -d ' ')
 if (( IS_WINDOWS )); then
     skipt "T61a output arrives while the input is still open / 輸入還開著時輸出就已到達 (a POSIX FIFO is not visible to a native Windows binary; the property is covered by T9 / MSYS 的 FIFO 對原生 Windows 程式不存在；該性質由 T9 涵蓋)"
     skipt "T61c the streamed output is complete / 串流輸出是完整的 (same reason / 同上)"
+    T61A_SKIPPED=1; T61C_SKIPPED=1
 else
 rm -f "$TMP/t61.fifo"; mkfifo "$TMP/t61.fifo"
 { print -r -- 'a,b'; cat "$TMP/t61_big"; sleep 2; print -r -- '9,end' } > "$TMP/t61.fifo" &
@@ -4570,6 +4571,7 @@ cp "$TMP/t98.csv" "$TMP/t98.bak"
 # round-trip。那些正是「這個修正如果做過頭」會被抓到的斷言，而它們在四個平台上都跑。
 if (( IS_WINDOWS )); then
     skipt "T98a-T98g the non-UTF-8 argument refusals / 非 UTF-8 參數的那幾條拒絕 (a Windows command line is UTF-16; no raw argument bytes survive for csv2 to check / Windows 的命令列是 UTF-16，沒有原始參數位元組留給 csv2 檢查)"
+    T98_SKIPPED=1
 else
 assert_fails "T98a -update refuses a value that is not valid UTF-8 / -update 拒絕不是合法 UTF-8 的值" -- \
     "$CSV2" -update 1:note "$bad_val" -i "$TMP/t98.csv" --in-place
@@ -7221,6 +7223,7 @@ fi
 
 if (( IS_WINDOWS )); then
     skipt "T141e -o onto a FIFO is refused with the same sentence / -o 指向 FIFO 時以同一句話拒絕 (a POSIX FIFO is not visible to a native Windows binary, as for T61a / MSYS 的 FIFO 對原生 Windows 程式不存在，同 T61a)"
+    T141E_SKIPPED=1
 else
     rm -f "$TMP/t141_fifo"
     mkfifo "$TMP/t141_fifo"
@@ -8994,6 +8997,7 @@ rm -f "$TMP/t135.csv.index" 2>/dev/null
 mkdir -p "$TMP/t135.csv.index" 2>/dev/null
 if [[ ! -d "$TMP/t135.csv.index" ]]; then
     skipt "T135c an unreadable sidecar reports why / 讀不到的 sidecar 會說出為什麼 (could not create a directory in its place / 無法在它的位置建立一個目錄)"
+    T135C_SKIPPED=1
 else
     _t135_out=$("$CSV2" --verify-index -i "$TMP/t135.csv" 2>&1)
     if [[ $_t135_out == *"cannot be read"* && $_t135_out != *"reason not recorded"* ]]; then
@@ -9256,6 +9260,7 @@ assert_eq "$?" "1" \
 # 那與 T43h 曾有的「分不出兩者」是同一個洞。
 if (( IS_WINDOWS )); then
     skipt "T131e a killed edit leaves no temp file beside the target / 被殺死的編輯不會在目標旁留下暫存檔 (POSIX signal handlers; a native Windows binary is not stopped this way / 這是 POSIX 訊號處理，原生 Windows 程式不是這樣被停下的)"
+    T131E_SKIPPED=1
 else
     rm -f "$TMP"/.t131_out.csv.csv2tmp.*(N) "$TMP/t131_out.csv"
     ( print -r -- 'a,b'; print -r -- '1,x'; sleep 5 ) \
@@ -13509,6 +13514,7 @@ echo "--- T240: a directory that cannot be examined is not a missing one / T240�
 printf 'a,b\n1,2\n' > "$TMP/t240.csv"
 if (( IS_WINDOWS )); then
     skipt "T240 a symlink loop needs a privilege to create on Windows / 在 Windows 上建立 symlink 迴圈需要特權"
+    T240_SKIPPED=1
 else
     ln -s "$TMP/t240loopb" "$TMP/t240loopa" 2>/dev/null
     ln -s "$TMP/t240loopa" "$TMP/t240loopb" 2>/dev/null
@@ -13609,7 +13615,30 @@ if (( IS_WINDOWS )); then
     # 這裡原本是 9，而且把 symlink（T43h、T129a-d、T130a-c）算了進去——那是這台機器有、而且一直
     # 都有的東西。它們的跳過現在由案例自己記錄，來自一次執行期探測，與這個檔案裡其他每一個條件式
     # 跳過相同。把數字寫在這裡，是多一個會忘記的地方：它一直說著 9，而其中三個的理由早就不在了。
-    (( want_skip += 6 ))
+    # The number is GONE. It said 9 while three of its reasons had left, was
+    # corrected to 6, and then said 6 while T135c's reason had left too: that
+    # case now puts a DIRECTORY where the unreadable sidecar goes, which fails
+    # the open for everyone, so it no longer skips on Windows -- and the count
+    # went on predicting that it would. The Windows node measured it as
+    # "expected 16, actual 15", and before that "expected 19, actual 18": the
+    # gap was always exactly one, which is what a single stale entry looks like.
+    #
+    # The comment above this line had already diagnosed the disease -- "a
+    # number written here is a second place to forget" -- and then kept it. So
+    # each of these five now records its own skip at the point where it skips,
+    # like every other conditional skip in this file. There is no longer a
+    # place where a Windows skip can be predicted without the case agreeing.
+    #
+    # 那個數字**沒有了**。它曾經說著 9，而其中三個的理由已經離開；改成 6 之後，它又說著 6，
+    # 而 T135c 的理由也離開了：那個案例現在在「讀不到的 sidecar」的位置放一個**目錄**，那對
+    # 任何人都會讓 open 失敗，因此它在 Windows 上不再跳過——而這個計數仍在預測它會。Windows
+    # 節點量到的是「預期 16、實際 15」，更早一次是「預期 19、實際 18」：差距永遠正好是 1，
+    # 而那正是「單一一筆過期項目」的樣子。
+    #
+    # 這一行上面的註解**早就診斷出這個病**——「把數字寫在這裡，是多一個會忘記的地方」——然後
+    # 留下了它。因此這五個現在各自在「它跳過的那個地方」記錄自己，與這個檔案裡其他每一個條件式
+    # 跳過相同。現在不再有任何地方能在「案例沒有同意」的情況下預測一個 Windows 的跳過。
+    :
 else
     _t69_probe=$(zstat_mode "$TMP")
     [[ $_t69_probe == <-> ]] || (( want_skip += 1 ))   # T129e
@@ -13698,6 +13727,27 @@ fi
 (( ${T182B_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T184A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T184B_SKIPPED:-0} )) && (( want_skip += 1 ))
+# The five that used to be a hardcoded 6 in the Windows arm, plus T240. Each is
+# recorded by the case that skipped, which is the only place that knows.
+# 原本在 Windows 那一支裡寫成 6 的那五個，加上 T240。每一個都由「跳過的那個案例」自己記錄，
+# 而那是唯一知道這件事的地方。
+(( ${T61A_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T61C_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T98_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T141E_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T131E_SKIPPED:-0} )) && (( want_skip += 1 ))
+# T135c skips only when the directory it needs cannot be created -- not a
+# platform property, and the reason the old number was wrong.
+# T135c 只在「它需要的那個目錄建不出來」時跳過——那不是平台的性質，而它正是那個舊數字錯掉的原因。
+(( ${T135C_SKIPPED:-0} )) && (( want_skip += 1 ))
+# T240 needs a symlink loop, which Windows will not let an unprivileged process
+# create. Added WITH its count, unlike T240's first version: a new skip whose
+# count is missing cancels against a stale entry and the check passes with two
+# errors in it, which is worse than one visible mismatch.
+# T240 需要一個 symlink 迴圈，而 Windows 不讓沒有特權的行程建立它。這次是**連同計數一起**加的
+# ——與 T240 的第一版不同：一個「漏掉計數」的新跳過，會與一筆過期項目互相抵銷，於是那個檢查
+# 帶著兩個錯誤通過，而那比一個看得見的數量不符更糟。
+(( ${T240_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T191A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T200A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T200B_SKIPPED:-0} )) && (( want_skip += 1 ))

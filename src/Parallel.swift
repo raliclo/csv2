@@ -244,6 +244,7 @@ private final class ParallelBatchResults: @unchecked Sendable {
     private var fragments: [[UInt8]]
     private var counts: [Int]
     private var firstError: Error?
+    private var firstErrorIndex = Int.max
 
     init(count: Int) {
         fragments = [[UInt8]](repeating: [], count: count)
@@ -257,9 +258,40 @@ private final class ParallelBatchResults: @unchecked Sendable {
         lock.unlock()
     }
 
-    func store(error: Error) {
+    /// LE. "First" means first IN THE FILE, not first to arrive.
+    ///
+    /// This kept whichever error a worker happened to store first, and the
+    /// workers run concurrently -- so which of two true statements the user
+    /// saw was decided by thread scheduling. On the T118 fixture, a raw
+    /// newline inside a quoted cell, the run said "record 1 (line 3): a raw
+    /// newline inside a cell" 1185 times out of 1200 and "record 2 (line 4)
+    /// has 1 fields but the header has 2" the other 15, the second being what
+    /// a chunk that began mid-record saw rather than what is wrong with the
+    /// file. A user following it to line 4 finds an ordinary row.
+    ///
+    /// Ordering by chunk index makes it deterministic AND correct: the
+    /// single-threaded path reports the earliest problem in the file, and the
+    /// lowest chunk index is that same problem. Within a batch, index order is
+    /// file order; batches run one after another and an error in an earlier
+    /// batch throws before the next begins.
+    ///
+    /// LE。「第一個」指的是**檔案裡的第一個**，不是最先到達的那一個。
+    ///
+    /// 這裡原本留住「哪一個 worker 剛好先存進來」的錯誤，而 worker 是並行的——於是使用者
+    /// 看到兩句都為真的話裡的哪一句，由執行緒排程決定。在 T118 那個 fixture（引號欄位裡的
+    /// 裸換行）上，1200 次中有 1185 次說「record 1 (line 3)：儲存格裡有裸換行」，另外 15 次
+    /// 說「record 2 (line 4) 有 1 欄，而標頭有 2 欄」——後者是「一個從記錄中間開始的區塊」
+    /// 看到的東西，不是那個檔案真正的毛病。使用者照著它去找第 4 行，會看到一列完全正常的資料。
+    ///
+    /// 依區塊索引排序，讓它同時是決定性的**且**正確的：單執行緒路徑回報的是檔案裡最早的那個
+    /// 問題，而索引最小的區塊裝的正是同一個問題。在一批之內，索引順序就是檔案順序；而各批依序
+    /// 執行，前一批的錯誤會在下一批開始之前就拋出。
+    func store(error: Error, at index: Int) {
         lock.lock()
-        if firstError == nil { firstError = error }
+        if firstError == nil || index < firstErrorIndex {
+            firstError = error
+            firstErrorIndex = index
+        }
         lock.unlock()
     }
 
@@ -561,7 +593,7 @@ func runParallelSearch(_ o: Options) throws {
                 if let e = localError { throw e }
                 bytes = memory.takeBytes()
             } catch {
-                results.store(error: error)
+                results.store(error: error, at: k)
                 return
             }
             results.store(bytes: bytes, hits: hitCount, at: k)

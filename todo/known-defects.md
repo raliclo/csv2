@@ -8976,6 +8976,29 @@ The no-op build happened because the macOS session asked the node to run the bat
 directly, stepping around it. Half of KY is a wrong instruction, not a missing guard, and the
 fix is documentation: AGENTS.md now says to build with ./compile_csv2.zsh.
 
+### 已結案（2026-09-03，節點確認）
+
+節點回報了兩件事，兩件都確認了上面的更正：
+
+1. **它當時打的是 `cmd.exe /c compile_csv2_win.bat`** —— 照 macOS session 第一封信直接叫批次檔，
+   繞過了 dispatcher。
+2. **`STALE BINARY` 沒有印出來，因為它根本沒有跑測試。** 它是在建置前後比對指紋
+   （`cca40f42ed23` 兩次相同）當場攔下的。
+
+而它接著**刻意重現**了那道守衛：把 `CSV2` 指向 8/26 的舊二進位檔，守衛確實會咬，並列出 11 個
+較新的原始檔。
+
+**所以那道守衛是好的，KY 從頭到尾都不是一個程式缺陷。** 它是一個錯的指示，加上一個沒有被走到的
+檢查。這一條保留在這裡的價值只剩兩件：`cmd.exe //c` 那個 MSYS 事實，以及「叫人繞過已經知道怎麼做
+的東西」這個形狀本身。
+
+Closed 2026-09-03. The node confirmed it ran `cmd.exe /c compile_csv2_win.bat` -- the macOS
+session's instruction, stepping around the dispatcher -- and that STALE BINARY never printed
+because no tests were run: it caught the no-op build by comparing the binary's fingerprint
+before and after. It then reproduced the guard deliberately, pointing CSV2 at an August 26
+binary, and the guard fired and listed 11 newer sources. The guard is sound; KY was never a
+program defect.
+
 `//c` 讓 MSYS 不去改寫它；**絕對路徑**是因為 cmd 從 MSYS 啟動時工作目錄與呼叫端不同，相對
 路徑會找不到那個批次檔——而找不到時它一樣安靜。
 
@@ -9122,3 +9145,155 @@ then, because the two need opposite fixes. Independently true either way: `fileK
 every stat failure into nil and the caller reads nil as "does not exist", so a permission
 error or ENOTDIR is reported as a missing directory on every platform. The errno is right
 there and is thrown away.
+
+---
+
+## LC. Windows 的預期略過數永遠多 1，而那個「不要寫死數字」的註解就寫在那一行上面（2026-09-03，Windows 節點回報）
+
+節點量到：Windows **實際 15、預期 16**；更早壞掉的那一次是 **實際 18、預期 19**。
+**差距永遠正好是 1，而預期值本身會浮動**——那是「有一筆過期項目被算進預期、但它不會走到 skip」
+的特徵。
+
+過期的那一筆是 **T135c**。它以前用 `chmod 000` 製造讀不到的 sidecar，在 Windows 上會跳過；
+現在它在那個位置放一個**目錄**，對任何人都會讓 open 失敗，因此**只在「連目錄都建不出來」時**
+才跳過——那在 Windows 上建得出來。案例改了，而 Windows 那一支的固定數字 `(( want_skip += 6 ))`
+仍然把它算著。
+
+**這一行上面的註解早就診斷出這個病：**
+
+> 把數字寫在這裡，是多一個會忘記的地方：它一直說著 9，而其中三個的理由早就不在了。
+
+那段話是在把 9 改成 6 時寫的。**它說出了病因，然後留下了病。** 這是這棵樹最常見的形狀
+——「一條規則只套用到它成立範圍的一部分」——的又一次：那次修正把 symlink 那三個改成由案例
+自己記錄，卻讓剩下的六個繼續當一個數字。
+
+### 而我在同一天讓它更糟
+
+T240 在 Windows 上會跳過（symlink 迴圈需要特權），**而我加它時沒有加計數**。下一輪 Windows
+的實際會變成 16、預期仍是 15+1=16——**兩個錯誤互相抵銷，那個檢查會通過，而兩個錯都還在。**
+一個「漏掉計數的新跳過」與「一筆過期項目」相消之後，比一個看得見的數量不符更糟。
+
+修法：**把那個數字拿掉**，六個各自在跳過的那一點記錄自己，與這個檔案裡其他每一個條件式跳過
+相同。現在不再有任何地方能在「案例沒有同意」的情況下預測一個 Windows 的跳過。
+
+The expected skip count on Windows was always exactly one more than the actual, with the
+expected value itself moving -- the signature of one stale entry. It was T135c: that case
+now puts a DIRECTORY where the unreadable sidecar goes, which fails the open for everyone,
+so it no longer skips on Windows while the hardcoded `want_skip += 6` still predicted it.
+The comment directly above that line had already diagnosed the disease -- "a number written
+here is a second place to forget" -- and then kept it. Worse, T240 was added the same day
+with a Windows skip and NO count, which would have cancelled the stale entry and let the
+check pass carrying two errors. The number is now gone; each case records its own skip.
+
+---
+
+## LD. 在 WSL2 的 `/mnt/c` 上跑，18 個失敗全都在講那個檔案系統（2026-09-03，WSL2 節點回報，**已記錄，未加守衛**）
+
+同一台機器、同一個建置，兩個位置：
+
+| 位置 | 結果 |
+|---|---|
+| 原生 ext4 | **1159 / 0 / 1**——唯一的 SKIP 是 T47，與 macOS 相同 |
+| `/mnt/c`（9p／DrvFs） | **1138 / 18 / 3** |
+
+那 18 個全部來自 9p 沒有 POSIX 權限、沒有 rename 原子性、沒有 FIFO，以及串流時序不同。
+**沒有一個和 csv2 有關。**
+
+這與 KZ 是同一族：**一個壞掉的環境，產生一大批各說各話的失敗，而沒有一個說得出真正的原因。**
+KZ 的處置是「在啟動時拒絕，並指名 `-f`」，而這一條的對應處置會是「偵測到 `$TMP` 位於一個沒有
+POSIX 語意的檔案系統時拒絕，並要求用原生路徑」。
+
+**但這次刻意不加那道守衛，理由是我驗證不了它。** 一道在四個節點上都會執行、而我只能在其中一個
+上測試的啟動期拒絕，如果誤判就會讓四個節點同時停擺。這棵樹已經有一整條記錄在講「測試碰到的不是
+被測物」（`mistakes.md` 第 1 條，7 次），而一道未經驗證的環境探測正是製造第 8 次的方式。
+
+因此這一條的處置是**文件**：`AGENTS.md` 說明 WSL2 上要從原生檔案系統執行這套測試，不要從
+`/mnt/c`，並說明為什麼那 18 個失敗不是缺陷。若日後有辦法在多個節點上驅動那個探測，再談守衛。
+
+Same machine, same build: native ext4 gives 1159/0/1 with T47 the only skip, exactly like
+macOS; /mnt/c gives 1138/18/3, and all 18 come from 9p having no POSIX permissions, no atomic
+rename, no FIFOs and different streaming timing. None of them is about csv2. Same family as
+KZ -- a broken environment producing a crowd of failures none of which names the cause -- and
+the matching response would be a start-up refusal. Deliberately NOT added: a refusal that runs
+on all four nodes while being testable on only one is how a false positive stops all four at
+once, and an unverified environment probe is exactly how entry 1 of mistakes.md gets its
+eighth occurrence. Documented in AGENTS.md instead.
+
+---
+
+## LE. 同一個壞掉的檔案，平行路徑會說出兩個不同的原因（2026-09-03，T118b 在一次完整執行中失敗）
+
+T118 的標題是「同一個檔案，同一個說法」。**而同一個檔案會說兩個故事，約 1.25% 的時候。**
+
+重現（macOS，1200 次，並在背景跑 6 個忙迴圈製造負載——沒有負載時 30/30 都正確）：
+
+```zsh
+printf 'pkg,note\ntext,text\nzlib,"has a\nraw newline"\nzstd,ok\n' > t.csv2
+for i in $(seq 1 300); do
+  for cb in 4 8 16 64; do
+    CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=$cb csv2 -contains ok -i t.csv2 2>&1 | head -1
+  done
+done | sort | uniq -c
+```
+
+```
+1185 csv2: record 1 (line 3), field 2: a raw newline inside a cell; .csv2 keeps one record per line…
+  15 csv2: record 2 (line 4) has 1 fields but the header has 2; csv2 will not pad or truncate to fit
+```
+
+兩則都是拒絕（rc 非零），**沒有資料損失**。問題在於**原因不是同一個**：第二則描述的是「一個
+從記錄中間開始的 chunk 所看到的東西」，而不是那個檔案真正的毛病。一個使用者拿著第二則訊息去
+找第 4 行，會找到一列完全正常的資料。
+
+**它一直都在，而 T118b 有 98.75% 的時間安靜地通過。** 它是在一次完整執行的負載下第一次被看見的
+——那正是「間歇性失敗只在忙的時候現形」的樣子，也是為什麼「跑一次綠燈」不等於「它是綠的」。
+
+**不要用「放寬 T118b」的方式修它。** 那個案例問的問題是對的（同一個檔案要有同一個說法），而
+放寬它等於把這個工具的核心承諾改成「大部分時候」。要修的是平行路徑：哪一個 worker 的錯誤先
+到達，目前決定了使用者看到哪一則訊息。
+
+### 定位與修正（同日）
+
+`Parallel.swift` 的 `ParallelBatchResults.store(error:)`：
+
+```swift
+if firstError == nil { firstError = error }   // ← 「第一個」是到達時間
+```
+
+**「第一個」指的是最先到達，不是檔案裡的第一個。** worker 是並行的，於是使用者看到哪一則訊息
+由執行緒排程決定。那條「改用掃描」的退路是存在的，它只是輸掉了一場賽跑。
+
+改成依**區塊索引**排序：索引最小的贏。那讓它同時是決定性的**且**正確的——單執行緒路徑回報的是
+檔案裡最早的那個問題，而索引最小的區塊裝的正是同一個問題。在一批之內索引順序就是檔案順序；各批
+依序執行，前一批的錯誤會在下一批開始之前拋出。
+
+**證明它會咬**：把修正還原成「先到者勝」，1200 次執行回報 1162 對 38 並以 1 結束；改回來之後
+1200 次全部同一則訊息。
+
+守衛是 [`verifications/parallel_error_order.zsh`](../verifications/parallel_error_order.zsh)，
+**不是** test_csv2.zsh 裡的一個案例：T118b 每個 chunk 大小只跑一次，因此大約每八十次執行才遇到
+一次。一個「1.25% 的機率抓得到競態」的案例不是守衛，是彩券。
+
+那支腳本的第一版用 `( while :; do :; done ) &` 製造負載，而那種行程**會繼承每一個已開啟的描述子**
+——於是把腳本接進任何管線都會永遠掛住，等一個被那些迴圈持有著的 EOF。改成並行跑多個 csv2：爭用
+一樣有，不需要善後，而且更接近這件事第一次出現時整套測試正在做的事。
+
+Located and fixed the same day. `ParallelBatchResults.store(error:)` kept whichever error
+arrived first, and the workers run concurrently, so scheduling decided which of two true
+sentences the user saw; the fall-back to scanning existed and simply lost a race. Ordering by
+chunk index makes it deterministic and correct at once, because the lowest chunk index holds
+the same problem the single-threaded path would report first. Proven to bite: with the fix
+reverted, 1200 runs gave 1162 against 38 and exited 1; restored, 1200 runs gave one message.
+The guard is verifications/parallel_error_order.zsh rather than a case in the suite, because
+T118b meets this about one run in eighty and a case that catches a race 1.25% of the time is
+a lottery ticket, not a guard.
+
+The same malformed file yields two different reasons about 1.25% of the time under load, and
+30/30 runs were correct without load. Both are refusals and no data is lost, but the second
+message describes what a chunk starting mid-record saw, not what is wrong with the file: a
+user following it to line 4 finds an ordinary row. This has always been there and T118b has
+been passing silently 98.75% of the time; it first appeared under the load of a full suite
+run, which is what an intermittent failure looks like and why one green run is not proof.
+Do NOT fix it by loosening T118b -- the question that case asks is the right one, and
+loosening it would change the tool's promise to "most of the time". The fix belongs in the
+parallel path, where which worker's error arrives first currently decides what the user sees.
