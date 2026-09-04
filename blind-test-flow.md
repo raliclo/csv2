@@ -250,6 +250,133 @@ the same commit order.
 是因為它們是在那裡學到的，但它們沒有一條是「只對報告成立」的：一個依要求新增的功能，需要同樣的
 四個平台、同樣兩種語言的文件、以及同樣的 commit 順序。
 
+### 11b. How the four nodes are actually upgraded
+
+Section 11 says why. This is the order, and every line of it was paid for on
+2026-09-02..05.
+
+**The order is Mac -> Linux VM -> WSL2 -> Windows, and it is not arbitrary.**
+It runs cheapest-feedback-first: the Mac is where the code is written and a
+failure costs one rebuild; the guest is driven locally from here and costs
+minutes; WSL2 and Windows are on another machine and each round trip costs a
+message and someone else's attention. A defect that survives to the fourth node
+has been paid for four times. Every step also invalidates the ones after it --
+a failure on the Mac makes the other three meaningless, so there is no reason
+to spend them.
+
+**Each node gets there by `git pull` where it can.** That is what makes a
+node's numbers mean something: they name a commit anyone can fetch and re-run.
+
+**Uncommitted code goes by multiscp -- and that is a different kind of
+result.** The binary is at `~/proj/multissh/release/multiscp` and is NOT on
+PATH, so give the full path. **The destination on the receiving node is under
+its own `~/proj`** -- not the tree the node normally builds from. Copying into
+the working tree replaces files the node may be mid-edit on, and it destroys
+the one thing that makes the copy recoverable: the ability to compare what
+arrived against what that node already had. But numbers from code that was
+copied rather than pulled belong to a state with no commit id: nobody can reproduce them later,
+including you. So say which files were sent, and RE-RUN the node after the
+commit exists. A green four-node run on uncommitted code is not a green
+four-node run on the commit that follows it -- this tree's whole subject is
+results that look like something they are not.
+
+**Build with `./compile_csv2.zsh` on every node, including Windows.** Do not
+invoke `compile_csv2_win.bat` yourself. The dispatcher's Windows branch already
+carries `MSYS2_ARG_CONV_EXCL='*'` (without it MSYS eats `/c` and the batch file
+NEVER RUNS, at exit status 0, with the binary unchanged) and the `.\` prefix
+(cmd does not search the working directory). KY happened because this session
+told a node to run the batch file directly, stepping around a dispatcher that
+already knew both.
+
+**Push before asking anyone to pull.** A node cannot test a commit it cannot
+fetch, and "please test HEAD" is meaningless if HEAD is local.
+
+**Ask for three numbers AND the SKIP list.** Not "did it pass". A matching
+total can be produced by two errors that cancel -- section 11 says this about
+kernel upgrades and it is equally true of a code change. On 2026-09-03 an
+expected-skip count was one too HIGH from a stale entry and one too LOW from a
+new case added the same day; left alone they would have cancelled and the check
+would have passed carrying both.
+
+**Confirm the binary is new before believing any number.** The suite's STALE
+BINARY gate only speaks if someone runs the suite; a node that compared the
+binary's fingerprint before and after caught a build that never ran, which the
+gate never saw because no tests followed it.
+
+**A node you cannot reach leaves the state UNKNOWN, not passing.** Say so in
+the words: "three green, one unknown". Put it in the commit message, because
+the person reading that commit in six months will not remember which node was
+missing. Do not let an unreachable node quietly become an assumed one.
+
+**Do not couple unrelated work to convergence.** This session deferred a guest
+image rebuild until "the four nodes align", and the two had nothing to do with
+each other -- rebuilding an aarch64 rootfs tells you nothing about a Windows
+build. The only real precondition was "no run of mine is in flight".
+
+**When a node reports a failure you cannot reproduce, ask for the exact text
+BEFORE theorising.** Two round-trips went into `strerror_s` on the theory that
+it was the deprecated call. The node's one sentence -- "it compiled without
+complaint; the error is on the next line" -- ended it, and the real fix was a
+function that already existed seventy lines away in the same file. A guess
+costs a round-trip; the exact text costs a line.
+
+**The parent's gitlink is last, and it must separate what was verified from
+what was quoted.** See section 12.
+
+### 11b. 四個節點實際上怎麼升級
+
+第 11 節說的是為什麼。這裡是順序，而它的每一行都在 2026-09-02..05 付過代價。
+
+**順序是 Mac → Linux VM → WSL2 → Windows，而那不是隨意排的。** 它是「回饋最便宜的先跑」：
+Mac 是程式被寫出來的地方，一次失敗的代價是一次重建；guest 由這裡在本地驅動，代價是幾分鐘；
+WSL2 與 Windows 在另一台機器上，每一輪往返的代價是一則訊息與別人的注意力。**一個活到第四個節點
+的缺陷，已經被付了四次錢。** 而且每一步都會讓它後面的失效——Mac 上失敗會讓另外三個變得沒有意義，
+那就沒有理由去花掉它們。
+
+**每個節點盡可能以 `git pull` 抵達。** 那正是「一個節點的數字有意義」的原因：它指名一個任何人都
+取得回來、也重跑得了的 commit。
+
+**未提交的程式用 multiscp 送——而那是另一種結果。** 執行檔在
+`~/proj/multissh/release/multiscp`，而且**不在 PATH 上**，要給完整路徑。**接收端的目標目錄放在
+那個節點自己的 `~/proj` 底下**——不是那個節點平常拿來建置的那棵樹。複製進工作樹會覆蓋掉那個節點
+可能正在編輯的檔案，而且會毀掉「讓這份複製可回溯」的唯一憑據：把送到的東西與那個節點原本就有的
+東西比對的能力。但「用複製而不是拉取」得到的數字，屬於一個沒有 commit id 的狀態：**日後沒有人重現得了它，包括你自己。** 因此要說出送了
+哪些檔案，並且在 commit 存在之後**重跑那個節點**。一次在未提交程式上的四節點綠燈，不是它之後那個
+commit 的四節點綠燈——而「看起來像某個東西、其實不是」正是這棵樹整個主題。
+
+**每個節點都用 `./compile_csv2.zsh` 建置，Windows 也是。** 不要自己去叫
+`compile_csv2_win.bat`。dispatcher 的 Windows 分支已經帶著 `MSYS2_ARG_CONV_EXCL='*'`
+（少了它，MSYS 會吃掉 `/c`，**批次檔根本不會執行**，退出碼 0，二進位檔一個位元組不變）與 `.\`
+前綴（cmd 不搜尋工作目錄）。KY 的成因正是本 session 叫一個節點直接跑那個批次檔，繞過了一個
+早就知道這兩件事的 dispatcher。
+
+**先推送，再請人拉。** 一個節點測不了它取不到的 commit，而「請測 HEAD」在 HEAD 還在本地時
+毫無意義。
+
+**要三個數字，**以及** SKIP 清單。** 不是「過了沒」。一個相同的總數可以由兩個互相抵銷的錯誤
+產生——第 11 節對核心升級講過這件事，對一次程式改動同樣成立。2026-09-03 有一個預期略過數因為
+一筆過期項目而**多一**，又因為同一天新增的案例漏了計數而**少一**；放著不管它們會抵銷，那個檢查
+會帶著兩個錯誤通過。
+
+**在相信任何數字之前，先確認那個二進位是新的。** 測試的 STALE BINARY 守衛只有在有人跑測試時才
+會說話；那次「從未執行的建置」是被一個「建置前後比對指紋」的節點當場抓到的，而那道守衛完全沒有
+看到它，因為後面根本沒有測試。
+
+**一個你連不上的節點，留下的狀態是「未知」，不是「通過」。** 要把那句話說出來：「三綠一未知」。
+寫進 commit message，因為六個月後讀那個 commit 的人不會記得少的是哪一個節點。**不要讓一個連不上
+的節點安靜地變成一個被假定沒問題的節點。**
+
+**不要把不相干的工作綁在「收斂」上。** 本 session 曾把 guest image 的重建押後到「四節點對齊」，
+而那兩件事毫無關係——重建一個 aarch64 rootfs 對一個 Windows 建置什麼也說不了。真正的前提只有
+一個：「我這邊沒有進行中的執行」。
+
+**當一個節點回報你重現不了的失敗時，先要原文，再想理論。** 為了 `strerror_s` 花掉兩輪往返，
+理論是「那個被廢棄的呼叫」。那個節點一句話結束了它——「它一個字沒被抱怨，錯在下一行」——而真正
+的修法是一個早就存在、在同一個檔案裡七十行外的函式。**一次猜測的代價是一輪往返，一段原文的代價
+是一行。**
+
+**母專案的 gitlink 放最後，而且必須把「驗過的」與「引述的」分開。** 見第 12 節。
+
 ### 12. Commit, push, then the parent's gitlink
 
 In that order. A gitlink pointing at a commit that exists only locally names
