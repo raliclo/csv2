@@ -9338,3 +9338,50 @@ control. Their second attempt failed for a different reason worth stating too: o
 `--headers 0` means a HEADERLESS CSV, not the line-oriented format, because the suffix has
 already declared comma separation. This defect's cost is not a wrong result; it is a wrong
 limitation written into someone's memory, which outlives a defect because no test reads it.
+
+---
+
+## LG. 我為 LC 加的守衛，建立在一個只看到一半機制的模型上（2026-09-04，自省時發現）
+
+LC 的強制檢查是 T241a：每一個被設定的 `Txxx_SKIPPED` 旗標都必須被 `${Txxx_SKIPPED:-0}` 消費，
+反之亦然。**那個模型漏了第二種機制。** `want_skip` 有兩種累加方式：
+
+| 機制 | 誰用 |
+|---|---|
+| 旗標消費區塊的 `${X:-0}` | 跑在那個區塊**之前**的案例 |
+| 案例自己 inline `(( want_skip += 1 ))` | 跑在那個區塊**之後**的案例，例如 T229 |
+
+兩種都是對的：一個跑得晚的案例，它的旗標在區塊執行時還沒被設。
+
+於是三件事一起錯了：
+
+1. **我寫下「T229 設了旗標卻沒有被計數，在沒有 symlink 特權的 Windows 上會讓實際超過預期」
+   ——那是假的。** 它一直都被計數。那句話進了 `mistakes.md` 的表、進了 commit message、也進了
+   測試檔的註解。
+2. **我為它補的那行消費是死碼**：它在 13908 執行，而 T229 的旗標到 14114 才被設。
+3. **T241a 因此建立在一個錯的模型上。** T229 能通過它，只是因為那行死碼把名字補進了清單；把死碼
+   拿掉，它就會對一個計數完全正確的案例判失敗。
+
+**成因**：我跑了一個掃描、看到一個名字不在某份清單裡，就斷定它沒有被計數——**而沒有去讀那個旗標
+周圍的程式碼**。那是第 2 條（證據就在附近而我沒讀）與第 3 條（規則只套用到一部分）的交集。
+
+修法是讓機制只剩一種：每個旗標都由一行 `${X:-0}` 消費，而跑得晚的案例把那一行放在它後面。
+T229 的 inline 加法與那行死碼都已移除，T241a 的模型重新成立。
+
+**順帶記下一件不修的事，以及理由。** T69b 比的是兩個總數（`skip` 與 `want_skip`），不是兩個集合。
+那看起來像個缺口——2026-09-03 的 LC 與 T240 正好是一對「多一個」與「少一個」，放著不管會互相
+抵銷。但檔案裡那段設計註解已經想過這件事，而它的理由成立：**名字清單抓不到「某個案例安靜地不再
+執行」，而數量抓得到。** 兩者各抓一種不同的失敗，正解是兩者都要，不是把其中一個換成另一個。
+在有人真的把兩者都做出來之前，維持現狀比「用一個換掉另一個」好——而 T241a 現在已經擋住了
+「預期值飄移」這條主要的路徑。
+
+A guard written for LC rested on a model that saw only half the mechanism: `want_skip` is
+accumulated both by `${X:-0}` consumers and by inline increments in cases that run after that
+block, and both are correct. So the claim that T229 was an uncounted skip is FALSE -- it had
+always been counted -- the consumer line added for it was dead code, and T241a passed on T229
+only because that dead line supplied the name it wanted. The cause: a scan showed a name
+missing from one list and I concluded it was uncounted without reading the code around the
+flag. Fixed by leaving one mechanism only. Noted and deliberately NOT changed: T69b compares
+totals rather than sets, which a cancelling pair can defeat -- but the design comment beside it
+already reasoned that a name list cannot catch a case that quietly stops running, while a count
+can. They catch different failures; the answer is both, not swapping one for the other.

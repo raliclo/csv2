@@ -13900,12 +13900,6 @@ fi
 # ——與 T240 的第一版不同：一個「漏掉計數」的新跳過，會與一筆過期項目互相抵銷，於是那個檢查
 # 帶著兩個錯誤通過，而那比一個看得見的數量不符更糟。
 (( ${T240_SKIPPED:-0} )) && (( want_skip += 1 ))
-# T229 sets its flag and nothing consumed it until T241a said so -- a skip that
-# would have made the actual count exceed the expected one on any Windows
-# without the symlink privilege. It had been there, unnoticed, the whole time.
-# T229 有設定旗標，而在 T241a 說出來之前沒有任何地方消費它——在任何「沒有 symlink 特權」的
-# Windows 上，那會讓實際的數量超過預期。它一直都在，而沒有人注意到。
-(( ${T229_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T191A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T200A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T200B_SKIPPED:-0} )) && (( want_skip += 1 ))
@@ -14111,8 +14105,29 @@ if ln -s "$TMP/t229_target.csv" "$TMP/t229_link.csv" 2>/dev/null; then
 else
     T229_SKIPPED=1
     skipt "T229 symlink backup semantics / symlink 備份語意 (symlinks unavailable / 無法建立 symlink)"
-    (( want_skip += 1 ))
 fi
+
+# T229's flag is consumed HERE, not in the block above, because T229 RUNS after
+# that block: its flag is not yet set when the block executes. It used to add
+# to want_skip inline instead, which was correct and invisible -- and that
+# invisibility cost a false defect record. A scan showed T229's name missing
+# from the list of `${X:-0}` consumers, and I concluded it was an uncounted
+# skip without reading the code around the flag. It had been counted all along.
+#
+# So there is now ONE mechanism: every flag is consumed by a `${X:-0}` line,
+# and a case that runs late has that line placed after it. T241a's model --
+# every flag set is consumed, every consumer has a flag -- is true again, which
+# it was not while inline arithmetic existed as a second, unlisted way to count.
+#
+# T229 的旗標在**這裡**被消費，而不是在上面那個區塊裡，因為 T229 **跑在那個區塊之後**：那個
+# 區塊執行時它的旗標還沒被設。它原本改用 inline 直接加 want_skip，那是正確的、也是看不見的
+# ——而那份看不見換來一條不成立的缺陷記錄。一次掃描顯示 T229 的名字不在 `${X:-0}` 消費者清單
+# 裡，我就斷定它是一個沒有被計數的跳過，而沒有去讀那個旗標周圍的程式碼。它一直都被計數著。
+#
+# 所以現在只有**一種**機制：每一個旗標都由一行 `${X:-0}` 消費，而跑得晚的案例就把那一行放在
+# 它後面。T241a 的模型——每個被設定的旗標都被消費、每個消費者都有旗標——重新成立了；在 inline
+# 算術還存在、作為第二種沒有被列出的計數方式時，它並不成立。
+(( ${T229_SKIPPED:-0} )) && (( want_skip += 1 ))
 if [[ "$skip" == "$want_skip" ]]; then
     ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
 else

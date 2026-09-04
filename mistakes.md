@@ -205,7 +205,7 @@ skill 說「摘要樣式是附加的，失敗掃描是強制的」。**把整個
 | 2026-09-02 | **KW** | 2026-08-25 修過的「位元組相等」問法 | 同一個檔案裡的第二處 |
 | 2026-09-02 | **KX** | `.lines` 裡空行是資料（讀取、`-update` 都同意） | `-insert`／`-append` |
 | 2026-09-03 | **LC** | 「不要把跳過寫成數字，讓案例自己記錄」 | Windows 那一支的 `+= 6`，**而那條規則就寫在它上面的註解裡** |
-| 2026-09-03 | **T229** | 每個跳過都要被預期略過數消費 | T229 設了旗標，沒有任何地方消費它 |
+| ~~2026-09-03~~ | ~~**T229**~~ | **這一列是錯的，見下方更正**——T229 一直都被計數，只是走另一個機制 | 而錯的原因本身是同一個形狀 |
 | 2026-09-03 | **strerror** | 「Windows 上不能用 deprecated 的 CRT 函式」 | 既有 5 個呼叫都在 `#if` 分支內，我新加的那個不在——**弄壞了 Windows 建置** |
 | 2026-09-03 | **T241 自己** | T218 記著它的掃描需要兩半：組出探針字串、排除註解裡的反面示範 | 我只套用了第一半——**在為這一條而寫的那道守衛裡** |
 | 2026-09-03 | **`comm`** | 「不要依賴外部工具的存在」，而且同一個檔案裡有一個 `only_in_first()` 就是為此而寫的 | 我在它下方八百行處寫了第二份實作，用的正是那段註解說「這裡沒有」的工具 |
@@ -273,8 +273,29 @@ skill 裡有一模一樣的先例：「這一次發生在為了防它而寫的�
 **T241a 檢查的是對應關係**——每一個被設定的 `Txxx_SKIPPED` 旗標都必須被預期略過數消費，
 反之亦然。兩個方向相反的錯誤在這裡不會抵銷，因為它比對的是兩個集合而不是兩個數字。
 
-**它在被寫出來的過程中就找到了 T229。** 一道守衛在自己還沒被提交之前就抓到一個既有實例，
-是這條規則普遍程度的直接證據。
+**更正（2026-09-04）：那個「找到 T229」是假的。**
+
+T241a 在被寫出來的過程中回報 `T229_SKIPPED` 有設定、沒有消費，而我把它當成「一個從未被計數的
+跳過」寫進了這張表、寫進 commit message、也寫進測試檔的註解。**它一直都被計數著**——`want_skip`
+有兩種累加方式，而我只看到一種：
+
+| 機制 | 誰用 |
+|---|---|
+| 旗標消費區塊的 `${X:-0}` | 跑在那個區塊**之前**的案例 |
+| 案例自己 inline 加 | 跑在那個區塊**之後**的案例，例如 T229 |
+
+兩種都對——一個跑得晚的案例，它的旗標在區塊執行時還沒被設，只能自己加。
+
+**所以那不是「守衛抓到一個既有實例」，是「守衛的模型只涵蓋一半，而我沒有去讀旗標周圍的程式碼
+就相信了它的輸出」。** 我為它補的那行消費是死碼（在 13908 執行，而旗標到 14114 才被設），
+而 T241a 能通過只是因為那行死碼把名字補進了它要的清單——把死碼拿掉，它就會對一個計數完全正確的
+案例判失敗。
+
+這件事本身是這一條的又一個實例，而且是最難看的一種：**一條不成立的缺陷記錄比沒有記錄更糟**，
+因為下一個讀者會相信它，而它旁邊沒有任何東西會反駁它。修法是讓機制只剩一種：每個旗標都由一行
+`${X:-0}` 消費，跑得晚的案例就把那一行放在它後面。見 known-defects 的 LG。
+
+**這一條真正的第一個實例仍然成立**（T218b 抓到 T218a 的空洞通過），只是它不在這裡。
 
 T241b 用一個真的含有「未計數旗標」的檔案證明那個掃描會咬，並使用**同一份實作**而不是複本
 ——與 T218b、T239b 同一個理由。
@@ -326,8 +347,11 @@ The dangerous form is a cancelling pair. On 2026-09-03 a stale entry made an exp
 one too high and a new case added the same day made it one too low. Left alone they cancel:
 the check passes, both errors remain, and the next real drift hides inside the sum. So the
 guard verifies the CORRESPONDENCE, not the total -- T241a pairs every skip flag with its
-consumer in both directions, which two opposite errors cannot defeat. It found a seventh
-instance, T229, while it was being written.
+consumer in both directions, which two opposite errors cannot defeat. It appeared to find a
+seventh instance, T229, while being written -- a claim later shown FALSE: T229 had always been
+counted, by an inline increment the scan's model did not know about, and the "fix" added for
+it was dead code. Corrected on 2026-09-04; see LG. There is now one mechanism, so the model
+is true again.
 
 Still missing: the general form. Three of the seven were a second site of the same rule in
 ordinary code, which no check covers.
