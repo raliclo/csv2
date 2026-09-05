@@ -2238,11 +2238,28 @@ SwiftUI——但**排序與截斷的界線仍以 grapheme cluster 為準**，理
   空檔案（只有標頭）回報 0 而不是錯誤
 - [x] **T81 `-mid` 的起點越界是錯誤** —— `a` 大於總筆數時非零結束且訊息說出總筆數；
   `b` 越界維持 T14 既有行為，兩者在同一個測試裡對照
-- [ ] **T82 索引存行號之後，跨行檔案的 `-mid` 走 seek** —— 讀取位元組數必須遠小於
+- [x] **T82 索引存行號之後，跨行檔案的 `-mid` 走 seek** —— 讀取位元組數必須遠小於
   起點的偏移量；且輸出與 `--no-index` 逐位元相同，含 `--physical`
-- [ ] **T83 索引版本 4 使版本 3 的 sidecar 被忽略而非誤用**
+- [x] **T83 索引版本 4 使版本 3 的 sidecar 被忽略而非誤用**
 
-> **T82 與 T83：實作已經在了，缺的是測試（2026-09-05 查證）。**
+> **T82 與 T83：測試已於 2026-09-05 補上，這一段留作紀錄。**
+>
+> **另外一處更正**：T82 的原文寫「輸出與 `--no-index` 逐位元相同，**含 `--physical`**」。
+> `--physical` 在這裡不適用——它是附加在**定位報告**的位址上的，需要搭配 `-contains`，而對
+> 一個 `-mid` 視窗它會被拒絕。載著行號的管道是 `--json` 的 `"line":`，而那正是一次 seek 無法
+> 重算、必須從 sidecar 取得的那個數字。案例因此走 `--json`：**同一半的疑問，只是從一扇真的
+> 存在的門走進去。**
+>
+> 實測數字：4000 筆佔 **8001 行**（確實跨行），而 `-mid 3900,3902` 只讀了 **6400／158901**
+> 位元組。
+>
+> Corrected: T82's line said "byte-identical including --physical". `--physical` does not apply
+> to `-mid` at all -- it adds to the address in the locating report and requires `-contains`.
+> The channel carrying the line for a `-mid` window is `--json`'s `"line":`, which is precisely
+> the number a seek cannot recompute and must take from the sidecar. Measured: 8001 lines for
+> 4000 records, and the window read 6400 of 158901 bytes.
+>
+> **原本的查證記錄（2026-09-05 稍早）：實作已經在了，缺的是測試。**
 >
 > `INDEX_VERSION` 是 **4**，`CSVIndex` 有 `var lines: [UInt64]`，而版本不符在 `load` 裡就被
 > 丟棄（`index …: version mismatch, ignoring`）。也就是說第 8 階段之三的**程式**在版本 4 落地時
@@ -2279,7 +2296,7 @@ SwiftUI——但**排序與截斷的界線仍以 grapheme cluster 為準**，理
 - [x] 第 8 階段之一：`-count` 與 `-mid` 起點越界（csv2 側，第三、四項）——2026-09-05，macOS 與 aarch64 guest
 - [ ] 第 8 階段之二：`csv2view` 最小可用版本——SwiftUI `List`、固定列高、`-mid` 取視窗、
   `-count` 畫捲軸、查詢離開 main actor
-- [ ] 第 8 階段之三：格點存行號、索引版本 4（跨行檔案的 seek，第五項）
+- [x] 第 8 階段之三：格點存行號、索引版本 4（跨行檔案的 seek，第五項）——程式隨版本 4 落地，測試於 2026-09-05 補上
 - [ ] 第 8 階段之四：繞回、跳到某一筆、搜尋並跳到命中處（`-contains` 已能回報位址）
 
 **這一整節尚未實作，一個核取方塊都還沒有資格打勾。** 上面每一個「定案」都是設計上的

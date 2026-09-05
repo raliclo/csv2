@@ -13935,6 +13935,127 @@ else
 fi
 
 echo
+echo "--- T82: a line-spanning file still seeks, and answers identically / T82：跨行的檔案仍然 seek，而且答案完全相同 ---"
+# Phase 8, item five. Storing the LINE at each grid point is what let the seek
+# survive embedded newlines: before version 4 the fast path had to be given up
+# whenever a record could span lines, because the line number of the landing
+# point was unknowable without reading from the start. The code landed with
+# version 4; nothing asserted it until now.
+#
+# 第 8 階段第五項。在每個格點存下**行號**，正是讓 seek 在有內嵌換行時仍然成立的東西：在版本 4
+# 之前，只要一筆紀錄可能跨行就必須放棄那條快路徑，因為落點的行號在「不從頭讀」的情況下無法得知。
+# 程式隨版本 4 落地；而在此之前沒有任何東西斷言過它。
+_t82_f="$TMP/t82.csv"
+{
+    print -r -- 'id,note'
+    for i in {1..4000}; do print -r -- "$i,\"a note
+with a real newline in it\""; done
+} > "$_t82_f"
+_t82_size=$(wc -c < "$_t82_f" | tr -d ' ')
+"$CSV2" --build-index -i "$_t82_f" >/dev/null 2>&1
+
+# The window starts deep into the file, so a scan would have to read most of it.
+# 這個視窗的起點在檔案深處，因此一次掃描必須讀掉它的大部分。
+# The fixture spans lines: the string above contains a REAL newline, so 4000
+# records occupy about 8000 lines. Checked, because the first diagnosis of this
+# case's failure was that it did NOT -- reached by reproducing the loop on one
+# line with a `\n` that `print -r` does not expand. The reproduction did not
+# have the shape of the thing being reproduced, which is the skill's own rule
+# and the reason that diagnosis was wrong. The real cause was the next line.
+# 這份 fixture 是跨行的：上面那個字串裡有一個**真正的**換行，因此 4000 筆佔約 8000 行。這裡檢查
+# 它，是因為這個案例失敗時的第一個診斷說它**不是**——那個診斷來自「把迴圈寫成一行、用一個
+# `print -r` 不會展開的 `\n`」的重現。**那次重現沒有被重現對象的形狀**，那正是 skill 自己那條
+# 規則，也是那個診斷錯掉的原因。真正的原因在下一行。
+_t82_lines=$(wc -l < "$_t82_f" | tr -d ' ')
+if (( _t82_lines > 7000 )); then
+    ok "T82a the fixture really spans lines: $_t82_lines lines for 4000 records / 這份 fixture 真的跨行：4000 筆佔 $_t82_lines 行"
+else
+    bad "T82a $_t82_lines lines for 4000 records, so nothing below tests a seek over embedded newlines / 實得如上"
+fi
+
+"$CSV2" -mid 3900,3902 -i "$_t82_f" -debug >/dev/null 2>"$TMP/t82_seek.txt"
+_t82_read=$(read_of "$TMP/t82_seek.txt")
+if [[ -n $_t82_read && $_t82_read -lt $((_t82_size / 4)) ]]; then
+    ok "T82b -mid on a line-spanning file read $_t82_read of $_t82_size bytes, so it seeked / 在跨行檔案上 -mid 只讀了 $_t82_read／$_t82_size 位元組，因此它 seek 了"
+else
+    bad "T82b read=$_t82_read size=$_t82_size (expected far less) / 實得如上"
+fi
+
+# Byte-identical to the same window without the index, INCLUDING --physical --
+# the physical line is exactly what a seek cannot recompute and must take from
+# the sidecar, so leaving it out would test the half that was never in doubt.
+# 與「同一個視窗但不用索引」逐位元相同，**包含 --physical**——實體行號正是一次 seek 無法重算、
+# 必須從 sidecar 取得的東西，把它排除在外等於測了從來沒有人懷疑的那一半。
+# Through --json, not --physical. `--physical` does not apply here at all: it
+# adds to the address in the LOCATING report and needs -contains, so the first
+# version of this case ran a command csv2 refused -- which is why read_bytes
+# and both outputs were empty. The channel carrying the line for a -mid window
+# is --json's `"line":`, and that is precisely the number a seek cannot
+# recompute and must take from the sidecar.
+# 走 --json，不走 --physical。`--physical` 在這裡根本不適用：它是附加在**定位報告**的位址上、
+# 需要搭配 -contains，因此這個案例的第一版執行了一個 csv2 會拒絕的指令——那就是 read_bytes 與
+# 兩個輸出都空掉的原因。對一個 -mid 視窗，載著行號的管道是 --json 的 `"line":`，而那正是一次
+# seek 無法重算、必須從 sidecar 取得的那個數字。
+"$CSV2" -mid 3900,3902 --json -i "$_t82_f" > "$TMP/t82_idx.out" 2>/dev/null
+"$CSV2" -mid 3900,3902 --json --no-index -i "$_t82_f" > "$TMP/t82_scan.out" 2>/dev/null
+if cmp -s "$TMP/t82_idx.out" "$TMP/t82_scan.out" && [[ -s "$TMP/t82_idx.out" ]] \
+   && grep -q '"line":' "$TMP/t82_idx.out"; then
+    ok "T82c and the seeked answer is byte-identical to the scanned one, line numbers included / 而 seek 得到的答案與掃描得到的逐位元相同，含行號"
+else
+    bad "T82c idx=$(wc -c < "$TMP/t82_idx.out") scan=$(wc -c < "$TMP/t82_scan.out") differ, empty, or carry no line / 實得如上"
+fi
+
+echo
+echo "--- T83: a version-3 sidecar is ignored, not misused / T83：版本 3 的 sidecar 被忽略，而不是被誤用 ---"
+# The version field sits at byte 8 and is checked BEFORE the index's own
+# checksum, which is what makes this case honest: patching the version alone
+# would otherwise be discarded for the checksum instead, and the case would
+# pass while proving something else entirely.
+# 版本欄位在第 8 個位元組，而且它在「索引自身的檢查碼」**之前**被檢查——那正是這個案例誠實的
+# 原因：否則只改版本會變成因為檢查碼而被丟棄，於是這個案例會通過，卻證明了完全不同的另一件事。
+_t83_f="$TMP/t83.csv"
+{ print -r -- 'a,b'; for i in {1..2000}; do print -r -- "$i,v$i"; done } > "$_t83_f"
+"$CSV2" --build-index -i "$_t83_f" >/dev/null 2>&1
+_t83_want=$("$CSV2" -mid 1900,1902 -i "$_t83_f" 2>/dev/null)
+
+# Proof the sidecar was usable BEFORE the patch. Without this the case would
+# pass on a file that never had a working index in the first place.
+# 證明那份 sidecar 在被改之前是可用的。少了這一步，這個案例會在一個「本來就沒有可用索引」的檔案
+# 上通過。
+if "$CSV2" --verify-index -i "$_t83_f" >/dev/null 2>&1; then
+    ok "T83a the sidecar is usable before the version is changed / 版本被改之前那份 sidecar 是可用的"
+else
+    bad "T83a --verify-index already failed before the patch / 在修改之前 --verify-index 就已經失敗"
+fi
+
+printf '\003' | dd of="$_t83_f.index" bs=1 seek=8 conv=notrunc 2>/dev/null
+_t83_why=$("$CSV2" --verify-index -i "$_t83_f" 2>&1 >/dev/null)
+# The message says "written by a different INDEX_VERSION" -- matched on that
+# exact word. The first version looked for a lowercase "version" and did not
+# find it, and the case failed while the program was right.
+# 訊息說的是「written by a different INDEX_VERSION」——比對那個確切的字。第一版找的是小寫的
+# "version"，沒有找到，於是那個案例失敗、而程式是對的。
+if [[ $_t83_why == *"INDEX_VERSION"* || $_t83_why == *"版本"* ]]; then
+    ok "T83b a version-3 sidecar is refused BY VERSION, not by some later check / 版本 3 的 sidecar 是**因為版本**被拒，而不是因為後面某一道檢查"
+else
+    bad "T83b ${_t83_why:0:90} / 訊息如上"
+fi
+
+# Ignored, not misused: the read still answers, and answers the same, because
+# it discarded the sidecar and scanned. A version bump that made an old sidecar
+# be READ with the new layout is the failure this guards -- it would return
+# offsets that are structurally valid and point at the wrong bytes.
+# 被忽略，而不是被誤用：那次讀取仍然回答，而且答案相同，因為它丟掉 sidecar 改用掃描。這道守衛
+# 防的失敗是「版本提升之後，舊的 sidecar 被用新的排版去讀」——那會回傳一批結構合法、卻指向錯誤
+# 位元組的偏移量。
+_t83_got=$("$CSV2" -mid 1900,1902 -i "$_t83_f" 2>/dev/null); _t83_rc=$?
+if [[ $_t83_rc == 0 && $_t83_got == $_t83_want && -n $_t83_want ]]; then
+    ok "T83c and the read still gives the same answer, by scanning / 而那次讀取仍然給出同一個答案，靠的是掃描"
+else
+    bad "T83c rc=$_t83_rc got=${_t83_got:0:40} want=${_t83_want:0:40} / 實得如上"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
