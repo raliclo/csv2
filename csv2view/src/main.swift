@@ -83,6 +83,37 @@ func probeMain(_ args: [String]) async -> Int32 {
             return 3
         }
 
+    case "jump", "wrap", "search":
+        // These three drive ViewerModel, not CSV2Bridge: wrap-around, jumping
+        // and search are the model's job, and testing the bridge under them
+        // would leave the joining logic -- the part that can be wrong --
+        // untested. The model is @MainActor because a view binds to it, so the
+        // probe enters that actor rather than duplicating the model without it.
+        // 這三個驅動的是 ViewerModel，不是 CSV2Bridge：繞回、跳轉與搜尋是模型的工作，而在它們
+        // 底下去測 bridge，會讓「接起來」那一段——也就是**會出錯的那一段**——沒有被測到。模型是
+        // @MainActor，因為會有一個 view 綁在它上面，所以探測**進入那個 actor**，而不是複製一份
+        // 沒有 actor 的模型出來。
+        return await MainActor.run { () -> Task<Int32, Never> in
+            let m = ViewerModel(bridge: bridge, pageSize: Int(rest.dropFirst().first ?? "5") ?? 5)
+            return Task { @MainActor in
+                await m.loadTotal()
+                if !m.errorLine.isEmpty { print("ERROR: \(m.errorLine)"); return 1 }
+                switch name {
+                case "jump":
+                    await m.loadWindow(from: Int(rest.first ?? "1") ?? 1)
+                case "wrap":
+                    await m.loadWrapping(from: Int(rest.first ?? "1") ?? 1)
+                default:
+                    await m.searchAndJump(rest.first ?? "")
+                }
+                if !m.errorLine.isEmpty { print("ERROR: \(m.errorLine)"); return 1 }
+                print("total=\(m.total) start=\(m.windowStart) address=\(m.addressText)")
+                print("records=" + m.page.rows.map { "\($0.record)" }.joined(separator: ","))
+                if !m.commandText.isEmpty { print("command=\(m.commandText)") }
+                return 0
+            }
+        }.value
+
     case "decode":
         // T87 drives decodeShowingInvalidBytes -- the function the UI uses --
         // against the raw bytes of a file. Not a copy of it: a test that

@@ -2324,7 +2324,24 @@ SwiftUI——但**排序與截斷的界線仍以 grapheme cluster 為準**，理
 > things this box names are drawing; the fourth, queries off the main actor, is the only one
 > that can be wrong invisibly, and it is in place. The box stays empty.
 - [x] 第 8 階段之三：格點存行號、索引版本 4（跨行檔案的 seek，第五項）——程式隨版本 4 落地，測試於 2026-09-05 補上
-- [ ] 第 8 階段之四：繞回、跳到某一筆、搜尋並跳到命中處（`-contains` 已能回報位址）
+- [x] 第 8 階段之四：繞回、跳到某一筆、搜尋並跳到命中處（`-contains` 已能回報位址）——2026-09-06
+
+> **測試編號在這裡分配：T90（繞回）、T91（跳轉）、T92（搜尋跳轉）。** 這一項是一個「旁邊沒有
+> 測試編號」的核取方塊，而 T80–T89 已經用完。它們在 `csv2view/test/`，不在主測試裡。
+>
+> **T90 兩半都量**：`csv2 -mid 9,11` 在十筆的檔案上給**兩筆**（csv2 不繞回），而檢視器給
+> `9,10,1`。那個對比**就是第六項那條規則**——決定「第 10 筆與第 1 筆在畫面上相鄰」是檢視器的
+> 工作，把它放進 csv2 會讓一個回報「10, 1」的輸出看起來像資料本身。
+>
+> **一個這裡做的 UI 決定**：跳轉目標越過檔尾會被**夾到最後一筆**，不是錯誤。一個跳轉框是「人在
+> 打一個數字」，而夾住正是每個編輯器的做法；第四項建立的那條錯誤路徑，在**程式**構造範圍時
+> 仍然到得了（T85 驅動的就是它），而那才是「安靜的空答案與資料分不出來」的情況。
+>
+> Test numbers allocated here: T90 wrap, T91 jump, T92 search-and-jump; this item was a
+> checkbox with none beside it. T90 measures BOTH halves -- csv2 alone gives two records for
+> `-mid 9,11` on ten, and the viewer joins two queries into 9,10,1 -- because that contrast is
+> the rule. A jump past the end is clamped, deliberately: a jump box is a person typing a
+> number, while the error path stays reachable where a program constructs the range.
 
 **這一整節尚未實作，一個核取方塊都還沒有資格打勾。** 上面每一個「定案」都是設計上的
 定案，不是完成的宣稱——依本計畫的規則，只有對應測試通過時才打勾。

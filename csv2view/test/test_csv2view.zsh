@@ -1,7 +1,13 @@
 #!/usr/bin/env zsh
 # =====================================================================
-# test_csv2view.zsh — the viewer's own suite. T84 to T89.
-# test_csv2view.zsh — 檢視器自己的測試。T84 到 T89。
+# test_csv2view.zsh — the viewer's own suite. T84 to T92.
+# test_csv2view.zsh — 檢視器自己的測試。T84 到 T92。
+#
+# T84-T89 are the plan's numbers for the viewer. T90-T92 are allocated here,
+# because phase 8-4 -- wrap-around, jump, search-and-jump -- was a checkbox
+# with no test numbers beside it.
+# T84–T89 是計畫給檢視器的編號。T90–T92 在這裡分配，因為第 8 階段之四（繞回、跳轉、搜尋跳轉）
+# 是一個「旁邊沒有測試編號」的核取方塊。
 #
 # SEPARATE from test/test_csv2.zsh on purpose, and the reason is written in
 # the plan before any code was written: SwiftUI does not exist on the
@@ -46,6 +52,9 @@ print -r -- ""
 F="$TMP/pkgs.csv"
 { print -r -- 'pkg,version,license'
   for i in {1..50}; do print -r -- "p$i,1.$i.0,MIT"; done } > "$F"
+
+{ print -r -- 'pkg,version'
+  for i in {1..10}; do print -r -- "p$i,1.$i"; done } > "$TMP/wrap.csv"
 
 F2="$TMP/two.csv2"
 { print -r -- 'pkg,version'; print -r -- '套件,版本'
@@ -92,7 +101,6 @@ else
     # convincingly at the moment it stopped working.
     # 這個掃描被對著一個真的含有它的檔案驅動，用的是同一個函式。一個安靜地什麼都沒比中的掃描，
     # 會在它停止運作的那一刻通過得最徹底。
-    _t84_w="SEPAR"; _t84_w="${_t84_w}ATOR"
     print -r -- "let x = s.split(separator: \",\")" > "$TMP/probe.swift"
     if [[ -n $(LC_ALL=C grep -nE 'split\(separator: ","\)' "$TMP/probe.swift" || true) ]]; then
         ok "T84d and the scan catches comma splitting when it is there / 而那個掃描在逗號切割存在時抓得到"
@@ -224,6 +232,102 @@ if [[ $_t89_one == *"columns=pkg,version,license"* ]]; then
     ok "T89c and the columns are in the file's order, not sorted / 而欄位是檔案的順序，不是排序過的"
 else
     bad "T89c got [$_t89_one] / 實得如上"
+fi
+
+# ---------------------------------------------------------------------
+# T90 — wrap-around is the VIEWER's, not csv2's. Phase 8 item six: csv2 has
+# no wrap-around query form and will not grow one, because record 10 and
+# record 1 are not adjacent in the file. A tool reporting them as one range
+# would be inventing data; deciding they are adjacent ON SCREEN is the
+# viewer's job. The contrast below IS the rule, which is why both halves
+# are measured rather than only the viewer's.
+# T90 —— 繞回是**檢視器的**，不是 csv2 的。第 8 階段第六項：csv2 沒有繞回的查詢形式，也不會長出
+# 一個，因為第 10 筆與第 1 筆在檔案裡並不相鄰。一個把它們回報成同一個範圍的工具是在發明資料；
+# 決定它們**在畫面上**相鄰，是檢視器的工作。底下那個對比**就是那條規則**，所以兩半都要量，
+# 而不是只量檢視器那一半。
+# ---------------------------------------------------------------------
+_t90_csv2=$("$CSV2" -mid 9,11 -i "$TMP/wrap.csv" 2>/dev/null | wc -l | tr -d ' ')
+_t90_view=$("$VIEW" --probe wrap "$CSV2" "$TMP/wrap.csv" 9 3 2>/dev/null | LC_ALL=C grep '^records=')
+if [[ $_t90_csv2 == 2 ]]; then
+    ok "T90a csv2 alone does not wrap: -mid 9,11 on ten records gives two / csv2 自己不繞回：十筆上的 -mid 9,11 給兩筆"
+else
+    bad "T90a csv2 -mid 9,11 gave $_t90_csv2 records / 實得如上"
+fi
+if [[ $_t90_view == "records=9,10,1" ]]; then
+    ok "T90b while the viewer joins two queries into 9,10,1 / 而檢視器把兩次查詢接成 9,10,1"
+else
+    bad "T90b got [$_t90_view] / 實得如上"
+fi
+
+# ---------------------------------------------------------------------
+# T91 — jumping to a record starts the window there. A target past the end
+# is CLAMPED to the last record, and that is a decision, not an accident:
+# a jump box is a person typing a number, and clamping is what every editor
+# does with one. The error path phase 8 item four created stays reachable
+# where a PROGRAM constructs the range -- T85 drives it -- and that is the
+# case where a silent empty answer would be indistinguishable from data.
+# T91 —— 跳到某一筆，視窗就從那裡開始。目標越過檔尾會被**夾到最後一筆**，而那是一個決定、不是
+# 意外：跳轉框是一個人在打一個數字，而夾住正是每一個編輯器對那個數字做的事。第 8 階段第四項
+# 建立的錯誤路徑，在**程式**構造那個範圍時仍然到得了——T85 驅動的就是它——而那才是「安靜的空答案
+# 與資料分不出來」的那個情況。
+# ---------------------------------------------------------------------
+_t91=$("$VIEW" --probe jump "$CSV2" "$TMP/wrap.csv" 7 3 2>/dev/null)
+if [[ $_t91 == *"start=7"* && $_t91 == *"records=7,8,9"* ]]; then
+    ok "T91a jumping to record 7 starts the window at 7 / 跳到第 7 筆，視窗從 7 開始"
+else
+    bad "T91a got [${_t91//$'\n'/ }] / 實得如上"
+fi
+_t91_far=$("$VIEW" --probe jump "$CSV2" "$TMP/wrap.csv" 999 3 2>/dev/null)
+if [[ $_t91_far == *"start=10"* ]]; then
+    ok "T91b and a target past the end is clamped to the last record, not an error / 而越過檔尾的目標被夾到最後一筆，不是錯誤"
+else
+    bad "T91b got [${_t91_far//$'\n'/ }] / 實得如上"
+fi
+
+# ---------------------------------------------------------------------
+# T92 — `/` is `-contains`, and the viewer jumps to the address it reports.
+# It does NOT search the text already on screen: that would find only what
+# is loaded and silently miss the rest of the file, which is the shape of
+# failure this whole tree is about.
+# T92 —— `/` 就是 `-contains`，而檢視器跳到它回報的位址。它**不**搜尋螢幕上已有的文字：那只會
+# 找到已載入的部分，並安靜地漏掉檔案的其餘部分，而那正是這整棵樹在講的那種失敗形狀。
+# ---------------------------------------------------------------------
+_t92=$("$VIEW" --probe search "$CSV2" "$TMP/wrap.csv" p4 3 2>/dev/null)
+if [[ $_t92 == *"start=4"* && $_t92 == *"address=4:1"* ]]; then
+    ok "T92a search jumps to the address csv2 reported / 搜尋跳到 csv2 回報的那個位址"
+else
+    bad "T92a got [${_t92//$'\n'/ }] / 實得如上"
+fi
+# The hit is BEYOND the first window, so a viewer searching its own loaded
+# text would have missed it. Without this the case would pass on a match
+# that happened to be on screen already.
+# 那個命中在**第一個視窗之外**，因此一個搜尋自己已載入文字的檢視器會漏掉它。少了這一條，
+# 這個案例會在一個「碰巧已經在畫面上」的命中上通過。
+_t92_far=$("$VIEW" --probe search "$CSV2" "$TMP/wrap.csv" p9 3 2>/dev/null)
+if [[ $_t92_far == *"start=9"* && $_t92_far == *"address=9:1"* ]]; then
+    ok "T92b including a hit past the first window, which on-screen search would miss / 包括一個在第一個視窗之外的命中——那是「螢幕內搜尋」會漏掉的"
+else
+    bad "T92b got [${_t92_far//$'\n'/ }] / 實得如上"
+fi
+# The command it offers for that hit runs, so the address is not merely
+# printed but usable -- the whole reason this viewer exists.
+# 它為那個命中提供的指令執行得起來，因此那個位址不只是被印出來、而是可用的——那正是這個檢視器
+# 存在的全部理由。
+_t92_cmd=$(print -r -- "$_t92" | LC_ALL=C grep '^command=' | sed 's/^command=//')
+if [[ -n $_t92_cmd && $(eval "$_t92_cmd" 2>/dev/null) == p4 ]]; then
+    ok "T92c and the command it offers for the hit returns that cell / 而它為那個命中提供的指令會回傳那一格"
+else
+    bad "T92c cmd=[$_t92_cmd] / 實得如上"
+fi
+# A search with no match is a visible message, not a silent no-op that
+# leaves the previous window on screen looking like a result.
+# 一次沒有命中的搜尋是**一則看得見的訊息**，不是一次安靜的無動作——那會把上一個視窗留在畫面上，
+# 看起來像是結果。
+_t92_none=$("$VIEW" --probe search "$CSV2" "$TMP/wrap.csv" zzzznope 3 2>&1); _t92_rc=$?
+if (( _t92_rc != 0 )) && [[ $_t92_none == *"ERROR"* ]]; then
+    ok "T92d while a search with no match says so instead of leaving the old window up / 而沒有命中的搜尋會說出來，不是把舊視窗留在那裡"
+else
+    bad "T92d rc=$_t92_rc out=[${_t92_none//$'\n'/ }] / 實得如上"
 fi
 
 print -r -- ""
