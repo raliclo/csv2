@@ -2654,10 +2654,14 @@ func printHelp() {
                          that merely contain a table rather than being one
       --json             JSON Lines, and TWO of those lines are metadata, not
                          records. The FIRST is the format csv2 believes it is
-                         reading -- {"meta":{"format","headers","fields"}},
-                         plus "header_zh" on a .csv2, because column names can
-                         legitimately repeat and an object cannot hold the
-                         second row under one key. The LAST is
+                         reading --
+                         {"meta":{"format","headers","fields","header"}}, plus
+                         "header_zh" on a .csv2. Both header arrays are
+                         POSITIONAL: a `fields` object gives the names but a
+                         JSON object's keys have no order, so the column order
+                         is only knowable from these. "header_zh" is separate
+                         because column names can legitimately repeat and an
+                         object cannot hold the second row under one key. The LAST is
                          {"meta":{"records","matched"}}. A parser that treats
                          every line as a record meets a line with no "record"
                          key as its very first input. "records" is also the

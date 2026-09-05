@@ -9462,3 +9462,51 @@ fails safe by KEEPING the directory), and fixed there by the session that report
 temp directory was deliberately not moved out of the repo: /var/folders is case-INSENSITIVE
 while this repo is not. Recorded after the fix rather than before, against this project's own
 rule -- and noting that aade3cf's message now carries two statements that are no longer true.
+
+---
+
+## LI. `--json` 的 meta 給得出中文標頭的順序，給不出英文的（2026-09-05，寫 csv2view 時發現）
+
+meta 行長這樣：
+
+```json
+{"meta":{"format":"csv2","headers":2,"fields":6,"header_zh":["比較項目","csv2",...]}}
+```
+
+`header_zh` 是**位置性的陣列**。而英文標頭**不在裡面**——它的名字散在每一筆紀錄的 `fields`
+物件的鍵上。
+
+程式碼裡的理由寫著：「`.csv` 不受影響：它只有一列標頭，而 `fields` 的鍵已經就是它。」
+**那對「名字」成立，對「順序」不成立。** JSON 物件的鍵沒有定義順序；輸出的文字碰巧是檔案順序，
+但任何用標準 JSON 解析器解成字典的消費者都會失去它。
+
+於是有一個不對稱：`.csv2` 的消費者拿得到**中文**欄名的順序，拿不到**英文**的；`.csv` 則連一個
+位置性的標頭都沒有。
+
+**而 README 的那句話被這件事反駁**：
+
+> the first metadata line includes the positional `header_zh` array **so consumers can use
+> either header row**
+
+用不了「either」——英文那一列不在那裡。
+
+**這是怎麼被發現的**：`csv2view` 用 `JSONSerialization` 解 meta 與紀錄，然後把欄位依「meta 的
+標頭順序」排列。meta 沒有英文標頭，於是它退回「取第一筆的鍵並排序」，畫面上的欄序因此變成
+`license, pkg_name, purpose, …`——**字母序，不是檔案序**。它不會出錯、不會報錯，只是安靜地把
+使用者的欄位重排了。
+
+**修法**：meta 一律帶 `"header"`（位置性的英文陣列），與 `header_zh` 對稱。成本是每次執行幾十個
+位元組；收穫是那一行變成自我描述的，而 `header_zh` 那句宣稱也才成立。
+
+**這同時推翻了計畫第 8 階段那句「這一節裡沒有任何一項需要 csv2 改變」**——第三到第五項要的資訊
+`--json` 確實都提供了，而**欄位順序**不在那三項裡，是實作時才浮出來的第四件事。
+
+The meta line carries `header_zh` as a positional array and never carries the English header:
+its names live as the KEYS of each record's `fields` object, and a JSON object's keys have no
+defined order, so any consumer decoding to a dictionary loses it. A `.csv2` consumer can
+therefore obtain the Chinese column order and not the English one; a `.csv` gets no positional
+header at all. The README's claim that the array is there "so consumers can use either header
+row" is contradicted by the output. Found by csv2view, which fell back to sorting the keys and
+so displayed the columns in alphabetical rather than file order -- silently, at rc=0. Fixed by
+emitting a positional `"header"` alongside `header_zh`. This also reverses the plan's sentence
+that nothing in that section needs csv2 to change: column ORDER was the item nobody listed.

@@ -125,8 +125,9 @@ csv2 -r -si --headers 1 -so < data.csv
 ```
 
 `--json` 輸出 JSON Lines；第一行與最後一行是 metadata，中間才是紀錄。
-對 `.csv2`，第一行 metadata 會以按位置排列的 `header_zh` 陣列提供第二列標頭，
-讓消費端可以使用任一列標頭。
+第一行 metadata 會帶 `header`——欄名，依**檔案自己的順序**；`.csv2` 還會帶 `header_zh`，
+也就是第二列標頭在相同的位置上。因此消費端可以使用任一列標頭，**而且知道欄位的順序**——
+那是一個 `fields` 物件的鍵給不了的東西。
 `--json-ascii` 會跳脫非 ASCII 字元。`-md` 輸出 Markdown，必須搭配 `-t`；
 `--md-style preserve|compact|pretty` 選擇排版。`--pretty` 會把選取的表格
 保留在記憶體中，受 `CSV2_PRETTY_MAX_BYTES` 限制。
@@ -354,7 +355,7 @@ $ csv2 -contains MIT -i pkgs.csv2
 
 ```console
 $ csv2 -r --json -i pkgs.csv2
-{"meta":{"format":"csv2","headers":2,"fields":3,"header_zh":["套件","版本","授權"]}}
+{"meta":{"format":"csv2","headers":2,"fields":3,"header":["pkg","version","license"],"header_zh":["套件","版本","授權"]}}
 {"record":1,"line":3,"fields":{"pkg":"zlib","version":"1.3.1","license":"MIT"}}
 {"record":2,"line":4,"fields":{"pkg":"zstd","version":"1.5.6","license":"BSD"}}
 {"meta":{"records":2,"matched":0}}

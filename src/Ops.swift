@@ -494,6 +494,42 @@ final class JSONEmitter: RecordEmitter {
         // 合法地重複同一個名字，而那恰好是物件裝不下的；為了一個序列化的選擇去發明一條新的拒絕，
         // 不成立。
         // `.csv` 不受影響：它只有一列標頭，而 `fields` 的鍵已經就是它。
+        // LI. The ENGLISH header, positionally, and it was missing.
+        //
+        // The reasoning above -- "a .csv is unaffected: the keys of `fields`
+        // already are it" -- is true of the NAMES and false of the ORDER. A
+        // JSON object's keys have no defined order, so a consumer that decodes
+        // a record into a dictionary loses it, and the emitted text happening
+        // to be in file order is not something a consumer may rely on.
+        //
+        // The asymmetry that made it visible: `header_zh` IS positional, so a
+        // .csv2 consumer could obtain the Chinese order and not the English
+        // one, and the README said the array was there "so consumers can use
+        // either header row". Either was not available.
+        //
+        // Found by csv2view, which fell back to sorting the keys and drew the
+        // columns alphabetically instead of in file order -- silently, at
+        // rc=0, on a file nobody would think to check.
+        //
+        // LI。**英文標頭，依位置**，而它先前不在裡面。
+        //
+        // 上面那段理由——「`.csv` 不受影響：`fields` 的鍵已經就是它」——對**名字**成立，對**順序**
+        // 不成立。JSON 物件的鍵沒有定義順序，因此一個把紀錄解成字典的消費者會失去它；而輸出的
+        // 文字碰巧是檔案順序，並不是消費者可以依賴的東西。
+        //
+        // 讓它現形的是那個不對稱：`header_zh` **是**位置性的，於是 .csv2 的消費者拿得到中文順序、
+        // 拿不到英文順序，而 README 說那個陣列在那裡是「so consumers can use either header row」。
+        // 「either」並不成立。
+        //
+        // 由 csv2view 發現：它退回「取鍵排序」，於是把欄位依字母序而不是檔案序畫出來——安靜地、
+        // 在 rc=0 之下、在一個沒有人會想到要檢查的檔案上。
+        var en = ""
+        if let first = ctx.headers.first {
+            let names = first.fields.map {
+                JSONOut.string($0.value, asciiOnly: ctx.jsonASCII)
+            }
+            en = ",\"header\":[" + names.joined(separator: ",") + "]"
+        }
         var zh = ""
         if ctx.headers.count > 1 {
             let names = ctx.headers[1].fields.map {
@@ -501,7 +537,7 @@ final class JSONEmitter: RecordEmitter {
             }
             zh = ",\"header_zh\":[" + names.joined(separator: ",") + "]"
         }
-        sink.write("{\"meta\":{\"format\":\"\(ctx.format.rawValue)\",\"headers\":\(ctx.headers.count),\"fields\":\(fields)\(zh)\(prot)}}\n")
+        sink.write("{\"meta\":{\"format\":\"\(ctx.format.rawValue)\",\"headers\":\(ctx.headers.count),\"fields\":\(fields)\(en)\(zh)\(prot)}}\n")
     }
 
     /// Refused rather than substituted. JSON is text, so a byte sequence that

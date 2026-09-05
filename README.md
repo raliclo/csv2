@@ -143,8 +143,10 @@ csv2 -r -si --headers 1 -so < data.csv
 ```
 
 `--json` emits JSON Lines. The first and last lines are metadata; record lines
-contain record data. For `.csv2`, the first metadata line includes the positional
-`header_zh` array so consumers can use either header row. `--json-ascii` escapes non-ASCII characters. `-md` emits
+contain record data. The first metadata line carries `header`, the column names in the file's own
+order, and for a `.csv2` also `header_zh`, the second header row in the same
+positions -- so a consumer can use either header row and knows the column
+ORDER, which the keys of a `fields` object cannot give it. `--json-ascii` escapes non-ASCII characters. `-md` emits
 Markdown and requires `-t`; `--md-style preserve|compact|pretty` selects its
 layout. `--pretty` holds the selected table in memory and is bounded by
 `CSV2_PRETTY_MAX_BYTES`.
@@ -408,7 +410,7 @@ treats every line as a record meets the first one immediately:
 
 ```console
 $ csv2 -r --json -i pkgs.csv2
-{"meta":{"format":"csv2","headers":2,"fields":3,"header_zh":["套件","版本","授權"]}}
+{"meta":{"format":"csv2","headers":2,"fields":3,"header":["pkg","version","license"],"header_zh":["套件","版本","授權"]}}
 {"record":1,"line":3,"fields":{"pkg":"zlib","version":"1.3.1","license":"MIT"}}
 {"record":2,"line":4,"fields":{"pkg":"zstd","version":"1.5.6","license":"BSD"}}
 {"meta":{"records":2,"matched":0}}

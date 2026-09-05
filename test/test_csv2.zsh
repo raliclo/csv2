@@ -14056,6 +14056,67 @@ else
 fi
 
 echo
+echo "--- T244: --json's meta carries the English header, positionally / T244：--json 的 meta 依位置帶著英文標頭 ---"
+# LI, found by csv2view. `header_zh` was positional and the English header was
+# not there at all: its names lived as the KEYS of each record's `fields`
+# object, and a JSON object's keys have no defined order. The emitted text
+# happens to be in file order, but a consumer decoding into a dictionary loses
+# it -- csv2view fell back to sorting the keys and drew the columns
+# alphabetically, silently, at rc=0.
+# LI，由 csv2view 發現。`header_zh` 是位置性的，而英文標頭**完全不在**：它的名字散在每一筆紀錄
+# 的 `fields` 物件的鍵上，而 JSON 物件的鍵沒有定義順序。輸出的文字碰巧是檔案順序，但一個解成
+# 字典的消費者會失去它——csv2view 因此退回「取鍵排序」，把欄位依字母序畫出來，安靜地，在 rc=0 下。
+_t244_meta=$("$CSV2" -mid 1,1 --json -i "$PKG" 2>/dev/null | head -1)
+# Compared against the file's OWN first line, not against a list written here:
+# a list here would be a second copy of the header and would agree with itself.
+# 與那個檔案**自己的第一行**比對，不是與寫在這裡的一份清單比對：寫在這裡的清單會是標頭的第二份
+# 複本，而它只會與自己一致。
+_t244_want=$(head -1 "$PKG" | tr ',' '\n' | sed 's/^/"/;s/$/"/' | paste -sd, -)
+if [[ $_t244_meta == *"\"header\":[$_t244_want]"* ]]; then
+    ok "T244a the meta line carries header in the file's column order / meta 行以檔案的欄序帶著 header"
+else
+    bad "T244a want header:[$_t244_want] got ${_t244_meta:0:110} / 實得如上"
+fi
+
+# On a .csv2 BOTH arrays are there and they line up position by position.
+# That is what makes the README's "consumers can use either header row" true;
+# before this it was false, because either was not available.
+# 在 .csv2 上**兩個**陣列都在，而且逐位置對齊。那正是 README 那句「consumers can use either
+# header row」成立的原因；在此之前它是假的，因為 either 並不存在。
+# The fixture is built here, not taken from compare/. That directory is NOT in
+# the payload the guest harness tars (src, the build scripts, test,
+# verifications and the two READMEs), so on the guest the file did not exist,
+# csv2 failed, and both counts came back 0 -- a case failing for a reason that
+# had nothing to do with what it tests. mistakes.md entry 1, caught by the
+# guest exactly as the four-node rule says it will be.
+# fixture 在這裡造，不從 compare/ 取。那個目錄**不在** guest harness 打包的 payload 裡（只有
+# src、建置腳本、test、verifications 與兩份 README），因此在 guest 上那個檔案不存在、csv2 失敗、
+# 兩個計數都回來 0——一個「因為與它所測無關的理由而失敗」的案例。mistakes.md 第 1 條，而它正是
+# 被 guest 抓到的，與四節點規則說的一模一樣。
+print -r -- 'dimension,csv2,sqlite'  > "$TMP/t244.csv2"
+print -r -- '比較項目,csv2,SQLite'  >> "$TMP/t244.csv2"
+print -r -- 'a,b,c'                 >> "$TMP/t244.csv2"
+_t244_m2=$("$CSV2" -mid 1,1 --json -i "$TMP/t244.csv2" 2>/dev/null | head -1)
+_t244_en_n=$(print -r -- "$_t244_m2" | grep -o '"header":\[[^]]*\]' | tr ',' '\n' | wc -l | tr -d ' ')
+_t244_zh_n=$(print -r -- "$_t244_m2" | grep -o '"header_zh":\[[^]]*\]' | tr ',' '\n' | wc -l | tr -d ' ')
+if [[ $_t244_en_n == $_t244_zh_n && $_t244_en_n -gt 1 ]]; then
+    ok "T244b a .csv2 carries both header arrays with the same length ($_t244_en_n) / .csv2 帶著兩個等長的標頭陣列"
+else
+    bad "T244b en=$_t244_en_n zh=$_t244_zh_n / 實得如上"
+fi
+
+# A file with no header row carries neither, rather than an empty array that
+# a consumer would read as "there are zero columns".
+# 沒有標頭列的檔案兩者都不帶，而不是帶一個空陣列——那會被消費者讀成「有零欄」。
+print -r -- 'just a line' > "$TMP/t244.txt"
+_t244_none=$("$CSV2" -r --json --headers 0 -si < "$TMP/t244.txt" 2>/dev/null | head -1)
+if [[ $_t244_none != *'"header"'* ]]; then
+    ok "T244c and a file with no header row carries no header array at all / 而沒有標頭列的檔案完全不帶標頭陣列"
+else
+    bad "T244c ${_t244_none:0:90} / 實得如上"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

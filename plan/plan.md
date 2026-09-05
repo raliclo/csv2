@@ -2229,6 +2229,21 @@ SwiftUI——但**排序與截斷的界線仍以 grapheme cluster 為準**，理
 `/` 開搜尋（背後是 `-contains`，跳到它回報的位址）。理由是這支工具的使用者本來就在
 終端機裡；一個非得用滑鼠的檢視器會讓人退回 `less`。
 
+> **實作時發現的矛盾（2026-09-05）：第四項與這句話衝突，而這句話贏。**
+>
+> 第四項說「欄寬用 csv2 已經有的那張表」。`src/Width.swift` 裡**沒有任何 `public`**——那張表是
+> 內部的。要用它就得把 csv2 的公開表面撐大，而那正是這句話說不會發生的事；同時 T84 禁止檢視器
+> import csv2 的內部型別。
+>
+> 依第四項自己的下半句處理：「**量測交給 SwiftUI**」。那張表原本就只用於**初始估算**，少了它
+> 只是第一幀的欄寬略差，與正確性無關。**不為了排版把一個公開 API 撐大。**
+>
+> Contradiction found while implementing: item four says to use csv2's width table, but nothing in
+> Width.swift is public, so using it would widen csv2's public surface -- which this very sentence
+> says will not happen, and which T84 forbids the viewer from reaching around. Resolved by item
+> four's own second half: SwiftUI measures the text. The table was only ever for the initial
+> estimate, so dropping it costs one frame's column width and nothing about correctness.
+
 **這一節裡沒有任何一項需要 csv2 改變。** 第三到第五項要的資訊，`--json` 的 meta 與標頭
 已經全部提供了。
 
@@ -2276,16 +2291,16 @@ SwiftUI——但**排序與截斷的界線仍以 grapheme cluster 為準**，理
 > sidecar is ignored, and nothing measures the bytes read when `-mid` seeks on a line-spanning
 > file. The boxes stay empty because they are boxes for TESTS, and code written but not tested
 > is not done here.
-- [ ] **T84 檢視器不解析 CSV** —— 以「檢視器原始碼中不得出現逗號切割、引號狀態機，
+- [x] **T84 檢視器不解析 CSV** —— 以「檢視器原始碼中不得出現逗號切割、引號狀態機，
   或對 csv2 內部型別的 import」為斷言；這一條是靜態檢查，理由見上方第一、二項
-- [ ] **T85 檢視器保留 rc** —— 以一個必然失敗的查詢（起點越界）驗證非零狀態有被讀到
+- [x] **T85 檢視器保留 rc** —— 以一個必然失敗的查詢（起點越界）驗證非零狀態有被讀到
   並被呈現，而不是變成一片空白
-- [ ] **T86 選中一格產生的指令真的可執行** —— 把 UI 產生的那一行餵給 csv2，取回的值必須
+- [x] **T86 選中一格產生的指令真的可執行** —— 把 UI 產生的那一行餵給 csv2，取回的值必須
   與畫面上顯示的逐位元相同。這一條是整個檢視器唯一的賣點，必須由機器驗證而不是由眼睛
-- [ ] **T87 非 UTF-8 的儲存格不被替換成 U+FFFD** —— 與 T8 同一份 fixture，斷言畫面模型
+- [x] **T87 非 UTF-8 的儲存格不被替換成 U+FFFD** —— 與 T8 同一份 fixture，斷言畫面模型
   裡保留的是原始位元組
-- [ ] **T88 被加密的欄在 UI 中不可解密** —— 沒有任何路徑接受金鑰
-- [ ] **T89 兩列標頭顯示為兩行，單列標頭顯示為一行** —— 且後者不產生一列空的中文標題
+- [x] **T88 被加密的欄在 UI 中不可解密** —— 沒有任何路徑接受金鑰
+- [x] **T89 兩列標頭顯示為兩行，單列標頭顯示為一行** —— 且後者不產生一列空的中文標題
 
 **csv2 側的測試（T80–T83）屬於本測試套件；檢視器側的（T84–T85）屬於 `csv2view` 自己的
 套件，不混進 `test_csv2.zsh`。** 混進去會讓 `./test/test_csv2.zsh` 在沒有 Xcode 的機器上
@@ -2296,6 +2311,18 @@ SwiftUI——但**排序與截斷的界線仍以 grapheme cluster 為準**，理
 - [x] 第 8 階段之一：`-count` 與 `-mid` 起點越界（csv2 側，第三、四項）——2026-09-05，macOS 與 aarch64 guest
 - [ ] 第 8 階段之二：`csv2view` 最小可用版本——SwiftUI `List`、固定列高、`-mid` 取視窗、
   `-count` 畫捲軸、查詢離開 main actor
+
+> **狀態（2026-09-05）：查詢層完成並測試，視窗未做。** T84–T89 全部通過（`csv2view/test/`，14 項）。
+> 還沒有的是這個核取方塊點名的前三件：SwiftUI `List`、固定列高、用 `-mid`／`-count` 畫捲軸。
+> 第四件——**查詢離開 main actor**——已經在了，而它是這四件裡唯一一個「錯了也看不出來」的：
+> 一次在沒有 sidecar 的檔案上的 `-count` 是 O(n)，而讓 main actor 卡住整趟掃描，會在一次按鍵上
+> 變成一顆彩球。
+>
+> 這個框維持空的。**一個畫了一半、沒有東西測的視窗，比一句「還沒做」貴。**
+>
+> The query layer is done and tested (T84-T89, 14 checks); the window is not. Three of the four
+> things this box names are drawing; the fourth, queries off the main actor, is the only one
+> that can be wrong invisibly, and it is in place. The box stays empty.
 - [x] 第 8 階段之三：格點存行號、索引版本 4（跨行檔案的 seek，第五項）——程式隨版本 4 落地，測試於 2026-09-05 補上
 - [ ] 第 8 階段之四：繞回、跳到某一筆、搜尋並跳到命中處（`-contains` 已能回報位址）
 
