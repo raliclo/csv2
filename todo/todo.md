@@ -36,6 +36,27 @@ guest 比對吞掉 csv2 的結束狀態（已修——csv2 單獨執行、檢查
 
 ## 1. Install into the package manager's bin directory / 安裝到套件管理員的 bin 目錄
 
+> **狀態（2026-09-05 逐項實測）：五件裡四件已完成，只剩 Windows 的 scoop shim。**
+>
+> | 這一條宣稱的 | 現況 |
+> |---|---|
+> | 問 `brew`，絕不寫死 | ✅ `install.zsh` 裡 `brew --prefix` 出現 3 次 |
+> | 明說「這不是 Homebrew 安裝」 | ✅ |
+> | 沒有 brew 時退回 `~/.local/bin` | ✅ |
+> | **Windows 的 scoop shim** | ❌ **未做**——`install.zsh` 的非註解行裡一次也沒有 `scoop` |
+> | 以執行來驗證，而非檢查檔案存在 | ✅ 以 `--version` 驗證 |
+>
+> 真正的 Homebrew formula 另外被「`raliclo/csv2` 尚未公開」擋住，那不是這裡做得完的。
+>
+> **這段狀態是因為一次盤點才寫的**：先前這一條看起來像「整條未開始」，而它其實只差一件。
+> 一個「未關閉」的項目與一個「幾乎做完」的項目，在標題上長得一模一樣。
+>
+> Status measured item by item on 2026-09-05: four of the five are done, and only the Windows
+> scoop shim is missing -- `install.zsh` has no `scoop` outside comments. The real Homebrew
+> formula is separately blocked on the repository being private. Written down because a
+> stocktake read this as "not started" when only one part remained: an open item and an
+> almost-finished one look identical from the heading.
+
 **Status (corrected 2026-08-20): the drop-in half is DONE, and so is the local
 Windows half. What remains -- a Homebrew tap and a public scoop manifest -- is
 one blockage wearing two names: this repository is private, and both need a URL
@@ -416,7 +437,7 @@ cannot be combined` 這道拒絕，正好禁止「編輯一個 `.md` 並把 `.md
 
 ---
 
-## `.csv2` 的讀取比 `.csv` 貴 1.8 倍——可能有一條不複製的快路徑（2026-08-26，JO）
+## ~~`.csv2` 的讀取比 `.csv` 貴 1.8 倍~~（2026-08-31 由 `ba16417` 修正，2026-09-05 複量確認）
 
 第 77 回合量到、我親手重現：45 萬筆相同資料、輸出逐位元相同，`-r` 是 422 ms（`.csv`）對
 767 ms（`.csv2`）。差值在 `-r`、`--json`、`-md` 上都是平的（約 350 ms），因此是「每個值都要付
@@ -428,3 +449,39 @@ cannot be combined` 這道拒絕，正好禁止「編輯一個 `.md` 並把 `.md
 **在動手之前**：先量「有多少比例的欄位真的含有跳脫」，以及那條路徑現在是不是已經存在——這棵樹
 今天已經有一次「以為知道而沒有量」的紀錄（JM）。已寫進 README 作為使用者要知道的成本；這一條
 是「能不能讓那個成本消失」，不是同一件事。
+
+
+### 已關閉（2026-09-05）
+
+**修正**：`ba16417`（2026-08-31）。原本每個欄位都要**再掃一次**找反斜線才決定要不要
+`unescape`；現在解析器在**已經逐位元組讀過去的時候**順手記下 `fieldHasBackslash`，只在旗標為真
+時才呼叫。那把整趟第二次掃描拿掉了。
+
+**複量（2026-09-05，交錯 10 輪、各取最小值）**：
+
+| 格式 | 最小值 |
+|---|---|
+| `.csv` | 612 ms |
+| `.csv2` | 614 ms |
+| **比值** | **1.00x** |
+
+原本記錄的是 **1.82x**（422 對 767 ms）。
+
+**只有比值可比，絕對毫秒數不可比**：這次的 fixture 是為複量現造的（45 萬筆、四欄、18 MB、
+一個反斜線都沒有），不是 2026-08-26 那一份。所以 612 對 422 什麼也說不了；而這一條當初宣稱的
+就是比值，比值現在是 1.00。
+
+**這一條是在一次盤點中被使用者指出「已經不成立」才發現的。** 同一次盤點還抓到 LB 的內文仍寫著
+「已索取、尚未收到」，而答案早在前一天就到了。**一份 todo 與一份缺陷清單都會與它們描述的程式
+反向漂移，而沒有任何東西會回報那件漂移**——這棵樹已經為此從全域 `CLAUDE.md` 刪掉過一張五條全部
+不成立的表。唯一抓得到的動作是**回去量**。
+
+Closed 2026-09-05. Fixed by ba16417 on 2026-08-31: the parser now records `fieldHasBackslash`
+while it is already walking the bytes, instead of scanning each field a second time to decide
+whether to unescape. Re-measured with ten interleaved rounds, minimum of each: 612 ms for
+`.csv` against 614 ms for `.csv2`, a ratio of 1.00x where the entry recorded 1.82x. Only the
+RATIO is comparable -- the fixture was made for this re-measurement and is not the original --
+and the ratio is what the entry claimed. Found because a stocktake was told the claim was no
+longer true; the same stocktake found LB still saying an answer had not arrived a day after it
+had. A todo list and a defect list both drift away from the program they describe, nothing
+reports the drift, and the only thing that catches it is measuring again.
