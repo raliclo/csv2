@@ -126,6 +126,7 @@ struct Options {
     var noIndex = false
     var verifyIndex = false
     var buildIndex = false
+    var count = false
 }
 
 func usageError(_ en: String, _ zh: String) -> CSV2Error { fault(en, zh) }
@@ -224,6 +225,7 @@ let KNOWN_FLAGS: Set<String> = [
     "append",
     "build-index",
     "cell",
+    "count",
     "col",
     "contains",
     "search-cell",
@@ -746,6 +748,7 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "no-index": o.noIndex = true
         case "verify-index": o.verifyIndex = true
         case "build-index": o.buildIndex = true
+        case "count": o.count = true
         case "version", "V":
             // The build, not just the number. `csv2 0.1.0` has been the
             // answer since the first commit, so it cannot tell two builds
@@ -2715,6 +2718,13 @@ func printHelp() {
       -debug             diagnostics to stderr
       -log FILE          append a timestamped operation record
       --no-index         never read or write a .index sidecar
+      -count             how many DATA records the file has, one line to
+                         stdout. O(1) when a usable sidecar is beside it, O(n)
+                         otherwise, and it writes no sidecar either way. There
+                         is no `total` in --json's meta on purpose: that number
+                         is only known when an index is, so the field would come
+                         and go, and a caller not finding it could not tell an
+                         empty file from a run without an index
       --build-index      build the sidecar now; otherwise one appears only as a
                          side effect of a write or a full read
       --verify-index     O(n) full check of the sidecar; the O(1) check the
@@ -2835,7 +2845,9 @@ func main() -> Int32 {
 
         Logger.shared.log(.info, "csv2 \(sanitizedCommandLine(Array(CommandLine.arguments.dropFirst())))")
 
-        if o.buildIndex {
+        if o.count {
+            try runCount(o)
+        } else if o.buildIndex {
             try runBuildIndex(o)
         } else if o.verifyIndex {
             try runVerifyIndex(o)

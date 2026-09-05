@@ -776,8 +776,19 @@ assert_fails "T14b -mid 0,3 (a<1) is an error / a<1 報錯" -- \
     "$CSV2" -mid 0,3 -i "$PKG" -so
 n=$("$CSV2" -mid 20,999 -i "$PKG" 2>/dev/null | wc -l | tr -d ' ')
 assert_eq "$n" "2" "T14c -mid b past the end runs to EOF without an error / b 超界輸出到檔尾且不報錯"
-n=$("$CSV2" -mid 900,999 -t -i "$PKG" 2>/dev/null | wc -l | tr -d ' ')
-assert_eq "$n" "1" "T14d -mid a past the end gives header only, still valid / a 超界只有標頭且仍合法"
+# T14d changed with phase 8 item four: a start past the end is now an ERROR.
+# It used to give the header and exit 0, and this case asserted that. The
+# reversal is not a whim -- for a scrolling UI, empty output cannot be told
+# apart from "these rows are genuinely empty", which is the same reason
+# `-get` past the end has been an error since T70f.
+# T14d 隨第 8 階段第四項改變：起點越過檔尾現在是**錯誤**。它先前給出標頭並以 0 結束，而這個
+# 案例斷言的正是那個。這次翻轉不是心血來潮——對一個會捲動的 UI，空輸出與「這幾列真的是空的」
+# 分不出來，而那正是 `-get` 越界自 T70f 起就是錯誤的同一個理由。
+assert_fails "T14d -mid a past the end is an error, not an empty success / a 超界是錯誤，不是一次空的成功" -- \
+    "$CSV2" -mid 900,999 -t -i "$PKG"
+_t14d_err=$("$CSV2" -mid 900,999 -t -i "$PKG" 2>&1 >/dev/null)
+assert_contains "$_t14d_err" "this file has 21" \
+    "T14e and it names the total, so the caller knows where the end is / 而且它說出總筆數，讓呼叫端知道結尾在哪"
 
 # T15 — -rownum is output-side only: it must not shift addressing and must
 # not be searchable, or a flag that "just prints one more column" would
@@ -5941,7 +5952,15 @@ md_err=$("$CSV2" -mid 500,505 -t -md -i "$TMP/t112.csv" 2>&1 >/dev/null)
 assert_contains "$md_err" "starts after the last record" \
     "T112g a -mid window past the end says so even under -md / 起點超過結尾的 -mid 視窗，即使在 -md 下也會說出來"
 
-assert_succeeds "T112h and it stays a success, because the run did what it was told / 而它仍然是成功，因為那次執行做了它被告知的事" -- \
+# T112h is inverted by phase 8 item four. It used to assert that this stays a
+# success "because the run did what it was told", and -md is precisely the
+# shape where that was worst: it renders a complete-looking empty table with no
+# meta line to contradict it. The run doing what it was told is not the
+# question; whether the caller can tell what happened is.
+# T112h 被第 8 階段第四項反轉。它先前斷言這仍然是成功，「因為那次執行做了它被告知的事」，
+# 而 -md 正是那個說法最糟的形狀：它算繪出一張看起來完整的空表格，且沒有 meta 行可以反駁它。
+# 「那次執行有沒有照做」不是問題所在，「呼叫端分不分得出發生了什麼」才是。
+assert_fails "T112h and under -md it is an error, not a complete-looking empty table / 而在 -md 下它是錯誤，不是一張看起來完整的空表" -- \
     "$CSV2" -mid 500,505 -t -md -i "$TMP/t112.csv"
 
 # A window that exists must stay silent, or the warning is noise.
@@ -7252,11 +7271,21 @@ echo
 echo "--- T141: warning where every window is past the end / T141：每一個視窗都在結尾之後時的警告 ---"
 
 print -r -- 'a,b,c' > "$TMP/t141_hdr.csv"
+# T141a is inverted by phase 8 item four, and this is the case that shows why
+# the old rule was weakest exactly where it was most needed. A header row and
+# no records is the one file where EVERY window is past the end -- and the old
+# behaviour gave the caller empty output at rc=0, with `--json` saying
+# `"records":0` whether the window was past the end or the file was simply
+# empty. A warning was added for it; an error answers it.
+# T141a 被第 8 階段第四項反轉，而這個案例正好顯示舊規則「在它最被需要的地方最弱」。
+# 一個有標頭、沒有紀錄的檔案，是唯一一個「每一個視窗都在結尾之後」的檔案——而舊行為給呼叫端的是
+# 空輸出、rc=0，且 `--json` 無論是「視窗越界」還是「檔案本來就空」都說 `"records":0`。當時為它
+# 加了一個警告；一個錯誤則直接回答了它。
+assert_fails "T141a a window past the end of an empty file is an error / 空檔案上「結尾之後」的視窗是錯誤" -- \
+    "$CSV2" -mid 1,3 -t -i "$TMP/t141_hdr.csv"
 _t141_err=$("$CSV2" -mid 1,3 -t -i "$TMP/t141_hdr.csv" 2>&1 >/dev/null)
-assert_eq "$?" "0" \
-    "T141a a window past the end of an empty file is not an error / 空檔案上「結尾之後」的視窗不是錯誤"
 assert_contains "$_t141_err" "no data records at all" \
-    "T141b but it warns, which it did not when the file had no records / 但它會警告——而在「檔案沒有紀錄」時它先前不會"
+    "T141b and it says the file has none, rather than which record is missing / 而且它說的是「這個檔案一筆也沒有」，不是「少了哪一筆」"
 
 # Still no warning when the window is real, or the WARN would mean nothing.
 # 視窗真的存在時仍然不警告，否則這個 WARN 就沒有意義了。
@@ -13813,6 +13842,96 @@ if [[ -f "$TMP/.pid" && $(<"$TMP/.pid") == $$ ]]; then
     ok "T243c and this run recorded its own pid, so the next run will spare it / 而這次執行記下了自己的 pid，因此下一次執行會放過它"
 else
     bad "T243c this run left no usable .pid: $( [[ -f $TMP/.pid ]] && print -r -- "$(<"$TMP/.pid")" || print none ) / 實得如上"
+fi
+
+echo
+echo "--- T80: -count answers the same with an index and without / T80：-count 有索引與沒有索引時答案相同 ---"
+# Phase 8, item three. A scrolling front end needs the total before it draws
+# anything. The verb was chosen over a `total` field in --json's meta because
+# that field would only exist when an index does, and a field that is sometimes
+# there recreates the ambiguity this tool exists to remove.
+# 第 8 階段第三項。一個會捲動的前端在畫任何東西之前就需要總數。選了動詞而不是在 --json 的 meta
+# 加一個 `total`，因為那個欄位只有在索引存在時才有——而一個時有時無的欄位，重新製造了這個工具
+# 存在所要消滅的那種歧義。
+_t80_with=$("$CSV2" -count -i "$PKG" 2>/dev/null)
+_t80_without=$("$CSV2" -count --no-index -i "$PKG" 2>/dev/null)
+if [[ -n $_t80_with && $_t80_with == $_t80_without ]]; then
+    ok "T80a -count gives the same answer with an index and with --no-index ($_t80_with) / 有索引與 --no-index 時答案相同"
+else
+    bad "T80a with=$_t80_with without=$_t80_without / 實得如上"
+fi
+
+# Checked against a number derived by a different route, not against itself.
+# --json's meta counts what the READ walked past; -count is allowed to answer
+# from a sidecar without reading. Two roads to one number is the only way this
+# case can fail when the sidecar is wrong.
+# 與一個「由另一條路推導出來的數字」對照，不是與自己對照。--json 的 meta 數的是那次**讀取**走過
+# 的筆數；而 -count 可以不讀就從 sidecar 回答。兩條路通往同一個數字，是這個案例在 sidecar 出錯時
+# 唯一有可能失敗的方式。
+_t80_json=$("$CSV2" -r --json -i "$PKG" 2>/dev/null | tail -1 | sed 's/.*"records":\([0-9]*\).*/\1/')
+if [[ $_t80_with == $_t80_json ]]; then
+    ok "T80b and it agrees with the records --json counted while reading / 而它與 --json 讀取時數到的 records 一致"
+else
+    bad "T80b -count=$_t80_with --json records=$_t80_json / 實得如上"
+fi
+
+# A file with only a header row answers 0. Counting nothing is a fact; asking
+# for a record IN nothing is the error, and T141a covers that.
+# 只有標頭列的檔案回答 0。「數出零筆」是一件事實；向零筆「要一筆」才是錯誤，那由 T141a 涵蓋。
+print -r -- 'a,b' > "$TMP/t80_empty.csv"
+_t80_e=$("$CSV2" -count -i "$TMP/t80_empty.csv" 2>/dev/null); _t80_rc=$?
+if [[ $_t80_rc == 0 && $_t80_e == 0 ]]; then
+    ok "T80c a header-only file counts 0, and that is not an error / 只有標頭的檔案數出 0，而那不是錯誤"
+else
+    bad "T80c rc=$_t80_rc out=$_t80_e / 實得如上"
+fi
+
+echo
+echo "--- T81: a start past the end fails, an end past the end does not / T81：起點越界失敗，終點越界不失敗 ---"
+# Phase 8, item four. Both halves in one case, because the pair IS the rule:
+# a window that starts inside the file and asks for more than is there has an
+# unambiguous answer -- what is there. A window that starts outside it does not.
+# 第 8 階段第四項。兩半放在同一個案例裡，因為**這一對就是那條規則**：一個起點在檔案內、卻要得比
+# 現有的多的視窗，有一個明確的答案——現有的這些。一個起點在檔案外的視窗沒有。
+_t81_rc_a=0; "$CSV2" -mid 900,999 -i "$PKG" >/dev/null 2>&1 || _t81_rc_a=$?
+_t81_rc_b=0; "$CSV2" -mid 20,999 -i "$PKG" >/dev/null 2>&1 || _t81_rc_b=$?
+if (( _t81_rc_a != 0 && _t81_rc_b == 0 )); then
+    ok "T81a a start past the end fails ($_t81_rc_a) while an end past the end succeeds ($_t81_rc_b) / 起點越界失敗、終點越界成功"
+else
+    bad "T81a start rc=$_t81_rc_a end rc=$_t81_rc_b / 實得如上"
+fi
+
+_t81_err=$("$CSV2" -mid 900,999 -i "$PKG" 2>&1 >/dev/null)
+if [[ $_t81_err == *"this file has 21"* ]]; then
+    ok "T81b and the refusal names the total, which is what the caller needs to correct itself / 而那道拒絕說出總筆數，那正是呼叫端用來自我修正的東西"
+else
+    bad "T81b ${_t81_err:0:80} / 訊息如上"
+fi
+
+# WHICH OF THESE ACTUALLY BITE, measured by putting the old behaviour back:
+# T81a, T14d, T112h and T141a fail; T81b, T14e and T81c pass. T81c is the one
+# worth naming -- stdout was empty under the old behaviour too, so it is NOT a
+# guard for this change. It guards the pipeline promise, which is a different
+# thing and still worth having. T81b and T14e check the message text, and the
+# old code could have carried the same words in a warning; T81a is the case
+# that separates a refusal from a warning, because it reads the exit status.
+# **這些之中哪些真的會咬**，以「把舊行為放回去」量出來：T81a、T14d、T112h、T141a 失敗；
+# T81b、T14e、T81c 通過。T81c 是值得指名的那個——**舊行為下 stdout 本來也是空的**，所以它
+# **不是**這次改變的守衛。它守的是管線承諾，那是另一件事，而且仍然值得有。T81b 與 T14e 檢查的
+# 是訊息文字，而舊的程式可以在一個警告裡帶著同樣的字；T81a 才是分辨「拒絕」與「警告」的那一個，
+# 因為它讀的是結束狀態。
+#
+# stdout stays empty without -t, which is the promise every refusal here keeps.
+# WITH -t the header may already have gone out, because the total is not
+# knowable until the file has been read -- recorded beside the throw in
+# Run.swift rather than papered over.
+# 不帶 -t 時 stdout 保持空的，那是這裡每一道拒絕都遵守的承諾。帶 -t 時標頭可能已經送出去了，
+# 因為總筆數要讀完檔案才知道——那一點記在 Run.swift 那個 throw 旁邊，而不是被粉飾掉。
+_t81_out=$("$CSV2" -mid 900,999 -i "$PKG" 2>/dev/null)
+if [[ -z $_t81_out ]]; then
+    ok "T81c and stdout is empty, so a pipeline sees nothing rather than something short / 而 stdout 是空的，因此管線看到的是「什麼都沒有」而不是「少了一截的東西」"
+else
+    bad "T81c stdout was not empty: ${_t81_out:0:60} / 實得如上"
 fi
 
 echo

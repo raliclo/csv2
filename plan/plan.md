@@ -2102,6 +2102,22 @@ view model 以 `Task.detached` 或 async 包裝），輸出以 `--json` 讀取�
 **定案：新增 `-count`，一個明確的動詞。** 印一行到 stdout，有索引時 O(1)，沒有索引時
 O(n)（並照既有規則順手建一個）。
 
+> **實作時的偏離（2026-09-05）：`-count` 不寫 sidecar。**
+>
+> 上面那句「並照既有規則順手建一個」，在去讀那些規則之後不成立：`planIndex` 只在這次執行
+> **需要隨機存取**（`-mid` 或 `-tail`）時才寫 sidecar，而 `-count` 兩者都不要。照那句話做，
+> 等於給一個「回答問題」的動詞一個沒有任何既有規則要求的磁碟副作用——而 `--build-index`
+> 本來就在那裡供人明說。
+>
+> 這是 flow.md 說的那種情況：實作時發現的計畫矛盾要回寫計畫。**寫的是「規則說什麼」，
+> 不是「那句關於規則的話說什麼」。**
+>
+> Implementation divergence: `-count` writes no sidecar. The line above says "and build one on
+> the way, per the existing rules"; reading those rules rather than the sentence about them,
+> `planIndex` writes one only when the run wants random access, which `-count` does not. Doing
+> it anyway would give a question-answering verb a disk side effect no existing rule asks for,
+> and `--build-index` already exists to say so explicitly.
+
 **被否決的是「在 `--json` 的 meta 加一個 `total` 欄位」**，而否決的理由值得記下來：那個
 欄位只有在索引存在時才知道，於是它會**時有時無**。一個有時候出現的欄位，正是本專案一路
 在消滅的那種歧義——呼叫端讀不到它時，分不出「這個檔案是空的」與「這次沒有索引」。明確的
@@ -2218,13 +2234,31 @@ SwiftUI——但**排序與截斷的界線仍以 grapheme cluster 為準**，理
 
 ### 測試（尚未實作）
 
-- [ ] **T80 `-count`** —— 有索引時的答案與無索引時相同；`--no-index` 下仍然正確；
+- [x] **T80 `-count`** —— 有索引時的答案與無索引時相同；`--no-index` 下仍然正確；
   空檔案（只有標頭）回報 0 而不是錯誤
-- [ ] **T81 `-mid` 的起點越界是錯誤** —— `a` 大於總筆數時非零結束且訊息說出總筆數；
+- [x] **T81 `-mid` 的起點越界是錯誤** —— `a` 大於總筆數時非零結束且訊息說出總筆數；
   `b` 越界維持 T14 既有行為，兩者在同一個測試裡對照
 - [ ] **T82 索引存行號之後，跨行檔案的 `-mid` 走 seek** —— 讀取位元組數必須遠小於
   起點的偏移量；且輸出與 `--no-index` 逐位元相同，含 `--physical`
 - [ ] **T83 索引版本 4 使版本 3 的 sidecar 被忽略而非誤用**
+
+> **T82 與 T83：實作已經在了，缺的是測試（2026-09-05 查證）。**
+>
+> `INDEX_VERSION` 是 **4**，`CSVIndex` 有 `var lines: [UInt64]`，而版本不符在 `load` 裡就被
+> 丟棄（`index …: version mismatch, ignoring`）。也就是說第 8 階段之三的**程式**在版本 4 落地時
+> 就完成了。
+>
+> 但套件裡**沒有**案例測這兩件事：沒有「版本不符被忽略」的案例，也沒有「跨行檔案的 `-mid` 走
+> seek 時讀取位元組數遠小於起點偏移量」的量測。因此這兩個核取方塊仍然是空的，而那是對的——
+> **這裡的核取方塊是給測試的**，而這棵樹的規則是「寫好但沒測不算完成」。
+>
+> 這一則是在盤點時查出來的：先前的印象是「T82/T83 看起來已經做掉了」，那只對了一半。
+>
+> The implementation is present -- INDEX_VERSION is 4, the index stores lines, and a version
+> mismatch is discarded at load. What is missing is the tests: nothing asserts that a version-3
+> sidecar is ignored, and nothing measures the bytes read when `-mid` seeks on a line-spanning
+> file. The boxes stay empty because they are boxes for TESTS, and code written but not tested
+> is not done here.
 - [ ] **T84 檢視器不解析 CSV** —— 以「檢視器原始碼中不得出現逗號切割、引號狀態機，
   或對 csv2 內部型別的 import」為斷言；這一條是靜態檢查，理由見上方第一、二項
 - [ ] **T85 檢視器保留 rc** —— 以一個必然失敗的查詢（起點越界）驗證非零狀態有被讀到
@@ -2242,7 +2276,7 @@ SwiftUI——但**排序與截斷的界線仍以 grapheme cluster 為準**，理
 
 ### 階段（未開始）
 
-- [ ] 第 8 階段之一：`-count` 與 `-mid` 起點越界（csv2 側，第三、四項）
+- [x] 第 8 階段之一：`-count` 與 `-mid` 起點越界（csv2 側，第三、四項）——2026-09-05，macOS 與 aarch64 guest
 - [ ] 第 8 階段之二：`csv2view` 最小可用版本——SwiftUI `List`、固定列高、`-mid` 取視窗、
   `-count` 畫捲軸、查詢離開 main actor
 - [ ] 第 8 階段之三：格點存行號、索引版本 4（跨行檔案的 seek，第五項）

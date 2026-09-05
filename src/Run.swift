@@ -555,6 +555,91 @@ func runBuildIndex(_ o: Options) throws {
 /// Offered because the O(1) validation deliberately is not one.
 /// O(n)，也是此處唯一構成證明而非啟發式的東西。之所以提供它，正因為 O(1) 的
 /// 驗證刻意不是證明。
+/// `-count`: how many DATA records the file has, on one line.
+///
+/// Phase 8, item three. A scrolling front end needs the total before it draws
+/// anything: `List` and `LazyVStack` size their scroll range from it, and a
+/// model that discovers the total while scrolling makes the scrollbar move
+/// under the user's hand.
+///
+/// Rejected, and the reason is worth keeping: a `total` field in `--json`'s
+/// meta line. That number is only known when an index exists, so the field
+/// would come and go -- and a field that is sometimes there recreates the
+/// ambiguity this tool exists to remove, because a caller that does not find
+/// it cannot tell "this file is empty" from "this run had no index". A verb
+/// always answers; it is only sometimes slower.
+///
+/// `-count`：這個檔案有幾筆**資料**紀錄，一行。
+///
+/// 第 8 階段第三項。一個會捲動的前端在畫任何東西之前就需要總數：`List` 與 `LazyVStack` 用它
+/// 決定捲動範圍，而一個「邊捲邊發現總數」的模型會讓捲軸在使用者手下移動。
+///
+/// 被否決的、而理由值得留著：在 `--json` 的 meta 行加一個 `total` 欄位。那個數字只有在索引
+/// 存在時才知道，因此那個欄位會**時有時無**——而一個有時候出現的欄位，重新製造了這個工具存在
+/// 所要消滅的那種歧義：讀不到它的呼叫端，分不出「這個檔案是空的」與「這次執行沒有索引」。
+/// 一個動詞一定會回答，只是有時候比較慢。
+func runCount(_ o: Options) throws {
+    guard let path = o.input else {
+        throw fault("-count needs -i FILE", "-count 需要 -i FILE")
+    }
+
+    // O(1) when a usable index is beside the file. `CSVIndex.load` is the same
+    // gate every other reader goes through, so a stale or unusable sidecar is
+    // discarded here exactly as it is there -- and the scan below then gives
+    // the same answer, which is what T80 asserts.
+    // 檔案旁有一份可用索引時是 O(1)。`CSVIndex.load` 就是其他每一個讀取者走的同一道關口，
+    // 因此一份過期或不可用的 sidecar 在這裡被捨棄的方式與那裡完全相同——而底下的掃描接著會給出
+    // 同一個答案，那正是 T80 斷言的東西。
+    if !o.noIndex, let idx = CSVIndex.load(dataPath: path) {
+        Platform.writeStdout("\(idx.records)\n")
+        return
+    }
+
+    // O(n): read it. No sidecar is written on the way.
+    //
+    // The plan's line for this verb says "and build one on the way, per the
+    // existing rules". Reading those rules rather than the sentence about them:
+    // `planIndex` writes a sidecar only when the run WANTS RANDOM ACCESS
+    // (`-mid` or `-tail`), and `-count` wants neither. Making it write one
+    // anyway would give a question-answering verb a side effect on disk that
+    // no existing rule asks for, and `--build-index` already exists to say so
+    // explicitly. Recorded in the plan beside that line.
+    //
+    // O(n)：讀過去。過程中不寫 sidecar。
+    //
+    // 計畫給這個動詞的那一行寫著「並照既有規則順手建一個」。去讀那些規則、而不是讀那句關於它們
+    // 的話：`planIndex` 只在這次執行**需要隨機存取**（`-mid` 或 `-tail`）時才寫 sidecar，而
+    // `-count` 兩者都不要。讓它照寫，等於給一個「回答問題」的動詞一個沒有任何既有規則要求的
+    // 磁碟副作用，而 `--build-index` 本來就在那裡供人明說。已記在計畫那一行旁邊。
+    let plan = try openInput(o)
+    defer { plan.source.close() }
+    try checkTornAppend(path: path, format: plan.format, truncatePartial: o.truncatePartial)
+
+    var headers: [Record] = []
+    var n = 0
+    var pendingError: Error?
+    let parser = RecordParser(format: plan.format, truncatePartial: o.truncatePartial) { rec in
+        if headers.count < plan.headerRows {
+            headers.append(rec)
+            if headers.count == plan.headerRows {
+                do { try validateHeaders(headers, want: plan.headerRows, path: plan.describedPath) }
+                catch { pendingError = error; return false }
+            }
+            return true
+        }
+        n = rec.number - plan.headerRows
+        return true
+    }
+    while let c = plan.source.next() { try parser.feed(c) }
+    try parser.finish()
+    if let e = pendingError { throw e }
+
+    // A file with only a header row answers 0, not an error. The count of an
+    // empty file is a fact; asking for a record IN it is what is an error.
+    // 只有標頭列的檔案回答 0，不是錯誤。一個空檔案的筆數是一件事實；向它「要一筆紀錄」才是錯誤。
+    Platform.writeStdout("\(n)\n")
+}
+
 func runVerifyIndex(_ o: Options) throws {
     guard let path = o.input else {
         throw fault("--verify-index needs -i FILE", "--verify-index 需要 -i FILE")
@@ -1208,14 +1293,51 @@ func runSelect(_ o: Options) throws {
     // 有標頭、沒有紀錄。在那裡，呼叫端拿到的是空輸出、rc=0、stderr 沉默，以及 `"records":0`
     // ——而 README 指定用來分辨這件事的第二個管道（--json 的 meta 行），無論是「視窗在結尾
     // 之後」還是「檔案本來就空」都說同一句話。最該發出這個警告的情況，正是它沒有涵蓋的那個。
+    // Phase 8, item four: a start past the end is an ERROR, not a warning.
+    //
+    // This reverses the decision the paragraphs above argue for, and the
+    // reason it was reversed is a use case that did not exist when they were
+    // written. For a scrolling UI this is the call that happens at wrap-around,
+    // and empty output is INDISTINGUISHABLE from "these rows are genuinely
+    // empty" -- in SwiftUI it renders as blank cells that look exactly like
+    // data. `-get` past the end was already an error for the same reason, in
+    // T70f: if both give empty output the caller cannot tell "this cell is
+    // empty" from "your address is wrong".
+    //
+    // `b` past the end keeps its behaviour: it runs to EOF and does not fail,
+    // because a window that STARTS inside the file and asks for more than is
+    // there has an unambiguous answer -- what is there.
+    //
+    // 第 8 階段第四項：起點越過檔尾是**錯誤**，不是警告。
+    //
+    // 這推翻了上面那幾段所論證的決定，而推翻它的理由是一個「那些段落被寫下時還不存在」的
+    // 使用情境。對一個會捲動的 UI，這正是繞回時發生的那一次呼叫，而空輸出**與「這幾列真的是
+    // 空的」無法區分**——在 SwiftUI 裡它會被算繪成一片空白儲存格，看起來完全像資料。`-get`
+    // 越界早就是錯誤，理由相同，寫在 T70f：若兩者都給空輸出，呼叫端就分不出「這一格是空的」
+    // 與「你的位址是錯的」。
+    //
+    // `b` 越界維持原行為：輸出到檔尾、不失敗。因為一個「起點在檔案內」的視窗要得比現有的多，
+    // 它有一個明確的答案——現有的這些。
+    //
+    // THE WRINKLE, recorded rather than hidden: the total is not knowable until
+    // the file has been read, so with `-t` the header row may already have
+    // reached stdout before this throws. Without `-t` stdout is empty, which is
+    // the usual promise. Buffering the header until a data record appears would
+    // change what `-t` means for every empty selection, which is a larger
+    // change than this item asked for.
+    // **那個皺褶，寫下來而不是藏起來**：總筆數要讀完檔案才知道，因此帶 `-t` 時，標頭列可能在
+    // 這裡拋出之前就已經到達 stdout 了。不帶 `-t` 時 stdout 是空的，那才是一般的承諾。把標頭
+    // 緩衝到「有資料紀錄出現」為止，會改變 `-t` 對每一種空選取的意義，那是比這一項所要求的
+    // 更大的改動。
     if let (a, _) = o.mid, a > seen {
         if seen == 0 {
-            Logger.shared.warn(
-                "-mid \(a) starts after the last record: this file has no data records at all, so no window could have selected anything; this is not an error and the exit status is 0")
-        } else {
-            Logger.shared.warn(
-                "-mid \(a) starts after the last record (\(seen)), so nothing was selected; this is not an error and the exit status is 0")
+            throw fault(
+                "-mid \(a): this file has no data records at all, so no window can start there",
+                "-mid \(a)：這個檔案完全沒有資料紀錄，因此沒有任何視窗能從那裡開始")
         }
+        throw fault(
+            "-mid \(a) starts after the last record: this file has \(seen)",
+            "-mid \(a) 的起點在最後一筆之後：這個檔案有 \(seen) 筆")
     }
 
     Logger.shared.debug("format=\(plan.format.rawValue) fields=\(expectedFields) records=\(seen)")

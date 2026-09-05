@@ -107,7 +107,22 @@ Available reading options:
 --physical         include the physical starting line in addresses
 --a1               include spreadsheet A1 notation in addresses
 -get r:c           print one cell value
+-count             print how many data records the file has
 ```
+
+`-count` prints one line: the number of data records. It is O(1) when a usable
+`.index` sidecar is beside the file and O(n) otherwise, and it writes no
+sidecar either way. A file with only a header row counts 0, which is not an
+error. There is deliberately no `total` in `--json`'s meta: that number is only
+known when an index is, so the field would come and go, and a caller not
+finding it could not tell an empty file from a run without an index.
+
+**`-mid a,b` with `a` past the last record is an error**, and the message names
+the total. `b` past the last record is not: a window that starts inside the
+file and asks for more than is there has an unambiguous answer, which is what
+is there. The asymmetry exists because empty output cannot be told apart from
+"these rows are genuinely empty" -- the same reason `-get` past the end has
+always been an error.
 
 Record numbers count data records, not physical lines. Header addresses are
 `0` for `.csv`, and `0a`/`0b` for `.csv2`. `-contains` searches every column;
