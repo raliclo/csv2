@@ -219,7 +219,52 @@ echo "[Info] csv2: $CSV2 ($($CSV2 --version))"
 echo "[Info] uname: $(uname -sm)"
 echo
 
+# The trap below catches EXIT, INT and TERM. It cannot catch KILL, and a run
+# killed from outside therefore leaves its whole temp directory behind. One
+# from 2026-08-29 survived that way and was still here on 2026-09-05: 228 MB,
+# 676 entries, inside `test/`.
+#
+# That is not merely wasted disk. `test_submodules/run_csv2_test.zsh` tars
+# `test/` into the payload it injects into the guest, so from that day every
+# guest run carried a 229 MB payload instead of about one megabyte -- and the
+# harness does not delete its payloads either. The parent project's session
+# measured 131 of them in one day, 4.1 GB. A directory nobody looked at turned
+# into gigabytes a week, in another tree, with the cost landing on someone else.
+#
+# 底下那個 trap 攔的是 EXIT、INT 與 TERM。它攔不到 KILL，因此一次「從外面被殺掉」的執行會把
+# 整個暫存目錄留在原地。2026-08-29 有一份就是這樣活下來的，到 2026-09-05 還在：228 MB、
+# 676 個項目，就在 `test/` 裡面。
+#
+# 那不只是浪費磁碟。`test_submodules/run_csv2_test.zsh` 會把 `test/` 打包成注入 guest 的
+# payload，所以從那天起每一次 guest 執行都帶著一個 229 MB 的 payload、而不是大約一 MB
+# ——而那個 harness 也不刪它的 payload。母專案的 session 一天量到 131 份、4.1 GB。
+# **一個沒有人看的目錄，在另一棵樹上變成了每週好幾 GB，而代價落在別人身上。**
+#
+# The reaper identifies a live run by the PID written inside, not by age. An
+# age threshold has to guess how long a run may take; a PID answers exactly,
+# and its failure mode is the safe one -- if the PID cannot be checked, or has
+# been recycled onto an unrelated process, the directory is KEPT.
+# 這個回收器靠「寫在裡面的 PID」判斷一次執行是否還活著，不靠年齡。年齡門檻必須猜「一次執行
+# 可能跑多久」；PID 給的是確定的答案，而且它的失敗方向是安全的那一邊——若 PID 查不到、或已經
+# 被回收給一個無關的行程，那個目錄會被**保留**。
+reap_stale_tmp() {   # dir
+    local d p kept=0 gone=0
+    for d in "$1"/.test_csv2.*(N/); do
+        p=""
+        [[ -f "$d/.pid" ]] && p=$(<"$d/.pid")
+        if [[ -n $p ]] && kill -0 "$p" 2>/dev/null; then
+            kept=$(( kept + 1 ))
+            continue
+        fi
+        rm -rf "$d" && gone=$(( gone + 1 ))
+    done
+    (( gone )) && print -r -- "[Info] removed $gone stale temp director$( (( gone == 1 )) && print -n y || print -n ies ) from a killed run / 移除了 $gone 個「被殺掉的執行」留下的暫存目錄"
+    return 0
+}
+reap_stale_tmp "$HERE"
+
 TMP="$(mktemp -d "$HERE/.test_csv2.XXXXXX")"
+print -r -- $$ > "$TMP/.pid"
 cleanup() { rm -rf "$TMP" }
 trap cleanup EXIT INT TERM
 
@@ -13695,6 +13740,77 @@ if [[ $_t242_msg == *"HEADERLESS"* || $_t242_msg == *"沒有標頭列"* ]]; then
     ok "T242c and it distinguishes --headers 0 on a suffixed file from lines / 而它區分了「有副檔名時的 --headers 0」與逐行"
 else
     bad "T242c the message does not distinguish the two meanings of --headers 0 / 訊息沒有區分 --headers 0 的兩種意義"
+fi
+
+echo
+echo "--- T243: a killed run's temp directory is reaped, a live one is not / T243：被殺掉的執行留下的暫存目錄會被回收，活著的不會 ---"
+# Reported by the parent project's session, which had been deleting the symptom
+# daily: 131 leftover payloads in one day, 4.1 GB, each holding a 229 MB
+# csv2-payload.tar. The source was here -- a temp directory from a run killed
+# on 2026-08-29, still sitting inside `test/` a week later, and tarred into
+# every guest payload since.
+#
+# The reaper is driven against a scratch directory using the SAME function the
+# start-up path calls, not a copy of its logic.
+#
+# 由母專案的 session 回報，而它先前每天在清那個症狀：一天 131 份殘留的 payload、4.1 GB，
+# 每一份裝著一個 229 MB 的 csv2-payload.tar。**來源在這裡**——一次 2026-08-29 被殺掉的執行留下的
+# 暫存目錄，一週後還在 `test/` 裡面，而且從那天起被打包進每一個 guest payload。
+#
+# 這個回收器是對著一個臨時目錄驅動的，用的是啟動路徑呼叫的**同一個函式**，不是它邏輯的複本。
+_t243_dir="$TMP/t243home"
+mkdir -p "$_t243_dir"
+
+# A directory with no .pid at all -- what every run before this change left.
+# 一個完全沒有 .pid 的目錄——這次改動之前每一次執行留下的樣子。
+mkdir -p "$_t243_dir/.test_csv2.nopid"
+# A directory whose PID is not running. PID 1 is always alive, so a dead one is
+# manufactured: a subshell's PID, read after it has exited.
+# 一個「PID 沒在跑」的目錄。PID 1 永遠活著，所以這裡製造一個死的：取一個 subshell 的 PID，
+# 在它結束之後才使用。
+# A genuinely dead PID: start a background subshell, keep its pid, wait for it
+# to finish. The first attempt used `$sysparams[pid]`, which needs
+# `zmodload zsh/system` -- it was never loaded, `no_unset` aborted the subshell,
+# and `_t243_dead` came back EMPTY. The case still passed, because an empty pid
+# takes the no-pid branch: it tested that branch twice and the dead-pid branch
+# never once. Nothing in the suite said so; run_checked printed the line.
+# 一個真正死掉的 PID：開一個背景 subshell、留住它的 pid、等它結束。第一版用了
+# `$sysparams[pid]`，那需要 `zmodload zsh/system`——它從未被載入，`no_unset` 在 subshell 裡中止，
+# 於是 `_t243_dead` 回來是**空的**。而那個案例照樣通過，因為空的 pid 走的是「沒有 pid」那一支：
+# 它把那一支測了兩次，而「pid 已死」那一支一次也沒測到。測試本身沒有說出這件事，是 run_checked
+# 印出了那一行。
+( : ) & _t243_dead=$!
+wait $_t243_dead 2>/dev/null
+mkdir -p "$_t243_dir/.test_csv2.dead"; print -r -- "$_t243_dead" > "$_t243_dir/.test_csv2.dead/.pid"
+# And one that IS alive: this very suite. If the reaper takes this, it would
+# take a concurrent run's directory too, which is the failure that matters.
+# 以及一個**確實活著**的：這份測試自己。回收器若動了它，也就會動一個並行執行的目錄，
+# 而那才是真正要緊的失敗。
+mkdir -p "$_t243_dir/.test_csv2.live"; print -r -- $$ > "$_t243_dir/.test_csv2.live/.pid"
+
+reap_stale_tmp "$_t243_dir" >/dev/null
+
+if [[ ! -d "$_t243_dir/.test_csv2.nopid" && ! -d "$_t243_dir/.test_csv2.dead" ]]; then
+    ok "T243a a directory with no pid, and one whose pid is gone, are both removed / 沒有 pid 的、以及 pid 已經不在的，兩者都被移除"
+else
+    bad "T243a nopid=$( [[ -d $_t243_dir/.test_csv2.nopid ]] && print still || print gone ) dead=$( [[ -d $_t243_dir/.test_csv2.dead ]] && print still || print gone ) / 實得如上"
+fi
+
+if [[ -d "$_t243_dir/.test_csv2.live" ]]; then
+    ok "T243b while a directory whose pid is running is left alone / 而一個 pid 還在跑的目錄不會被動"
+else
+    bad "T243b the reaper removed a LIVE run's directory / 回收器移除了一個「還活著」的執行的目錄"
+fi
+
+# The new run records its own pid, or the next run reaps this one while it is
+# still working. The reaper and the recording are two halves of one thing, and
+# a test that only drove the reaper would pass with the recording missing.
+# 新的執行要記下自己的 pid，否則下一次執行會在它還在工作時把它回收掉。回收器與「記錄」是同一件事
+# 的兩半，而一個「只驅動回收器」的測試，會在「記錄」不存在時照樣通過。
+if [[ -f "$TMP/.pid" && $(<"$TMP/.pid") == $$ ]]; then
+    ok "T243c and this run recorded its own pid, so the next run will spare it / 而這次執行記下了自己的 pid，因此下一次執行會放過它"
+else
+    bad "T243c this run left no usable .pid: $( [[ -f $TMP/.pid ]] && print -r -- "$(<"$TMP/.pid")" || print none ) / 實得如上"
 fi
 
 echo
