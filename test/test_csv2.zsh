@@ -226,19 +226,21 @@ echo
 #
 # That is not merely wasted disk. `test_submodules/run_csv2_test.zsh` tars
 # `test/` into the payload it injects into the guest, so from that day every
-# guest run carried a 229 MB payload instead of about one megabyte -- and the
-# harness does not delete its payloads either. The parent project's session
-# measured 131 of them in one day, 4.1 GB. A directory nobody looked at turned
-# into gigabytes a week, in another tree, with the cost landing on someone else.
+# guest run carried a 229 MB payload instead of about one megabyte. The parent
+# project's session measured 131 of them in one day, 4.1 GB. A directory nobody
+# looked at turned into gigabytes a week, in another tree, with the cost landing
+# on someone else. (That session's half -- the harness never deleting its
+# payloads -- was fixed there on 2026-09-05, after this was reported to it.)
 #
 # 底下那個 trap 攔的是 EXIT、INT 與 TERM。它攔不到 KILL，因此一次「從外面被殺掉」的執行會把
 # 整個暫存目錄留在原地。2026-08-29 有一份就是這樣活下來的，到 2026-09-05 還在：228 MB、
 # 676 個項目，就在 `test/` 裡面。
 #
 # 那不只是浪費磁碟。`test_submodules/run_csv2_test.zsh` 會把 `test/` 打包成注入 guest 的
-# payload，所以從那天起每一次 guest 執行都帶著一個 229 MB 的 payload、而不是大約一 MB
-# ——而那個 harness 也不刪它的 payload。母專案的 session 一天量到 131 份、4.1 GB。
-# **一個沒有人看的目錄，在另一棵樹上變成了每週好幾 GB，而代價落在別人身上。**
+# payload，所以從那天起每一次 guest 執行都帶著一個 229 MB 的 payload、而不是大約一 MB。
+# 母專案的 session 一天量到 131 份、4.1 GB。**一個沒有人看的目錄，在另一棵樹上變成了每週
+# 好幾 GB，而代價落在別人身上。**（那個 session 那一半——harness 從不刪除自己的 payload
+# ——已於 2026-09-05 在那邊修好，就在這件事被回報給它之後。）
 #
 # The reaper identifies a live run by the PID written inside, not by age. An
 # age threshold has to guess how long a run may take; a PID answers exactly,

@@ -9385,3 +9385,64 @@ flag. Fixed by leaving one mechanism only. Noted and deliberately NOT changed: T
 totals rather than sets, which a cancelling pair can defeat -- but the design comment beside it
 already reasoned that a name list cannot catch a case that quietly stops running, while a count
 can. They catch different failures; the answer is both, not swapping one for the other.
+
+---
+
+## LH. 一個被殺掉的執行留下的暫存目錄，變成另一棵樹上每週好幾 GB（2026-09-05，母專案 session 回報）
+
+**先承認一件事：這一條是在修好之後才寫的。** `CLAUDE.md` 說「不要在一個被回報的缺陷被寫下來之前
+就去修它」，理由是「一個只存在於 session 逐字稿裡的缺陷，留給下一個讀者的是一棵乾淨的樹和一份
+全過的測試」。我先修了，補記在這裡。
+
+### 回報的症狀
+
+母專案 session 量到：一天 **131 個殘留的 `tmp.*` 目錄、4,134 MB**，隔天又 **14 個、459 MB**，
+每一個裝著一份 **229 MB 的 `csv2-payload.tar`**。它每天清一次，並指出「這只是把症狀掃掉」。
+
+### 實際的鏈
+
+| 環節 | 事實 |
+|---|---|
+| 1 | csv2 測試套件的 `$TMP` 是 `test/.test_csv2.XXXXXX`——**在 repo 裡面** |
+| 2 | 它的 trap 是 `EXIT INT TERM`；**`KILL` 攔不到** |
+| 3 | 2026-08-29 一次被殺掉的執行留下 `test/.test_csv2.REVUUi`：**228 MB、676 個項目** |
+| 4 | `run_csv2_test.zsh` 把整個 `test/` 打包成注入 guest 的 payload |
+| 5 | 於是從那天起**每一次** guest 執行都帶著 229 MB，而不是約 1 MB |
+| 6 | 而那個 harness 當時不刪自己的 payload |
+
+**代價落在別人的磁碟上，而病灶在這裡。** 兩者之間隔著一條打包路徑，兩邊各自看都不像問題。
+
+### 兩半，各自的修法
+
+**這一半（csv2）**：加一個回收器，靠**寫在目錄裡的 PID** 判斷一次執行是否還活著，不靠年齡。
+年齡門檻必須猜「一次執行可能跑多久」；PID 給確定答案，而失敗方向是安全的那一邊——查不到、或被
+回收給無關行程時，那個目錄會被**保留**。T243a/b/c 釘住它；T243b 專門要求「還活著的執行的目錄
+不能被動」，因為動了它就等於會動一個並行執行的目錄。
+
+**沒有把 `$TMP` 搬出 repo，而那是刻意的**：`/var/folders` 在開機卷宗上是大小寫**不**敏感的，
+而 csv2 在 case-sensitive 的 sparse image 上。搬過去會改變被測的東西。
+
+**另一半（母專案的 `run_csv2_test.zsh`）**：已由那個 session 於 2026-09-05 修好，就在被回報之後。
+它的做法值得記：清理放在 `finish()` 裡、**在回傳判斷式之前**（放在之後，函式的退出碼會變成 `rm`
+的）、在寫報告之後（它先前為此付過代價），並守著「已設定且是絕對路徑」——因為空值會讓
+`${payload:h}` 變成 `.`，而那是一個非常不同的 `rm`。
+
+### 兩句已經變假的話
+
+修好之後，我在 `aade3cf` 的 commit message 裡寫著「仍未修：`run_csv2_test.zsh` 從不刪除它的
+payload。第 206 行造出路徑、第 207 行建立目錄」。**那句話現在兩處都不成立**：它已經被修好，而且
+因為修正插在前面，行號變成了 217/218。**commit message 改不掉**——這是這星期第三次。
+
+測試檔裡對應的註解已經更正。這一條的存在，一半是為了讓下一個讀到那個 commit message 的人，
+在別處找得到「它後來怎麼了」。
+
+Reported by the parent project's session: 131 leftover directories in one day, 4.1 GB, each
+holding a 229 MB payload. The chain: the suite's temp directory lives inside `test/`, its trap
+cannot catch KILL, a run killed on 2026-08-29 left 228 MB behind, and the guest harness tars
+`test/` into every payload. The cost landed on another tree's disk while the cause sat here,
+with a tar between them so that neither side looked like a problem on its own. Fixed here with
+a PID-based reaper (age would have to guess how long a run may take; a PID answers exactly and
+fails safe by KEEPING the directory), and fixed there by the session that reported it. The
+temp directory was deliberately not moved out of the repo: /var/folders is case-INSENSITIVE
+while this repo is not. Recorded after the fix rather than before, against this project's own
+rule -- and noting that aade3cf's message now carries two statements that are no longer true.
