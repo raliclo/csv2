@@ -2309,10 +2309,34 @@ SwiftUI——但**排序與截斷的界線仍以 grapheme cluster 為準**，理
 ### 階段（未開始）
 
 - [x] 第 8 階段之一：`-count` 與 `-mid` 起點越界（csv2 側，第三、四項）——2026-09-05，macOS 與 aarch64 guest
-- [ ] 第 8 階段之二：`csv2view` 最小可用版本——SwiftUI `List`、固定列高、`-mid` 取視窗、
+- [x] 第 8 階段之二：`csv2view` 最小可用版本——SwiftUI `List`、固定列高、`-mid` 取視窗、
   `-count` 畫捲軸、查詢離開 main actor
 
-> **狀態（2026-09-05）：查詢層完成並測試，視窗未做。** T84–T89 全部通過（`csv2view/test/`，14 項）。
+> **狀態（2026-09-06）：四件都在，而「測到什麼」與「沒測到什麼」分開說。**
+>
+> UI 全部在 `csv2view/UI/`，查詢層在 `csv2view/src/`。四件：SwiftUI `LazyVStack`（計畫寫的是
+> `List`／`LazyVStack`）、固定列高、用 `-count` 的總數決定捲動範圍、查詢離開 main actor。
+>
+> | | 怎麼被驗證 |
+> |---|---|
+> | 查詢離開 main actor | T84–T92，驅動的是真正的 `CSV2Bridge` 與 `ViewerModel` |
+> | 捲動範圍來自 `total` | **T93a，靜態**——把它換成「用已載入的列」會失敗 |
+> | 固定列高 | **T93b，靜態**——把它換成 padding 會失敗 |
+> | 那些像素本身 | **沒有測。** 這裡沒有 GUI 測試框架，我不假裝有 |
+>
+> T93 是靜態的，而它**被證明會咬**：把那兩處各換成計畫指名的那個錯誤寫法，兩項都失敗。
+> 一個沒有被證明會咬的靜態 grep，對任何東西都會通過。
+>
+> **`T84` 的掃描同時涵蓋 `src/` 與 `UI/`。** 它原本只掃 `src/`，而一道停在下層的守衛會漏掉
+> 「最想抄捷徑」的那一層——正在畫那張表的那一層。
+>
+> Four things, and what is verified is stated separately from what is not. Queries off the main
+> actor are driven by T84-T92 against the real bridge and model. The scroll range coming from
+> `total` and the fixed row height are STATIC checks, T93a and T93b, proven to bite by putting
+> the plan's own named failure back in each place. The pixels themselves are not tested: there
+> is no GUI harness here and pretending otherwise would be worse than saying so. T84's scan
+> covers UI/ as well as src/, because a guard that stops at the layer below misses the layer
+> where the shortcut is most tempting. T84–T89 全部通過（`csv2view/test/`，14 項）。
 > 還沒有的是這個核取方塊點名的前三件：SwiftUI `List`、固定列高、用 `-mid`／`-count` 畫捲軸。
 > 第四件——**查詢離開 main actor**——已經在了，而它是這四件裡唯一一個「錯了也看不出來」的：
 > 一次在沒有 sidecar 的檔案上的 `-count` 是 O(n)，而讓 main actor 卡住整趟掃描，會在一次按鍵上

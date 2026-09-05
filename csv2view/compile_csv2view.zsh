@@ -45,7 +45,7 @@ mkdir -p release
 # the file order decides which file is allowed to have it.
 # main.swift **排在最後**。Swift 要求最上層的程式碼放在 main.swift，而檔案順序決定哪一個檔案
 # 被允許擁有它。
-SOURCES=(src/Bridge.swift src/Model.swift src/main.swift)
+SOURCES=(src/Bridge.swift src/Model.swift UI/ContentView.swift UI/Window.swift src/main.swift)
 for f in $SOURCES; do
     [[ -f "$f" ]] || { print -u2 -- "missing source: $f / 缺少原始檔：$f"; exit 1 }
 done

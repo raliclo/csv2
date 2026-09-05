@@ -69,13 +69,20 @@ F2="$TMP/two.csv2"
 # 的檢視器，在任何人想得到要試的檔案上都與 csv2 一致，而在那個「引號內有逗號、沒有人試過」的檔案
 # 上不一致。
 # ---------------------------------------------------------------------
-_t84_srcs=($VIEW_ROOT/src/*.swift(N))
+# BOTH directories. The scan covered only src/ when UI/ was created, and a
+# guard that stops at the layer below misses the layer where the shortcut is
+# most tempting: the one drawing the table. Same shape as every "a rule applied
+# to only part of where it holds" entry in mistakes.md.
+# **兩個目錄都掃。** UI/ 被建立時這個掃描只涵蓋 src/，而一道停在下層的守衛，會漏掉「最想抄捷徑」
+# 的那一層：正在畫那張表的那一層。與 mistakes.md 裡每一條「規則只套用到它成立範圍的一部分」
+# 是同一個形狀。
+_t84_srcs=($VIEW_ROOT/src/*.swift(N) $VIEW_ROOT/UI/*.swift(N))
 # Fewer than two files means the glob broke, not that the source is clean.
 # T218a passed on the guest having scanned NOTHING; this is the cheap half
 # of that lesson.
 # 少於兩個檔案代表 glob 壞了，不代表原始碼是乾淨的。T218a 曾在 guest 上「什麼都沒掃」而通過；
 # 這是那個教訓裡便宜的那一半。
-if (( ${#_t84_srcs} < 2 )); then
+if (( ${#_t84_srcs} < 4 )); then
     bad "T84a the glob found ${#_t84_srcs} sources, so it scanned almost nothing / 那個 glob 只找到 ${#_t84_srcs} 個原始檔，等於幾乎沒掃"
 else
     # Comment lines are dropped first: this file's own explanations name the
@@ -328,6 +335,47 @@ if (( _t92_rc != 0 )) && [[ $_t92_none == *"ERROR"* ]]; then
     ok "T92d while a search with no match says so instead of leaving the old window up / 而沒有命中的搜尋會說出來，不是把舊視窗留在那裡"
 else
     bad "T92d rc=$_t92_rc out=[${_t92_none//$'\n'/ }] / 實得如上"
+fi
+
+# ---------------------------------------------------------------------
+# T93 — the two things the 8-2 checkbox names that a running test cannot
+# reach. There is no GUI harness here, so these are static: the drawing
+# either takes its scroll range from `total` or it does not, and either
+# fixes the row height or it does not, and both are visible in the source.
+#
+# They are worth asserting because the plan names the exact failure each
+# one prevents. A range built from the LOADED rows gives a scrollbar that
+# describes the window instead of the file; a row height that depends on
+# content makes the range depend on what has arrived, and the scrollbar
+# then moves under the user's hand as windows load.
+#
+# T93 —— 8-2 那個核取方塊點名、而一個「會執行的測試」搆不到的那兩件事。這裡沒有 GUI 測試框架，
+# 所以它們是靜態的：那段畫圖的程式要嘛從 `total` 取捲動範圍、要嘛沒有；要嘛固定列高、要嘛沒有，
+# 而兩者都寫在原始碼裡看得見。
+#
+# 它們值得斷言，因為計畫指名了每一個各自防止的失敗。用**已載入的列**建出來的範圍，會給出一個
+# 「描述那個視窗而不是那個檔案」的捲軸；一個隨內容而變的列高，會讓範圍取決於「已經抵達了什麼」，
+# 於是捲軸會在視窗載入時、在使用者手下移動。
+# ---------------------------------------------------------------------
+_t93_ui="$VIEW_ROOT/UI/ContentView.swift"
+if [[ -f $_t93_ui ]] && LC_ALL=C grep -q 'ForEach(1\.\.\.max(model\.total' "$_t93_ui"; then
+    ok "T93a the scroll range is built from model.total, not from the loaded rows / 捲動範圍由 model.total 建出，不是由已載入的列"
+else
+    bad "T93a the range does not come from model.total / 範圍不是來自 model.total"
+fi
+if [[ -f $_t93_ui ]] && LC_ALL=C grep -q '\.frame(height: kRowHeight)' "$_t93_ui" \
+   && LC_ALL=C grep -q '^let kRowHeight' "$_t93_ui"; then
+    ok "T93b and every row is given one fixed height / 而每一列都被給定同一個固定高度"
+else
+    bad "T93b the row height is not a fixed constant / 列高不是一個固定常數"
+fi
+# The scan must be looking at a file that exists and has content, or both
+# checks above would fail for the wrong reason and read as design faults.
+# 這個掃描必須看著一個存在且有內容的檔案，否則上面兩項會以錯的理由失敗，而讀起來像是設計缺陷。
+if [[ -s $_t93_ui ]] && (( $(wc -l < "$_t93_ui") > 50 )); then
+    ok "T93c and it read a view file with something in it / 而它讀到的是一個有內容的 view 檔案"
+else
+    bad "T93c ContentView.swift is missing or too small to be the view / ContentView.swift 不存在，或小到不可能是那個 view"
 fi
 
 print -r -- ""

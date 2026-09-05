@@ -42,13 +42,28 @@ func decodePage(_ r: QueryResult) throws -> Page {
             throw PageError.malformed(String(line.prefix(80)))
         }
         if let meta = o["meta"] as? [String: Any] {
-            // `header` may be absent: the meta line only carries the column
-            // names when -t was asked for or when the shape needs them. When
-            // it is absent the columns are taken from the first record, and
-            // sorted, so the arrangement is at least STABLE between runs --
-            // stable and possibly not the file's order beats unstable.
-            // `header` 可能不存在：meta 行只在需要時才帶欄名。不存在時就取第一筆紀錄的欄名並
-            // 排序，讓欄序至少在不同次執行之間**穩定**——「穩定但可能不是檔案的順序」勝過「不穩定」。
+            // `header` is present whenever the file HAS a header row -- csv2
+            // emits it positionally since LI, which this viewer is the reason
+            // for. It is absent only for `--headers 0`, where there is no
+            // header to carry, and the fallback below then takes the keys of
+            // the first record and sorts them: stable between runs, and
+            // openly not the file's order, because with no header row there
+            // is no file order to be had.
+            //
+            // This comment said the opposite an hour ago -- "the meta line
+            // only carries the names when -t was asked for" -- which was true
+            // of csv2 before LI and false the moment it was fixed. Left
+            // standing it would have sent the next reader looking for a
+            // condition that no longer exists.
+            //
+            // 只要那個檔案**有**標頭列，`header` 就一定在——csv2 自 LI 起就依位置輸出它，而這個
+            // 檢視器正是那次修正的起因。它只在 `--headers 0` 時不存在，因為那裡沒有標頭可帶；
+            // 底下的退路於是取第一筆紀錄的鍵並排序：在不同次執行之間穩定，而且**公開地**不是
+            // 檔案的順序——因為沒有標頭列時，根本沒有「檔案的順序」可言。
+            //
+            // 這段註解一小時前說的是相反的話——「meta 行只在給了 -t 時才帶欄名」——那在 LI 之前
+            // 對 csv2 成立，而在它被修好的那一刻起就是假的。留著它，會讓下一個讀者去找一個
+            // 已經不存在的條件。
             if let en = meta["header"] as? [String] {
                 header = ViewHeader(columns: en, columnsZh: meta["header_zh"] as? [String])
             }
@@ -86,6 +101,9 @@ final class ViewerModel: ObservableObject {
     @Published var errorLine: String = ""
     @Published var selected: (record: Int, column: Int)? = nil
     @Published var windowStart: Int = 1
+    /// One query at a time. See rowAppeared.
+    /// 一次一個查詢。見 rowAppeared。
+    private var loading = false
 
     let bridge: CSV2Bridge
     let pageSize: Int
@@ -168,6 +186,33 @@ final class ViewerModel: ObservableObject {
             errorLine = m
         } catch {
             errorLine = "\(error)"
+        }
+    }
+
+    /// A row scrolled into view. Loads the window containing it, and does
+    /// nothing at all when that window is already the one on screen.
+    ///
+    /// The guard is not an optimisation. `LazyVStack` calls `onAppear` for
+    /// every row it materialises, so scrolling through a page fires it dozens
+    /// of times in a second; without the guard each call would start a
+    /// process, and the viewer would spend a scroll launching csv2 rather than
+    /// drawing. `loading` closes the same door for the calls that arrive while
+    /// a query is still out.
+    ///
+    /// 一列捲進了可視範圍。載入包含它的那個視窗，而當那個視窗已經在畫面上時，**什麼也不做**。
+    ///
+    /// 那道守衛不是最佳化。`LazyVStack` 會為它具現化的每一列呼叫 `onAppear`，因此捲過一頁會在
+    /// 一秒內觸發它幾十次；少了那道守衛，每一次呼叫都會啟動一個行程，而這個檢視器會把一次捲動
+    /// 花在啟動 csv2 上、而不是畫圖上。`loading` 則對「查詢還在外面時抵達的那些呼叫」關上同一扇門。
+    func rowAppeared(_ n: Int) {
+        guard total > 0, !loading else { return }
+        if n >= windowStart && n < windowStart + pageSize { return }
+        let target = max(1, ((n - 1) / pageSize) * pageSize + 1)
+        if target == windowStart { return }
+        loading = true
+        Task { @MainActor in
+            await loadWindow(from: target)
+            loading = false
         }
     }
 

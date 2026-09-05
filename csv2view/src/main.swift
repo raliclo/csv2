@@ -142,11 +142,25 @@ if argv.first == "--probe" {
     exit(code)
 }
 
+// A file opens the window. Two arguments, because the viewer never guesses
+// where csv2 is: a viewer that found its own csv2 on PATH could be looking at
+// a different build from the one the caller means, and every number on screen
+// would be that build's.
+// 給一個檔案就開視窗。**兩個**引數，因為這個檢視器從不猜 csv2 在哪：一個自己去 PATH 上找 csv2
+// 的檢視器，可能看著的是與呼叫端所指不同的一個建置，而螢幕上的每一個數字都會是那個建置的。
+#if canImport(AppKit)
+if argv.count == 2 {
+    let bridge = CSV2Bridge(binary: argv[0], path: argv[1])
+    await MainActor.run { runViewerWindow(bridge: bridge, title: (argv[1] as NSString).lastPathComponent) }
+}
+#endif
+
 FileHandle.standardError.write(Data("""
-csv2view: the window is not built yet; this binary carries the query layer and
-its probes. Run `csv2view --probe window CSV2 FILE A B` to exercise it.
-csv2view：視窗還沒有做，這個執行檔帶著查詢層與它的探測。
-請用 `csv2view --probe window CSV2 FILE A B` 來運動它。
+csv2view CSV2 FILE            open the window
+csv2view --probe NAME ...     run one query without a window
+
+csv2view CSV2 FILE            開啟視窗
+csv2view --probe NAME ...     不開視窗地執行一次查詢
 
 """.utf8))
 exit(2)
