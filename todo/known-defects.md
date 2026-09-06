@@ -9162,6 +9162,50 @@ every stat failure into nil and the caller reads nil as "does not exist", so a p
 error or ENOTDIR is reported as a missing directory on every platform. The errno is right
 there and is thrown away.
 
+
+### 結案（2026-09-06，從 Mac 經 multissh 直接量到）：**不是 csv2 的缺陷**
+
+機制 2 也不對。真正的原因是**環境的路徑轉換**，而它只在一種組合下缺席：
+
+| 情況 | MSYS 有沒有轉換 | csv2 收到 | 訊息 |
+|---|---|---|---|
+| 絕對路徑、父是**真目錄** | 有 | `C:/Users/…` | 正常運作 |
+| 絕對路徑、父是**一般檔案** | **沒有** | `/c/Users/…` **原樣** | 「the directory … does not exist」 |
+| **相對**路徑、父是一般檔案 | 不需要 | `test/…/afile` | 「a new file cannot be created in …」＝與 Linux／macOS 相同 |
+
+**MSYS2 的轉換是「解析得了才轉」。** `/c/…/afile/out.csv` 因為 `afile` 是檔案、不是目錄，那條路徑
+解析不了，於是 MSYS 把它**原樣**交給原生程式。而 `/c/Users/…` 這個字串在 Windows 的命名空間裡
+**真的不存在**——`stat` 回 ENOENT 是正確的，csv2 說「不存在」也是誠實的。
+
+證據是同一次執行裡的對比：`-i` 與 `-o` 同時給、而目標父路徑是真目錄時，`-debug` 記下的呼叫行是
+`-i C:/Users/… -o C:/Users/…`——**兩個都被轉換了**。父路徑換成一般檔案，`-o` 那一個就以 `/c/…`
+原樣抵達。
+
+**因此 T145g 在 Windows 上失敗，不是因為 csv2 在那裡行為不同，而是因為那個案例遞給它的路徑
+從未以 Windows 認得的形式抵達。** 用相對路徑時，三個平台的訊息完全一致。
+
+修正屬於測試：T145g 改用相對路徑，於是它在每個平台上測的是同一件事。
+
+**先前兩次判斷都錯了，值得記下錯法**：第一次我猜是 `deletingLastPathComponent` 不認得反斜線
+（機制 1），節點的一句話排除了它；第二次我斷定是「Windows 的 stat 在一個存在的一般檔案上失敗」
+（機制 2），而那是**從節點轉述的訊息推的，不是我自己量的**。真正量得到答案，是在能夠直接在那台
+機器上跑指令之後——而那條路一直都在（`~/.multissh/generated/config2Win`，那個檔案自己就寫著
+「macOS → Windows」與「對外撥接的是本機」）。**我先前說「沒有管道」，是因為我讀了一份說反了的
+流程文件，而沒有去找設定檔。**
+
+Closed 2026-09-06, measured directly from the Mac over multissh. Not a csv2 defect and not
+mechanism 2 either. MSYS2 converts a POSIX path only when it resolves: `/c/.../afile/out.csv`
+does not, because `afile` is a file, so the string reaches the native binary verbatim -- and
+`/c/Users/...` genuinely does not exist in the Windows namespace, so ENOENT is correct and the
+message is truthful. Proven by the same run's `-debug` line showing BOTH `-i` and `-o` as
+`C:/...` when the target's parent is a real directory, while the file-parent case arrives as
+`/c/...`. With a RELATIVE path all three platforms give the same message. The fix belongs in
+T145g. Both earlier diagnoses were wrong, and the second was inferred from a relayed message
+rather than measured -- the route to measure it existed the whole time in
+~/.multissh/generated/config2Win, whose own header says "macOS -> Windows ... this machine is
+the one dialling out". I had read a flow document that said the opposite and never looked for
+the config.
+
 ---
 
 ## LC. Windows 的預期略過數永遠多 1，而那個「不要寫死數字」的註解就寫在那一行上面（2026-09-03，Windows 節點回報）

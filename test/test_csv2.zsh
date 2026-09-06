@@ -7675,8 +7675,48 @@ fi
 # 底下的 T145e 透過 /dev/stdout 問同一個問題，那是一條 POSIX 路徑，而它被拒絕的理由是 root 能夠
 # 打敗的：root 在 /dev 裡建得出檔案。那個案例維持原樣，並在咬不住的地方繼續跳過。這一個的存在，
 # 是為了讓「那道拒絕本身」在每個地方都有覆蓋，而不是只在「uid 剛好沒有特權」的地方。
+# A RELATIVE path, and that is the whole point of this line.
+#
+# With an ABSOLUTE path this case failed on Windows for a reason that has
+# nothing to do with csv2, and it took three diagnoses to find out. MSYS2
+# converts a POSIX path to a Windows one only when the path RESOLVES:
+# `/c/.../t145_notadir/out.csv` does not resolve, because `t145_notadir` is a
+# file and not a directory, so MSYS hands the string to the native binary
+# verbatim. `/c/Users/...` genuinely does not exist in the Windows namespace,
+# so `stat` returns ENOENT and csv2 says "does not exist" -- a truthful answer
+# about the string it was given, and a different answer from the other two
+# platforms about the same intent.
+#
+# Proven by the `-debug` line of one run: with the target's parent a real
+# DIRECTORY, both `-i` and `-o` arrive as `C:/...`; with the parent a file,
+# `-o` arrives as `/c/...`.
+#
+# A relative path needs no conversion, so all three platforms see the same
+# thing and the case tests the same thing everywhere. LB.
+#
+# **相對**路徑，而那正是這一行的全部重點。
+#
+# 用**絕對**路徑時，這個案例在 Windows 上以一個與 csv2 完全無關的理由失敗，而那花了三次診斷才
+# 查出來。MSYS2 只在一條 POSIX 路徑**解析得了**時才把它轉成 Windows 路徑：
+# `/c/…/t145_notadir/out.csv` 解析不了，因為 `t145_notadir` 是檔案而不是目錄，於是 MSYS 把那個
+# 字串**原樣**交給原生程式。而 `/c/Users/…` 在 Windows 的命名空間裡真的不存在，所以 `stat` 回
+# ENOENT、csv2 說「不存在」——對它拿到的那個字串而言是誠實的答案，而對同一個意圖來說，是與
+# 另外兩個平台不同的答案。
+#
+# 證據是同一次執行的 `-debug` 行：目標的父路徑是**真目錄**時，`-i` 與 `-o` 都以 `C:/…` 抵達；
+# 父路徑是檔案時，`-o` 以 `/c/…` 抵達。
+#
+# 相對路徑不需要轉換，因此三個平台看到的是同一個東西，這個案例在每個地方測的也是同一件事。LB。
+_t145_rel="${TMP:t}/t145_notadir"
 printf 'x' > "$TMP/t145_notadir"
-_t145_nd=$("$CSV2" -r -t -i "$TMP/t145.csv" -o "$TMP/t145_notadir/out.csv" 2>&1 >/dev/null)
+# The input path does NOT traverse the file. `$_t145_rel/../t145.csv` would
+# resolve `..` through `t145_notadir`, which is a file, and that is ENOTDIR on
+# every platform -- it only escaped notice because `-o` is validated before the
+# input is opened, so the case would still pass while its `-i` was broken.
+# 輸入路徑**不穿過那個檔案**。`$_t145_rel/../t145.csv` 會經由 `t145_notadir` 去解析 `..`，而它是
+# 一個檔案，在每個平台上都是 ENOTDIR——這一點之所以沒被發現，只是因為 `-o` 的檢驗發生在輸入被
+# 開啟之前，於是那個案例會在它的 `-i` 已經壞掉的情況下照樣通過。
+_t145_nd=$(cd "${TMP:h}" && "$CSV2" -r -t -i "${TMP:t}/t145.csv" -o "$_t145_rel/out.csv" 2>&1 >/dev/null)
 if [[ $_t145_nd == *"cannot be created"* && $_t145_nd == *"t145_notadir"* ]]; then
     ok "T145g a path whose parent is a file is refused for what it is, on every platform / 父路徑是一個檔案的路徑，會以「它是什麼」被拒絕——在每一個平台上"
 else
