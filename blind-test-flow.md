@@ -264,6 +264,44 @@ has been paid for four times. Every step also invalidates the ones after it --
 a failure on the Mac makes the other three meaningless, so there is no reason
 to spend them.
 
+**How to reach the other two, because not saying it cost days.** The Mac dials
+out. `~/.multissh/generated/config2Win` reaches Windows on port 16888 and
+`config2WSL` reaches WSL2 on 16889; both use user `lowei` and the host answers
+to `Ralic-W11.local` as well as to the IPv6 link-local address in the file:
+
+```zsh
+~/proj/multissh/release/multissh -f ~/.multissh/generated/config2Win \
+    Ralic-W11.local 'cd ~/proj/csv2 && git pull --rebase && ./compile_csv2.zsh && ./test/test_csv2.zsh'
+```
+
+**`multissh_upgrade_flow.md` in the multissh project says the opposite** -- that
+Windows is the node that dials -- and on 2026-09-02 to 09-06 this session
+believed it, told the user and another session four times that there was no
+channel, and did the Windows work by relay instead. The config file's own
+header says "macOS -> Windows ... this machine is the one dialling out". Two
+documents describing one thing, contradicting each other, with nothing to
+notice.
+
+**When two texts disagree about a system, believe the one the machine reads.**
+A config is executed; a flow document is not. That is not a rule about
+documents being unreliable -- it is that one of these two is load-bearing and
+the other is a description, and only the description can drift without anything
+breaking.
+
+**怎麼連上另外兩個節點，因為不寫下來，代價是好幾天。** 撥接的是 Mac。
+`~/.multissh/generated/config2Win` 連 Windows（埠 16888），`config2WSL` 連 WSL2（埠 16889），
+兩者的使用者都是 `lowei`，而那台機器對 `Ralic-W11.local` 與檔案裡那個 IPv6 link-local 位址都會回應
+（用法見上方指令）。
+
+**multissh 專案裡的 `multissh_upgrade_flow.md` 說的是相反的事**——說 Windows 才是撥接的那一端
+——而 2026-09-02 到 09-06 之間，這個 session 相信了它，四次告訴使用者與另一個 session「沒有管道」，
+並改用轉述的方式處理 Windows 的工作。那個設定檔自己的檔頭寫著「macOS → Windows……對外撥接的是
+本機」。**兩份文字描述同一件事、互相矛盾，而沒有任何東西會發現。**
+
+**當兩份文字對一個系統的說法不一致時，相信機器會讀的那一份。** 設定檔會被執行，流程文件不會。
+這不是一條「文件不可靠」的規則——而是這兩者之中有一份是承重的、另一份是描述，**而只有描述可以
+在不弄壞任何東西的情況下漂走**。
+
 **Each node gets there by `git pull` where it can.** That is what makes a
 node's numbers mean something: they name a commit anyone can fetch and re-run.
 
