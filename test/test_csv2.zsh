@@ -14157,6 +14157,50 @@ else
 fi
 
 echo
+echo "--- T245: --headers 0 on a file already read line by line is a no-op / T245：對一個本來就逐行讀的檔案，--headers 0 是無操作 ---"
+# LJ, reported by the parent project's session. A file with no declaring suffix
+# already reads line by line, so asking for `--headers 0` -- the format it is
+# already using -- must change nothing. It instead fell through to `.csv`, the
+# first line decided the field count, and any later line holding a comma
+# failed with a message that was perfectly true about a parse that should never
+# have happened.
+# LJ，由母專案的 session 回報。一個沒有宣告性後綴的檔案本來就逐行讀，因此指定 `--headers 0`
+# ——那個它現在正在用的格式——必須什麼都不改變。而它落進了 `.csv`，第一行決定欄數，之後任何含
+# 逗號的一行都會失敗，訊息對「那個本不該發生的解析」而言完全正確。
+printf 'a\nb\nx,y\n' > "$TMP/t245.txt"
+_t245_plain=$("$CSV2" -r -i "$TMP/t245.txt" 2>&1); _t245_rc1=$?
+_t245_zero=$("$CSV2" -r --headers 0 -i "$TMP/t245.txt" 2>&1); _t245_rc2=$?
+if [[ $_t245_rc1 == 0 && $_t245_rc2 == 0 && $_t245_plain == $_t245_zero ]]; then
+    ok "T245a --headers 0 gives byte-identical output to leaving it out / --headers 0 與不給它的輸出逐位元相同"
+else
+    bad "T245a rc=$_t245_rc1/$_t245_rc2 plain=[${_t245_plain//$'\n'/|}] zero=[${_t245_zero//$'\n'/|}] / 實得如上"
+fi
+
+# The comma is DATA there, and that is the whole point of the format. A case
+# checking only that the two spellings agree would pass if both had become CSV.
+# 那個逗號在那裡是**資料**，而那正是這個格式的全部重點。一個只檢查「兩種寫法一致」的案例，
+# 會在「兩者都變成 CSV」時照樣通過。
+if [[ $_t245_zero == *"x,y"* ]]; then
+    ok "T245b and the comma stays data, one field per line / 而那個逗號仍然是資料，一行一個欄位"
+else
+    bad "T245b the comma was treated as a separator: [${_t245_zero//$'\n'/|}] / 實得如上"
+fi
+
+# The use the override exists for is NOT taken away: a file with no suffix that
+# really IS a CSV stays readable with --headers 1. That is what the code
+# comment beside the fix protects, and removing it would trade one silent
+# breakage for another.
+# 那個覆寫存在的用途**沒有被拿走**：一個沒有副檔名、而且確實是 CSV 的檔案，用 --headers 1 仍然
+# 讀得到。那正是修正旁邊那段註解所保護的東西，拿掉它等於用一種靜默的破壞換另一種。
+printf 'a,b\n1,2\n' > "$TMP/t245data"
+_t245_csv=$("$CSV2" -r -t --headers 1 -i "$TMP/t245data" 2>/dev/null)
+if [[ $_t245_csv == "a,b"$'\n'"1,2" ]]; then
+    ok "T245c while --headers 1 still reads a suffix-less file as a CSV / 而 --headers 1 仍然把無副檔名的檔案讀成 CSV"
+else
+    bad "T245c got [${_t245_csv//$'\n'/|}] / 實得如上"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

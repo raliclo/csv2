@@ -2396,8 +2396,33 @@ func openInput(_ o: Options) throws -> InputPlan {
         // 沒有副檔名：一欄、沒有標頭列、那一行的位元組原樣。第 8b 階段。`--headers` 仍然可以覆蓋，
         // 因為一個叫 `data`、而且**確實是** CSV 的檔案，在這之前就是這樣讀的，現在也必須還能這樣讀
         // ——新的預設不可以把一個本來可用的用法拿走。
+        // `h == 0` is `.lines`, and leaving it out of this ternary is LJ.
+        //
+        // A file with no declaring suffix ALREADY reads line by line, so
+        // `--headers 0` on one should be a no-op -- which is what `--help`
+        // promises: "the line-oriented format ... which until now could only
+        // be had by having no suffix", and "the one value a declaring suffix
+        // does NOT override". Instead 0 fell through to `.csv`, the first line
+        // decided the field count, and any later line holding a comma failed
+        // with a message that was perfectly true about a parse that should
+        // never have happened.
+        //
+        // The correct expression is about fifty lines above, on the stdin
+        // path, and has been since phase 12 added `--headers 0`. That phase
+        // updated the `.md` route and the stdin route and not this one.
+        //
+        // `h == 0` 是 `.lines`，而把它漏在這個三元之外就是 LJ。
+        //
+        // 一個沒有宣告性後綴的檔案**本來就**逐行讀，因此對它指定 `--headers 0` 應該是**無操作**
+        // ——那正是 `--help` 承諾的：「the line-oriented format……在此之前只能靠『沒有副檔名』
+        // 取得」，以及「唯一一個會宣告的副檔名蓋不過去的值」。而實際上 0 落進了 `.csv`，第一行
+        // 決定了欄數，之後任何含逗號的一行都會失敗——訊息對「那個本不該發生的解析」而言完全正確。
+        //
+        // 正確的寫法就在上方約五十行的 stdin 那條路上，而且從第 12 階段加入 `--headers 0` 起
+        // 就在那裡。那個階段改了 `.md` 那條路與 stdin 那條路，**沒有改這一條**。
         if let h = o.headersOverride {
-            return InputPlan(format: h == 2 ? .csv2 : .csv, headerRows: h,
+            return InputPlan(format: h == 0 ? .lines : (h == 2 ? .csv2 : .csv),
+                             headerRows: h,
                              source: try ByteSource(path: path), describedPath: path)
         }
         return InputPlan(format: .lines, headerRows: 0,

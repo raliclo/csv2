@@ -9554,3 +9554,55 @@ row" is contradicted by the output. Found by csv2view, which fell back to sortin
 so displayed the columns in alphabetical rather than file order -- silently, at rc=0. Fixed by
 emitting a positional `"header"` alongside `header_zh`. This also reverses the plan's sentence
 that nothing in that section needs csv2 to change: column ORDER was the item nobody listed.
+
+---
+
+## LJ. `--headers 0` 對一個「本來就是逐行」的檔案，把它變成 CSV（2026-09-06，母 session 實測回報）
+
+```sh
+printf 'a\nb\nx,y\n' > /tmp/p.txt
+csv2 -r -i /tmp/p.txt              # a / b / x,y —— 正常
+csv2 -r --headers 0 -i /tmp/p.txt  # csv2: record 3 (line 3) has 2 fields but the header has 1
+```
+
+**`.txt` 沒有宣告性後綴，所以它預設就是逐行格式；而明確指定 `--headers 0`——那個「本來就是它
+現在用的格式」——反而讓它失敗。** `--help` 說 `--headers 0` 是「the line-oriented format …
+which until now could only be had by having no suffix」，並且是「the one value a declaring
+suffix does NOT override」。照那個描述，對一個無後綴檔案指定 0 應該是**無操作**。
+
+成因在 `main.swift`：
+
+```swift
+if let h = o.headersOverride {
+    return InputPlan(format: h == 2 ? .csv2 : .csv, headerRows: h, …)   // h == 0 掉進 .csv
+}
+```
+
+那個三元只分辨「2」與「其他」，於是 `0` 變成「零列標頭的 CSV」——而在那裡，第一行決定欄數，
+第三行有一個逗號，欄數就不一致。
+
+**而同一個檔案的第 2345 行（stdin 那條路）寫的是正確的版本**：
+
+```swift
+format: h == 0 ? .lines : (h == 2 ? .csv2 : .csv)
+```
+
+第 12 階段加 `--headers 0` 時，`.md` 與 stdin 兩條路都改了，**這一條沒有**。這是 mistakes.md
+第 3 條——一條規則只套用到它成立範圍的一部分——而正確的寫法就在同一個檔案裡，相距約五十行。
+
+**回報者走到它的路徑值得記**：他先假設「`.txt` 被當成 CSV，所以要加 `--headers 0`」，加了之後
+失敗；再假設「是我插入的那一列有逗號」，把每一列做了 CSV 引號包覆——**仍然失敗，而錯誤訊息從頭
+到尾指的都是檔案的第 3 行，不是他的輸入**。真正拆穿它的是「把兩種寫法並排跑一次」，而不是繼續猜。
+
+**那個錯誤訊息是誠實的，而它誠實地描述著一個不該存在的解析。** 訊息說「第 3 行有 2 欄」——在
+`.csv` 底下那完全正確。錯的是「為什麼它是 `.csv`」，而訊息沒有理由提到那件事。
+
+`--headers 0` on a file that is ALREADY line-oriented turns it into a CSV. A `.txt` has no
+declaring suffix, so it defaults to the line-oriented format; asking for `--headers 0` -- the
+format it is already using -- makes it fail on any line containing a comma. The cause is a
+ternary that distinguishes 2 from everything else, so 0 becomes "a CSV with no header rows",
+and the correct expression already exists about fifty lines above on the stdin path. Phase 12
+updated the `.md` and stdin routes and not this one: mistakes.md entry 3. The reporter's route
+to it is worth keeping -- two wrong hypotheses, both consistent with an error message that
+truthfully described a parse that should never have happened, and what broke it open was
+running both spellings side by side instead of guessing again.
