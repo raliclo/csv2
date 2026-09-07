@@ -62,7 +62,26 @@ fi
 
 [[ -x $CSV2 ]] || { print -u2 -- "build first: $ROOT/compile_csv2.zsh"; exit 1 }
 
-: ${MEASURE_OUTPUT:=$HERE/measure_output.txt}
+# Named for the platform, because the repo keeps one committed record PER
+# platform and this script used to write `measure_output.txt` on all of them.
+# Running the documented command on the Windows node therefore overwrote the
+# macOS record -- silently, in the working tree, where the next `git add -A`
+# would have published Windows numbers under the macOS name. Found on
+# 2026-09-08 when the node refused to pull: the only thing standing between
+# that and a published wrong column was git noticing an unstaged change.
+# 依平台命名，因為這個 repo 為**每個平台**各保存一份已提交的紀錄，而這支腳本先前在所有平台上
+# 寫的都是 `measure_output.txt`。於是在 Windows 節點上執行那個被記載的指令，會覆蓋掉 macOS 的
+# 那份紀錄——靜默地、就在工作複本裡，而下一次 `git add -A` 就會把 Windows 的數字掛在 macOS 的
+# 名字底下發表出去。2026-09-08 因為節點拒絕 pull 才發現：擋在那與「發表一個錯誤欄位」之間的，
+# 只有 git 注意到有一個未暫存的變更。
+if [[ -z ${MEASURE_OUTPUT:-} ]]; then
+    case $(uname -s) in
+        Darwin)        MEASURE_OUTPUT=$HERE/measure_output.txt ;;
+        Linux)         MEASURE_OUTPUT=$HERE/measure_output_linux.txt ;;
+        MSYS*|MINGW*|CYGWIN*|Windows*) MEASURE_OUTPUT=$HERE/measure_output_windows.txt ;;
+        *)             MEASURE_OUTPUT=$HERE/measure_output_$(uname -s).txt ;;
+    esac
+fi
 OUT=$MEASURE_OUTPUT
 TMP=$(mktemp -d "$HERE/.measure.XXXXXX")
 trap 'rm -rf -- "$TMP"' EXIT INT TERM
