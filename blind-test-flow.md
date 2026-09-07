@@ -340,6 +340,34 @@ to `Ralic-W11.local` as well as to the IPv6 link-local address in the file:
     Ralic-W11.local 'cd ~/proj/csv2 && git pull --rebase && ./compile_csv2.zsh && ./test/test_csv2.zsh'
 ```
 
+Swap `config2Win` for `config2WSL` to reach WSL2; nothing else in the line
+changes.
+
+**It has to be that binary. `ssh` cannot reach these nodes at all**, and the
+message it gives says nothing about why. The daemons present a
+`ssh-mldsa44-ed25519@openssh.com` host key, which stock OpenSSH has never
+supported -- so the honest failure is `Bad key types`. You are unlikely to
+see it. On 2026-09-08, macOS 10.3p1 percent-expands `HostName`, and the IPv6
+scope id in both profiles (`fe80::...%en1`) reads to it as an unknown token
+`%e`, so `ssh -F` dies at **config-parse** time with
+`vdollar_percent_expand: unknown key %e` -- before it has looked at a host, a
+port, or a key. That message invites you to go and fix the profile. The
+profile is fine; it was never for this program. This session lost half an
+hour there in round 96 and only got out by noticing that the multissh runner
+scripts name a `client=release/multissh` of their own.
+
+把 `config2Win` 換成 `config2WSL` 就是 WSL2，那一行的其他部分都不變。
+
+**必須是那個執行檔。`ssh` 根本連不到這兩個節點**，而它給的訊息完全沒有說出原因。
+那兩個 daemon 呈現的是 `ssh-mldsa44-ed25519@openssh.com` 主機金鑰，原版 OpenSSH 從來
+不支援——所以誠實的失敗是 `Bad key types`。你多半看不到它。2026-09-08 起，macOS 上的
+10.3p1 會對 `HostName` 做百分號展開，而兩份 profile 裡的 IPv6 scope id（`fe80::...%en1`）
+在它眼中是一個未知的 `%e`，於是 `ssh -F` 在**解析設定檔**的階段就死了，訊息是
+`vdollar_percent_expand: unknown key %e`——那時它還沒看過主機、埠號或金鑰。那句訊息會
+邀請你去修那份 profile。那份 profile 沒有問題，它本來就不是給這支程式用的。第 96 回合
+這個 session 在那裡耗掉半小時，最後是靠著注意到 multissh 的 runner 腳本自己指名了一個
+`client=release/multissh` 才走出來。
+
 **`multissh_upgrade_flow.md` in the multissh project says the opposite** -- that
 Windows is the node that dials -- and on 2026-09-02 to 09-06 this session
 believed it, told the user and another session four times that there was no
