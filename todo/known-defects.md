@@ -9611,6 +9611,8 @@ running both spellings side by side instead of guessing again.
 
 ## LK. `--dry-run` 在 `-md` 那條路上會**實際寫入**（2026-09-06，第 79 回合盲測，親手重現）
 
+**狀態：已修（9481bb5，2026-09-06），由 T246a／T246b 釘住。** / Status: fixed, pinned by T246a/T246b.
+
 ```sh
 printf '# Notes\n\n| pkg | version | license |\n|---|---|---|\n| zlib | 1.3.2 | Zlib |\n| zstd | 1.5.6 | BSD |\n' > doc.md
 csv2 -update 2:version '9.9.9' -md -t --md-table 1 --dry-run -i doc.md --in-place
@@ -9654,6 +9656,8 @@ even a later diff shows more than the one cell the caller asked about. The same 
 ---
 
 ## LL. `-update-where` 在 Markdown 上失敗，而 `-update` 在同一個檔案上成功（2026-09-06，第 79 回合，親手重現）
+
+**狀態：已修（9481bb5，2026-09-06），由 T247a／T247b 釘住。** / Status: fixed, pinned by T247a/T247b.
 
 ```sh
 printf '| pkg | version |\n|---|---|\n| zlib | 1.3.2 |\n| zstd | 1.5.6 |\n' > pure.md

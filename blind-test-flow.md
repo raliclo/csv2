@@ -155,6 +155,36 @@ which the round never reached.
 而當一項宣稱是對的時，它往往比回報的更對：第 78 回合說 `-md` 把 CR 變成了 LF；實際去量，發現
 CRLF 也活不下來，而那是那個回合沒有走到的。
 
+### 8b. A task that EDITS a file must checksum it, because no stream will tell you
+
+Round 79's only real defect was invisible in everything a caller normally
+reads: `--dry-run` with `-md` exited 0, wrote zero bytes to stdout, zero bytes
+to stderr, and modified the file. The round found it because it took a sha256
+before and after; nothing else in its transcript would have. A round that
+judged that task by exit status and output would have reported "worked".
+
+So: every task in a brief that edits a file gets a before/after checksum, and
+the report states it. Not a diff of the region the task touched -- a checksum
+of the whole file, because the surprise is a write nobody asked about.
+
+The same asymmetry decides where a case asserts first. T246 checks the
+CHECKSUM before it checks the report, because a case checking only the report
+would have started passing the moment the report was added while the write
+went on happening underneath it.
+
+### 8b. 一個「會編輯檔案」的任務必須取校驗和，因為沒有任何一條串流會告訴你
+
+第 79 回合唯一一個真正的缺陷，在呼叫端平常會讀的每一樣東西裡都是隱形的：`--dry-run` 搭配
+`-md` 以 0 結束、stdout 零位元組、stderr 零位元組，而檔案被改了。那個回合能發現它，是因為它
+在前後各取了一次 sha256；它的逐字稿裡沒有別的東西看得到。一個用退出碼與輸出去判斷那個任務的
+回合，會回報「成功」。
+
+因此：brief 裡每一個會編輯檔案的任務，都要取前後校驗和，並在報告中寫出來。不是「任務碰到的
+那個區域的 diff」——是**整個檔案**的校驗和，因為意外的正是那次沒有人問起的寫入。
+
+同一個不對稱決定了一個案例先斷言什麼。T246 先檢查**校驗和**、再檢查報告，因為一個只檢查報告
+的案例，會在報告被加上去的那一刻開始通過，而底下那次寫入照樣繼續發生。
+
 ### 9. Write it down BEFORE fixing it
 
 Every reproduced finding goes into [`todo/known-defects.md`](./todo/known-defects.md)
