@@ -584,7 +584,27 @@ csv2: 2026-09-08T01:17:16.212+08:00 DEBUG metrics: read_bytes=65536 file_bytes=7
 併用會以「兩者互相矛盾」被拒絕。`--no-index` 同時停用讀取與寫入 sidecar；「寫入」那一半只對上面
 那兩個動詞有意義。
 
-在格式與門檻允許時，`-contains` 可使用平行搜尋，輸出與單執行緒路徑逐位元相同。
+`-contains` 可以使用平行搜尋，而且**只有** `-contains`——一般讀取**永遠不會**平行，不論檔案多大。
+輸出與單執行緒路徑逐位元相同。直到 2026-09-08 之前，上面那兩列的標籤是「完整讀取」，那邀請讀者去
+期待 `-r` 會有那個加速；它們量的是一次掃遍全檔的**搜尋**。
+
+底下每一條都必須成立，平行路徑才會啟用；而 `-debug` 會指名第一個不成立的：
+
+| 條件 | 註 |
+|---|---|
+| 動詞是 `-contains` | 而且不是 `--filter`、`-A`／`-B`／`-C` 或 `--search-*` 範圍——那些每一個都會強制單執行緒 |
+| 具名檔案，不是 stdin | 那個檔案必須可 seek |
+| `.csv` 或 `.csv2` | 無副檔名的檔案與 `.md` 被排除；在 2026-09-08 之前強迫它們走上去會當機 |
+| `.csv` 需要一個 `.index` | 「一筆一行」必須被**證明**，而只有建出來的索引能證明它——因此 `--no-index` 同樣會關掉 `.csv` 的平行 |
+| 至少 `CSV2_PARALLEL_MIN_BYTES` | 邊界值算符合 |
+| 不只一個核心 | |
+
+```text
+$ csv2 -contains x -debug -i data.csv 2>&1 >/dev/null | grep single-threaded
+csv2: 2026-09-08T02:00:12.643+08:00 DEBUG single-threaded: .csv with no index proving one record per line; build one with --build-index
+```
+
+`CSV2_PARALLEL_MAX_BYTES` 限制「同時持有在手上的量」，它在底下那張表裡。
 
 測試與調校使用的環境變數：
 
@@ -593,6 +613,7 @@ csv2: 2026-09-08T01:17:16.212+08:00 DEBUG metrics: read_bytes=65536 file_bytes=7
 | `CSV2_INDEX_MIN_BYTES` | 16 MiB | **自動**建立 sidecar 的最小檔案大小；`--build-index` 不理會它 |
 | `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | 平行搜尋的最小檔案大小 |
 | `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | 搜尋區塊大小 |
+| `CSV2_PARALLEL_MAX_BYTES` | 1 GiB | 平行搜尋同時持有的檔案量上限 |
 | `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `--pretty` 可以持有的「**資料儲存格**已跳脫位元組」上限 |
 | `CSV2_MD_MAX_BYTES` | 16 MiB | Markdown **輸入檔的原始位元組**上限 |
 | `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | `-tail` 與上下文緩衝上限 |
@@ -617,8 +638,8 @@ csv2: 2026-09-08T01:17:16.212+08:00 DEBUG metrics: read_bytes=65536 file_bytes=7
 
 | 量測項目 | macOS arm64<br>2026-08-17 | Windows x86_64<br>2026-08-27 | Linux aarch64 guest<br>2026-08-30 |
 |---|---:|---:|---:|
-| 完整讀取，單執行緒 | 556,000 µs | 2,512,000 µs | 93,000 µs |
-| 完整讀取，平行 | 203,000 µs | 839,000 µs | 101,000 µs |
+| 掃遍全檔的搜尋，單執行緒 | 556,000 µs | 2,512,000 µs | 93,000 µs |
+| 掃遍全檔的搜尋，平行 | 203,000 µs | 839,000 µs | 101,000 µs |
 | 小型耐久編輯 | 19,200 µs | 81,500 µs | 10,600 µs |
 | 整檔重寫 | 655,000 µs | 2,444,000 µs | 192,000 µs |
 

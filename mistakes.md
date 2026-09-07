@@ -193,6 +193,23 @@ asserted the token `WARN`, which was a cheap way to detect that a warning happen
 nothing its own title claimed. Pin the whole line to pin a shape; pin the content to pin a
 message; do not half-do both.
 
+**2026-09-08，第十六次：`$?` 又一次不是我以為的那個指令的。** 追第 95 回合那個當機時，我寫了
+`"$C" ... 2>&1 | LC_ALL=C cut -c1-100` 然後 `echo "  rc=$?"`，得到 rc=0，於是一度以為當機已經修好。
+**那是 `cut` 的退出碼。** 分開重測是 133。
+
+這是同一條的第四種機制（管線、`| head`、參數列裡的命令替換，現在是 `| cut`），而它出現在
+**我剛剛才在同一個 session 裡記過這條規則之後**。判準沒有變，變的是我沒有套用它：**要判斷一個指令的
+成敗，`$?` 必須是它之後執行的第一件事。**
+
+**同一天的另一件**：我把 `CSV2_PARALLEL_MAX_BYTES` 的預設值寫成 64 MiB 放進 README，那是一個
+**我沒有量過的數字**。去看程式碼是 `1 << 30`，也就是 1 GiB。那是 mistakes 4.7（「推廣一個觀察，
+與量測那個推廣，是兩件事」）的近親：**寫下一個值，與查證那個值，是兩件事**——而查證只需要一次 grep。
+
+Sixteenth, and the fourth mechanism for one rule: a pipeline into `cut` gave `cut`'s status and
+I briefly believed a crash was fixed. Separately the same day I wrote a default value into the
+README from memory -- 64 MiB for a knob whose default is 1 GiB -- which one grep would have
+caught. Writing a value and checking it are two acts.
+
 ### 共同形狀
 
 **測試碰到的是環境，不是被測物。** 三次都一樣：程式在各平台行為相同，不同的是量尺。

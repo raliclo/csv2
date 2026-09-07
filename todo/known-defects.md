@@ -10975,3 +10975,87 @@ T256e 用的是**子字串**比對——`== *'index hit'*` 對兩種形式都成
 一個 append 撞上一次就地改寫時，會**靜默地**遺失，rc=0、兩個行程的 stderr 都是空的、紀錄數不變。
 
 那句話把「append」挖成例外，而它該挖的是「**append 對 append**」。
+
+---
+
+# 第 95 回合（2026-09-08，平行搜尋）—— **這一系列第一個當機**
+
+## OF. `-contains` 在「有索引的逐行模式檔案」上以 SIGTRAP 死亡（程式缺陷）
+
+**狀態：已修（2026-09-08）。** 根源不在那個切分器，在呼叫點的 `Format.from(path: p) ?? .csv`——`Format.from` 只為兩個**會宣告的**副檔名作答、其餘回傳 nil，而把那個 nil 預設成 `.csv`，**是一句關於「無副檔名的檔案是什麼」的假話**。改為 `?? .lines`（四處），並在 `parallelDeclineReason` 裡為 `.lines` 與 `.md` 各加一條指名的婉拒。T267a 一次斷言四種格式，因為那個缺陷就是「條件從未指名的那兩種」。
+
+```sh
+printf 'alpha\nbravo\ncharlie\n' > lines.txt          # 20 bytes，無宣告性副檔名
+CSV2_INDEX_MIN_BYTES=0 csv2 --build-index -i lines.txt   # 成功：index built: 3 records
+CSV2_INDEX_MIN_BYTES=0 CSV2_PARALLEL_MIN_BYTES=0 csv2 -contains alpha -i lines.txt
+# rc=133 (128+5 = SIGTRAP)   stdout=0 bytes   stderr=0 bytes   三次全中
+```
+
+**這是這份 brief 所描述的最壞那一種失敗的反面**：不是一個謊稱自己成功的指令，而是一個**一句話都
+不說就死掉**的指令。
+
+而且整條路都是**被記載的指令**走出來的：`--build-index` 接受逐行模式的檔案，並回報成功。
+
+## OG. 有索引的 `.md` 會以一則自相矛盾的訊息失敗（程式缺陷）
+
+**狀態：已修（2026-09-08）——與 OF 同一個修正。判斷用的是**副檔名**而不是 `format`，因為 `Format` 裡沒有 `.md`：一個 Markdown 輸入在任何讀取器看到它之前就被翻譯成 `.csv`／`.csv2`，而 `o.input` 仍指著那個 `.md`——**那道縫正是平行路徑讀到原始表格的由來**。
+
+```sh
+printf '| p | v |\n|---|---|\n| a | 1 |\n' > t.md
+csv2 -contains a --md-table 1 -i t.md                    # 1:1  p  a     ← 正常
+CSV2_INDEX_MIN_BYTES=0 csv2 --build-index -i t.md
+CSV2_INDEX_MIN_BYTES=0 CSV2_PARALLEL_MIN_BYTES=0 csv2 -contains a --md-table 1 -i t.md
+# csv2: record 2 (line 2) is a Markdown separator row and has one field, so this is -md
+#       output rather than CSV. Name it with a .md suffix ...
+```
+
+**它叫你把檔案改名成它已經有的那個副檔名。** 加上一個索引，就把一個能用的 `-contains` 變成了 rc=1。
+
+起因：平行那條路解析的是**原始位元組**，而不是先經過 `MarkdownIn.translate`。
+
+**這與第 79 回合的 LL 是同一個形狀**——那裡是 `-update-where` 的預掃描用 `ByteSource(path:)` 直接
+開檔、繞過了 `openInput`。同一個不變量，第二個地方破掉。
+
+## OH. 「Full read, parallel」那一列描述了一件不存在的事（文件寫錯）
+
+**狀態：已修（2026-09-08）——查了量測腳本：那兩列跑的是 `-contains 'ZZ_NO_SUCH_STRING_ZZ'`，一次掃遍全檔的**搜尋**。標籤改為「Whole-file search」，並明說一般讀取永遠不會平行。**
+
+量測表裡有一列「完整讀取，平行」，而 `-r -debug` 一字不差地說：
+`parallelism applies to -contains only`。**那一列邀請讀者去期待一個不可能發生的 2.7 倍加速。**
+
+## OI. 平行路徑的先決條件，最重要的那一條完全沒有記載
+
+**狀態：已記載（2026-09-08）——加了一張「六條全部要成立」的表（動詞、具名檔案、格式、`.csv` 需要索引、大小門檻、核心數），附上 `-debug` 的真實輸出，並把 `CSV2_PARALLEL_MAX_BYTES` 補進環境變數表。**寫它的預設值時我先寫了一個沒有量過的 64 MiB，查程式碼才發現是 1 GiB。**
+
+- **一個 `.csv` 沒有 `.index` sidecar 就永遠不會平行搜尋**，不論多大。**那是任何想用到這個功能的人
+  最需要的一件事**，而它不在任何地方——回報者是從一個 `-debug` 字串裡拿到的。
+- **`-debug` 會回報平行與否，這件事沒有被提過。** 那一頁的兩個 `-debug` 範例只涵蓋索引命中與
+  `metrics:`。**任務 1 從 README 本身無法回答。**
+- **`--filter`、`-A`／`-B`／`-C`、以及有範圍限定的搜尋，會靜默地強制單執行緒。** 未提及。
+  這是一個活的陷阱：`--search-column license` 看起來像最佳化，而它讓你失去平行路徑。
+- **`--no-index` 會關掉 `.csv` 的平行搜尋。** 而我在第 84 回合寫的那句「**寫入**那一半只對上面那兩個
+  動詞有意義」，**主動把讀者從真相引開**——真正靠它的是**讀取**那一半。
+- **`CSV2_PARALLEL_MAX_BYTES` 不在環境變數表裡**，而它在兩節之後的量測表裡被當成欄標題用。
+  它是真的、也有效。
+- **「format」從未被列舉**：`.csv2` 可以、`.csv` 有條件、逐行模式與 `.md` 不行——而**後兩者被強迫走上去
+  就會當掉或失敗**（見 OF、OG）。
+
+## OJ. 兩則診斷訊息說了假話
+
+**狀態：已修（2026-09-08）——`.txt` 那則隨 OF 一起修好；`-A/-B/-C` 那則是把上下文的判斷移到 `--filter` 之前，因為前者在內部隱含後者。T267b／T267c 釘住兩者。**
+
+- 一個 `.txt` 回報 `single-threaded: .csv with no index…`，而兩行之後同一次執行回報 `format=lines`。
+- `-C 1` 與 `-A 2` 回報 `single-threaded: --filter`，而 `--filter` 從來沒有被給過。
+
+**在這一輪裡，那些字串是回報者唯一的真相來源，而其中兩則是假的。**
+
+## 附記：回報者查證了一件事，而結論是「文件對、程式的訊息太嚇人」
+
+平行路徑的 `-debug` 說它「信任」索引，而若檔案在相同大小與 mtime 下被改動，紀錄號「將會是錯的」。
+回報者把一個 28.5 MB 的檔案在**位元組數不變**的情況下竄改、用 `os.utime` 還原 mtime，然後搜尋：
+
+**索引帶有內容戳記，竄改被抓到，索引被丟棄，搜尋退回單執行緒，而答案與 `--no-index` 完全一致。**
+
+> **README 是對的，而程式自己的 `-debug` 訊息比事實更嚇人。**
+
+（那個丟棄仍然是靜默的：沒有 `-debug` 時 stderr 是 0 bytes——那是第 84 回合 MF 已經記載的。）

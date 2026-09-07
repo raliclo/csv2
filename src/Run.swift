@@ -792,13 +792,36 @@ func runSelect(_ o: Options) throws {
     // never ran" precisely when the output is identical.
     // 一律說出走的是哪一條路——包括走的是普通那一條時。只回報「有趣的那一種」會讓沉默變得
     // 有歧義；而「平行產生了相同的輸出」與「平行根本沒跑」，恰恰在輸出相同時無法區分。
-    if let p = o.input, let why = parallelDeclineReason(o, format: Format.from(path: p) ?? .csv) {
+    // `?? .lines`, not `?? .csv`. `Format.from(path:)` answers only for the two
+    // DECLARING suffixes and returns nil for everything else -- and everything
+    // else is read line by line. Defaulting to `.csv` told the parallel path
+    // that a `.txt` was a CSV, so a suffix-less file with an index reached a
+    // splitter built for CSV records and died on SIGTRAP with both streams
+    // empty; the format guard added inside parallelDeclineReason could never
+    // fire from here, because the wrong format arrived before it. OF.
+    //
+    // The two `checkTornAppend` calls below take the same default and are
+    // provably unaffected -- that function returns immediately unless the
+    // format is `.csv2` -- but they are changed with the others, because the
+    // default was not a harmless shorthand: it was a false statement about
+    // what a suffix-less file is.
+    //
+    // `?? .lines`，不是 `?? .csv`。`Format.from(path:)` 只為那兩個**會宣告的**副檔名作答，其餘一律
+    // 回傳 nil——而那個「其餘」是逐行讀的。把預設寫成 `.csv`，等於告訴平行路徑「一個 .txt 是 CSV」，
+    // 於是一個有索引、無宣告副檔名的檔案抵達了「為 CSV 紀錄而建的切分器」，並以 SIGTRAP 死去而
+    // 兩條串流全空；而加在 parallelDeclineReason 裡面的那道格式守衛，從這裡永遠開不了火
+    // ——因為錯的格式在它之前就已經送到了。OF。
+    //
+    // 底下兩個 `checkTornAppend` 用的是同一個預設，而且可證明不受影響（那個函式在格式不是 `.csv2`
+    // 時立刻返回）；但它們與其他兩處一起改，因為那個預設不是一個無害的簡寫：**它是一句關於
+    // 「一個無宣告副檔名的檔案是什麼」的假話。**
+    if let p = o.input, let why = parallelDeclineReason(o, format: Format.from(path: p) ?? .lines) {
         Logger.shared.debug("single-threaded: \(why)")
     } else if o.input == nil {
         Logger.shared.debug("single-threaded: stdin")
     }
-    if let p = o.input, canRunParallelSearch(o, format: Format.from(path: p) ?? .csv) {
-        try checkTornAppend(path: p, format: Format.from(path: p) ?? .csv,
+    if let p = o.input, canRunParallelSearch(o, format: Format.from(path: p) ?? .lines) {
+        try checkTornAppend(path: p, format: Format.from(path: p) ?? .lines,
                             truncatePartial: o.truncatePartial)
         do {
             try runParallelSearch(o)
@@ -828,7 +851,7 @@ func runSelect(_ o: Options) throws {
         }
     }
     if let p = o.input {
-        try checkTornAppend(path: p, format: Format.from(path: p) ?? .csv,
+        try checkTornAppend(path: p, format: Format.from(path: p) ?? .lines,
                             truncatePartial: o.truncatePartial)
     }
 

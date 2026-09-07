@@ -733,8 +733,31 @@ heuristic — and combining it with `--no-index` is refused as a contradiction.
 `--no-index` disables both reading and writing the sidecar; the writing half
 matters only for the two verbs above.
 
-`-contains` can use parallel search when the format and thresholds permit it;
-output is byte-identical to the single-threaded path.
+`-contains` can use parallel search, and **only** `-contains` — a plain read is
+never parallel, whatever the file's size. Output is byte-identical to the
+single-threaded path. Until 2026-09-08 the two rows above were labelled "Full
+read", which invited a reader to expect that speedup from `-r`; they measure a
+search that scans the whole file.
+
+Everything below has to hold for the parallel path to run, and `-debug` names
+the first one that does not:
+
+| Requirement | Note |
+|---|---|
+| the verb is `-contains` | and not `--filter`, `-A`/`-B`/`-C`, or a `--search-*` scope — each of those forces one thread |
+| a named file, not stdin | the file has to be seekable |
+| `.csv` or `.csv2` | a suffix-less file and a `.md` are excluded; forcing them was a crash until 2026-09-08 |
+| a `.csv` needs an `.index` | one record per line has to be PROVEN, and only a built index proves it — so `--no-index` also turns parallelism off on a `.csv` |
+| at least `CSV2_PARALLEL_MIN_BYTES` | inclusive at the boundary |
+| more than one core | |
+
+```text
+$ csv2 -contains x -debug -i data.csv 2>&1 >/dev/null | grep single-threaded
+csv2: 2026-09-08T02:00:12.643+08:00 DEBUG single-threaded: .csv with no index proving one record per line; build one with --build-index
+```
+
+`CSV2_PARALLEL_MAX_BYTES` bounds how much is held in flight at once; it is in
+the table below.
 
 Environment variables used for controlled testing and tuning:
 
@@ -743,6 +766,7 @@ Environment variables used for controlled testing and tuning:
 | `CSV2_INDEX_MIN_BYTES` | 16 MiB | minimum file size for AUTOMATIC sidecar creation; `--build-index` ignores it |
 | `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | minimum size for parallel search |
 | `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | search chunk size |
+| `CSV2_PARALLEL_MAX_BYTES` | 1 GiB | how much of the file the parallel search holds in flight at once |
 | `CSV2_PRETTY_MAX_BYTES` | 16 MiB | the DATA CELLS' escaped bytes that `--pretty` may hold |
 | `CSV2_MD_MAX_BYTES` | 16 MiB | the Markdown input FILE's raw bytes |
 | `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | limit for `-tail` and context buffers |
@@ -769,8 +793,8 @@ runs used 200,000 records (25.4 MiB); the Linux guest run used 20,000 records
 
 | Measurement | macOS arm64<br>2026-08-17 | Windows x86_64<br>2026-08-27 | Linux aarch64 guest<br>2026-08-30 |
 |---|---:|---:|---:|
-| Full read, single-threaded | 556,000 µs | 2,512,000 µs | 93,000 µs |
-| Full read, parallel | 203,000 µs | 839,000 µs | 101,000 µs |
+| Whole-file search, single-threaded | 556,000 µs | 2,512,000 µs | 93,000 µs |
+| Whole-file search, parallel | 203,000 µs | 839,000 µs | 101,000 µs |
 | Small durable edit | 19,200 µs | 81,500 µs | 10,600 µs |
 | Full-file rewrite | 655,000 µs | 2,444,000 µs | 192,000 µs |
 

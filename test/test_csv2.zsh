@@ -16079,6 +16079,88 @@ else
     bad "T266e a short final record was accepted (rc=$_t266_short) / 欄位太少的最後一筆被接受了"
 fi
 
+echo "--- T267: the parallel path accepts only what it can split / T267：平行路徑只接受它切得開的東西 ---"
+# OF/OG, the first crash these rounds have found. `Format.from(path:)` answers
+# only for the two DECLARING suffixes and returns nil for everything else, and
+# the call site defaulted that nil to `.csv` -- a false statement about what a
+# suffix-less file is. So a `.txt` with an index reached a splitter built for
+# CSV records:
+#
+#   exit 133 (128+5, SIGTRAP), stdout 0 bytes, stderr 0 bytes, 3/3
+#
+# reached entirely through documented commands, because `--build-index` accepts
+# such a file and reports success. A `.md` took the same road and had its raw
+# table parsed as CSV, refused with a message telling the caller to rename the
+# file to the suffix it already had -- which is LL one layer over: a second
+# reader that did not know a `.md` must be translated first.
+#
+# All four formats are asserted in one loop, because the defect WAS the two the
+# condition never named, and a case covering only `.csv` would have passed
+# throughout.
+#
+# OF／OG，這幾個回合找到的第一個當機。`Format.from(path:)` 只為那兩個**會宣告的**副檔名作答，其餘
+# 回傳 nil，而呼叫點把那個 nil 預設成 `.csv`——**那是一句關於「無副檔名的檔案是什麼」的假話**。
+# 於是一個有索引的 `.txt` 抵達了為 CSV 紀錄而建的切分器：
+#
+#   rc=133（128+5，SIGTRAP）、stdout 0 bytes、stderr 0 bytes、三次全中
+#
+# 而且整條路都走得通**被記載的指令**，因為 `--build-index` 接受這種檔案並回報成功。`.md` 走同一條路，
+# 它的原始表格被當成 CSV 解析，並以「請把檔案改名成它已經有的副檔名」拒絕——那是 LL 高一層：
+# 一個不知道「`.md` 必須先被翻譯」的第二個讀取者。
+#
+# 四種格式在同一個迴圈裡斷言，因為那個缺陷**就是**「那個條件從未指名的兩種」，而一個只涵蓋 `.csv`
+# 的案例自始至終都會通過。
+printf 'alpha\nbravo\ncharlie\n' > "$TMP/t267.txt"
+printf '| p | v |\n|---|---|\n| a | 1 |\n' > "$TMP/t267.md"
+printf 'k,v\na,1\nb,2\n' > "$TMP/t267.csv"
+printf 'k,v\n甲,乙\na,1\n' > "$TMP/t267.csv2"
+for _f in t267.txt t267.md t267.csv t267.csv2; do
+    CSV2_INDEX_MIN_BYTES=0 "$CSV2" --build-index -i "$TMP/$_f" >/dev/null 2>&1
+done
+_t267_bad=()
+for _f in t267.txt t267.md t267.csv t267.csv2; do
+    _extra=""
+    [[ $_f == t267.md ]] && _extra="--md-table 1"
+    CSV2_INDEX_MIN_BYTES=0 CSV2_PARALLEL_MIN_BYTES=0 \
+        "$CSV2" -contains a ${=_extra} -i "$TMP/$_f" >"$TMP/t267.out" 2>"$TMP/t267.err"
+    _t267_rc=$?
+    if (( _t267_rc != 0 )) || [[ ! -s "$TMP/t267.out" ]]; then
+        _t267_bad+=("${_f}:rc=$_t267_rc")
+    fi
+done
+if (( ${#_t267_bad} == 0 )); then
+    ok "T267a every format searches at rc=0 with the parallel threshold at zero / 平行門檻為零時，每一種格式都以 rc=0 搜尋成功"
+else
+    bad "T267a $_t267_bad / 實得如上"
+fi
+
+# And the two excluded formats say WHY they are single-threaded, rather than
+# being silently declined or silently accepted. The reason is the only window a
+# caller has onto which path ran.
+# 而那兩種被排除的格式要說出**為什麼**是單執行緒，而不是被靜默婉拒或靜默接受。那個理由是呼叫端
+# 唯一能看見「走了哪條路」的窗口。
+_t267_why=$(CSV2_INDEX_MIN_BYTES=0 CSV2_PARALLEL_MIN_BYTES=0 \
+    "$CSV2" -contains a -debug -i "$TMP/t267.txt" 2>&1 >/dev/null \
+    | LC_ALL=C grep -o 'single-threaded: .*')
+if [[ $_t267_why == *'line by line'* ]]; then
+    ok "T267b a suffix-less file declines the parallel path by name / 無副檔名的檔案會指名地婉拒平行路徑"
+else
+    bad "T267b got [$_t267_why] / 實得如上"
+fi
+
+# OJ. A decline reason must name what the CALLER typed. `-A`/`-B`/`-C` imply
+# --filter internally, so asking about filter first reported `--filter` to
+# someone who never passed it.
+# OJ。婉拒理由必須指名**呼叫端打了什麼**。`-A`／`-B`／`-C` 在內部隱含 `--filter`，因此先問 filter，
+# 會對一個從未給過它的人回報 `--filter`。
+_t267_ctx=$("$CSV2" -contains a -C 1 -debug -i "$TMP/t267.csv" 2>&1 >/dev/null \
+    | LC_ALL=C grep -o 'single-threaded: .*')
+if [[ $_t267_ctx == *'-A/-B/-C'* ]]; then
+    ok "T267c -C declines as -A/-B/-C, not as --filter / -C 以 -A/-B/-C 的名義婉拒，而不是 --filter"
+else
+    bad "T267c got [$_t267_ctx] / 實得如上"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

@@ -138,9 +138,16 @@ func workerCount() -> Int {
 func parallelDeclineReason(_ o: Options, format: Format) -> String? {
     if o.contains == nil { return "not a search; parallelism applies to -contains only" }
     if o.searchScope != nil { return "a scoped search" }
+    // Context BEFORE filter: `-A`/`-B`/`-C` imply `--filter` internally, so
+    // asking about filter first reported `--filter` to someone who never typed
+    // it. A decline reason is read as "this is what you did"; naming a flag the
+    // caller did not pass sends them to look for it. OJ.
+    // 上下文放在 filter **之前**：`-A`／`-B`／`-C` 在內部隱含了 `--filter`，因此先問 filter，會對一個
+    // 從未打過它的人回報 `--filter`。一則婉拒理由會被讀成「你做了這件事」；指名一個呼叫端沒有給過的
+    // 旗標，只會讓他去找一個不存在的東西。OJ。
+    if o.after != 0 || o.before != 0 { return "-A/-B/-C" }
     if o.filter { return "--filter" }
     if o.markdown { return "-md" }
-    if o.after != 0 || o.before != 0 { return "-A/-B/-C" }
     if o.head != nil || o.tail != nil || o.mid != nil { return "-head/-tail/-mid" }
     if o.encryptCols != nil || o.decryptCols != nil || o.hashCols != nil { return "a transform" }
     if !o.edits.isEmpty { return "an edit" }
@@ -155,6 +162,54 @@ func parallelDeclineReason(_ o: Options, format: Format) -> String? {
     // 前提是一筆一行。`.csv2` 保證了這一點；`.csv` 只有在「由掃描建立的索引這麼說」
     // 時才被信任。
     if format == .csv2 { return nil }
+    // Only .csv and .csv2 have a record structure this path knows how to split.
+    // `.lines` and `.md` fell through to the `.csv` branch below, where an index
+    // saying "no embedded newlines" -- trivially true of a line-mode file -- let
+    // them in, and the path then ran on bytes it was not built for:
+    //
+    //   .lines  SIGTRAP, exit 133, empty stdout, empty stderr, 3/3
+    //   .md     the raw table parsed as CSV, refused with a message telling the
+    //           caller to rename the file to the suffix it already has
+    //
+    // Both were reachable entirely through documented commands, because
+    // `--build-index` accepts these files and reports success. The header of
+    // this file says the acceptance condition is the point; it had two formats
+    // it never named, and silence about a format is not the same as excluding
+    // it. OF, OG.
+    //
+    // The `.md` half is LL one layer over: that was `-update-where`'s pre-scan
+    // opening the raw file instead of going back through openInput, and this is
+    // the parallel path doing the same. Twice now, the thing that breaks is a
+    // second reader that does not know a `.md` must be translated first.
+    //
+    // 只有 .csv 與 .csv2 具備這條路徑知道怎麼切分的紀錄結構。`.lines` 與 `.md` 原本會落進底下
+    // `.csv` 那一支，而一個說「沒有內嵌換行」的索引——那對逐行模式的檔案是自明地成立的——就把它們
+    // 放了進去，接著這條路徑便在它並非為之而建的位元組上跑起來：
+    //
+    //   .lines  SIGTRAP，rc=133，stdout 空、stderr 空，三次全中
+    //   .md     原始表格被當成 CSV 解析，並以一則「請把檔案改名成它已經有的副檔名」的訊息拒絕
+    //
+    // 兩者都完全走得通**被記載的指令**，因為 `--build-index` 接受這些檔案並回報成功。
+    // 這個檔案的標頭寫著「接受條件才是重點」；而它有兩種格式從未被指名，
+    // **對一個格式保持沉默，與把它排除在外，不是同一件事。** OF、OG。
+    //
+    // `.md` 那一半是 LL 高一層：那一次是 `-update-where` 的預掃描直接開原始檔、沒有再走一次
+    // openInput，而這一次是平行路徑做了同樣的事。**兩次了，壞掉的都是「第二個讀取者不知道 .md
+    // 必須先被翻譯」。**
+    if format == .lines {
+        return "a suffix-less file is read line by line, and this path splits CSV records"
+    }
+    // Tested on the SUFFIX, not on `format`, because `Format` has no `.md`: a
+    // Markdown input is translated into `.csv` or `.csv2` before any reader
+    // sees it, so by the time this function runs the format says `csv` while
+    // `o.input` still names the `.md`. That gap is exactly how the parallel
+    // path came to read the raw table.
+    // 判斷的是**副檔名**，不是 `format`——因為 `Format` 裡沒有 `.md`：一個 Markdown 輸入在任何讀取器
+    // 看到它之前，就已經被翻譯成 `.csv` 或 `.csv2`，因此執行到這個函式時，format 說的是 `csv`，
+    // 而 `o.input` 指的仍是那個 `.md`。**那道縫，正是平行路徑讀到原始表格的由來。**
+    if path.lowercased().hasSuffix(".md") {
+        return "a .md is translated to records before it is read, and this path reads bytes"
+    }
     // --no-index says "never read or write a sidecar", and this was the one
     // place that read one anyway. It did not print, return or write anything
     // from the index -- it only let the index decide which path ran -- which
