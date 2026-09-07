@@ -173,6 +173,26 @@ comparison was wrong. The basename is the part both forms share. And I asked the
 actually printed instead of assuming the cause -- which turned a guess into a line I could put
 in the comment.
 
+**2026-09-08：一個用子字串比對的案例，釘住的是內容、不是格式。** 我在第 84 回合把 `-debug` 的輸出
+寫進 README，寫成裸的 `index hit` 與 `metrics: ...`。真實輸出是
+`csv2: 2026-09-08T01:17:16.211+08:00 DEBUG index hit: ...`——帶前綴、時間戳與等級。
+
+**那與我在第 88 回合修掉的 MV 是同一個毛病**：一段假的主控台轉錄。而它活過了 T256e，因為那個案例
+寫的是 `[[ $x == *'index hit'* ]]`——**子字串比對對兩種形式都成立**。
+
+同一天同一件事的第二面：T170b 斷言那則警告含有 `WARN`，而那只是「偵測到有警告」的廉價手段；它的
+標題說的是「會就它**丟掉的東西**發出警告」，而它對「丟掉的東西」什麼也沒檢查。格式一改它就壞了。
+
+**判準：一個案例若要釘住「輸出長什麼樣」，就必須比對整行；若要釘住「輸出說了什麼」，就比對內容
+而不要比對外包裝。** 兩者混在一起時——像 T256e 那樣——它既不保護格式，也不保護內容。
+
+A case matching a substring pins the content, not the shape. My `-debug` example was a
+transcript that never happened -- the same fault as MV, corrected two rounds earlier -- and it
+survived because the case matched `*'index hit'*`, true of both forms. The same day, T170b
+asserted the token `WARN`, which was a cheap way to detect that a warning happened and checked
+nothing its own title claimed. Pin the whole line to pin a shape; pin the content to pin a
+message; do not half-do both.
+
 ### 共同形狀
 
 **測試碰到的是環境，不是被測物。** 三次都一樣：程式在各平台行為相同，不同的是量尺。

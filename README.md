@@ -138,7 +138,10 @@ Available reading options:
 -count             print how many data records the file has
 ```
 
-`-count` prints one line: the number of data records. It is O(1) when a usable
+`-count` prints one line: the number of data records. It counts them without
+checking that each has the file's field width, so it can answer confidently for
+a file `-r` refuses — a ragged record at 15000 of 20000 gives `20000` at exit 0.
+It does check quote termination, so a file torn mid-quote is refused. It is O(1) when a usable
 `.index` sidecar is beside the file and O(n) otherwise, and it writes no
 sidecar either way. A file with only a header row counts 0, which is not an
 error. There is deliberately no `total` in `--json`'s meta: that number is only
@@ -475,8 +478,20 @@ process is interrupted after the write begins, the file may contain a partial
 record; the all-or-nothing preservation guarantee for ordinary in-place edits
 does not apply to this append-only path.
 
-`--truncate-partial` discards a trailing incomplete record during a rewrite.
-It is refused with `-append`, which cannot remove existing bytes.
+`--truncate-partial` discards a trailing incomplete record — which means one
+specific thing: the file ends INSIDE an unclosed quote. A file whose last line
+merely has too few fields is a different fault and is refused, not truncated. It
+works on a plain read as well as a rewrite, which is what you want when holding
+a torn file, and is refused with `-append`, which cannot remove existing bytes.
+When it discards, it says so on stderr AT EXIT 0:
+
+```text
+csv2: --truncate-partial discarded 12 bytes: an unterminated record beginning at byte 4
+```
+
+**stderr is not always empty on a successful run.** Warnings are one line,
+English only, and do not change the exit status; `-add-column` without its
+Traditional Chinese title emits one too. That is the whole list.
 
 `-update-where OLD VALUE` requires exactly one data cell to equal `OLD` in
 full. Zero matches, multiple matches, or overlapping repeated updates are
@@ -525,7 +540,11 @@ line is true of the data file and false of the file it is written in. Until
 
 Other edit verbs are refused rather than returning empty output that could be
 mistaken for “no changes”. `--backup` with `--in-place` saves the original
-beside the input as `INPUT.bak` and refuses to overwrite an existing backup.
+beside the input as `INPUT.bak` and refuses to overwrite an existing backup — so
+it works once per path, and a second backed-up edit needs the `.bak` moved
+aside first. A FAILED edit removes the backup it had just taken, since the
+input is unchanged and a leftover `.bak` would block every later use; before
+2026-09-08 one failure burned that single use permanently.
 
 **An edit cannot take `--json` at all**, so an edit's refusal is never a JSON
 error object: adding `--json` to an edit replaces whatever would have been
@@ -679,10 +698,15 @@ mtime and you will not be told. Reads stay right and get much slower. `-debug`
 is the only window onto this and prints `index hit` or the reason it did not:
 
 ```text
-$ csv2 -mid 500,500 -debug -i data.csv
-index hit
-metrics: read_bytes=65536 file_bytes=2808905 peak_rss_bytes=9404416
+$ csv2 -mid 500,500 -debug -i data.csv 2>&1 >/dev/null
+csv2: 2026-09-08T01:17:16.211+08:00 DEBUG index hit: record 500 via grid point 257 at byte 6297
+csv2: 2026-09-08T01:17:16.212+08:00 DEBUG metrics: read_bytes=65536 file_bytes=76898 peak_rss_bytes=9404416
 ```
+
+Every `-debug` line is prefixed, timestamped and levelled, and goes to stderr.
+Until 2026-09-08 this block showed the messages bare, which was a transcript
+that never happened — the same fault as the `-contains --json` example corrected
+on 2026-09-07, and it survived because the case pinning it matched a substring.
 
 `read_bytes` against `file_bytes` is the evidence that a window was seeked to
 rather than scanned for; a discarded index shows the whole file read.
@@ -789,7 +813,7 @@ re-reading them.
 | skipping `#` comment lines | nothing does, and deliberately: a `#` is data and `#id` is a legal column name, so skipping one would mean guessing which lines are data. The refusal names the `#` |
 | a header-only read | `csv2 -head 1 --json -i f.csv \| head -1` — the meta line carries `header`; no verb returns the names alone |
 | converting between `.csv` and `.csv2` | refused on purpose. To do it by hand: write the records to a SUFFIX-LESS path, author the second header row yourself, then read that back — csv2 will not invent a header row it was not given |
-| safe concurrent writers | serialise them yourself; two writers silently lose one edit. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one finishing SECOND warns it could not update the index |
+| safe concurrent writers, EXCEPT append against append | serialise them yourself; two writers silently lose one edit. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one finishing SECOND warns it could not update the index |
 
 One thing this table used to say and no longer does: **editing a Markdown
 table** is supported, and it is in the examples below.

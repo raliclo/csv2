@@ -9894,8 +9894,21 @@ assert_fails "T170a -insert checks the field count too / -insert 同樣會檢查
     "$CSV2" -insert 2 'x,y' -i "$TMP/t170.csv" -o "$TMP/t170out.csv"
 printf 'a,b\n1,2\n3,"unterminated' > "$TMP/t170p.csv"
 _t170w=$("$CSV2" -r -t --truncate-partial -i "$TMP/t170p.csv" -o "$TMP/t170clean.csv" 2>&1)
-assert_contains "$_t170w" "WARN" \
+# Asserts WHAT it discarded, which is what this case's own title claims. It
+# used to look for the token `WARN`, which was a cheap way to detect that a
+# warning happened and checked nothing about its content -- and it broke on
+# 2026-09-08 when the level stopped being printed to stderr, because the log
+# FILE's line and the stderr line had been the same string. That change was
+# right (the `-add-column` warning never carried a level), and this assertion
+# was measuring the wrapper rather than the message.
+# 斷言的是它**丟掉了什麼**，而那正是這個案例自己的標題所宣稱的。它先前找的是 `WARN` 這個 token
+# ——那是「偵測有警告發生」的廉價手段，對內容什麼也沒檢查——而它在 2026-09-08 壞掉，因為那個等級
+# 不再被印到 stderr：log **檔案**那一行與 stderr 那一行原本是同一個字串。那次改動是對的
+# （`-add-column` 的警告從來就沒有帶等級），而這個斷言量的是外包裝、不是訊息。
+assert_contains "$_t170w" "discarded" \
     "T170b --truncate-partial warns about what it discarded / --truncate-partial 會就它丟掉的東西發出警告"
+assert_contains "$_t170w" "unterminated record" \
+    "T170b2 and names why it was discarded / 並說出它為什麼被丟掉"
 
 # ---------------------------------------------------------------------
 # T171 -- --no-index gives up the parallel path on a .csv, and says so.
@@ -15971,6 +15984,99 @@ if [[ $_t265_dash == 1 ]] && LC_ALL=C grep -q 'no such file' "$TMP/t265d.err"; t
     ok "T265d --value-file - is a file named -, not stdin / --value-file - 是一個叫 - 的檔案，不是 stdin"
 else
     bad "T265d rc=$_t265_dash err=[$(tr '\n' '|' < "$TMP/t265d.err")] / 實得如上"
+fi
+
+echo "--- T266: what a failed edit leaves behind, and how a warning looks / T266：一次失敗的編輯留下什麼，以及一則警告長什麼樣 ---"
+# OB. The backup is written BEFORE the edit -- it has to be -- but a failed edit
+# leaves the input byte-identical, so the `.bak` then held a copy of a file
+# nothing touched, and makeInPlaceBackup refuses to overwrite one. ONE failure
+# permanently blocked every future --backup edit on that path: the flag worked
+# once per file and a failure burned it.
+#
+# Four states are asserted, because a fix in either direction passes two of
+# them: always removing the backup would pass "failure leaves none" and lose
+# the successful case, and never removing it would pass "success keeps one".
+#
+# OB。備份寫在編輯**之前**——那是必然的——但一次失敗的編輯會讓輸入逐位元不變，於是那個 `.bak` 保存的
+# 是一份沒有東西動過的檔案，而 makeInPlaceBackup 拒絕覆寫既有的備份。**一次失敗就永久封死了那個
+# 路徑上未來的每一次 --backup 編輯**：這個旗標每個檔案只能用一次，而一次失敗把它燒掉了。
+#
+# 四種狀態都要斷言，因為任一個方向的修法都會通過其中兩種：「一律移除」會通過「失敗不留」而弄丟成功
+# 的情況，「一律不移除」會通過「成功保留」。
+printf 'a,b\n1,2\n' > "$TMP/t266.csv"
+"$CSV2" -update 99:1 'X' -i "$TMP/t266.csv" --in-place --backup >/dev/null 2>&1
+_t266_failed_rc=$?
+_t266_after_fail=$([[ -f "$TMP/t266.csv.bak" ]] && echo present || echo absent)
+"$CSV2" -update 1:1 'X' -i "$TMP/t266.csv" --in-place --backup >/dev/null 2>&1
+_t266_ok_rc=$?
+_t266_after_ok=$([[ -f "$TMP/t266.csv.bak" ]] && echo present || echo absent)
+"$CSV2" -update 1:2 'Y' -i "$TMP/t266.csv" --in-place --backup >/dev/null 2>&1
+_t266_second_rc=$?
+if [[ $_t266_failed_rc == 1 && $_t266_after_fail == absent \
+      && $_t266_ok_rc == 0 && $_t266_after_ok == present && $_t266_second_rc == 1 ]]; then
+    ok "T266a a failed edit leaves no .bak, a successful one leaves exactly one / 失敗的編輯不留 .bak，成功的留下恰好一個"
+else
+    bad "T266a fail=$_t266_failed_rc/$_t266_after_fail ok=$_t266_ok_rc/$_t266_after_ok second=$_t266_second_rc / 實得如上"
+fi
+
+# And the backup must hold the PRE-edit bytes, not the post-edit ones. A fix
+# that moved the backup after the write would satisfy T266a completely.
+# 而那個備份必須保存**編輯前**的位元組，不是編輯後的。一個「把備份移到寫入之後」的修法，會完全
+# 滿足 T266a。
+if [[ $(cat "$TMP/t266.csv.bak") == $'a,b\n1,2' ]]; then
+    ok "T266b and the backup holds the bytes from before the edit / 而那個備份保存的是編輯之前的位元組"
+else
+    bad "T266b bak=[$(tr '\n' '|' < "$TMP/t266.csv.bak")] / 實得如上"
+fi
+
+# OA. Two warnings in one program had two shapes: --truncate-partial printed an
+# audit-log line -- ISO timestamp, WARN level -- on a run where -log was never
+# passed, while -add-column two files away printed plainly. The log FILE's line
+# and the stderr line were the same string.
+#
+# Both are asserted, because making them agree is the fix and either one alone
+# would pass on a program that changed the wrong one.
+#
+# OA。同一支程式裡的兩則警告有兩種形狀：`--truncate-partial` 在一次「從未給過 -log」的執行上印出了
+# 一行稽核紀錄——ISO 時間戳、WARN 等級——而兩個檔案之外的 `-add-column` 印得乾乾淨淨。log **檔案**
+# 那一行與 stderr 那一行，是同一個字串。
+#
+# 兩者都要斷言，因為「讓它們一致」才是那個修正，而只斷言其中一個，會在「改錯了那一個」的程式上通過。
+printf 'a,b\n1,"unclosed\n' > "$TMP/t266torn.csv"
+"$CSV2" -r --truncate-partial -i "$TMP/t266torn.csv" >/dev/null 2>"$TMP/t266w1.err"
+_t266_torn_rc=$?
+printf 'a,b\n甲,乙\n1,2\n' > "$TMP/t266.csv2"
+"$CSV2" -add-column 2 'note' 'x' -i "$TMP/t266.csv2" --in-place >/dev/null 2>"$TMP/t266w2.err"
+_t266_w1=$(LC_ALL=C head -1 "$TMP/t266w1.err")
+_t266_w2=$(LC_ALL=C head -1 "$TMP/t266w2.err")
+if [[ $_t266_torn_rc == 0 && $_t266_w1 == 'csv2: --truncate-partial'* && $_t266_w2 == 'csv2: -add-column'* ]]; then
+    ok "T266c both warnings use csv2: <text>, and the truncation warns at exit 0 / 兩則警告都用 csv2: <文字>，而截斷是在 rc=0 之下警告"
+else
+    bad "T266c rc=$_t266_torn_rc w1=[${_t266_w1:0:60}] w2=[${_t266_w2:0:60}] / 實得如上"
+fi
+
+# -debug keeps its timestamps: there the ordering and the gaps ARE the
+# information. A fix that stripped them everywhere would pass T266c.
+# `-debug` 保留它的時間戳：在那裡，順序與間隔**本身**就是資訊。一個「到處都拿掉」的修法會通過 T266c。
+_t266_dbg=$("$CSV2" -r -debug -i "$TMP/t266.csv2" 2>&1 >/dev/null | LC_ALL=C head -1)
+if [[ $_t266_dbg == 'csv2: 20'*'INFO'* || $_t266_dbg == 'csv2: 20'*'DEBUG'* ]]; then
+    ok "T266d while -debug lines keep their timestamp and level / 而 -debug 的行仍保留時間戳與等級"
+else
+    bad "T266d got [${_t266_dbg:0:70}] / 實得如上"
+fi
+
+# The torn-file definition: ending inside an unclosed quote is truncatable,
+# a short last record is a different fault and is refused. The page said
+# "incomplete final record" and defined neither.
+# 「破損檔案」的定義：結束在**未關閉的引號裡**是可截斷的，而「最後一筆欄位太少」是**另一種**錯誤、
+# 會被拒絕。那一頁寫的是「結尾不完整的紀錄」，兩者都沒有定義。
+printf 'a,b,c\n1,2,3\n4,5\n' > "$TMP/t266short.csv"
+"$CSV2" -r --truncate-partial -i "$TMP/t266short.csv" >/dev/null 2>&1
+_t266_short=$?
+if [[ $_t266_short == 1 ]]; then
+    ok "T266e a short final record is refused, not truncated / 最後一筆欄位太少會被拒絕，不會被截斷"
+else
+    bad "T266e a short final record was accepted (rc=$_t266_short) / 欄位太少的最後一筆被接受了"
 fi
 
 echo

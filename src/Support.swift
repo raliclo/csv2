@@ -341,7 +341,34 @@ final class Logger: @unchecked Sendable {
             // IS the CSV, and a timestamp in the middle of it is corruption.
             // 診斷訊息走 stderr，絕不走 stdout：使用 `-so` 時輸出就是 CSV，
             // 在其中插入時間戳就是損毀。
-            Platform.writeStderr("csv2: \(line)")
+            //
+            // A WARNING is a message to the person running the command, and it
+            // is written the way every other one is: `csv2: <text>`. It used to
+            // carry the timestamp and the level, because the file's line and
+            // stderr's line were the same string -- so `--truncate-partial` on a
+            // run with no `-log` printed `csv2: 2026-09-08T01:14:06.597+08:00
+            // WARN  ...`, an audit-log entry from a log that was never opened,
+            // while `-add-column`'s warning two files away printed plainly. Two
+            // warnings, one program, two shapes. OA.
+            //
+            // DEBUG and TRACE keep the timestamp: they exist for someone
+            // watching a run happen, where the ordering and the gaps are the
+            // information.
+            //
+            // 一則**警告**是說給「正在下這個指令的人」聽的，因此它的寫法與其他每一則相同：
+            // `csv2: <文字>`。它先前帶著時間戳與等級，因為檔案那一行與 stderr 那一行**是同一個
+            // 字串**——於是一次沒有給 `-log` 的 `--truncate-partial` 印出了
+            // `csv2: 2026-09-08T01:14:06.597+08:00 WARN  ...`，一筆來自「從未被開啟的 log」的稽核
+            // 紀錄；而兩個檔案之外的 `-add-column` 警告卻印得乾乾淨淨。同一支程式、兩則警告、
+            // 兩種形狀。OA。
+            //
+            // DEBUG 與 TRACE 保留時間戳：它們是給「正在看一次執行發生」的人用的，而那裡
+            // 順序與間隔本身就是資訊。
+            if level == .warn {
+                Platform.writeStderr("csv2: \(lineEscape(message()))\n")
+            } else {
+                Platform.writeStderr("csv2: \(line)")
+            }
         }
     }
 

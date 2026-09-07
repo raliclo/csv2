@@ -944,10 +944,41 @@ func runSelect(_ o: Options) throws {
     // `--backup` 被接受、以 0 結束、兩條串流都不印任何東西、覆寫了明文，而旁邊沒有 `.bak`
     // ——**偏偏在那條「原檔一旦失去就無法復原」的路上**，而那正是呼叫端打出這個旗標的理由。
     // 一般編輯自始至終都正確地備份，因此從外面看不出任何異狀。LU。
-    if o.backup, o.inPlace, let path = o.input { try makeInPlaceBackup(path) }
+    var backupToUndo: String?
+    if o.backup, o.inPlace, let path = o.input {
+        try makeInPlaceBackup(path)
+        backupToUndo = path + ".bak"
+    }
     let sink = try makeSink(o)
     var aborted = true
-    defer { if aborted { sink.abort() } }
+    // The backup goes with the sink.
+    //
+    // It is written BEFORE the edit, which it has to be -- it exists to hold
+    // the bytes the edit is about to replace. But a failed edit leaves the
+    // input byte-identical, so the `.bak` then holds a copy of a file nothing
+    // touched, and `makeInPlaceBackup` refuses to overwrite an existing one:
+    // ONE failure permanently blocked every future `--backup` edit on that
+    // path. `--backup` worked exactly once per file and a failure burned it.
+    //
+    // This is the same shape as T28d, which asserts that a failed in-place edit
+    // leaves no temp file beside the input. A stale `.bak` is that debris under
+    // a different name. OB.
+    //
+    // 備份與 sink 同進退。
+    //
+    // 它寫在編輯**之前**，那是必然的——它存在的理由就是保存「那次編輯即將取代的位元組」。但一次
+    // 失敗的編輯會讓輸入逐位元不變，於是那個 `.bak` 保存的是一份「沒有任何東西動過的檔案」的複本；
+    // 而 `makeInPlaceBackup` 拒絕覆寫既有的備份：**一次失敗就永久封死了那個路徑上未來的每一次
+    // `--backup` 編輯**。`--backup` 每個檔案只能用一次，而一次失敗就把它燒掉了。
+    //
+    // 這與 T28d 是同一個形狀——那個案例斷言「一次失敗的就地編輯不會在輸入旁邊留下暫存檔」。
+    // 一個過期的 `.bak` 就是那份殘骸換了個名字。OB。
+    defer {
+        if aborted {
+            sink.abort()
+            if let b = backupToUndo { try? FileManager.default.removeItem(atPath: b) }
+        }
+    }
 
     let needle: [UInt8] = o.contains.map {
         o.normalize ? normalizedBytes([UInt8]($0.utf8)) : [UInt8]($0.utf8)
@@ -1806,10 +1837,41 @@ func runEdit(_ o: Options) throws {
         }
     }
 
-    if o.backup, let path = o.input { try makeInPlaceBackup(path) }
+    var backupToUndo: String?
+    if o.backup, let path = o.input {
+        try makeInPlaceBackup(path)
+        backupToUndo = path + ".bak"
+    }
     let sink = o.dryRun ? ByteSink(stdout: 1 << 16) : try makeSink(o)
     var aborted = true
-    defer { if aborted { sink.abort() } }
+    // The backup goes with the sink.
+    //
+    // It is written BEFORE the edit, which it has to be -- it exists to hold
+    // the bytes the edit is about to replace. But a failed edit leaves the
+    // input byte-identical, so the `.bak` then holds a copy of a file nothing
+    // touched, and `makeInPlaceBackup` refuses to overwrite an existing one:
+    // ONE failure permanently blocked every future `--backup` edit on that
+    // path. `--backup` worked exactly once per file and a failure burned it.
+    //
+    // This is the same shape as T28d, which asserts that a failed in-place edit
+    // leaves no temp file beside the input. A stale `.bak` is that debris under
+    // a different name. OB.
+    //
+    // 備份與 sink 同進退。
+    //
+    // 它寫在編輯**之前**，那是必然的——它存在的理由就是保存「那次編輯即將取代的位元組」。但一次
+    // 失敗的編輯會讓輸入逐位元不變，於是那個 `.bak` 保存的是一份「沒有任何東西動過的檔案」的複本；
+    // 而 `makeInPlaceBackup` 拒絕覆寫既有的備份：**一次失敗就永久封死了那個路徑上未來的每一次
+    // `--backup` 編輯**。`--backup` 每個檔案只能用一次，而一次失敗就把它燒掉了。
+    //
+    // 這與 T28d 是同一個形狀——那個案例斷言「一次失敗的就地編輯不會在輸入旁邊留下暫存檔」。
+    // 一個過期的 `.bak` 就是那份殘骸換了個名字。OB。
+    defer {
+        if aborted {
+            sink.abort()
+            if let b = backupToUndo { try? FileManager.default.removeItem(atPath: b) }
+        }
+    }
 
     var headers: [Record] = []
     // The header as it ARRIVED, kept for resolving column addresses.
