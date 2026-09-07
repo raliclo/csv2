@@ -150,8 +150,22 @@ for run in 1 2 3; do
     d=$(( e - s ))
     (( d < pbest )) && pbest=$d
 done
+# A default of 1 turns a FAILED measurement into a plausible number: if the run
+# did not go parallel there is no worker count to find, and dividing the speedup
+# by 1 reports "1.00x on 1 workers" as though that were the result. Refuse
+# instead. OX -- the same missing assertion that let OW stand for three weeks in
+# the RSS harness next door.
+# 預設 1 會把一次**失敗的量測**變成一個合理的數字：沒走平行時根本沒有工作者數可找，而把加速比
+# 除以 1 會印出「1.00x on 1 workers」，看起來就像那是結果。改成拒絕。OX——正是隔壁那支 RSS
+# harness 讓 OW 站了三個星期的、同一個缺席的斷言。
+if ! grep -qE 'DEBUG parallel: [0-9]+ chunks' $TMP/dbg.txt; then
+    print -u2 -- "the parallel row did not take the parallel path; this measurement would be of something else"
+    print -u2 -- "平行那一列沒有走平行路徑；這次量測會量到別的東西"
+    grep -E 'DEBUG (single-threaded|parallel)' $TMP/dbg.txt | head -2 >&2
+    exit 1
+fi
 workers=$(grep -o '[0-9]* workers' $TMP/dbg.txt | head -1 | awk '{print $1}')
-: ${workers:=1}
+[[ -n $workers ]] || { print -u2 -- "parallel ran but reported no worker count"; exit 1 }
 pmbs=$(( actual / 1048576.0 / pbest ))
 speedup=$(( best / pbest ))
 say "parallel        : $(printf '%.3f' $pbest) s   $(printf '%.0f' $pmbs) MiB/s   speedup $(printf '%.2f' $speedup)x on $workers workers"
