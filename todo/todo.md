@@ -485,3 +485,21 @@ and the ratio is what the entry claimed. Found because a stocktake was told the 
 longer true; the same stocktake found LB still saying an answer had not arrived a day after it
 had. A todo list and a defect list both drift away from the program they describe, nothing
 reports the drift, and the only thing that catches it is measuring again.
+
+## guest 那個節點無法確認任何個別案例 / The guest node cannot confirm any individual case
+
+`sos/test_submodules/run_csv2_test.zsh` 匯出的 report 與 console log **完全沒有逐案例行**——
+連 `T1` 都沒有一行。2026-09-06 為了確認 T249 是否在 guest 內執行而查，才發現這件事。
+
+因此四個節點裡有一個，我們只能靠「總數有沒有照預期移動」來判斷，而那是**代理**，不是量測。
+這次它剛好夠用（1191 → 1194 恰好是 T249a/b/c，而 T55a0 因 busybox 沒有 openssl 而缺席），但
+**一個案例若在 guest 裡安靜地不執行，只有總數會說話**，而總數同時被許多東西影響。
+
+那支腳本在**母專案的樹**底下，不在這裡。依「誰擁有一個目錄，誰就對它有最終判斷」，這一項是
+**要回報給母專案的建議**，不是這裡逕行修改的東西。建議的形狀：把 guest 內 `test_csv2.log` 的
+內容一併帶回 host 端的 report，或至少帶回所有 `FAIL`／`SKIP` 行與案例總數的分項。
+
+The guest harness exports only totals -- no per-case lines at all, not even T1. So on one of
+the four nodes a case that silently stops running is visible only as a moved total, which is a
+proxy rather than a measurement. The script belongs to the parent project's tree, so this is a
+suggestion to report there, not something to change from here.
