@@ -100,7 +100,7 @@ Available reading options:
 --include-headers  include header rows in searches
 --normalize       compare search text in NFC; stored bytes are unchanged
 -A N -B N -C N     record context around matches
--head N -tail N    first or last N records
+-head N -tail N    first or last N records; N must be at least 1
 -mid a,b           inclusive record range; either end may be omitted
 -t                 include header rows in output
 -rownum            prepend a record-number column
@@ -146,10 +146,34 @@ csv2 -r -si --headers 1 -so < data.csv
 contain record data. The first metadata line carries `header`, the column names in the file's own
 order, and for a `.csv2` also `header_zh`, the second header row in the same
 positions -- so a consumer can use either header row and knows the column
-ORDER, which the keys of a `fields` object cannot give it. `--json-ascii` escapes non-ASCII characters. `-md` emits
-Markdown and requires `-t`; `--md-style preserve|compact|pretty` selects its
-layout. `--pretty` holds the selected table in memory and is bounded by
-`CSV2_PRETTY_MAX_BYTES`.
+ORDER, which the keys of a `fields` object cannot give it. `header` is present
+whenever the file HAS a header row, so a `.lines` file — which has none — carries
+no `header` key at all, and a script that reads column order from it must expect
+that rather than an empty list. To get the order WITHOUT the file's records, take
+the first line alone: `csv2 -head 1 --json -i f.csv | head -1`. There is no
+header-only verb.
+
+`--json-ascii` escapes non-ASCII characters. `-md` and `--json` are mutually
+exclusive and say so; there is no single run that emits both.
+
+`-md` emits Markdown and requires `-t`. `--md-style` selects the layout, and the
+three names are about PADDING only — none of them changes a value:
+
+| `--md-style` | What it does |
+|---|---|
+| `preserve` (default) | Keeps each untouched row's original spacing. The rows you edited are re-emitted compactly, so it means "preserve the rows you did not touch", not "preserve the source layout" |
+| `compact` | `\|zstd\|1.5.6\|BSD\|` — no padding anywhere |
+| `pretty` | Re-aligns every column to a common width across the whole table |
+
+`preserve` therefore gives the smallest diff when editing a document in place,
+which is what it is the default for. `--pretty` (a different flag) holds the
+selected table in memory and is bounded by `CSV2_PRETTY_MAX_BYTES`.
+
+When a table is selected out of a document with `--md-table N`, the `line`
+number on each `--json` record line is relative to THAT TABLE, not to the
+document: the first data row is `line 2` however far down the file the table
+begins. A script that maps those back onto the document has to add the table's
+own offset, which csv2 does not report.
 
 Use `--en` or `--zh` to choose the header language in human-readable output.
 `--version`/`-V` prints the build version; `--help`/`-h` prints the complete
@@ -246,9 +270,14 @@ and refuses to overwrite an existing backup. Under `--json`, refusals are one
 JSON error object on stderr with a stable `code`, `message`, and `message_zh`;
 the exit status remains 1.
 
-An edit may use `-md` when the destination is Markdown. With
-`--md-table N --in-place`, only the selected table is replaced; surrounding
-prose is carried across and all output line endings are LF.
+An edit whose destination is Markdown MUST pass `-md` — it is not optional.
+Editing a `.md` file without it is refused, naming the suffix, and the file is
+left alone. With `--md-table N --in-place`, only the selected table is replaced;
+surrounding prose is carried across and all output line endings are LF.
+`--dry-run` works here as it does everywhere: it prints each changed cell and
+writes nothing. Until 2026-09-06 that last sentence was false — `--dry-run` with
+`-md` performed the write, and reported success with no output on either stream
+— which is why it is now stated rather than left to be assumed.
 
 ## Protection and audit logging
 
@@ -348,8 +377,13 @@ the same binary, record count, host, and search conditions. The raw output is
 
 ## When to stop using this
 
-Every row here was measured on 2026-09-01, not carried forward from an earlier
-list. Two entries that used to be on it are gone because the feature landed.
+Every row here was measured on 2026-09-06, not carried forward from an earlier
+list. Three entries that used to be on it are gone because the feature landed —
+the third was "counting without reading the file", which `-count` has answered
+since phase 8 while this table went on sending readers to a whole-file `--json`
+pass. It survived a re-measurement dated 2026-09-01 that this sentence claimed
+covered every row, which is the argument for re-running the rows rather than
+re-reading them.
 
 | Not offered | What to do instead |
 |---|---|
@@ -357,7 +391,7 @@ list. Two entries that used to be on it are gone because the feature landed.
 | case-insensitive matching | nothing does — `-contains mit` finds no `MIT`. Use `--json` and one pass of your own |
 | scoping a search to ONE column | nothing does. `-contains` matches a substring in EVERY column, so `-contains MIT` also finds `transMITter` — see the last example below. Counting with it is silently wrong the moment the word appears elsewhere |
 | skipping `#` comment lines | nothing does, and deliberately: a `#` is data and `#id` is a legal column name, so skipping one would mean guessing which lines are data. The refusal names the `#` |
-| counting without reading the file | `records` on the trailing `--json` meta line — but the obvious way to get it reads every byte |
+| a header-only read | `csv2 -head 1 --json -i f.csv \| head -1` — the meta line carries `header`; no verb returns the names alone |
 | converting between `.csv` and `.csv2` | refused on purpose; write the records out and read them back in |
 | safe concurrent writers | serialise them yourself; two writers silently lose one edit. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one finishing SECOND warns it could not update the index |
 

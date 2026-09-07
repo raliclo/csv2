@@ -14276,6 +14276,99 @@ else
     bad "T247b got [${_t247_body//$'\n'/|}] / 實得如上"
 fi
 
+echo "--- T248: the sentences round 79 had to discover by experiment / T248：第 79 回合只能靠實驗才問出來的那些句子 ---"
+# Round 79 got every one of these right eventually, and got them by running the
+# program until it answered. Each is now written in both READMEs, and each is
+# pinned here for the same reason every documented claim is: a described
+# behaviour that stops being true is worse than one that was never described,
+# because a reader relies on it.
+# 第 79 回合最後每一條都問對了，而它問出來的方式是「一直執行這支程式直到它回答」。這些現在都
+# 寫進了兩份 README，而每一條都釘在這裡，理由與所有被記載的行為一樣：一個「不再為真」的行為
+# 描述比一個從未被描述的更糟，因為讀者會依賴它。
+printf 'pkg,version\nzlib,1.3.2\nzstd,1.5.6\n' > "$TMP/t248.csv"
+"$CSV2" -head 0 -i "$TMP/t248.csv" >/dev/null 2>"$TMP/t248a.err"; _t248_h=$?
+"$CSV2" -tail 0 -i "$TMP/t248.csv" >/dev/null 2>"$TMP/t248b.err"; _t248_t=$?
+if [[ $_t248_h == 1 && $_t248_t == 1 ]] && LC_ALL=C grep -q 'at least 1' "$TMP/t248a.err"; then
+    ok "T248a -head 0 and -tail 0 are refused, saying the count must be at least 1 / -head 0 與 -tail 0 被拒絕，並說明數量至少要是 1"
+else
+    bad "T248a head=$_t248_h tail=$_t248_t err=[$(tr '\n' '|' < "$TMP/t248a.err")] / 實得如上"
+fi
+
+# A `.lines` file has no header row, so the meta line carries no `header` KEY
+# at all -- not an empty array. The README now says so because a script written
+# against the column-order guarantee gets `undefined` there rather than `[]`,
+# and those two fail in different places.
+# `.lines` 檔沒有標頭列，因此那行 meta **完全不帶 `header` 這個鍵**——不是帶一個空陣列。README
+# 現在明說這件事，因為一個依「欄序保證」寫成的腳本在那裡拿到的是 `undefined` 而不是 `[]`，
+# 而那兩者失敗的位置不同。
+printf 'one\ntwo,three\n' > "$TMP/t248.txt"
+_t248_meta=$("$CSV2" -r --json -i "$TMP/t248.txt" 2>&1 | head -1)
+if [[ $_t248_meta == *'"format":"lines"'* && $_t248_meta != *'"header"'* ]]; then
+    ok "T248b a .lines meta line carries no header key at all / .lines 的 meta 行完全不帶 header 鍵"
+else
+    bad "T248b got [$_t248_meta] / 實得如上"
+fi
+
+# The documented header-only read. It is a recipe rather than a verb, which is
+# exactly why it needs a test: nothing in the program would break if it stopped
+# working, because no code path is named after it.
+# 被記載的「只讀標頭」。它是一份配方而不是一個動詞，而那正是它需要測試的原因：如果它哪天不再
+# 有效，程式裡不會有任何東西壞掉——因為沒有任何一條程式路徑以它命名。
+_t248_hdr=$("$CSV2" -head 1 --json -i "$TMP/t248.csv" 2>/dev/null | head -1)
+if [[ $_t248_hdr == *'"meta"'* && $_t248_hdr == *'"header":['* ]]; then
+    ok "T248c -head 1 --json | head -1 yields the column order / -head 1 --json | head -1 給出欄位順序"
+else
+    bad "T248c got [$_t248_hdr] / 實得如上"
+fi
+
+# `--md-style` with nothing given must equal `preserve`. The default was never
+# stated anywhere, and the round had to measure all three styles to find out
+# which one it had been getting.
+# 不給 `--md-style` 時必須等同 `preserve`。這個預設值從未被寫在任何地方，而那個回合只能把三種
+# 排版全部量一遍，才知道它一直拿到的是哪一種。
+printf '| pkg | version |\n|---|---|\n| zlib | 1.3.2   |\n| zstd | 1.5.6   |\n' > "$TMP/t248d.md"
+cp "$TMP/t248d.md" "$TMP/t248e.md"
+"$CSV2" -update 1:version '9.9.9' -md -t -i "$TMP/t248d.md" --in-place 2>/dev/null
+"$CSV2" -update 1:version '9.9.9' -md -t --md-style preserve -i "$TMP/t248e.md" --in-place 2>/dev/null
+if cmp -s "$TMP/t248d.md" "$TMP/t248e.md"; then
+    ok "T248d the default --md-style is preserve, byte for byte / 預設的 --md-style 就是 preserve，逐位元相同"
+else
+    bad "T248d default and preserve differ: [$(tr '\n' '|' < "$TMP/t248d.md")] vs [$(tr '\n' '|' < "$TMP/t248e.md")] / 實得如上"
+fi
+
+# `line` under `--md-table N` counts within the TABLE. The first data row is
+# line 2 however far down the document the table starts -- here it starts at
+# document line 5, and the record still reports 2. A script mapping these back
+# onto the document has to add the offset itself, and cannot get it from csv2.
+# `--md-table N` 底下的 `line` 是在**那張表**之內計數的。無論那張表從文件多下面開始，第一筆
+# 資料列都是 line 2——這裡它從文件第 5 行開始，而那筆紀錄仍然回報 2。要把它們對回文件的腳本
+# 必須自己加上偏移量，而且無法從 csv2 取得它。
+printf '# Doc\n\ntext\n\n| pkg | version |\n|---|---|\n| zlib | 1.3.2 |\n' > "$TMP/t248f.md"
+_t248_line=$("$CSV2" -r --json --md-table 1 -i "$TMP/t248f.md" 2>/dev/null | LC_ALL=C grep '"record":1')
+if [[ $_t248_line == *'"line":2'* ]]; then
+    ok "T248e --json line is table-relative, not document-relative / --json 的 line 相對於表格，而不是相對於文件"
+else
+    bad "T248e got [$_t248_line] / 實得如上"
+fi
+
+# `-md` on a Markdown destination is mandatory, and the refusal must leave the
+# file alone. The README said "may", which reads as optional; the round tried
+# it without and was refused. Checking the file too, because a refusal that
+# has already written is the shape this project keeps finding.
+# 目的地是 Markdown 時 `-md` 是**必要**的，而那次拒絕必須不動到檔案。README 原本寫的是「可以」，
+# 那讀起來像選配；那個回合不給它試了一次，被拒絕。這裡連檔案一起檢查，因為「一個已經寫過了的
+# 拒絕」正是這個專案一再找到的那個形狀。
+printf '| pkg | version |\n|---|---|\n| zlib | 1.3.2 |\n' > "$TMP/t248g.md"
+_t248_sha=$(shasum -a 256 "$TMP/t248g.md" | cut -d' ' -f1)
+"$CSV2" -update 1:version '9.9.9' -i "$TMP/t248g.md" --in-place >/dev/null 2>"$TMP/t248g.err"
+_t248_rc=$?
+if [[ $_t248_rc == 1 && $_t248_sha == $(shasum -a 256 "$TMP/t248g.md" | cut -d' ' -f1) ]] \
+   && LC_ALL=C grep -q '\.md' "$TMP/t248g.err"; then
+    ok "T248f editing a .md without -md is refused and the file is untouched / 編輯 .md 而不給 -md 會被拒絕，且檔案未被動到"
+else
+    bad "T248f rc=$_t248_rc err=[$(tr '\n' '|' < "$TMP/t248g.err")] / 實得如上"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
