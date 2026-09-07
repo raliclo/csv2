@@ -14211,14 +14211,34 @@ echo "--- T246: --dry-run with -md writes nothing / T246：--dry-run 搭配 -md 
 # stdout 零位元組、stderr 零位元組，以及一個被改掉的檔案。這正是本案例先斷言**校驗和**、再斷言
 # 報告的原因。一個只檢查報告的案例，會在報告被加上去的那一刻就通過，而底下那次寫入照樣繼續發生。
 printf '# Notes\n\n| pkg | version | license |\n|---|---|---|\n| zlib | 1.3.2 | Zlib |\n| zstd | 1.5.6 | BSD |\n' > "$TMP/t246.md"
-_t246_before=$(shasum -a 256 "$TMP/t246.md" | cut -d' ' -f1)
+# cmp against a pristine COPY, not a checksum of the path twice.
+#
+# The first version of this case took `shasum -a 256` before and after. macOS
+# has `shasum`; the guest's busybox has `sha256sum` and not `shasum`, so in the
+# guest BOTH captures were the empty string and `$before == $after` held --
+# the case passed by measuring nothing. It was the suite's own missing-command
+# handler that reported it, four calls' worth, and nothing else would have.
+#
+# `cmp` cannot fail that way: it compares two files that must both exist, and
+# `sha256_of` 70 lines up is no use here either -- it hashes a STRING, which is
+# the same trap one layer over.
+#
+# 用 `cmp` 與一份**原始複本**比對，而不是對同一個路徑取兩次校驗和。
+#
+# 這個案例的第一版在前後各取一次 `shasum -a 256`。macOS 有 `shasum`；guest 的 busybox 有
+# `sha256sum` 而沒有 `shasum`，於是在 guest 裡**兩次擷取都是空字串**，`$before == $after` 成立
+# ——這個案例以「什麼都沒量」的方式通過了。回報它的是這套測試自己的「缺指令」處理常式，數出四次
+# 呼叫，而除此之外沒有任何東西看得到。
+#
+# `cmp` 不可能那樣失敗：它比的是兩個都必須存在的檔案。上面第 1766 行的 `sha256_of` 在這裡也沒有
+# 用——它雜湊的是一個**字串**，那是同一個陷阱換一層。
+cp "$TMP/t246.md" "$TMP/t246.orig"
 _t246_out=$("$CSV2" -update 2:version '9.9.9' -md -t --md-table 1 --dry-run \
             -i "$TMP/t246.md" --in-place 2>"$TMP/t246.err"); _t246_rc=$?
-_t246_after=$(shasum -a 256 "$TMP/t246.md" | cut -d' ' -f1)
-if [[ $_t246_rc == 0 && $_t246_before == $_t246_after ]]; then
+if [[ $_t246_rc == 0 ]] && cmp -s "$TMP/t246.orig" "$TMP/t246.md"; then
     ok "T246a --dry-run --in-place -md leaves the document byte-identical / --dry-run --in-place -md 讓文件逐位元不變"
 else
-    bad "T246a rc=$_t246_rc before=${_t246_before:0:16} after=${_t246_after:0:16} / 實得如上"
+    bad "T246a rc=$_t246_rc diff=[$(cmp "$TMP/t246.orig" "$TMP/t246.md" 2>&1)] / 實得如上"
 fi
 
 # The report is the other half of the promise: the README says --dry-run
@@ -14359,10 +14379,10 @@ fi
 # 那讀起來像選配；那個回合不給它試了一次，被拒絕。這裡連檔案一起檢查，因為「一個已經寫過了的
 # 拒絕」正是這個專案一再找到的那個形狀。
 printf '| pkg | version |\n|---|---|\n| zlib | 1.3.2 |\n' > "$TMP/t248g.md"
-_t248_sha=$(shasum -a 256 "$TMP/t248g.md" | cut -d' ' -f1)
+cp "$TMP/t248g.md" "$TMP/t248g.orig"          # cmp, not shasum -- see T246a
 "$CSV2" -update 1:version '9.9.9' -i "$TMP/t248g.md" --in-place >/dev/null 2>"$TMP/t248g.err"
 _t248_rc=$?
-if [[ $_t248_rc == 1 && $_t248_sha == $(shasum -a 256 "$TMP/t248g.md" | cut -d' ' -f1) ]] \
+if [[ $_t248_rc == 1 ]] && cmp -s "$TMP/t248g.orig" "$TMP/t248g.md" \
    && LC_ALL=C grep -q '\.md' "$TMP/t248g.err"; then
     ok "T248f editing a .md without -md is refused and the file is untouched / 編輯 .md 而不給 -md 會被拒絕，且檔案未被動到"
 else

@@ -185,6 +185,16 @@ went on happening underneath it.
 同一個不對稱決定了一個案例先斷言什麼。T246 先檢查**校驗和**、再檢查報告，因為一個只檢查報告
 的案例，會在報告被加上去的那一刻開始通過，而底下那次寫入照樣繼續發生。
 
+**在回歸測試裡，等價的做法是 `cmp -s` 加一份 `cp` 出來的原始複本，不是校驗和。** 一個盲測 agent
+跑在完整的 macOS shell 上，那裡 `shasum` 一定在；這套測試還要在 busybox 上跑，而那裡沒有 `shasum`
+——於是前後兩次擷取雙雙變成空字串，`空 == 空` 讓那個案例以「什麼都沒量」的方式通過。T246a 第一版
+就是這樣，見 mistakes 第 1 條第十一次。
+
+In a regression case the equivalent is `cmp -s` against a `cp` of the original, NOT a checksum.
+A blind-test agent runs in a full macOS shell where `shasum` exists; this suite also runs on
+busybox, where it does not -- and both captures collapse to the empty string, which are equal,
+so the case passes having measured nothing.
+
 ### 9. Write it down BEFORE fixing it
 
 Every reproduced finding goes into [`todo/known-defects.md`](./todo/known-defects.md)
