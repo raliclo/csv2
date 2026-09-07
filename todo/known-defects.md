@@ -11381,3 +11381,159 @@ mid-file `#` is fine.
    在 stdout 與 stderr 上都是空的、rc=0，與「沒有這筆資料」完全無法區分。
 5. **第 7 列沒有說「活下來的是哪一個」**（最後改名的那個），也沒有說檔案仍然是有效的而不是
    壞掉的。這兩件事都會改變讀者要擔心到什麼程度。
+
+---
+
+# 第 98 回合（2026-09-08，公布的數字）—— 一份掛在「平行」標題底下的單執行緒量測
+
+一個全新的 `claude -p` 行程，只讀兩份 README，主題是這一頁**公布的每一個數字**：能不能重現、
+每一個預設值與門檻在兩側是否真的改變行為、以及那些帶日期的量測旁邊的句子是否仍然成立。
+
+**第 4 類是空的**，而且是這一系列裡查得最徹底的一次空：十一個門檻逐一在「剛好」與「差一個位元組」
+兩側量過，**全部落在被記載的那個位元組上**；十一個範例輸出逐位元相同；平行與單執行緒在
+10,000,000 筆上輸出的 md5 相同。缺陷全部在量測那一節，而且方向一致：**這個工具比那一頁說的快，
+而且比那一頁說的耗記憶體。**
+
+Category 4 empty, and it is the most thoroughly checked empty in this series:
+eleven thresholds probed a byte either side, all landing on the documented byte;
+eleven example outputs byte-identical; parallel and single-threaded md5-identical
+on ten million records. Every defect is in the measurement section and they all
+run one way: the tool is faster than the page says and uses far more memory.
+
+## OW. 「平行搜尋吞吐量與 RSS」那張表的 `.csv` 兩列是**單執行緒**跑出來的
+
+**狀態：待修。**
+
+那張表的標題是平行搜尋。而 `.csv` 需要一個 `.index` 才會走平行——**這一頁自己的需求表就是這樣
+寫的**。產生那張表的 harness 從來不建索引：
+
+```console
+$ grep -c index verifications/measure_parallel_rss.zsh
+0
+```
+
+親手證明（21,288,908 位元組、1,400,000 筆、每筆命中）：
+
+```console
+$ csv2 -contains needle -debug -i big.csv 2>&1 >/dev/null | grep -E 'single-threaded|parallel:'
+csv2: … DEBUG single-threaded: .csv with no index proving one record per line; build one with --build-index
+
+$ csv2 --build-index -i big.csv
+$ csv2 -contains needle -debug -i big.csv 2>&1 >/dev/null | grep -E 'single-threaded|parallel:'
+csv2: … DEBUG parallel: trusting index …
+csv2: … DEBUG parallel: 6 chunks, 10 workers, chunk 4194304 bytes
+```
+
+`.csv2` 不需要索引，因此那張表的 `.csv2` 兩列是真的平行。**一張表裡有一半的列走的是另一條程式
+路徑，而沒有任何東西說出來。**
+
+後果有三個，而它們都朝著同一個方向：
+
+1. **記憶體用量被低估了 4 到 19 倍。**「在 1.3 GB 的搜尋上 peak RSS 9.28 MiB」是**掃描**的成本，
+   不是平行搜尋的成本。一個依這張表把容器開在 64 MiB 的人會 OOM。
+2. **`CSV2_PARALLEL_MAX_BYTES` 那一欄是「關於什麼都沒有」的證據。** 9.28 對 9.30 MiB 讀起來像
+   「這個旋鈕幾乎沒差」。它在單執行緒路徑上**不可能**有差——那條路徑上沒有任何 chunk 在飛。
+   唯一為那個旋鈕提供的量測，正好取自它失效的地方。
+3. **這一頁最大的一條調校事實，被它自己的 benchmark 藏了起來**：對一個 `.csv` 下
+   `--build-index`，會把一次 30 秒的搜尋變成 9.6 秒。
+
+## OX. 兩支量測腳本都不斷言「剛剛跑的是哪一條路徑」
+
+**狀態：待修。這是 OW 的成因，而不是它的症狀。**
+
+`measure_parallel_rss.zsh` 設了 `CSV2_PARALLEL_MIN_BYTES=1` 來強制平行——但 `.csv` 的阻擋者
+不是大小門檻，是缺索引。它抓的是 `metrics:` 那一行（單執行緒也會印）與 `parallel: holding`
+那幾行（單執行緒**一行都不會印**，而「沒有行」讀起來剛好像「沒有壓力」）。於是它量了另一條
+路徑、完整地寫出一張表、以 0 結束。
+
+`measure.zsh` 有同一個形狀的缺口，只是後果較輕：
+
+```zsh
+workers=$(grep -o '[0-9]* workers' $TMP/dbg.txt | head -1 | awk '{print $1}')
+: ${workers:=1}
+```
+
+沒走平行時 `workers` 靜默地變成 1，而加速比就除以 1。**一個「找不到就給預設值」的退回，把
+一次失敗的量測變成一個長得很合理的數字。**
+
+Neither harness asserts which code path it just timed. The RSS one greps for
+`metrics:` (printed on both paths) and `parallel: holding` (printed on neither,
+when there is no cap pressure), so a single-threaded run produces a complete
+table at exit 0. `measure.zsh` defaults `workers` to 1 when the grep finds
+nothing, turning a failed measurement into a plausible number.
+
+## OY. 密文以 base64 存放，因此「空儲存格可以分辨」是假的
+
+**狀態：待修（文件）。**
+
+README：「Ciphertext length is the plaintext's plus 28 bytes with no padding, so
+value lengths are visible and **an empty cell is distinguishable**.」
+
++28 是對的——但那是**原始位元組**。存進儲存格的是 base64：
+
+```console
+$ csv2 -encrypt secret -keyfile k.bin -i s.csv -o e.csv
+plain_len=0  stored_len=40
+plain_len=1  stored_len=40
+plain_len=2  stored_len=40
+plain_len=3  stored_len=44
+plain_len=4  stored_len=44
+plain_len=10 stored_len=52
+```
+
+長度只以 **3 個位元組為一階**可見，而**空儲存格與 1、2 位元組的值完全無法分辨**。這句話錯的
+方向是保守的（它宣稱的洩漏比實際多），但一個為了「藏起空儲存格」而去補齊值的讀者，是依據一句
+假話在行動；而一個要估算欄寬的讀者，從這一頁算不出任何儲存長度——**base64 這件事整頁從未出現。**
+
+## OZ. `-count -debug` 不印 `index hit`，而那一頁說 `-debug` 是唯一的窗
+
+**狀態：待修。**
+
+```console
+$ csv2 --build-index -i s.csv
+$ csv2 -count -debug -i s.csv 2>&1 >/dev/null
+csv2: … INFO  csv2 -count -debug -i s.csv          ← 只有這一行
+
+$ csv2 -mid 1,1 -debug -i s.csv 2>&1 >/dev/null
+csv2: … INFO  csv2 -mid 1,1 -debug -i s.csv
+csv2: … DEBUG single-threaded: not a search; parallelism applies to -contains only
+csv2: … DEBUG index hit: record 1 via grid point 1 at byte 10
+csv2: … DEBUG format=csv fields=2 records=1
+```
+
+`-count` 是**整頁最依賴索引的那個動詞**——它的全部賣點就是「有索引時 O(1)」——而它恰好是唯一
+一個無法用被記載的方式確認索引有沒有被用到的動詞。只有計時看得出來。失敗的那一半是好的：
+索引過期時它會說 `index … is stale, ignoring and scanning`。
+
+## PA. 那張平行表沒有日期，而它是漂得最遠的一張
+
+**狀態：待修（文件）。**
+
+這一頁其他每一組數字旁邊都有日期——「macOS arm64 2026-08-17」、「Windows x86_64 2026-08-27」、
+「Linux aarch64 guest 2026-08-30」。**唯一沒有日期的那一張，正是唯一一張半數的列走錯路徑的。**
+一個讀者無法對它做這一頁教給他的那件事：看日期，判斷它有多舊。
+
+## PB. 三個「找不到」
+
+**狀態：待修（文件）。**
+
+1. **README 從未提到 `measure_parallel_rss.zsh`**（出現 0 次）。它指名了輸出檔，卻沒有指名產生
+   那個檔的指令。受測者是用 `ls verifications/` 找到它的。
+2. **`measure_output*.txt` 這個 glob 不涵蓋那張表自己的來源。** 它匹配三個檔，而那張表的來源是
+   `measure_parallel_rss_output.txt`——不在其中。
+3. **README 從未提到 `RECORDS=`。** 那一頁說「只比對 like-for-like 的列」，卻沒有給讀者換語料
+   大小的方法。方法是存在的（`RECORDS=20000 ./measure.zsh`，寫在那支腳本自己的檔頭第 24 行），
+   只是不在讀者讀得到的地方。**受測者據此結論「無法指定語料大小」——那個結論是錯的，而它會是
+   錯的，正是因為這一頁沒說。**
+
+## PC. guest 的「平行」列比它上面的單執行緒列**慢**，而沒有東西解釋
+
+**狀態：待修（文件）。這一列不是壞掉的。**
+
+guest 那一欄：單執行緒 93,000 µs、平行 101,000 µs。受測者由此推論那一列「不可能是平行跑的」，
+理由是 2.48 MiB 遠低於這一頁記載的 16 MiB 下限。**那個推論是錯的**：`measure.zsh` 在那一列上
+設了 `CSV2_PARALLEL_MIN_BYTES=1000`，而語料是 `.csv2`（不需要索引），所以它確實走了平行。
+
+真正的原因是：**在 2.48 MiB 上，平行的額外成本超過它的收益。** 那是一個真實而且有用的事實，
+而這一頁把它留成一個看起來像錯誤的數字。一個有能力自己算的讀者，會像受測者那樣得出一個錯誤
+的結論——而那正是「一個沒有被解釋的數字」的代價。
