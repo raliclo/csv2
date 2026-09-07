@@ -14646,6 +14646,103 @@ else
     bad "T252a unscoped=$_t252_all scoped=$_t252_one / 實得如上"
 fi
 
+echo "--- T253: what the protection section now claims / T253：保護那一節現在宣稱的事 ---"
+# Round 81 read that section and could not finish a single keyed task from it.
+# Everything below is a sentence added because of that round, and each is here
+# so the sentence cannot quietly stop being true.
+# 第 81 回合讀了那一節，而它無法只靠那一節完成任何一個「需要金鑰」的任務。底下每一項都是因為那個
+# 回合而加進文件的句子，放在這裡是為了讓那些句子不能悄悄地不再為真。
+printf 'id,name,email\n1,Alice,a@x.com\n2,Bob,b@x.com\n' > "$TMP/t253.csv"
+head -c 32 /dev/urandom > "$TMP/t253key.bin"
+
+# `-t` is inert for -hash. The section's four examples all carried it, so a
+# reader learns a rule that does not exist -- and the rule IS real for `-md`
+# editing, so they cannot tell the two apart.
+# `-t` 對 -hash 沒有作用。那一節的四個範例都帶著它，於是讀者學到一條不存在的規則——而那條規則對
+# `-md` 編輯**是**真的，所以他分不出哪一個才是。
+"$CSV2" -hash email -i "$TMP/t253.csv" -o "$TMP/t253_t.csv" -t 2>/dev/null
+"$CSV2" -hash email -i "$TMP/t253.csv" -o "$TMP/t253_no.csv" 2>/dev/null
+if cmp -s "$TMP/t253_t.csv" "$TMP/t253_no.csv"; then
+    ok "T253a -hash gives byte-identical output with and without -t / -hash 給不給 -t，輸出逐位元相同"
+else
+    bad "T253a -t changed the output of -hash / -t 改變了 -hash 的輸出"
+fi
+
+# The marker shapes the section now spells out.
+# 那一節現在明確寫出的標記形狀。
+_t253_plain=$(LC_ALL=C head -1 "$TMP/t253_no.csv")
+"$CSV2" -hash email -keyfile "$TMP/t253key.bin" -i "$TMP/t253.csv" -o "$TMP/t253_kf.csv" 2>/dev/null
+_t253_kf=$(LC_ALL=C head -1 "$TMP/t253_kf.csv")
+if [[ $_t253_plain == *'email:hash'* && $_t253_kf == *'email:hmac:'* ]]; then
+    ok "T253b unkeyed marks :hash and keyed marks :hmac:KEYID / 無金鑰標記 :hash，有金鑰標記 :hmac:KEYID"
+else
+    bad "T253b plain=[$_t253_plain] keyed=[$_t253_kf] / 實得如上"
+fi
+
+# A key under the minimum is refused, and the message carries the number. The
+# section now gives that number; round 81 could only find it by failing.
+# 低於下限的金鑰會被拒絕，而訊息裡有那個數字。那一節現在寫出了它；第 81 回合只能靠「先失敗一次」
+# 才找得到。
+printf 'x' > "$TMP/t253short.bin"
+"$CSV2" -hash email -keyfile "$TMP/t253short.bin" -i "$TMP/t253.csv" -o "$TMP/t253z.csv" \
+    >/dev/null 2>"$TMP/t253.err"
+if [[ $? == 1 ]] && LC_ALL=C grep -q '16' "$TMP/t253.err"; then
+    ok "T253c a key under 16 bytes is refused, and the message names 16 / 不足 16 bytes 的金鑰被拒絕，且訊息說出 16"
+else
+    bad "T253c rc=$? err=[$(tr '\n' '|' < "$TMP/t253.err")] / 實得如上"
+fi
+
+# The verb table. `-append` and `-insert` are the two a reader would not
+# predict from the word "edits", and `-delete -col` is the one that is allowed.
+# 那張動詞表。`-append` 與 `-insert` 是讀者從「edits」一詞預測不到的兩個，而 `-delete -col` 是那個
+# 被允許的。
+_t253_refused=0
+for _v in '-update 1:email zzz' '-append 3,C,c@x.com' '-insert 1 9,Z,z@x.com' '-delete -cell 1:3'; do
+    cp "$TMP/t253_kf.csv" "$TMP/t253work.csv"
+    "$CSV2" ${=_v} -i "$TMP/t253work.csv" --in-place >/dev/null 2>&1
+    (( $? == 1 )) && (( _t253_refused += 1 ))
+done
+cp "$TMP/t253_kf.csv" "$TMP/t253work.csv"
+"$CSV2" -delete -col 3 -i "$TMP/t253work.csv" --in-place >/dev/null 2>&1
+_t253_delcol=$?
+if [[ $_t253_refused == 4 && $_t253_delcol == 0 ]]; then
+    ok "T253d four verbs refused on a protected column, -delete -col allowed / 四個動詞在受保護欄位上被拒，-delete -col 允許"
+else
+    bad "T253d refused=$_t253_refused/4 delete-col=$_t253_delcol / 實得如上"
+fi
+
+# meta `header` keeps the marker; a record's `fields` key does not. The README
+# tells a script to take column ORDER from the meta header, so the two names
+# have to be documented as different or that advice breaks here.
+# meta 的 `header` 保留標記，而紀錄的 `fields` 鍵沒有。README 叫腳本從 meta 的 header 取欄序，因此
+# 這兩組名字必須被明白記載為「不同」，否則那個建議在這裡就會斷掉。
+_t253_json=$("$CSV2" -r --json -i "$TMP/t253_kf.csv" 2>/dev/null)
+_t253_meta=$(print -r -- "$_t253_json" | LC_ALL=C head -1)
+_t253_rec=$(print -r -- "$_t253_json" | LC_ALL=C sed -n '2p')
+if [[ $_t253_meta == *'"email:hmac:'* && $_t253_meta == *'"protected"'* && $_t253_rec == *'"email":'* ]]; then
+    ok "T253e meta keeps the marker, fields uses the base name, meta carries protected / meta 保留標記、fields 用基底名稱、meta 帶有 protected"
+else
+    bad "T253e meta=[${_t253_meta:0:120}] rec=[${_t253_rec:0:90}] / 實得如上"
+fi
+
+# `--yes` is a DIFFERENT key source, not a spelling of -keyfile, and -keyfile
+# wins when both are given. Run only where the ambient key exists: it is created
+# by mssh-keygen and is absent on the guest and on Windows. Guarded rather than
+# skipped, so the platform skip counts T69b pins do not move.
+# `--yes` 是**另一個**金鑰來源，不是 -keyfile 的另一種寫法；兩者同時給時 -keyfile 勝出。只在那把
+# 環境金鑰存在的地方執行：它由 mssh-keygen 產生，在 guest 與 Windows 上不存在。這裡用「守衛」而不是
+# 「跳過」，才不會動到 T69b 釘住的各平台 SKIP 數。
+if [[ -r "$HOME/.multissh/generated/mldsa44-ed25519.key.raw" ]]; then
+    "$CSV2" -hash email --yes -i "$TMP/t253.csv" -o "$TMP/t253_yes.csv" 2>/dev/null
+    "$CSV2" -hash email -keyfile "$TMP/t253key.bin" --yes -i "$TMP/t253.csv" -o "$TMP/t253_both.csv" 2>/dev/null
+    _t253_yes=$(LC_ALL=C head -1 "$TMP/t253_yes.csv" 2>/dev/null)
+    if [[ $_t253_yes == *'email:hmac:'* ]] && cmp -s "$TMP/t253_kf.csv" "$TMP/t253_both.csv"; then
+        ok "T253f --yes keys the hash from the ambient file, and -keyfile wins over it / --yes 以環境金鑰加密雜湊，而 -keyfile 勝過它"
+    else
+        bad "T253f yes=[$_t253_yes] keyfile-wins=$(cmp -s "$TMP/t253_kf.csv" "$TMP/t253_both.csv" && echo yes || echo no) / 實得如上"
+    fi
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

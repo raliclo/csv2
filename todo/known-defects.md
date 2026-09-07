@@ -9769,3 +9769,87 @@ csv2 -mid 15,16 --json -i twenty.csv | tail -1 # {"meta":{"records":16,...}}  �
 
 A workaround written into the documentation that does not actually work is worse than no
 workaround, because a reader relies on it. T248e pinned the fact and not the advice.
+
+---
+
+# 第 81 回合（2026-09-07，保護欄位）—— 四項，全部親手重現
+
+第 4 類（工具壞了）是**空的**，這是連續第三個回合。這一輪的主題是 `-hash`／`-encrypt`／`-keyfile`，
+而 README 的保護那一節只有八行——不足以完成任何一個需要金鑰的任務。
+
+## LQ. `--yes` 會悄悄取用 `~/.multissh/generated/` 底下的一把金鑰，而 README 從未提到那個檔案
+
+```sh
+printf 'id,name,email\n1,Alice,a@x.com\n' > d.csv
+csv2 -hash email -i d.csv -o plain.csv -t          # 標頭：email:hash
+csv2 -hash email -i d.csv -o yes.csv   -t --yes    # 標頭：email:hmac:9c65c01a
+```
+
+`--yes` 產生的是一個**有金鑰**的雜湊，金鑰來自 `$HOME/.multissh/generated/mldsa44-ed25519.key.raw`
+（本機上存在，64 bytes，權限 600）。README 寫的是：
+
+> `-hash` uses SHA-256 without a key, or keyed hashing with `-keyfile`/`--yes`.
+
+**那個斜線把兩者呈現成可互換的。它們不是。** 一個是你自己挑、可以備份的金鑰；另一個伸手去拿一個
+**環境裡的**檔案，而那個檔案的存在讀者無從得知。照字面選了 `--yes` 的人，產出的東西只有在那台機器上
+可重現，而金鑰是一個他不知道存在的檔案。
+
+兩者同時給時 `-keyfile` 勝出（實測逐位元相同）。這件事也沒有寫。
+
+## LR. 保護那一節的四個範例都帶著 `-t`，而 `-t` 在那裡是無作用的
+
+```sh
+csv2 -hash email -i d.csv -o w.csv -t
+csv2 -hash email -i d.csv -o wo.csv        # 沒有 -t
+cmp w.csv wo.csv                            # 逐位元相同
+```
+
+`-encrypt` 也一樣。兩者都一定會寫出標頭列——它們必須寫，因為保護標記就在標頭裡。
+
+**這比「少寫了一件事」更糟**：四個範例一致地帶著一個不需要的旗標，讀者於是學到一條不存在的規則，
+而那條規則在別處（`-md` 編輯**真的**需要 `-t`）是成立的——於是他無從分辨哪一個才是真的。
+
+## LS. 受保護檔案上，`--json` 的 meta `header` 與紀錄的 `fields` 鍵不一致
+
+```sh
+csv2 -r --json -i kf.csv
+{"meta":{...,"header":["id","name","email:hmac:6e9c89ad"],"protected":{...}}}
+{"record":1,...,"fields":{"id":"1","name":"Alice","email":"df41068b..."}}
+```
+
+meta 說第三欄叫 `email:hmac:6e9c89ad`，紀錄說它叫 `email`。
+
+README 明確叫人用 meta 的 `header` 取得欄序，「因為 `fields` 物件的鍵給不了」——**而在受保護的檔案上，
+那兩組名字對不起來**，所以任何依名字把兩者接起來的腳本都會在這裡斷掉。
+
+兩邊各自都是合理的（meta 反映檔案裡實際的標頭；`fields` 用的是你**定址時**用的名字），但沒有一句話
+說出這件事，而 README 的指引正好要求把它們對起來。meta 裡還多了一個 `protected` 鍵，也沒有記載。
+
+## LT. 「raw edits ... are refused」沒有說出那個範圍，而範圍不是直覺的
+
+| 動詞 | 在受保護欄位上 |
+|---|---:|
+| `-update` | rc=1 |
+| `-append` | **rc=1** |
+| `-insert` | **rc=1** |
+| `-delete -cell` | rc=1 |
+| `-delete -col` | **rc=0（允許）** |
+
+`-append` 與 `-insert` 被拒，是因為一整筆紀錄會把一個未經保護的原始值帶進那一欄；`-delete -col`
+被允許，是因為刪掉整欄不寫入任何原始值。**兩者都正確，而兩者都不在那一頁上。** 「edits」這個字沒有
+被界定到動詞層級，讀者無法預測。
+
+## 一併記下：README 沒說「為什麼要用金鑰」
+
+無金鑰的 `-hash` 就是**未加鹽的 sha256(值)**——實測 `sha256sum` 逐位元相同。README 說它「單向」，
+而對 email 這種可猜的欄位，未加鹽的摘要用字典就能還原。**那正是「為什麼要用金鑰」的全部理由，
+而那一頁從未給出這個理由**，於是讀者沒有依據去決定該不該用 `-keyfile`。
+
+金鑰檔的要求（至少 16 bytes、怎麼產生）也只存在於**錯誤訊息**裡。那則訊息寫得比那一節好——它說出
+下限、說出理由，並附上可直接貼的產生指令。這一輪最尖銳的一句觀察是回報者寫的：**csv2 的錯誤訊息
+比 csv2 的 README 更像文件，而它們只有在你先犯一次錯之後才讀得到。**
+
+The unkeyed digest is unsalted sha256 of the value, verified byte for byte against sha256sum.
+The page calls it one-way and never says it is dictionary-reversible for a guessable column,
+which is the entire reason to supply a key. The key file's requirements live only in an error
+message -- one that is better written than the section, and reachable only by making a mistake.

@@ -305,12 +305,50 @@ csv2 -decrypt secret -keyfile key.bin -i encrypted.csv -o clear.csv -t
 csv2 -log audit.log -update 1:2 value -i data.csv -o result.csv
 ```
 
-`-hash` uses SHA-256 without a key, or keyed hashing with `-keyfile`/`--yes`.
-Hashing is one-way but preserves equality comparisons. `-encrypt` uses
-ChaCha20-Poly1305 with a fresh nonce. Protected columns are marked in the
-header; raw edits to a protected column are refused. Secrets are accepted from
-key files, not command-line arguments. `-debug` writes diagnostics to stderr;
-`-log` appends timestamped operation records.
+`-hash` without a key is the plain, **unsalted** SHA-256 of the value. It is
+one-way and preserves equality comparisons, but unsalted means anyone can hash
+their guesses and compare: for a column of email addresses or postcodes that
+recovers the values. **That is the reason to supply a key**, not a refinement of
+it.
+
+`-keyfile PATH` reads the key from a file — at least 16 bytes, and
+`head -c 32 /dev/urandom > key.bin` is a fine way to make one. `--yes` is a
+DIFFERENT thing, not a spelling of the same one: it uses an ambient key at
+`~/.multissh/generated/mldsa44-ed25519.key.raw`, created by `mssh-keygen`. Output
+keyed that way is reproducible only on a machine holding that file, so prefer
+`-keyfile` for anything you need to reproduce or back up. If both are given,
+`-keyfile` wins.
+
+`-encrypt` uses ChaCha20-Poly1305 with a fresh nonce, so encrypting the same
+input twice gives different bytes; both decrypt.
+
+**`-t` is not needed for `-hash` or `-encrypt`** and changes nothing there — the
+examples above carry it, and did so alone until 2026-09-07 while a reader could
+reasonably conclude it was required. These verbs always write the header row,
+because that is where the protection marker lives. `-md` editing genuinely does
+require `-t`; these do not.
+
+Protected columns are marked in the header: `name:hash`, `name:hmac:KEYID` for a
+keyed hash, and `name:enc:KEYID:NONCE` for a ciphertext. `KEYID` identifies the
+key without being it.
+
+Edits that would put a raw value into a protected column are refused — and that
+covers more verbs than "edit" suggests:
+
+| Verb on a protected column | |
+|---|---|
+| `-update`, `-update-where`, `-delete -cell` | refused |
+| `-append`, `-insert` | refused — a whole record carries a raw value into that column |
+| `-delete -col` | allowed — removing the column writes no raw value |
+
+Under `--json`, a protected file's meta `header` carries the marker as stored
+(`email:hmac:6e9c89ad`) while each record's `fields` is keyed by the BASE name
+(`email`), which is also the name you address with. The two deliberately differ;
+a script joining them by name has to strip the marker at the first `:`. The meta
+line also gains a `protected` object naming each protected column and its kind.
+
+Secrets are accepted from key files, not command-line arguments. `-debug` writes
+diagnostics to stderr; `-log` appends timestamped operation records.
 
 There is no `-key` option: secrets on a command line are visible to other
 processes and may remain in shell history. Use `-keyfile` instead.
