@@ -501,6 +501,38 @@ T241b 用一個真的含有「未計數旗標」的檔案證明那個掃描會�
 去修它」，理由是「一個只存在於 session 逐字稿裡的缺陷，留給下一個讀者的是一棵乾淨的樹和
 一份全過的測試」。**一個只存在於逐字稿裡的承諾是同一種東西。**
 
+### 第六次：我把「每一列都重新量測過」寫進一張表，而我只量了一列
+
+2026-09-06，盲測回報「什麼時候該停止使用它」那張表裡有一列已經過時（`-count` 早就做出來了）。我修掉
+那一列，**並把那張表的前言改寫成「下表每一列都是 2026-09-06 實測的」。**
+
+我沒有量其餘各列。
+
+隔天第 80 回合回來，指出同一張表裡的另一列說「把搜尋限定在一欄」根本不提供，還警告用 `-contains`
+計數會「安靜地錯」——而 `--search-column` 就記載在**同一份文件、上面 260 行處**。
+
+**那句前言在我寫下它的那一刻就是假的。** 而它比原本沒有那句話更糟：一張自稱「每一列都被重新量測過」的表，
+會勸退下一個原本想去查證的人。我不只留下了一個錯誤，還在它上面加了一道保證。
+
+| 我說了會做的 | 實際做的 | 什麼會回報這件事 |
+|---|---|---|
+| 重新量測那張表的每一列 | 量了被指出的那一列 | **沒有東西** |
+
+**這一條與本節其他幾次的差別，在於那個宣稱是「關於我自己的工作」。** 前幾次是說了要做某件事然後忘了；
+這一次我把「已經做完」寫進了成品，於是那份成品開始替我背書。
+
+**矯正（機械式的）：不要寫「全部都檢查過了」這種宣稱，除非那個檢查是一支跑得起來的東西。** 如果檢查
+是手動的，就寫出「檢查了哪幾列、什麼時候」——一份具體的清單會露出它的缺口，一句概括不會。而這次真正的
+修法是 T252a：把那一列變成一個**會失敗的測試**，那樣它就不能再悄悄過時。
+
+I rewrote a table's preamble to say every row had been re-measured, having
+re-measured the one row I was told about. The next round found another false row
+in the same table, documented 260 lines above it. The sentence was untrue at the
+moment I wrote it, and it was worse than saying nothing: a table claiming to be
+verified discourages the next person from checking. Do not write "all of these
+were checked" unless the check is something that runs; if it is manual, list
+which ones and when -- a list shows its gaps, a summary hides them.
+
 ### 矯正措施
 
 **在使用者可見的文字裡說出「我會做 X」的當下就記下來**（TaskCreate），不要等做完再回頭數。
