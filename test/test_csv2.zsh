@@ -14521,18 +14521,56 @@ fi
 # case silently rather than skipping it visibly.
 # python3 是被允許的，但只限於「它不存在時有被處理」的地方。任何呼叫它的檔案都必須同時守住它——
 # 否則沒有 python3 的 guest 會**安靜地失去**那個案例，而不是**看得見地**跳過它。
+# Per INVOCATION, not per file. The first version asked only whether the file
+# containing a python3 call also contained a guard somewhere -- and this file
+# has one, for T166e, hundreds of lines away. So an unguarded call added
+# elsewhere in the same file passed, and the guest failed on it two days later
+# with a message blaming the buffer under test. A guard whose unit is coarser
+# than the thing it guards will pass the case it was written for and miss the
+# next one.
+# 逐**呼叫**檢查，不是逐檔。第一版問的只是「含有 python3 呼叫的那個檔案，裡面某處有沒有守衛」
+# ——而這個檔案有一個，是 T166e 的，在幾百行之外。於是同一個檔案裡別處新增的、沒有守衛的呼叫
+# 照樣通過，而 guest 在兩天後以一則「怪罪被測緩衝」的訊息失敗。**一道守衛，若它的單位比它要守的
+# 東西粗，就會通過它被寫來針對的那個情況、而漏掉下一個。**
 _py_unguarded=()
 for _f in "${_scan_files[@]}"; do
     [[ -f $_f ]] || continue
-    _fb=$(LC_ALL=C grep -v '^[[:space:]]*#' "$_f" 2>/dev/null)
-    print -r -- "$_fb" | LC_ALL=C grep -qE '(^|[^[:alnum:]_])python3?([^[:alnum:]_]|$)' || continue
-    print -r -- "$_fb" | LC_ALL=C grep -qE 'command -v python3|\$\+commands\[python3\]' \
-        || _py_unguarded+=("${_f:t}")
+    # The needle is BUILT, like `_ban` above. Written out, this line is itself a
+    # match and the scan reports its own source -- which it did, on the first
+    # run, and which T241a did twice before it. Two of the three scans in this
+    # case already built their needles; this one was written beside them without
+    # the same care.
+    # 這個關鍵字是**組出來的**，與上面的 `_ban` 一樣。直接寫出來的話，這一行本身就是一個命中，
+    # 掃描會回報它自己的原始碼——第一次執行時它就這樣做了，而 T241a 在它之前已經做過兩次。
+    # 這個案例裡三個掃描有兩個早就把關鍵字組出來；這一個是在它們旁邊寫的，卻沒有同樣的謹慎。
+    _py="pyth"$'on'
+    for _ln in ${(f)"$(LC_ALL=C grep -n -E "(^|[^[:alnum:]_])${_py}3?([^[:alnum:]_]|$)" "$_f" 2>/dev/null || true)"}; do
+        _n=${_ln%%:*}
+        [[ $_n == <-> ]] || continue
+        # A full-line comment is not an invocation. Tested with grep rather than
+        # a zsh pattern: `[[:space:]]#` needs EXTENDED_GLOB to mean "zero or
+        # more", and without it the `#` is a literal, so the test never matched
+        # and every comment mentioning the word was reported as a call.
+        # 一整行的註解不是一次呼叫。用 grep 而不是 zsh 的樣式來測：`[[:space:]]#` 要有
+        # EXTENDED_GLOB 才表示「零或多個」，沒有它時那個 `#` 是字面字元，於是這個判斷永遠不成立，
+        # 每一行提到那個字的註解都被回報成一次呼叫。
+        print -r -- "${_ln#*:}" | LC_ALL=C grep -qE '^[[:space:]]*#' && continue
+        # The guard has to be NEAR: within the 30 lines above the call, which is
+        # more than any real if-block here and less than the distance to an
+        # unrelated one.
+        # 那個守衛必須**在附近**：呼叫上方 30 行之內——比這裡任何一個真實的 if 區塊都寬，
+        # 又比「到一個不相干的守衛」的距離窄。
+        _from=$(( _n > 30 ? _n - 30 : 1 ))
+        if ! LC_ALL=C sed -n "${_from},${_n}p" "$_f" 2>/dev/null \
+             | LC_ALL=C grep -qE "command -v ${_py}3|\\\$\\+commands\\[${_py}3\\]"; then
+            _py_unguarded+=("${_f:t}:${_n}")
+        fi
+    done
 done
 if (( ${#_py_unguarded} == 0 )); then
-    ok "T249c every file invoking python3 also guards on its presence / 每個呼叫 python3 的檔案都同時檢查了它是否存在"
+    ok "T249c every ${_py}3 call sits behind a nearby availability guard / 每一次 ${_py}3 呼叫都在附近的可用性守衛之後"
 else
-    bad "T249c unguarded python3 in: ${_py_unguarded} / 實得如上"
+    bad "T249c unguarded ${_py}3 at: ${_py_unguarded} / 實得如上"
 fi
 
 echo "--- T250: document line numbers for a table inside a document / T250：文件裡的表格，行號是文件的行號 ---"
@@ -15059,8 +15097,17 @@ _t257_large=$( { time ( "$CSV2" -tail 8000 -i "$TMP/t257.csv" --no-index >/dev/n
 # Guard the arithmetic: an unparsed time is not a fast run.
 # 守住這個算式：一個「沒有解析出來的時間」不是一次跑得快的執行。
 if [[ -n $_t257_small && -n $_t257_large ]]; then
-    _t257_ok=$(python3 -c "s=${_t257_small}; l=${_t257_large}; print(1 if (s<=0.02 or l/s < 4) else 0)")
-    if [[ $_t257_ok == 1 ]]; then
+    # zsh arithmetic, not python3: the guest is busybox and has no python3, and
+    # T166e's guarded use of it is far enough away in this file that T249c --
+    # which checks per FILE -- did not notice this one was unguarded. The guest
+    # reported "the buffer is not a ring" on a run where both timings were
+    # 0.040s, because the missing interpreter left the comparison empty. A
+    # failure message that names the wrong cause is worse than none.
+    # 用 zsh 的算術，不用 python3：guest 是 busybox、沒有 python3，而 T166e 那個「有守衛的」用法
+    # 在這個檔案裡離得夠遠，於是 T249c——它是**逐檔**檢查的——沒有發現這一個沒有守衛。guest 在
+    # 一次「兩個時間都是 0.040s」的執行上回報了「那個緩衝不是一個環」，因為缺少的直譯器讓那個
+    # 比較變成空的。**一則指名了錯誤原因的失敗訊息，比沒有訊息更糟。**
+    if (( _t257_small <= 0.02 || _t257_large / _t257_small < 4 )); then
         ok "T257a -tail 8000 costs about what -tail 100 does (${_t257_small}s vs ${_t257_large}s) / -tail 8000 的成本與 -tail 100 相當"
     else
         bad "T257a -tail 8000 took ${_t257_large}s against ${_t257_small}s for -tail 100; the buffer is not a ring / -tail 8000 花了如上時間，那個緩衝不是一個環"

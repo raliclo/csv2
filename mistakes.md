@@ -108,6 +108,32 @@ downstream status, now a command substitution earlier in the same argument list.
 the first thing executed after the command -- not merely "not in a pipeline". Capture it into a
 variable on the very next line.
 
+**2026-09-07，第十四次：busybox 上缺工具，第四次；而這一次我自己寫的守衛沒有擋住它。**
+
+為第 85 回合的 T257a 寫比值判斷時我用了 `python3`。guest 上沒有它，於是那個比較變成空的，案例回報
+**「那個緩衝不是一個環」**——而它印出的兩個時間是 `0.040s` 對 `0.040s`，也就是**環是好的**。
+一則指名了錯誤原因的失敗訊息，比沒有訊息更糟：它把讀者送去看一個沒有問題的地方。
+
+**兩天前我為了防這件事寫了 T249c，而它沒有攔到。** 它問的是「含有 python3 呼叫的那個**檔案**，
+裡面某處有沒有守衛」——而 `test_csv2.zsh` 有一個，是 T166e 的，在幾百行之外。**一道守衛，若它的
+單位比它要守的東西粗，就會通過它被寫來針對的那個情況、而漏掉下一個。** 現在它是逐**呼叫**檢查，
+並要求守衛在上方 30 行之內。
+
+修好它的過程本身又踩了兩次同一類：
+1. 「跳過整行註解」我寫成 zsh 樣式 `[[:space:]]#`，那需要 `EXTENDED_GLOB`；沒開時 `#` 是字面字元，
+   於是**每一行提到那個字的註解都被當成呼叫**。改用 `grep -qE '^[[:space:]]*#'`。
+2. 掃描抓到了**它自己**——先是它的正規表示式（第 14538 行），修好之後又是它的 `ok`／`bad` **訊息**。
+   T249a 與 T249b 早就為了這件事把關鍵字組出來，而我在它們旁邊寫 T249c 時沒有照做。**同一個案例裡，
+   三個掃描有兩個套了規則。**
+
+那第二點是 T241a 的逐字重演，連順序都一樣：先被程式碼抓到、修好、再被散文抓到。
+
+Fourteenth: a tool absent on busybox for the fourth time, and this time the guard I wrote two
+days earlier to prevent exactly it did not catch it -- because its unit was the FILE while the
+thing it guarded was the CALL. Fixing it, I twice repeated the class again: a zsh pattern that
+needed EXTENDED_GLOB silently matched nothing, and the scan caught its own regex and then its
+own message, which is T241a verbatim including the order.
+
 ### 共同形狀
 
 **測試碰到的是環境，不是被測物。** 三次都一樣：程式在各平台行為相同，不同的是量尺。
