@@ -11587,3 +11587,45 @@ substitution inherits it, and the assignment kills the script -- after it has
 already truncated the output file. What was left was a header and no rows, with
 nothing on stderr: a file that reads like a table cut short rather than a run
 that died. The empty case is the normal one.
+
+## PF. 量測腳本在每個平台上寫同一個輸出檔名
+
+**狀態：已修（2026-09-08），由 T278a 與 T279a／T279b 釘住。** 修 OW 的過程中撞到的。
+
+這個 repo 為**每個平台**各保存一份已提交的量測紀錄（`measure_output.txt`、
+`measure_output_windows.txt`、`measure_output_linux.txt`），而 `measure.zsh` 在所有平台上寫的都是
+`measure_output.txt`。於是在 Windows 節點上執行那個**被記載的指令**，會覆蓋掉 macOS 的那份紀錄：
+
+```console
+$ # 在 Windows 節點上，跑完 ./verifications/measure.zsh 之後
+$ git status --porcelain
+ M verifications/measure_output.txt
+$ git pull --rebase
+error: cannot pull with rebase: You have unstaged changes.
+```
+
+**擋在「這件事」與「把 Windows 的數字掛在 macOS 的名字底下發表出去」之間的，只有 git 注意到有一個
+未暫存的變更。** 一次 `git add -A` 就會跨過它，而 diff 裡看到的會是四個換了值的合理數字。
+
+### 同一次還發現：表格與它自稱的來源不一致
+
+README 說「原始量測保存在 `verifications/measure_output*.txt`」。而在 2026-09-08 稍早，表格引用的是
+**五次交錯執行的最小值**，檔案裡是**單獨一次**執行——其中一列差了三倍（`0.0635` 對 `0.0212`）。
+兩者都是同一個單位下看起來完全合理的數字，沒有任何東西回報這件事。
+
+修法不是「把數字改對」，那只會撐到下一次量測。修法是 **T279**：把表格的十六個數字逐一與那四份
+來源檔比對，並要求它們也出現在中文版裡。它會在任何一個節點重新量測之後失敗，直到表格被更新——
+那是刻意付出的代價，另一個選擇是一頁引用著沒有任何檔案支持的數字。
+
+The repo keeps one committed record per platform and this script wrote
+`measure_output.txt` on all of them, so running the documented command on the
+Windows node overwrote the macOS record in that node's working tree. The only
+thing between that and publishing Windows numbers under the macOS name was git
+noticing an unstaged change; `git add -A` steps over it and the diff shows four
+plausible numbers with different values.
+
+The same fix uncovered that the table and the files it names as its source
+disagreed by 3x on one row, both being plausible figures in the same units. The
+repair is not correcting the numbers -- that lasts until the next measurement --
+but T279, which compares all sixteen published figures against the four files
+and requires them in the translation too.

@@ -838,21 +838,31 @@ storage, corpus size, and host conditions are included. The macOS and Windows
 runs used 200,000 records (25.4 MiB); the Linux guest run used 20,000 records
 (2.48 MiB), so compare only like-for-like rows.
 
-All four columns were measured on 2026-09-08 with the same binary, best of five
-runs, and the two macOS columns interleaved rather than run back to back.
+All four columns were measured on 2026-09-08 with the same binary. Each figure
+is one `measure.zsh` run, which is itself best-of-N per row, and each column is
+the file named beside it — `measure_output.txt`,
+`measure_output_macos_ssd.txt`, `measure_output_windows.txt`,
+`measure_output_linux.txt`. The two macOS columns were interleaved rather than
+run back to back.
 
 | Measurement | macOS arm64<br>sparse image | macOS arm64<br>local SSD | Windows x86_64 | Linux aarch64 guest |
 |---|---:|---:|---:|---:|
-| Whole-file search, single-threaded | 549,000 µs | 543,000 µs | 1,812,000 µs | 62,000 µs |
-| Whole-file search, parallel | 195,000 µs | 196,000 µs | 808,000 µs | 70,000 µs |
-| Small durable edit | 35,800 µs | 5,800 µs | 74,800 µs | 7,200 µs |
-| Full-file rewrite | 1,201,000 µs | 611,000 µs | 1,870,000 µs | 146,000 µs |
+| Whole-file search, single-threaded | 551,000 µs | 546,000 µs | 1,806,000 µs | 62,000 µs |
+| Whole-file search, parallel | 213,000 µs | 201,000 µs | 774,000 µs | 71,000 µs |
+| Small durable edit | 37,300 µs | 7,800 µs | 66,300 µs | 9,000 µs |
+| Full-file rewrite | 1,232,000 µs | 601,000 µs | 1,887,000 µs | 150,000 µs |
 
 **The two macOS columns are the same machine, the same binary and the same
 minute.** Only the filesystem holding the corpus differs. The two read rows do
-not notice it — 1% — and the two write rows differ by 6.2× and 2.0×. Until
+not notice it — 1% — and the two write rows differ by 4.8× and 2.0×. Until
 2026-09-08 this table had one macOS column and never said where the corpus was,
-which made a 6× storage effect look like a property of csv2.
+which made a storage effect look like a property of csv2.
+
+**The write rows move between runs; the read rows do not.** Across six
+interleaved runs the sparse image gave 35,800–44,100 µs for the small edit and
+1,201,000–1,322,000 µs for the rewrite, the SSD 5,800–7,800 µs and
+601,000–619,000 µs. Both read rows stayed inside 2%. A single write figure from
+either medium is worth about as much as its range says it is.
 
 **The guest's parallel row is SLOWER than its single-threaded row, and that is
 the real result.** On a 2.48 MiB corpus the boundary-finding pass and the worker

@@ -16683,6 +16683,100 @@ else
 fi
 
 echo
+echo "--- T279: the published table equals the files it names / T279：發表的表格等於它指名的那些檔案 ---"
+# The page says the source measurements are kept in verifications/measure_output*.txt.
+# On 2026-09-08 it said that while the table quoted minima across five runs and
+# the file held one run, so the table and its stated source disagreed by 3x on
+# one row. Nothing reported it: both were plausible numbers in the same units.
+#
+# This case is the one guard that a table CANNOT drift from its source, which is
+# the whole subject of round 98. When a node re-measures -- the parent runner
+# rewrites measure_output_linux.txt on every guest run -- this case fails until
+# the table is updated. That is the intended cost: the alternative is a page
+# that quotes numbers no file supports.
+#
+# 那一頁說原始量測保存在 verifications/measure_output*.txt。2026-09-08 它一邊這樣說，一邊在表格裡
+# 引用五次執行的最小值，而檔案裡是單獨一次執行——於是表格與它自稱的來源，在其中一列上差了三倍。
+# 沒有任何東西回報這件事：兩者都是同一個單位下看起來合理的數字。
+#
+# 這個案例是「一張表不會與它的來源漂開」的唯一守衛，而那正是第 98 回合的全部主題。當某個節點重新
+# 量測時——母專案 runner 每次跑 guest 都會改寫 measure_output_linux.txt——這個案例會失敗，直到表格
+# 被更新為止。那是刻意付出的代價：另一個選擇，是一頁引用著「沒有任何檔案支持」的數字。
+_t279_us() {   # 秒 -> 帶千位逗號的微秒 / seconds -> microseconds with thousands separators
+    local n=$(printf '%.0f' $(( $1 * 1000000 )))
+    print -r -- $n | LC_ALL=C sed -e :a -e 's/\(.*[0-9]\)\([0-9]\{3\}\)/\1,\2/;ta'
+}
+_t279_from() {  # $1=檔案 $2=列 -> 微秒 / file, row -> microseconds
+    local f=$ROOT/verifications/$1.txt v
+    case $2 in
+        single)   v=$(LC_ALL=C sed -n 's/^single-threaded *: *\([0-9.]*\) s.*/\1/p' $f) ;;
+        parallel) v=$(LC_ALL=C sed -n 's/^parallel *: *\([0-9.]*\) s.*/\1/p' $f) ;;
+        edit)     v=$(LC_ALL=C sed -n 's/^smallest edit *: *\([0-9.]*\) s.*/\1/p' $f) ;;
+        rewrite)  v=$(LC_ALL=C sed -n 's/^rewrite whole *: *\([0-9.]*\) s.*/\1/p' $f) ;;
+    esac
+    [[ -n $v ]] || { print -r -- "MISSING"; return }
+    _t279_us $v
+}
+# The four columns of the README table, in the order they appear.
+# README 表格的四欄，依它們出現的順序。
+_t279_files=(measure_output measure_output_macos_ssd measure_output_windows measure_output_linux)
+_t279_rows=(single parallel edit rewrite)
+_t279_labels=("Whole-file search, single-threaded" "Whole-file search, parallel" "Small durable edit" "Full-file rewrite")
+_t279_bad=()
+for _i in 1 2 3 4; do
+    _line=$(LC_ALL=C grep -F "| ${_t279_labels[$_i]} |" "$ROOT/README.md" | head -1)
+    if [[ -z $_line ]]; then
+        _t279_bad+=("row '${_t279_labels[$_i]}' is not in README.md")
+        continue
+    fi
+    for _c in 1 2 3 4; do
+        _want=$(_t279_from ${_t279_files[$_c]} ${_t279_rows[$_i]})
+        # zsh DROPS the empty fields that a leading and trailing `|` produce, so
+        # field 1 is the label and the data columns are 2..5 -- not 3..6. The
+        # first version of this line used `_c + 2`, which is in range for three
+        # of the four columns and out of range for the fourth; under `set -u`
+        # an out-of-range subscript is not empty, it ABORTS THE SUITE, and
+        # `zsh -n` cannot see it because it is a run-time value. That is
+        # mistakes_prevention rule 4 in a different disguise, so the `:-` is
+        # here as well as the corrected index.
+        # zsh 會**丟掉**開頭與結尾的 `|` 造成的空欄位，因此第 1 欄是標題、資料欄是 2..5——不是
+        # 3..6。這一行的第一版寫的是 `_c + 2`，它對四欄中的三欄在範圍內、對第四欄越界；而在
+        # `set -u` 之下，一個越界的下標不是空字串，它會**中止整個測試套件**，而 `zsh -n` 看不見
+        # 它，因為那是執行期的值。那正是 mistakes_prevention 第 4 條換了一個偽裝，所以除了修正
+        # 索引之外，這裡也加上 `:-`。
+        _got=${${(s:|:)_line}[$((_c + 1))]:-}
+        _got=${_got// /}
+        _got=${_got%µs}
+        if [[ $_got != $_want ]]; then
+            _t279_bad+=("${_t279_labels[$_i]} col$_c: README says [$_got], ${_t279_files[$_c]}.txt says [$_want]")
+        fi
+    done
+done
+if (( ${#_t279_bad} == 0 )); then
+    ok "T279a all sixteen published figures equal the four source files / 十六個發表的數字全部等於那四份來源檔"
+else
+    bad "T279a ${#_t279_bad} mismatch(es): ${_t279_bad[1]}${_t279_bad[2]:+ ; ${_t279_bad[2]}} / 不一致如上"
+fi
+
+# And the same four numbers must appear in the translation, so a reader of
+# either page acts on the same figures. The zh table was corrected in the same
+# commit as the English one twice this month; nothing checked that they agreed.
+# 而同樣那四個數字必須也出現在翻譯裡，讓讀任一頁的人依據的是同一組數字。這個月已經有兩次，中文表
+# 與英文表在同一個 commit 裡各自被修正——而沒有任何東西檢查過它們是否一致。
+_t279_zh_bad=0
+for _i in 1 2 3 4; do
+    for _c in 1 2 3 4; do
+        _want=$(_t279_from ${_t279_files[$_c]} ${_t279_rows[$_i]})
+        LC_ALL=C grep -qF "$_want µs" "$ROOT/README.zh-TW.md" || _t279_zh_bad=$((_t279_zh_bad + 1))
+    done
+done
+if (( _t279_zh_bad == 0 )); then
+    ok "T279b every one of those figures also appears in README.zh-TW.md / 那些數字每一個也都出現在 README.zh-TW.md"
+else
+    bad "T279b $_t279_zh_bad figure(s) are in the English table and not the Chinese one / 有這麼多個數字只在英文表裡"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
