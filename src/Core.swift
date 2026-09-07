@@ -923,8 +923,8 @@ public final class RecordParser {
         // 情況。KU。
         if format != .lines && r.count == 1 && looksLikeMarkdownSeparator(r.fields[0].value) {
             throw fault(
-                "record \(r.number) (line \(r.line)) is a Markdown separator row in a file with one column, so this is -md output rather than CSV. Name it with a .md suffix and csv2 reads it as a table -- until 2026-08-26 this sentence ended \"-md is one-way and csv2 cannot read it back\", which stopped being true when it learned to",
-                "第 \(r.number) 筆（第 \(r.line) 行）是一列 Markdown 分隔列，且此檔只有一欄，因此這是 -md 的輸出而不是 CSV。把它命名為 .md 副檔名，csv2 就會把它當成一張表來讀——在 2026-08-26 之前，這句話的結尾是「-md 是單向的，csv2 讀不回來」，而在它學會讀回來的那一刻，那句話就不再為真")
+                "record \(r.number) (line \(r.line)) is a Markdown separator row and has one field, so this is -md output rather than CSV. Name it with a .md suffix and csv2 reads it as a table -- until 2026-08-26 this sentence ended \"-md is one-way and csv2 cannot read it back\", which stopped being true when it learned to",
+                "第 \(r.number) 筆（第 \(r.line) 行）是一列 Markdown 分隔列，且只有一個欄位，因此這是 -md 的輸出而不是 CSV。把它命名為 .md 副檔名，csv2 就會把它當成一張表來讀——在 2026-08-26 之前，這句話的結尾是「-md 是單向的，csv2 讀不回來」，而在它學會讀回來的那一刻，那句話就不再為真")
         }
         fields = []
         recordDirty = false

@@ -47,7 +47,13 @@ The input suffix declares the format:
 | `.csv` | 1 | RFC 4180; quoted commas and newlines are supported |
 | `.csv2` | 2 | English and Traditional Chinese headers; one record per line; `\\n` and `\\r` escapes |
 | `.md` | recovered | A Markdown table; use `--md-table N` for a selected table |
-| other (`.txt`, `.log`, …) or none | 0 | One column per line; bytes are preserved verbatim |
+| other (`.txt`, `.log`, …) or none | 0 | One column per line; bytes are preserved verbatim. `--json` calls this `"format":"lines"` |
+
+Suffix matching is case-insensitive (`DATA.CSV` is a `.csv`), and when a name
+has several suffixes the LAST one decides — so `data.csv.bak`, which is what
+`--backup` writes, reads as line mode rather than as a CSV. The `-o` path's
+suffix declares a format too, and is checked against the input's header count.
+`--headers 0` on a `.csv2` leaves `"format":"csv2"` beside `"headers":0`.
 
 **A suffix-less file has no structure to contradict, so nothing in it is
 suspect.** A `#`, a JSON object, an XML declaration, a Markdown table's rows
@@ -199,8 +205,12 @@ header-only verb. With no header row the `fields` object is keyed by position
 as decimal strings — `{"1":"one"}` — so a script written against column NAMES
 gets numbers there, not an error.
 
-The meta line's `fields` is the number of fields per record: 3 for a
-three-column CSV, and 0 for a `.lines` file, where the count is not fixed.
+The meta line's `fields` is the width of the HEADER: 3 for a three-column CSV,
+and **0 whenever there is no header row** — a `.lines` file, or any file read
+with `--headers 0`. `0` does not mean the width is unfixed: a `.csv` read with
+`--headers 0` still pins it to record 1 and still refuses a ragged file. Use it
+to size rows only when it is non-zero. Until 2026-09-07 this said 0 meant "not
+fixed", which is false on exactly the run that reports it.
 
 `--json-ascii` escapes non-ASCII characters. `-md` and `--json` are mutually
 exclusive and say so; there is no single run that emits both.
@@ -263,14 +273,28 @@ on 2026-09-07 without the condition that made it true.
 **`--headers 0` reads the input line by line** — one field per line, bytes
 verbatim. That is the format a file with no `.csv`/`.csv2` suffix already has,
 and until now it could only be had by *having no suffix*, so neither stdin nor
-a prose `.md` could ask for it. It is also the one value a declaring suffix
-does not override. What a declaring suffix refuses is DISAGREEMENT: `--headers 1`
+a prose `.md` could ask for it. What a declaring suffix refuses is DISAGREEMENT: `--headers 1`
 on a `.csv2` and `--headers 2` on a `.csv` are both errors, while a `--headers`
-that agrees with the suffix is accepted and does nothing. `0` is refused
-whatever the suffix says, because it declines the question rather than answering
-it differently. Until 2026-09-07 this said `--headers 1|2` was refused against a
-`.csv2` outright, which set up a clean binary that does not exist — and the error
-example below, which shows the disagreement case, was right the whole time. A `.md` read this way is
+that agrees with the suffix is accepted and does nothing.
+
+**`--headers 0` is accepted on every suffix**, and what it then means depends on
+the suffix, which is the part worth reading twice:
+
+| Input | `--headers 0` gives |
+|---|---|
+| no suffix, or `.txt`, `.log`, … | one field per line, bytes verbatim — line mode |
+| `.md` | the same: prose, editable and writable back as prose |
+| `.csv`, `.csv2` | headerless CSV — **still split on commas**, with the field count pinned by record 1 |
+| stdin | line mode; `--headers` is required there because there is no suffix |
+
+So on a `.csv` it removes the header row and nothing else. A ragged file read
+that way is still refused, naming record 1 rather than a header that does not
+exist.
+
+Two sentences here were false until 2026-09-07, four lines apart and
+contradicting each other: that `0` is refused whatever the suffix says, and that
+it is the one value a suffix cannot override. A correction on that date fixed
+the `--headers 1|2` claim in this same paragraph and left both standing. A `.md` read this way is
 prose, and can be edited and written back as prose — for documents that merely
 CONTAIN a table rather than being one.
 
@@ -651,7 +675,7 @@ re-reading them.
 | a search that ignores which column it is in | `-contains` matches a substring in EVERY column, so `-contains MIT` also finds `transMITter` — see the last example below. Use `--search-column license` to scope it, or `--search-row`/`--search-cell`. Until 2026-09-07 this row said scoping was not offered at all, and warned that counting would be "silently wrong", 260 lines below the section documenting the flag that fixes it |
 | skipping `#` comment lines | nothing does, and deliberately: a `#` is data and `#id` is a legal column name, so skipping one would mean guessing which lines are data. The refusal names the `#` |
 | a header-only read | `csv2 -head 1 --json -i f.csv \| head -1` — the meta line carries `header`; no verb returns the names alone |
-| converting between `.csv` and `.csv2` | refused on purpose; write the records out and read them back in |
+| converting between `.csv` and `.csv2` | refused on purpose. To do it by hand: write the records to a SUFFIX-LESS path, author the second header row yourself, then read that back — csv2 will not invent a header row it was not given |
 | safe concurrent writers | serialise them yourself; two writers silently lose one edit. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one finishing SECOND warns it could not update the index |
 
 One thing this table used to say and no longer does: **editing a Markdown

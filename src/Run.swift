@@ -543,7 +543,8 @@ func runBuildIndex(_ o: Options) throws {
             // 早就從它的標頭設過這個值，因此這一行在那裡是惰性的。
             if expectedFields == 0 { expectedFields = r.count }
             try checkFieldCount(r, expected: expectedFields,
-                                what: "record \(r.number) (line \(r.line))")
+                                what: "record \(r.number) (line \(r.line))",
+                                headerRows: plan.headerRows)
             // A record that itself spans lines means a record number is no
             // longer a line number, and the index stores bytes rather than
             // lines -- so the seek path must refuse to use this index. Recorded
@@ -1198,7 +1199,8 @@ func runSelect(_ o: Options) throws {
             // 早就從它的標頭設過這個值，因此這一行在那裡是惰性的。
             if expectedFields == 0 { expectedFields = r.count }
             try checkFieldCount(r, expected: expectedFields,
-                                what: "record \(r.number) (line \(r.line))")
+                                what: "record \(r.number) (line \(r.line))",
+                                headerRows: plan.headerRows)
             // Not `false`. This is the index -tail builds as a side effect, and
             // a sidecar that lies about this property is worse than none --
             // the next -contains on the file acts on it.
@@ -2171,7 +2173,8 @@ func runEdit(_ o: Options) throws {
             // 早就從它的標頭設過這個值，因此這一行在那裡是惰性的。
             if expectedFields == 0 { expectedFields = r.count }
             try checkFieldCount(r, expected: expectedFields,
-                                what: "record \(r.number) (line \(r.line))")
+                                what: "record \(r.number) (line \(r.line))",
+                                headerRows: plan.headerRows)
 
             if let ups = updates[r.number] {
                 touched.insert(r.number)

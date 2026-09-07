@@ -10470,3 +10470,105 @@ csv2 -contains Jos --normalize -i n.csv      # 沒有命中
 但那個措辭——「compare search text in NFC」——讀起來像是「只有搜尋字串會被正規化」，而**兩邊都會**；
 它也邀請人讀成「不管有沒有重音都找得到」，而那是假的。**一個可能讓命中變少的旗標，需要一句話說
 出這件事。**
+
+---
+
+# 第 89 回合（2026-09-07，格式判定）—— 一次修正在同一段裡留下了兩句假話
+
+## NA. 我 2026-09-07 的修正，修掉了被指出的那一句，留下它旁邊的兩句（文件寫錯）
+
+**狀態：已修（2026-09-07）——那一段改寫成一張四列的表，明說 `--headers 0` 在每種副檔名上的意思；T261a／T261b 釘住「都被接受」與「意思不同」兩半。記為 mistakes 4.8：**重新量測的單位是「段落」**。**
+
+第 85 回合（MJ）指出「`--headers 1|2` 對 `.csv2` 會被拒絕」是錯的，我把它改成了「拒絕的是不一致」。
+**同一段裡另外兩句我沒有重新量。** 兩句都是假的，而且**彼此矛盾，相距四行**：
+
+```sh
+csv2 -r --headers 0 -i one.csv    # rc=0
+csv2 -r --headers 0 -i two.csv2   # rc=0
+csv2 -r --headers 0 -i m.md       # rc=0
+csv2 -r --headers 0 -si < one.csv # rc=0
+```
+
+1. **「`0` 則無論副檔名說什麼都會被拒」——假。** 四種都以 0 結束。
+2. **「它也是唯一一個『會宣告的副檔名蓋不過去』的值」——對 `.csv`／`.csv2` 為假。** 實測：
+
+```sh
+printf 'a,b,c\n1,2\n' > ragged.csv
+csv2 -r --headers 0 -i ragged.csv
+# csv2: record 2 (line 2) has 2 fields but the header has 3; ...
+```
+
+`.csv` 搭配 `--headers 0` **仍然依逗號切割並強制欄數**——它不是逐行模式。那個副檔名確實蓋過去了。
+只有 `.md` 那一句是真的。
+
+**這是 mistakes 4.6 的重演，但這一次的範圍更小、也因此更難原諒**：上一次我沒有重新量一張表的其餘
+各列，這一次我沒有重新量**同一段落裡的下一句**。
+
+## NB. 我第 83 回合寫的 meta `fields` 規則，兩半都是假的
+
+**狀態：已修（2026-09-07，文件）——`fields` 是**標頭的寬度**，0 表示「沒有標頭列」而非「不固定」；T261e 釘住。**
+
+我寫的是：「meta 行的 `fields` 是每筆有幾個欄位：三欄的 CSV 是 3，而 `.lines` 檔是 0，因為那裡的
+欄數不固定。」
+
+```sh
+csv2 -r --json --headers 0 -i one.csv     # {"meta":{"format":"csv","headers":0,"fields":0}}
+csv2 -r --headers 0 -i ragged.csv         # 拒絕：has 2 fields but the header has 3
+```
+
+一個三欄的 CSV 以 `--headers 0` 讀，回報 `fields:0`——**而它的欄數是固定的**，同一次組態下不符會被
+拒絕。**「3 代表三欄」與「0 代表不固定」在同一次執行上同時失效。**
+
+## NC. 一則拒絕訊息指名了「一個那次執行宣告不存在的標頭」（程式缺陷）
+
+**狀態：已修（2026-09-07）——`checkFieldCount` 加上 `headerRows`，零列標頭時訊息改指名第 1 筆；T261c／T261d 同時釘住兩種情況。**
+
+```sh
+csv2 -r --headers 0 -i ragged.csv
+# csv2: record 2 (line 2) has 2 fields but the header has 3
+```
+
+那次執行說了**零列標頭**。第 1 筆是**資料**。訊息該指名的是第 1 筆，不是「the header」。
+
+## ND. `fields:0` 與「欄數正被強制」同時成立（程式缺陷）
+
+**狀態：改判為文件問題（2026-09-07）。** meta 行在任何紀錄之前送出，那時「被強制的寬度」還不存在，因此 `fields` 只能是標頭的寬度。程式沒有錯，是我把那個欄位的意義寫錯了——見 NB。
+
+NB 的另一面：`--json` 回報 `fields:0`，而 NC 證明形狀被釘在 3 且不符會被拒。**一個信任 `fields`
+的消費端會把它的列開錯大小。** 回報「0 表示不固定」而同時強制 3，是自相矛盾的。
+
+## NE. 「a file with one column」被用來描述一個兩欄的檔案（程式缺陷）
+
+**狀態：已修（2026-09-07）——訊息改為「is a Markdown separator row **and has one field**」；T261f 釘住，並斷言舊措辭不再出現。**
+
+```sh
+printf 'pkg,version\n套件,版本\n|---|---|\n' > t.csv2
+csv2 -r -i t.csv2
+# csv2: record 3 (line 3) is a Markdown separator row in a file with one column, ...
+```
+
+**那筆紀錄只有一個欄位；那個檔案有兩欄。** 對照組證明兩個檢查是分開的：同一個檔案裡一個非
+Markdown 的單欄位紀錄，會得到正確的「has 1 fields but the header has 2」。
+
+（順帶：那則正確的訊息寫的是「has 1 **fields**」。）
+
+## NF. 三件關於副檔名的事沒有記載
+
+**狀態：已記載（2026-09-07）——不分大小寫、最後一個副檔名勝出（`--backup` 的 `.bak` 因此不是 CSV）、`"lines"` 這個字面值、`-o` 的副檔名也宣告格式；T261g 釘住前兩項。**
+
+- **副檔名比對不分大小寫**：`UP.CSV` 讀成 `csv`。
+- **多重副檔名時最後一個勝出**：`b.csv.bak` 讀成 `lines`。**這件事對 `--backup` 產生的 `.bak` 檔
+  正好要緊**——那些檔案不會被當成 CSV 讀回來。
+- **`meta.format` 裡的字面值 `"lines"`**：格式表的第四列沒有名字，而 `--json` 會輸出
+  `"format":"lines"`，散文也用「`.lines` 檔」的說法，彷彿那是一個副檔名。任何依 `meta.format`
+  分支的人只能用猜的。
+- **`.csv2` 搭配 `--headers 0` 會留下 `"format":"csv2"` 而 `"headers":0`**——一個文件從未展示過的
+  組合，而一個依 `format` 判斷的消費端不會預期它。
+
+## NG. 「write the records out and read them back in」讀起來像 csv2 會代勞
+
+**狀態：已修（2026-09-07）——那一列現在說出「寫到無副檔名的路徑、自己寫第二列標頭、再讀回來」。**
+
+那是「什麼時候該停止使用它」裡 `.csv`→`.csv2` 的替代方案。它實際的意思是：把紀錄倒出來、**在你的
+shell 裡自己組出第二列標頭**、再讀回去；而且中間那個檔案**必須沒有副檔名**。錯誤訊息把兩件事都說
+了，README 兩件都沒說。

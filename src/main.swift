@@ -2585,7 +2585,26 @@ func validateBeforeAppend(path: String, format: Format, headerRows: Int,
 // MARK: - Field count check / 欄數檢查
 // ---------------------------------------------------------------------
 
-func checkFieldCount(_ r: Record, expected: Int, what: String) throws {
+/// `headerRows` decides what the message calls the source of `expected`.
+///
+/// With `--headers 0` there is no header, and record 1 is data -- but the
+/// message said "but the header has 3" anyway, naming a thing the same run had
+/// declared does not exist. A reader told to compare against a header they did
+/// not write goes looking for a file that is not there. NC.
+///
+/// A default of 1 keeps the seven other call sites unchanged, because every one
+/// of them is on a path where a header exists; only the reading path can carry
+/// zero.
+///
+/// `headerRows` 決定這則訊息把 `expected` 的來源叫作什麼。
+///
+/// 在 `--headers 0` 之下沒有標頭，而第 1 筆是**資料**——但那則訊息照樣說「but the header has 3」，
+/// 指名了一個同一次執行剛剛宣告「不存在」的東西。一個被要求去對照「一列他沒有寫過的標頭」的讀者，
+/// 會去找一個並不存在的東西。NC。
+///
+/// 預設值 1 讓其餘七個呼叫點不必改動，因為它們每一個都在「標頭存在」的路徑上；只有讀取那條路
+/// 帶得了零。
+func checkFieldCount(_ r: Record, expected: Int, what: String, headerRows: Int = 1) throws {
     guard r.count == expected else {
         // Never pad. This is the check `artifacts.csv` was missing on the day
         // a commit string got written into the built_utc column with nothing
@@ -2616,9 +2635,11 @@ func checkFieldCount(_ r: Record, expected: Int, what: String) throws {
                 "\(what) starts with '#'. csv2 has no comment syntax: in CSV a '#' is data, and a column named '#id' is legal, so skipping such a line would mean guessing which lines are data. Remove the line, or read the file under a name with no .csv/.csv2 suffix, where every line is one field",
                 "\(what) 以 '#' 開頭。csv2 沒有註解語法：在 CSV 裡 '#' 是資料，而一個叫 '#id' 的欄位是合法的，因此跳過這樣的一行就等於去猜哪些行是資料。請移除那一行，或把這個檔案以「沒有 .csv／.csv2 副檔名」的名字讀取——那時每一行就是一個欄位")
         }
+        let sourceEN = headerRows == 0 ? "record 1 has" : "the header has"
+        let sourceZH = headerRows == 0 ? "第 1 筆有" : "標頭有"
         throw fault(
-            "\(what) has \(r.count) fields but the header has \(expected); csv2 will not pad or truncate to fit",
-            "\(what) 有 \(r.count) 欄，標頭有 \(expected) 欄；csv2 不會補空或截斷來湊合")
+            "\(what) has \(r.count) fields but \(sourceEN) \(expected); csv2 will not pad or truncate to fit",
+            "\(what) 有 \(r.count) 欄，\(sourceZH) \(expected) 欄；csv2 不會補空或截斷來湊合")
     }
 }
 

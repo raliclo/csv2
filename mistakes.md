@@ -618,6 +618,28 @@ previous three of these were true statements missing their condition; this one w
 claim that "any X may be combined" needs at least two unlike X measured, or it needs shrinking
 back to the one that was.
 
+### 第八次：同一段落裡，我修了被指出的那一句，沒有量它旁邊的兩句
+
+2026-09-07。第 85 回合指出「`--headers 1|2` 對 `.csv2` 會被拒絕」是錯的，我把它改成「拒絕的是不一致」。
+
+隔天第 89 回合回來，指出**同一段落裡另外兩句也是假的**，而且**彼此矛盾、相距四行**：
+
+- 「`0` 則無論副檔名說什麼都會被拒」——四種副檔名全部 rc=0
+- 「它也是唯一一個『會宣告的副檔名蓋不過去』的值」——`.csv` 搭配 `--headers 0` 仍然依逗號切割
+
+**這是第六次（4.6）的縮小版，而縮小讓它更難原諒。** 那一次我沒有重新量「一張表的其餘各列」；
+這一次我沒有重新量「同一個段落裡的下一句」——而我正在編輯那個段落，那兩句就在我游標的四行之內。
+
+**判準因此要縮到最小的可操作單位：改一句話時，把它所在的那個段落整段重跑一遍。** 不是那份文件、
+不是那一節——是那一段。段落是「一組彼此有關的宣稱」的自然邊界，而彼此有關的宣稱正是最容易一起
+過時、也最容易只修一句的東西。
+
+Eighth, and a smaller version of the sixth which makes it harder to excuse. Fixing one false
+sentence, I did not re-measure the two beside it -- in the same paragraph, four lines from my
+cursor, and contradicting each other. The unit of re-measurement is the PARAGRAPH: a paragraph
+is the natural boundary of a group of related claims, and related claims are exactly what goes
+stale together and gets fixed one at a time.
+
 ### 矯正措施
 
 **在使用者可見的文字裡說出「我會做 X」的當下就記下來**（TaskCreate），不要等做完再回頭數。

@@ -15471,6 +15471,115 @@ else
     bad "T260g raw=[$_t260_raw] norm=[$_t260_norm] ascii=[$_t260_ascii] / 實得如上"
 fi
 
+echo "--- T261: what --headers 0 means on each suffix / T261：--headers 0 在每一種副檔名上的意思 ---"
+# NA. A correction on 2026-09-07 fixed one sentence in this paragraph and left
+# two beside it, four lines apart and contradicting each other: that `0` is
+# refused whatever the suffix says, and that it is the one value a suffix cannot
+# override. Both false. This is mistakes 4.6 at a smaller scale -- last time it
+# was the other rows of a table, this time the next sentence in the paragraph.
+#
+# The table in the README is now four rows, so this case is four assertions.
+# Checking one suffix would have passed while three others were wrong.
+#
+# NA。2026-09-07 的一次修正改掉了這一段裡的一句，卻把它旁邊的兩句留下——相距四行、而且彼此矛盾：
+# 「`0` 無論副檔名說什麼都會被拒」，以及「它是唯一一個副檔名蓋不過去的值」。兩句都是假的。
+# 這是 mistakes 4.6 的縮小版——上一次是一張表的其餘各列，這一次是**同一段落裡的下一句**。
+#
+# README 裡那張表現在有四列，因此這個案例有四項斷言。只檢查其中一種副檔名，會在另外三種都錯的
+# 情況下照樣通過。
+printf 'a,b,c\n1,2,3\n' > "$TMP/t261.csv"
+printf 'a,b\n甲,乙\n1,2\n' > "$TMP/t261.csv2"
+printf '# doc\n\n| p | v |\n|---|---|\n' > "$TMP/t261.md"
+printf 'one\ntwo,three\n' > "$TMP/t261.txt"
+_t261_bad=()
+for _f in t261.csv t261.csv2 t261.md t261.txt; do
+    "$CSV2" -r --headers 0 -i "$TMP/$_f" >/dev/null 2>&1 || _t261_bad+=("$_f")
+done
+if (( ${#_t261_bad} == 0 )); then
+    ok "T261a --headers 0 is accepted on every suffix / --headers 0 在每一種副檔名上都被接受"
+else
+    bad "T261a refused on: $_t261_bad / 被拒的有如上"
+fi
+
+# And what it MEANS differs. On a .csv it is headerless CSV -- still split on
+# commas, still arity-checked -- while on a suffix-less file it is line mode.
+# The ragged file is what separates them: line mode has one field per line and
+# cannot be ragged.
+# 而它的**意思**不同。在 `.csv` 上它是「無標頭的 CSV」——仍然依逗號切割、仍然檢查欄數——而在無副檔名
+# 的檔案上它是逐行模式。那個欄數不齊的檔案正是分開兩者的東西：逐行模式一行就是一個欄位，
+# 不可能不齊。
+printf 'a,b,c\n1,2\n' > "$TMP/t261ragged.csv"
+printf 'a,b,c\n1,2\n' > "$TMP/t261ragged"
+"$CSV2" -r --headers 0 -i "$TMP/t261ragged.csv" >/dev/null 2>"$TMP/t261.err"
+_t261_csv_rc=$?
+"$CSV2" -r --headers 0 -i "$TMP/t261ragged" >/dev/null 2>&1
+_t261_lines_rc=$?
+if [[ $_t261_csv_rc == 1 && $_t261_lines_rc == 0 ]]; then
+    ok "T261b a .csv with --headers 0 still splits on commas; a suffix-less file does not / .csv 搭配 --headers 0 仍依逗號切割，無副檔名的檔案不會"
+else
+    bad "T261b csv_rc=$_t261_csv_rc lines_rc=$_t261_lines_rc / 實得如上"
+fi
+
+# NC. That refusal must not name a header the run declared does not exist.
+# NC。那則拒絕不可以指名一個「那次執行宣告不存在」的標頭。
+if LC_ALL=C grep -q 'record 1 has 3' "$TMP/t261.err" && ! LC_ALL=C grep -q 'the header has' "$TMP/t261.err"; then
+    ok "T261c with --headers 0 the message names record 1, not a header / 在 --headers 0 之下訊息指名第 1 筆，而不是標頭"
+else
+    bad "T261c err=[$(tr '\n' '|' < "$TMP/t261.err")] / 實得如上"
+fi
+
+# ...and must still name the header when there IS one. A fix that always said
+# "record 1" would pass T261c and lose the information in the common case.
+# ……而在**確實有**標頭時仍然要指名標頭。一個「一律說 record 1」的修法會通過 T261c，並在最常見的
+# 情況下丟掉那個資訊。
+"$CSV2" -r -i "$TMP/t261ragged.csv" >/dev/null 2>"$TMP/t261b.err"
+if LC_ALL=C grep -q 'the header has 3' "$TMP/t261b.err"; then
+    ok "T261d and it still names the header when one exists / 而在標頭存在時它仍然指名標頭"
+else
+    bad "T261d err=[$(tr '\n' '|' < "$TMP/t261b.err")] / 實得如上"
+fi
+
+# NB/ND. meta `fields` is the HEADER's width, so 0 means "no header row" and
+# not "unfixed" -- the width is pinned by record 1 on that very run, which
+# T261b just proved by refusing a ragged file.
+# NB／ND。meta 的 `fields` 是**標頭的寬度**，因此 0 的意思是「沒有標頭列」而不是「不固定」
+# ——在那一次執行上，寬度正是由第 1 筆釘住的，而 T261b 剛剛用「拒絕一個不齊的檔案」證明了這件事。
+_t261_meta=$("$CSV2" -r --json --headers 0 -i "$TMP/t261.csv" 2>/dev/null | LC_ALL=C head -1)
+if [[ $_t261_meta == *'"headers":0'* && $_t261_meta == *'"fields":0'* ]]; then
+    ok "T261e fields is 0 when there is no header row, while the width is still enforced / 沒有標頭列時 fields 是 0，而寬度仍然被強制"
+else
+    bad "T261e got [$_t261_meta] / 實得如上"
+fi
+
+# NE. The Markdown refusal described the FILE as one-column when it was the
+# RECORD that had one field. The two-column fixture is the case: a message that
+# said "one column" of a two-column file sent the reader to the wrong place.
+# NE。那則 Markdown 拒絕把**檔案**描述成單欄，而其實是那筆**紀錄**只有一個欄位。這個兩欄的
+# fixture 正是那個情況：一則對兩欄檔案說「只有一欄」的訊息，會把讀者送去錯的地方。
+printf 'pkg,version\n套件,版本\n|---|---|\n' > "$TMP/t261md.csv2"
+"$CSV2" -r -i "$TMP/t261md.csv2" >/dev/null 2>"$TMP/t261md.err"
+if LC_ALL=C grep -q 'has one field' "$TMP/t261md.err" \
+   && ! LC_ALL=C grep -q 'file with one column' "$TMP/t261md.err"; then
+    ok "T261f the Markdown refusal describes the record, not the file / 那則 Markdown 拒絕描述的是紀錄，不是檔案"
+else
+    bad "T261f err=[$(tr '\n' '|' < "$TMP/t261md.err")] / 實得如上"
+fi
+
+# NF. Suffix matching is case-insensitive, and the LAST suffix decides -- which
+# matters because --backup writes `.bak`, and those files do not read back as
+# CSV.
+# NF。副檔名比對不分大小寫，而**最後一個**副檔名說了算——那件事要緊，因為 `--backup` 寫出的是
+# `.bak`，而那些檔案讀回來不是 CSV。
+printf 'a,b\n1,2\n' > "$TMP/T261UP.CSV"
+printf 'a,b\n1,2\n' > "$TMP/t261.csv.bak"
+_t261_up=$("$CSV2" -r --json -i "$TMP/T261UP.CSV" 2>/dev/null | LC_ALL=C head -1)
+_t261_bak=$("$CSV2" -r --json -i "$TMP/t261.csv.bak" 2>/dev/null | LC_ALL=C head -1)
+if [[ $_t261_up == *'"format":"csv"'* && $_t261_bak == *'"format":"lines"'* ]]; then
+    ok "T261g a suffix matches case-insensitively and the last one decides / 副檔名比對不分大小寫，且最後一個說了算"
+else
+    bad "T261g up=[${_t261_up:0:50}] bak=[${_t261_bak:0:50}] / 實得如上"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
