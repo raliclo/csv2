@@ -47,7 +47,7 @@ The input suffix declares the format:
 | `.csv` | 1 | RFC 4180; quoted commas and newlines are supported |
 | `.csv2` | 2 | English and Traditional Chinese headers; one record per line; `\\n` and `\\r` escapes |
 | `.md` | recovered | A Markdown table; use `--md-table N` for a selected table |
-| other or none | 0 | One column per line; bytes are preserved verbatim |
+| other (`.txt`, `.log`, …) or none | 0 | One column per line; bytes are preserved verbatim |
 
 **A suffix-less file has no structure to contradict, so nothing in it is
 suspect.** A `#`, a JSON object, an XML declaration, a Markdown table's rows
@@ -268,8 +268,30 @@ csv2 -add-column 3 'note,備註' 'todo' -i data.csv2 --in-place
 ```
 
 Supported edit verbs are `-insert`, `-append`, `-delete`, `-update`, and
-`-add-column`, plus content-anchored `-update-where`. All indexes refer to the original input and are applied in one
-pass. `-delete -cell` clears a field without changing the field count.
+`-add-column`, plus content-anchored `-update-where`. Several may be given in
+one invocation. All RECORD NUMBERS refer to the original input and every edit is
+applied in one pass — so `-insert 2 'NEW' -delete 4` deletes the record that was
+4th before the insert, not the one that is 4th after it. (This sentence said
+"all indexes" until 2026-09-07, in a page where "index" otherwise means the
+`.index` sidecar.)
+
+**`-delete a,b` deletes an inclusive RANGE**, the same reading as `-mid a,b`. To
+remove records that are not adjacent, repeat the flag:
+
+```sh
+csv2 -delete 2,4 -i data.csv --in-place        # deletes 2, 3 AND 4
+csv2 -delete 2 -delete 4 -i data.csv --in-place # deletes 2 and 4, keeping 3
+```
+
+Both forms exit 0 and print nothing, so the wrong one costs a record with no
+sign that anything unintended happened. Until 2026-09-07 only `-delete 4`
+appeared here, which left a reader with two records to remove choosing blind.
+
+`-insert N` makes the new record number N; the record previously at N and
+everything after it shift down. It cannot address one past the end — use
+`-append` for that.
+
+`-delete -cell` clears a field without changing the field count.
 `-delete -col` removes a column from every record and every header row.
 `-add-column` takes both header titles for `.csv2`; omitting the Traditional
 Chinese title leaves that header cell empty and emits a warning.

@@ -15168,6 +15168,74 @@ else
     bad "T257e count_rc=$_t257_cnt err=[$(tr '\n' '|' < "$TMP/t257.err")] edit=[${_t257_edit//$'\n'/|}] / 實得如上"
 fi
 
+echo "--- T258: the two spellings of -delete, and what a record number means / T258：-delete 的兩種寫法，以及紀錄號指的是什麼 ---"
+# MN. `-delete a,b` is an inclusive range and `-delete` may repeat, and neither
+# was on the page -- so a reader with two records to remove chose blind between
+# a syntax that does what they meant and one that silently takes the record
+# between. Both exit 0 with empty streams, so the wrong choice costs a record
+# with no sign that anything unintended happened.
+#
+# Both forms are asserted together on purpose. A case that checked only the
+# range would pass on a program where the repeated flag ALSO deleted a range,
+# and vice versa; it is the difference between them that the page now teaches.
+#
+# MN。`-delete a,b` 是一個包含兩端的範圍，而 `-delete` 可以重複，兩者都不在那一頁上——於是一個有
+# 兩筆要刪的讀者只能在「做他想要的事」與「安靜地把中間那一筆一起帶走」之間盲選。兩種寫法都以 0
+# 結束、串流全空，因此選錯的代價是少一筆紀錄，而沒有任何跡象。
+#
+# 兩種寫法刻意一起斷言。一個只檢查範圍的案例，會在「重複旗標**也**刪成範圍」的程式上通過，
+# 反之亦然；那一頁現在教的正是**兩者之間的差別**。
+_t258_mk() { printf 'name\nalpha\nbravo\ncharlie\ndelta\necho\n' > "$1" }
+_t258_mk "$TMP/t258a.csv"
+"$CSV2" -delete 2,4 -i "$TMP/t258a.csv" --in-place >"$TMP/t258.out" 2>"$TMP/t258.err"
+_t258_rc=$?
+_t258_range=$(LC_ALL=C tail -n +2 "$TMP/t258a.csv" | LC_ALL=C tr '\n' ' ')
+_t258_mk "$TMP/t258b.csv"
+"$CSV2" -delete 2 -delete 4 -i "$TMP/t258b.csv" --in-place >/dev/null 2>&1
+_t258_list=$(LC_ALL=C tail -n +2 "$TMP/t258b.csv" | LC_ALL=C tr '\n' ' ')
+if [[ $_t258_range == 'alpha echo ' && $_t258_list == 'alpha charlie echo ' ]]; then
+    ok "T258a -delete a,b is a range and repeating the flag is a list / -delete a,b 是範圍，重複旗標是清單"
+else
+    bad "T258a range=[$_t258_range] list=[$_t258_list] / 實得如上"
+fi
+
+# The silence is half the finding: it is why the wrong spelling is not noticed.
+# 那份沉默是這個發現的一半：它正是「選錯了卻沒有人發現」的原因。
+if [[ $_t258_rc == 0 && ! -s "$TMP/t258.out" && ! -s "$TMP/t258.err" ]]; then
+    ok "T258b the range form says nothing on either stream / 範圍那種寫法在兩條串流上都不說話"
+else
+    bad "T258b rc=$_t258_rc out=$(wc -c < "$TMP/t258.out" | tr -d ' ')B err=$(wc -c < "$TMP/t258.err" | tr -d ' ')B / 實得如上"
+fi
+
+# MP. `-insert N` makes the new record BECOME N, and one past the end is
+# refused rather than treated as an append.
+# MP。`-insert N` 讓新紀錄**成為**第 N 筆，而「最後一筆的下一個」會被拒絕，不會被當成追加。
+_t258_mk "$TMP/t258c.csv"
+"$CSV2" -insert 3 'ZZZ' -i "$TMP/t258c.csv" --in-place >/dev/null 2>&1
+_t258_ins=$("$CSV2" -get 3:1 -i "$TMP/t258c.csv" 2>/dev/null)
+_t258_mk "$TMP/t258d.csv"
+"$CSV2" -insert 6 'ZZZ' -i "$TMP/t258d.csv" --in-place >/dev/null 2>"$TMP/t258d.err"
+_t258_past=$?
+if [[ $_t258_ins == 'ZZZ' && $_t258_past == 1 ]] && LC_ALL=C grep -q 'out of range' "$TMP/t258d.err"; then
+    ok "T258c -insert N makes the new record N, and N past the end is refused / -insert N 讓新紀錄成為第 N 筆，而越界的 N 被拒絕"
+else
+    bad "T258c record3=[$_t258_ins] past_rc=$_t258_past err=[$(tr '\n' '|' < "$TMP/t258d.err")] / 實得如上"
+fi
+
+# MO. Several verbs in one run, with record numbers referring to the ORIGINAL
+# input. The combination is the assertion: `-delete 4` must take the record that
+# was fourth BEFORE the insert, not the one that is fourth after it.
+# MO。一次執行給好幾個動詞，而紀錄號指的是**原始**輸入。那個組合本身就是斷言：`-delete 4` 必須
+# 拿走「插入**之前**排第 4」的那一筆，而不是插入之後排第 4 的那一筆。
+_t258_mk "$TMP/t258e.csv"
+"$CSV2" -insert 2 'NEW' -delete 4 -i "$TMP/t258e.csv" --in-place >/dev/null 2>&1
+_t258_both=$(LC_ALL=C tail -n +2 "$TMP/t258e.csv" | LC_ALL=C tr '\n' ' ')
+if [[ $_t258_both == 'alpha NEW bravo charlie echo ' ]]; then
+    ok "T258d record numbers refer to the original input across two verbs / 兩個動詞之間，紀錄號指的是原始輸入"
+else
+    bad "T258d got [$_t258_both], wanted [alpha NEW bravo charlie echo ] / 實得如上"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

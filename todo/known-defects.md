@@ -10236,3 +10236,69 @@ printf '  %-28s rc=%s\n' "${x%% -i*}  $(basename ${x##*-i })" "$?"
 與 2026-09-06 那次 `| head -2` 是同一條、不同機制：那次是管線，這次是**同一個參數列裡的命令替換**。
 判準因此要再放寬一格：**要判斷一個指令的成敗，`$?` 必須是它之後執行的第一件事**——不只是「不要放進
 管線」，而是「中間不要有任何會執行東西的展開」。修法是立刻存進區域變數：`local rc=$?`。
+
+---
+
+# 第 86 回合（2026-09-07，編輯動詞）—— 第 1 類與第 4 類**都是空的**
+
+這是第一個「文件沒有寫錯任何一句話」的回合。所有發現都是**沒寫**與**不清楚**——而其中第一項有
+資料遺失的半徑。
+
+## MN. `-delete a,b` 是包含兩端的**範圍**，而 README 只展示過 `-delete 4`
+
+**狀態：已記載（2026-09-07）——兩種寫法並列展示，並說明「兩者都以 0 結束、都不印任何東西」；T258a 同時斷言兩種、T258b 釘住那份沉默。**
+
+```sh
+printf 'name\nalpha\nbravo\ncharlie\ndelta\necho\n' > t.csv
+csv2 -delete 2,4 -i t.csv --in-place
+# rc=0   stdout=0 bytes   stderr=0 bytes
+# 剩下：alpha echo          ← charlie 也不見了
+```
+
+想刪掉第 2 與第 4 筆的人，手上有兩種寫法：
+
+| 寫法 | 結果 |
+|---|---|
+| `-delete 2 -delete 4`（重複旗標） | alpha charlie echo ← 他要的 |
+| `-delete 2,4`（逗號） | alpha echo ← **中間那一筆被一起刪掉** |
+
+**兩種寫法都沒有被記載。** README 只有 `-delete 4`。於是一個有兩筆要刪的讀者，是在擲硬幣：一面
+做他想要的事，另一面**安靜地**把中間的全部刪掉——rc=0、兩條串流都不印任何東西。
+
+**這個行為本身站得住**：逗號在 `-mid a,b` 就是包含兩端的範圍，`-delete a,b` 與它一致。回報者因此
+**沒有**把它歸進第 4 類，而那個判斷是對的。**它是一個文件缺口，而那個缺口的半徑是資料遺失。**
+
+`-delete a,b` is an inclusive range, consistent with `-mid a,b`, and neither that form nor the
+repeated-flag form is documented -- so a reader with two records to delete has a coin flip
+between the syntax that does what they meant and one that silently takes everything between.
+
+## MO. 「一次可以給好幾個編輯動詞」從未被明說
+
+**狀態：已記載（2026-09-07），由 T258d 釘住——而那個案例斷言的是「紀錄號指的是原始輸入」，那才是這件事真正的內容。**
+
+「所有索引都以原始輸入為準，並在一次通過中套用」**暗示**了它，但編輯那一節的九行範例是九次
+各自獨立的單動詞執行，沒有任何一行示範兩個動詞。實測 `-insert 2 'NEW' -delete 4` 正常運作，
+且索引確實以原始輸入為準。
+
+## MP. `-insert N` 的語意沒有寫，而 `-insert count+1` 會被拒絕
+
+**狀態：已記載（2026-09-07），由 T258c 釘住兩半。**
+
+`csv2 -insert 4 'a,b,c'` 可以讀成「新紀錄**成為**第 4 筆」或「插在第 4 筆**之後**」。實測是前者。
+而 `-insert 6` 在一個 5 筆的檔案上被拒絕（訊息清楚），所以「用 `-insert count+1` 來追加」這條看起來
+合理的路走不通——那一頁沒有說，只有執行期的錯誤訊息說了。
+
+## MQ. 「All indexes refer to the original input」裡的 index 與 sidecar 撞名
+
+**狀態：已修（2026-09-07）——改為 record numbers，並補上一個具體例子。**
+
+在**這一份** README 裡，「index」壓倒性地指的是 `.index` sidecar——它有一整節。而這句話是任務 3 與
+任務 4 的答案，它該用那個沒有歧義的詞：**record numbers**。回報者自陳第一次讀時把它解析成
+「關於 sidecar 是否過期的宣稱」。
+
+## MR. 格式表的「other or none」那一列從未指名一個具體副檔名
+
+**狀態：已修（2026-09-07）——改為「other (`.txt`, `.log`, …) or none」。**
+
+`.txt` 與 `.md` 都是「其他」，而 `.md` 被獨立成另一列、行為完全不同——於是「other」這個字在默默地
+做事。讀者只能假設 `.txt` 落在那一列（它確實是）。
