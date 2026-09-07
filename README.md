@@ -277,12 +277,23 @@ bytes, including trailing newlines and whitespace. They require exactly one
 `-update` and cannot be combined with a literal value or `-si`.
 
 `--dry-run` currently previews `-update` and `-update-where`, printing each
-changed cell as `old -> new`, and writes nothing. Other edit verbs are refused
-rather than returning empty output that could be mistaken for “no changes”.
-`--backup` with `--in-place` saves the original beside the input as `INPUT.bak`
-and refuses to overwrite an existing backup. Under `--json`, refusals are one
-JSON error object on stderr with a stable `code`, `message`, and `message_zh`;
-the exit status remains 1.
+changed cell as `old -> new`, and writes no DATA file. It is not silent on disk
+if you also passed `-log`: the preview is appended there, including the new
+value, followed by a line reading `dry run: N change(s), wrote nothing`. That
+line is true of the data file and false of the file it is written in. Until
+2026-09-07 this page said "writes nothing" without qualification.
+
+Other edit verbs are refused rather than returning empty output that could be
+mistaken for “no changes”. `--backup` with `--in-place` saves the original
+beside the input as `INPUT.bak` and refuses to overwrite an existing backup.
+
+**An edit cannot take `--json` at all**, so an edit's refusal is never a JSON
+error object: adding `--json` to an edit replaces whatever would have been
+reported with `conflicting-options`, which is a refusal about the flags rather
+than about the edit. JSON error objects — one object on stderr with a stable
+`code`, `message`, and `message_zh`, exit status 1 — are for READS. Until
+2026-09-07 this paragraph promised them here, and the table below repeated the
+promise.
 
 An edit whose destination is Markdown MUST pass BOTH `-md` and `-t`, and
 neither is optional — `-t` is required for the same reason it is when reading,
@@ -379,8 +390,32 @@ Under `--json`, a protected file's meta `header` carries the marker as stored
 a script joining them by name has to strip the marker at the first `:`. The meta
 line also gains a `protected` object naming each protected column and its kind.
 
+`-hash` and `-encrypt` mark BOTH header rows of a `.csv2`, so a file with
+English and Chinese headers gets `license:hmac:KEYID` and `授權:hmac:KEYID`.
+
 Secrets are accepted from key files, not command-line arguments. `-debug` writes
-diagnostics to stderr; `-log` appends timestamped operation records.
+diagnostics to stderr; `-log` appends timestamped operation records — plain text,
+one line each, append-only, English only, and the file is created if absent:
+
+```text
+2026-09-07T15:37:42.384+08:00 INFO  csv2 -log a.log -update 1:license <value> -i d.csv --in-place
+2026-09-07T15:37:42.388+08:00 INFO  update 1:license: "MIT" -> "Zlib"
+2026-09-07T15:37:42.398+08:00 INFO  wrote 2 records, 2 fields, atomic rename OK
+```
+
+The first line is the invocation with the VALUE redacted; `--value-file` and
+`--value-stdin` are recorded as themselves, so the record says where the value
+came from. Until 2026-09-07 both were replaced by `<value>`, which made a
+`--value-stdin` run indistinguishable from a literal one.
+
+**The log holds cleartext cell data, and it is created 0644.** That is the point
+of it — the second line above is what makes the record useful — but it means
+`-update`, `-update-where`, `-delete` and `-delete -cell` write values into it,
+`-delete N` writes a whole record, and a `-contains` search records its needle.
+Protecting a column does not protect the log beside it: keep it where you would
+keep the data, not where you would keep a build artifact. What the log never
+holds is a key — `-keyfile` is recorded as the path, and the key's fingerprint
+appears where a key would identify itself.
 
 There is no `-key` option: secrets on a command line are visible to other
 processes and may remain in shell history. Use `-keyfile` instead.
@@ -482,9 +517,14 @@ re-reading them.
 | converting between `.csv` and `.csv2` | refused on purpose; write the records out and read them back in |
 | safe concurrent writers | serialise them yourself; two writers silently lose one edit. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one finishing SECOND warns it could not update the index |
 
-Two things this table used to say and no longer does: **editing a Markdown
-table** is supported, and **telling refusals apart programmatically** is done
-with the `--json` error object — both are in the examples below.
+One thing this table used to say and no longer does: **editing a Markdown
+table** is supported, and it is in the examples below.
+
+It also used to say that **telling refusals apart programmatically** is done
+with the `--json` error object. That is true for reads and false for edits,
+which cannot take `--json` at all — so an edit's refusal is available only as
+text on stderr. That row was removed rather than corrected, because it named a
+capability the reader most wants exactly where it does not exist.
 
 ## Examples
 

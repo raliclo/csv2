@@ -9940,3 +9940,108 @@ was already in an error message I did not read.
 `-hash` 同等水準的洩漏面說明：密文長度是明文長度加 28 且沒有 padding、空儲存格分辨得出來、其他
 欄位與紀錄數與列序都是明文、欄位名稱本身也是明文——以及**相等性不會洩漏**，那正是它相對於 `-hash`
 的具體優勢，而現在讀者只能自己發現。
+
+---
+
+# 第 83 回合（2026-09-07，稽核記錄）—— 第 4 類再度不空
+
+## LY. 稽核記錄裡的指令回音會吞掉 `--value-file`／`--value-stdin`，記下一個沒有發生過的指令（程式缺陷）
+
+**狀態：已修（2026-09-07）——例外依旗標名稱而非「看起來像旗標」，由 T255a／T255b 釘住（後者確保 `-5` 這種值仍被遮蔽）。** / Status: fixed.
+
+```sh
+csv2 -log a1.log -update 1:license --value-file val.bin -i v.csv2 --in-place
+# 記成： -update 1:license <value> /path/val.bin -i ... --in-place
+
+printf 'GPL' | csv2 -log a2.log -update 1:license --value-stdin -i v.csv2 --in-place
+# 記成： -update 1:license <value> -i ... --in-place
+
+csv2 -log a3.log -update 1:license 'Apache' -i v.csv2 --in-place
+# 記成： -update 1:license <value> -i ... --in-place        ← 與上一行逐字相同
+```
+
+**兩種壞法不同，而第二種比較嚴重。**
+
+`--value-file`：那個旗標**消失了**，而它的路徑以明文懸在後面，讀起來像是 `-update` 的第三個位置
+參數。記下來的命令列不是跑過的那一個，連語法形狀都不是。
+
+`--value-stdin`：那個旗標被換成 `<value>`，後面什麼都沒有——於是**這筆紀錄與「用字面值更新」那一筆
+逐字相同**。稽核軌跡分不出「值從 stdin 來」與「值就寫在命令列上」，而那正是它存在要回答的問題之一。
+
+那個遮蔽器看來是「無條件替換 `-update` 位址後面的那個 token」，沒有先看它是值還是旗標。對一個普通
+的字面值，那沒有害處；對這兩個旗標，它產生的是 (i) 不忠實的轉錄、(ii) 丟掉了一個實質改變執行方式
+的旗標，以及 (iii) 在一個「什麼都沒被遮蔽」的位置暗示發生過遮蔽。rc=0，兩條串流都空的。
+
+**這條與 LU 是同一種**：一個宣稱自己在保護你的機制，在它最該生效的地方安靜地沒有生效。
+
+The log's invocation echo blanket-replaces the token after the `-update` address without
+checking whether it is a value or a flag. `--value-file` vanishes and leaves its path dangling
+as a positional argument; `--value-stdin` vanishes entirely, making that record byte-identical
+to a literal-value update. The trail cannot answer one of the questions it exists to answer.
+
+## LZ. `--dry-run` 搭配 `-log` 會寫入檔案，而兩份 README 都說它「不寫入任何檔案」
+
+**狀態：已修（2026-09-07，文件）——行為不變，句子改為「不寫入任何**資料**檔」並說明 `-log` 會記下預覽；T255c 同時釘住兩半。** / Status: documented; T255c pins both halves.
+
+```sh
+csv2 -log dr.log -update 1:license 'NEVER' --dry-run -i d.csv2 --in-place
+```
+
+資料檔前後不變（正確）。**log 檔變了**（`e3b0c442…` → `dbe8fd1d…`），而它新增的內容包含你要求它
+不要寫的那個值：
+
+```
+INFO  update 1:license: "seed" -> "NEVER"
+INFO  dry run: 1 change(s), wrote nothing
+```
+
+**那行「wrote nothing」就寫在一個剛剛被寫入的檔案裡。**
+
+英文寫的是「writes nothing」，中文更強：「**且不寫入任何檔案**」。
+
+行為本身**大概是對的**——你會希望「預覽過什麼」留下軌跡——錯的是那個句子。它該說的是：不寫入任何
+**資料檔**；若給了 `-log`，那次預覽仍會被記錄。
+
+## MA. 「在 `--json` 底下，拒絕會是一個 JSON 錯誤物件」對編輯的拒絕拿不到
+
+**狀態：已修（2026-09-07，文件）——明說編輯不能搭配 `--json`，那張表後面的重複承諾已移除；T255d 釘住。而這一次那張表的**每一列都重新量過**，不只改被指出的那一項——那是 mistakes 4.6 的矯正措施。** / Status: documented; every row of that table was re-measured this time, not just the one reported.
+
+```sh
+csv2 -update 1:license 'x' -i p.csv2 --in-place
+# csv2: -update 1:license targets a column this file declares transformed; ...
+
+csv2 --json -update 1:license 'x' -i p.csv2 --in-place
+# {"error":{"code":"conflicting-options","message":"--json is an output shape and an edit writes CSV ..."}}
+```
+
+**加上 `--json` 會把真正的錯誤蓋掉，換成 `conflicting-options`。** 於是那個保護拒絕以機器可讀的形式
+**取不到**——而那句承諾就寫在**編輯**那一節裡，「什麼時候該停止使用它」那張表還再說了一次：
+「以程式分辨不同的拒絕，靠的是 `--json` 錯誤物件」。
+
+**那張表這是第三次被抓到有錯的一列**（前兩次是 LN 的「限定一欄搜尋」與那個 `-count`）。三次都是
+同一個形狀：一句對「它被寫下來的那一天」為真的話，在功能改變之後沒有人回去重跑它。
+
+## MB. `-log` 的格式完全沒有記載，而且沒有任何一句話說它含有明文儲存格資料
+
+**狀態：已記載（2026-09-07）——加入真實的三行輸出範例、格式說明，以及「那份記錄含明文、以 0644 建立、保護欄位不會保護它」的警告。** / Status: documented with a real sample.
+
+整份 README 對它只有一句：「`-log` appends timestamped operation records」。沒有任何一行範例輸出，
+而這份 README 在別處對「展示真實輸出」是嚴謹的。
+
+更要緊的是：`-update`、`-update-where`、`-delete`、`-delete -cell` 都會把**明文的值**寫進那個檔案，
+`-delete N` 會寫進**一整列**連同欄名；讀取指令也會被記錄，包含 `-contains` 的搜尋字串。檔案以 `0644`
+建立。
+
+**收容 `-log` 的正是那一節，仔細列出了「一個加密欄位會洩漏什麼」——而它沒有提到隔壁那個檔案裡放著
+明文。**
+
+## MC. `-hash` 會標記 `.csv2` 的**兩列**標頭
+
+**狀態：已記載（2026-09-07），由 T255e 釘住。** / Status: documented, pinned by T255e.
+
+```
+pkg,license:hmac:49dd4744
+名稱,授權:hmac:49dd4744
+```
+
+README 記載了標記，但沒說一個雙標頭檔案的兩列都會被標記。

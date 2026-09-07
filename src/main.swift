@@ -2825,7 +2825,42 @@ func sanitizedCommandLine(_ argv: [String]) -> String {
         case "update":
             // keep the address, drop the value / 保留位址，去掉值
             if i + 1 < argv.count { out.append(loggedArg(argv[i + 1])) }
-            if i + 2 < argv.count { out.append("<value>") }
+            // ...unless the value did not come from the command line at all.
+            //
+            // `--value-file` and `--value-stdin` stand WHERE a value would
+            // stand, and replacing them with `<value>` recorded a run that did
+            // not happen: the flag vanished, and `--value-file`'s path fell
+            // through to the default branch and was emitted as a bare token, so
+            // the line read as `-update ADDR <value> /path/to/file` -- not the
+            // command that ran, and not even the same shape. `--value-stdin`
+            // was worse: it vanished with nothing after it, making that record
+            // byte-identical to a literal-value update, so the trail could not
+            // say where the value came from. LY.
+            //
+            // The exception is by NAME, not by "looks like a flag". A literal
+            // value may legitimately begin with `-` (`-update 1:2 -5`), and
+            // treating any dash-leading token as a flag would print it in the
+            // clear -- the opposite failure, and the worse one.
+            //
+            // ……除非那個值根本不是從命令列來的。
+            //
+            // `--value-file` 與 `--value-stdin` 站的正是「值」會站的位置，而把它們換成 `<value>`，
+            // 記下的是一次**沒有發生過**的執行：旗標消失了，而 `--value-file` 的路徑落進 default
+            // 分支、以裸 token 印出來，於是那一行讀起來是 `-update ADDR <value> /path/to/file`
+            // ——既不是跑過的那個指令，連形狀都不是。`--value-stdin` 更糟：它消失後後面什麼都沒有，
+            // 使那筆紀錄與「用字面值更新」逐字相同，於是那份軌跡說不出「值從哪裡來」。LY。
+            //
+            // 這個例外是**依名字**，不是依「看起來像旗標」。一個字面值合法地可以用 `-` 開頭
+            //（`-update 1:2 -5`），而把任何以 dash 開頭的 token 當成旗標，會把它明文印出來
+            // ——那是反方向的失敗，而且更嚴重。
+            if i + 2 < argv.count {
+                let next = normalizeFlag(argv[i + 2])
+                if next == "value-file" || next == "value-stdin" {
+                    out.append(argv[i + 2])
+                } else {
+                    out.append("<value>")
+                }
+            }
             i += 3
             continue
         case "update-where":

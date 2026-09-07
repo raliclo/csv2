@@ -14846,6 +14846,94 @@ else
     bad "T254f round trip differs: [$(cmp "$TMP/t254rt.csv" "$TMP/t254rt_d.csv" 2>&1)] / 實得如上"
 fi
 
+echo "--- T255: the audit log records what actually ran / T255：稽核記錄記下的是真正跑過的東西 ---"
+# LY. The invocation echo replaced the token after the -update address with
+# `<value>` without asking whether it was a value or a flag. `--value-file`
+# vanished and its path fell through as a bare token, so the line read as
+# `-update ADDR <value> /path` -- not the command that ran, and not even the
+# same shape. `--value-stdin` vanished with nothing after it, which made that
+# record byte-identical to a literal update: the trail could not say where the
+# value came from, which is one of the questions it exists to answer.
+#
+# LY。指令回音把 `-update` 位址後面那個 token 換成 `<value>`，而沒有先問它是值還是旗標。
+# `--value-file` 消失了、它的路徑以裸 token 落下，於是那一行讀起來是 `-update ADDR <value> /path`
+# ——既不是跑過的指令，連形狀都不是。`--value-stdin` 消失後後面什麼都沒有，使那筆紀錄與一次字面值
+# 更新逐位元相同：那份軌跡說不出值從哪裡來，而那正是它存在要回答的問題之一。
+printf 'pkg,license\n名稱,授權\nzlib,MIT\n' > "$TMP/t255.csv2"
+printf 'BSD-3' > "$TMP/t255val.bin"
+"$CSV2" -log "$TMP/t255a.log" -update 1:license --value-file "$TMP/t255val.bin" \
+    -i "$TMP/t255.csv2" --in-place >/dev/null 2>&1
+printf '%s' 'GPL' | "$CSV2" -log "$TMP/t255b.log" -update 1:license --value-stdin \
+    -i "$TMP/t255.csv2" --in-place >/dev/null 2>&1
+"$CSV2" -log "$TMP/t255c.log" -update 1:license 'Apache' \
+    -i "$TMP/t255.csv2" --in-place >/dev/null 2>&1
+_t255_vf=$(LC_ALL=C grep -o -- '--value-file' "$TMP/t255a.log" | head -1)
+_t255_vs=$(LC_ALL=C grep -o -- '--value-stdin' "$TMP/t255b.log" | head -1)
+if [[ $_t255_vf == '--value-file' && $_t255_vs == '--value-stdin' ]]; then
+    ok "T255a --value-file and --value-stdin are recorded as themselves / --value-file 與 --value-stdin 以自己的樣子被記下"
+else
+    bad "T255a vf=[$_t255_vf] vs=[$_t255_vs] / 實得如上"
+fi
+
+# The redaction still has to happen for an actual value, INCLUDING one that
+# begins with a dash. Exempting anything that looks like a flag would print a
+# value like `-5` in the clear -- the opposite failure, and the worse one.
+# 對一個真正的值，遮蔽仍然必須發生，**包括以 dash 開頭的值**。把「看起來像旗標」的東西一律豁免，
+# 會讓 `-5` 這種值被明文印出來——那是反方向的失敗，而且更嚴重。
+"$CSV2" -log "$TMP/t255d.log" -update 1:license '-5' -i "$TMP/t255.csv2" --in-place >/dev/null 2>&1
+if LC_ALL=C grep -q 'update 1:license <value>' "$TMP/t255c.log" \
+   && LC_ALL=C grep -q 'update 1:license <value>' "$TMP/t255d.log" \
+   && ! LC_ALL=C grep -q 'update 1:license -5' "$TMP/t255d.log"; then
+    ok "T255b a literal value is still redacted, even one starting with a dash / 字面值仍然被遮蔽，即使它以 dash 開頭"
+else
+    bad "T255b c=[$(LC_ALL=C grep -o 'update 1:license [^ ]*' "$TMP/t255c.log"|head -1)] d=[$(LC_ALL=C grep -o 'update 1:license [^ ]*' "$TMP/t255d.log"|head -1)] / 實得如上"
+fi
+
+# LZ. --dry-run writes no DATA file and does write to the log. Both halves are
+# asserted, because the README now says both and either one alone would let the
+# other sentence rot.
+# LZ。--dry-run 不寫**資料**檔，而它確實會寫入記錄。兩半都要斷言，因為 README 現在兩句都說了，
+# 而只斷言其中一半，會讓另一句慢慢爛掉。
+printf 'pkg,license\n名稱,授權\nzlib,seed\n' > "$TMP/t255dr.csv2"
+cp "$TMP/t255dr.csv2" "$TMP/t255dr.orig.csv2"
+: > "$TMP/t255dr.log"
+"$CSV2" -log "$TMP/t255dr.log" -update 1:license 'NEVER' --dry-run \
+    -i "$TMP/t255dr.csv2" --in-place >/dev/null 2>&1
+if cmp -s "$TMP/t255dr.orig.csv2" "$TMP/t255dr.csv2" && [[ -s "$TMP/t255dr.log" ]] \
+   && LC_ALL=C grep -q 'NEVER' "$TMP/t255dr.log"; then
+    ok "T255c --dry-run leaves the data file and still records the preview / --dry-run 不動資料檔，而仍然記下那次預覽"
+else
+    bad "T255c data changed=$(cmp -s "$TMP/t255dr.orig.csv2" "$TMP/t255dr.csv2" && echo no || echo YES) log=$(wc -c < "$TMP/t255dr.log" | tr -d ' ') bytes / 實得如上"
+fi
+
+# MA. An edit cannot take --json, so an edit's refusal is never a JSON error
+# object -- adding --json replaces the real refusal with conflicting-options.
+# The README promised JSON errors in the Editing section until 2026-09-07.
+# MA。編輯不能搭配 --json，因此一次編輯的拒絕永遠不會是 JSON 錯誤物件——加上 --json 會把真正的
+# 拒絕換成 conflicting-options。直到 2026-09-07 之前，README 在編輯那一節承諾了 JSON 錯誤。
+head -c 32 /dev/urandom > "$TMP/t255key.bin"
+"$CSV2" -hash license -keyfile "$TMP/t255key.bin" -i "$TMP/t255.csv2" -o "$TMP/t255p.csv2" 2>/dev/null
+_t255_plain=$("$CSV2" -update 1:license 'x' -i "$TMP/t255p.csv2" --in-place 2>&1)
+_t255_json=$("$CSV2" --json -update 1:license 'x' -i "$TMP/t255p.csv2" --in-place 2>&1)
+if [[ $_t255_plain == *'transformed'* && $_t255_json == *'conflicting-options'* ]]; then
+    ok "T255d --json on an edit reports the flag conflict, not the edit's own refusal / 對編輯加 --json 回報的是旗標衝突，不是那次編輯自己的拒絕"
+else
+    bad "T255d plain=[${_t255_plain:0:70}] json=[${_t255_json:0:70}] / 實得如上"
+fi
+
+# MC. A .csv2 gets BOTH header rows marked. A case checking only the first row
+# would pass on a program that marked one and left the other naming a column
+# that no longer holds what its name says.
+# MC。一個 .csv2 的**兩列**標頭都會被標記。一個只檢查第一列的案例，會在「程式只標記了一列、
+# 而另一列還在用一個名字指稱一個已經不是那個東西的欄位」時照樣通過。
+_t255_h1=$(LC_ALL=C sed -n '1p' "$TMP/t255p.csv2")
+_t255_h2=$(LC_ALL=C sed -n '2p' "$TMP/t255p.csv2")
+if [[ $_t255_h1 == *'license:hmac:'* && $_t255_h2 == *'授權:hmac:'* ]]; then
+    ok "T255e -hash marks both header rows of a .csv2 / -hash 標記 .csv2 的兩列標頭"
+else
+    bad "T255e h1=[$_t255_h1] h2=[$_t255_h2] / 實得如上"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
