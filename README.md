@@ -193,17 +193,40 @@ Use `--en` or `--zh` to choose the header language in human-readable output.
 `--version`/`-V` prints the build version; `--help`/`-h` prints the complete
 option list.
 
-`-si` reads stdin and `-so` writes stdout. Neither streams the whole input into
-memory. When stdin is used, `--headers` is required, because stdin has no
-extension to declare a format with.
+`-si` reads stdin and `-so` writes stdout. Neither LOADS the whole input into
+memory — until 2026-09-07 that sentence said "streams … into memory", which is a
+contradiction in terms, since streaming is what you do instead of loading. When
+stdin is used, `--headers` is required, because stdin has no extension to
+declare a format with.
+
+For a read, `-so` is the default and passing it changes nothing. For an EDIT
+through a pipe it becomes one of two destinations, and one of them is required —
+`-o FILE` or `-so`, with `--in-place` unavailable because there is no named file
+to write back to:
+
+```sh
+csv2 -update 1:1 'X' -si --headers 1 -so < data.csv
+```
+
+`-count` and `--in-place` refuse stdin outright and say so, naming `-i FILE`.
+
+Reading from a pipe is always single-threaded, so `-contains` never takes the
+parallel path there whatever the thresholds allow, and `-debug` reports
+`file_bytes=0` — which makes the `read_bytes` against `file_bytes` comparison
+described under Indexes meaningless on a pipe. That comparison was written here
+on 2026-09-07 without the condition that made it true.
 
 **`--headers 0` reads the input line by line** — one field per line, bytes
 verbatim. That is the format a file with no `.csv`/`.csv2` suffix already has,
 and until now it could only be had by *having no suffix*, so neither stdin nor
 a prose `.md` could ask for it. It is also the one value a declaring suffix
-does not override: `--headers 1|2` against a `.csv2` is refused because the
-suffix has already answered how many header rows there are, while `0` declines
-that question rather than answering it differently. A `.md` read this way is
+does not override. What a declaring suffix refuses is DISAGREEMENT: `--headers 1`
+on a `.csv2` and `--headers 2` on a `.csv` are both errors, while a `--headers`
+that agrees with the suffix is accepted and does nothing. `0` is refused
+whatever the suffix says, because it declines the question rather than answering
+it differently. Until 2026-09-07 this said `--headers 1|2` was refused against a
+`.csv2` outright, which set up a clean binary that does not exist — and the error
+example below, which shows the disagreement case, was right the whole time. A `.md` read this way is
 prose, and can be edited and written back as prose — for documents that merely
 CONTAIN a table rather than being one.
 

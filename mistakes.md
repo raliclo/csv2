@@ -94,6 +94,20 @@ the file was read as `.lines`, the column did not exist, and six runs produced n
 caught it was the shell-level failure scan in run_checked, not the case's own assertion -- the
 case computed its answer from what it actually got and reported it correctly.
 
+**2026-09-07，第十三次：同一條，第三種機制。** 驗證第 85 回合的 MJ 時我寫的是
+`"$C" -r ${=x} >/dev/null 2>&1` 然後 `printf '... rc=%s' "...$(basename ...)..." "$?"`。四個情況
+全部回報 `rc=0`，我一度據此判定「那項回報不成立」。**那個 `$?` 是 `basename` 的**——同一個參數列裡
+的命令替換會執行一個指令並重設它，而它排在 `"$?"` 前面。
+
+三種機制，同一條規則：管線（09-06）、`| head` 取到下游的狀態（09-06）、參數列裡的命令替換（09-07）。
+**判準因此要再放寬一格**：要判斷一個指令的成敗，`$?` 必須是它之後執行的**第一件事**——不只是「不要
+放進管線」，而是「中間不要有任何會執行東西的展開」。做法固定為：下一行立刻 `local rc=$?`。
+
+Thirteenth, and the third mechanism for one rule: a pipeline, then `| head` taking the
+downstream status, now a command substitution earlier in the same argument list. `$?` must be
+the first thing executed after the command -- not merely "not in a pipeline". Capture it into a
+variable on the very next line.
+
 ### 共同形狀
 
 **測試碰到的是環境，不是被測物。** 三次都一樣：程式在各平台行為相同，不同的是量尺。

@@ -15031,6 +15031,96 @@ else
     bad "T256f ver_rc=$_t256_ver_rc conflict_rc=$_t256_conflict_rc ver=[${_t256_ver:0:80}] / 實得如上"
 fi
 
+echo "--- T257: -tail is a ring, and what stdin refuses / T257：-tail 是一個環，以及 stdin 拒絕什麼 ---"
+# MI. `tailRing` was an Array with removeFirst(), which shifts every remaining
+# element, so holding N records cost O(N) per record. The NAME said ring from
+# the day it was written, and in this tree names and comments are reliable
+# enough that nobody read the line under it.
+#
+# This case measures the SHAPE, not a duration: the same file at two values of N
+# must cost about the same. A wall-clock threshold would fail on a loaded
+# machine and would have to be retuned per node; a ratio between two runs on the
+# same machine in the same second does not.
+#
+# MI。`tailRing` 原本是一個 Array 加 `removeFirst()`，而它會搬移其餘每一個元素，因此持有 N 筆的
+# 成本是「每筆 O(N)」。那個**名字**從它被寫下的那天起就說它是環，而在這棵樹裡，名稱與註解可靠到
+# 沒有人會去讀它底下那一行。
+#
+# 這個案例量的是**形狀**，不是一個時間長度：同一個檔案在兩個 N 值下的成本必須差不多。一個以牆鐘
+# 秒數為門檻的斷言，會在機器忙碌時失敗、而且每個節點都要重新調；而「同一台機器、同一秒內兩次執行
+# 的比值」不會。
+{ print -r -- 'id,payload'
+  for _i in {1..40000}; do printf '%d,%s\n' $_i 'aaaaaaaaaaaaaaaaaaaa'; done } > "$TMP/t257.csv"
+
+_t257_small=$( { time ( "$CSV2" -tail 100 -i "$TMP/t257.csv" --no-index >/dev/null 2>&1 ) } 2>&1 | \
+    LC_ALL=C awk '/total/{print $(NF-1)}' )
+_t257_large=$( { time ( "$CSV2" -tail 8000 -i "$TMP/t257.csv" --no-index >/dev/null 2>&1 ) } 2>&1 | \
+    LC_ALL=C awk '/total/{print $(NF-1)}' )
+# Guard the arithmetic: an unparsed time is not a fast run.
+# 守住這個算式：一個「沒有解析出來的時間」不是一次跑得快的執行。
+if [[ -n $_t257_small && -n $_t257_large ]]; then
+    _t257_ok=$(python3 -c "s=${_t257_small}; l=${_t257_large}; print(1 if (s<=0.02 or l/s < 4) else 0)")
+    if [[ $_t257_ok == 1 ]]; then
+        ok "T257a -tail 8000 costs about what -tail 100 does (${_t257_small}s vs ${_t257_large}s) / -tail 8000 的成本與 -tail 100 相當"
+    else
+        bad "T257a -tail 8000 took ${_t257_large}s against ${_t257_small}s for -tail 100; the buffer is not a ring / -tail 8000 花了如上時間，那個緩衝不是一個環"
+    fi
+else
+    bad "T257a could not parse the timings (small=[$_t257_small] large=[$_t257_large]) / 無法解析時間"
+fi
+
+# Correctness against an INDEPENDENT implementation. A ring that dropped or
+# reordered records would still be fast, and a case that timed it without
+# checking the bytes would call that a success.
+# 對上一個**獨立實作**的正確性。一個會漏掉或弄亂順序的環仍然會很快，而一個只計時、不比對位元組的
+# 案例，會把那稱為成功。
+_t257_want=$(tail -n 5 "$TMP/t257.csv")
+_t257_got=$("$CSV2" -tail 5 -i "$TMP/t257.csv" --no-index 2>/dev/null)
+if [[ $_t257_got == $_t257_want ]]; then
+    ok "T257b -tail 5 matches tail(1) byte for byte / -tail 5 與 tail(1) 逐位元相同"
+else
+    bad "T257b got [${_t257_got//$'\n'/|}] want [${_t257_want//$'\n'/|}] / 實得如上"
+fi
+
+# And N larger than the file returns the whole file rather than wrapping. A ring
+# indexed with the wrong modulus would repeat records here.
+# 而 N 大於檔案筆數時要回傳整個檔案，不能繞回。一個用錯模數的環會在這裡重複紀錄。
+printf 'a\n1\n2\n3\n' > "$TMP/t257small.csv"
+_t257_all=$("$CSV2" -tail 99 -i "$TMP/t257small.csv" 2>/dev/null)
+if [[ $_t257_all == $'1\n2\n3' ]]; then
+    ok "T257c -tail larger than the file returns every record once / N 大於檔案筆數時，每一筆恰好回傳一次"
+else
+    bad "T257c got [${_t257_all//$'\n'/|}] / 實得如上"
+fi
+
+# MJ. A --headers that AGREES with the suffix is accepted; only disagreement is
+# refused. The page described a clean binary that does not exist.
+# MJ。與副檔名**一致**的 --headers 會被接受，只有不一致才被拒絕。那一頁描述了一個不存在的
+# 乾淨二分法。
+printf 'a,b\n1,2\n' > "$TMP/t257one.csv"
+printf 'a,b\n甲,乙\n1,2\n' > "$TMP/t257two.csv2"
+"$CSV2" -r --headers 1 -i "$TMP/t257one.csv" >/dev/null 2>&1; _t257_a1=$?
+"$CSV2" -r --headers 2 -i "$TMP/t257two.csv2" >/dev/null 2>&1; _t257_a2=$?
+"$CSV2" -r --headers 2 -i "$TMP/t257one.csv" >/dev/null 2>&1; _t257_d1=$?
+"$CSV2" -r --headers 1 -i "$TMP/t257two.csv2" >/dev/null 2>&1; _t257_d2=$?
+if [[ $_t257_a1 == 0 && $_t257_a2 == 0 && $_t257_d1 == 1 && $_t257_d2 == 1 ]]; then
+    ok "T257d an agreeing --headers is accepted, a disagreeing one is refused / 一致的 --headers 被接受，不一致的被拒絕"
+else
+    bad "T257d agree=$_t257_a1/$_t257_a2 disagree=$_t257_d1/$_t257_d2 / 實得如上"
+fi
+
+# MK/ML. -count refuses stdin; an edit through a pipe works and needs a
+# destination. Both were reachable only by probing.
+# MK／ML。`-count` 拒絕 stdin；一次經由管線的編輯可行，而且需要一個目的地。兩者原本都只能靠試。
+"$CSV2" -count -si --headers 1 < "$TMP/t257one.csv" >/dev/null 2>"$TMP/t257.err"
+_t257_cnt=$?
+_t257_edit=$("$CSV2" -update 1:1 'X' -si --headers 1 -so < "$TMP/t257one.csv" 2>/dev/null)
+if [[ $_t257_cnt == 1 ]] && LC_ALL=C grep -q 'i FILE' "$TMP/t257.err" && [[ $_t257_edit == $'a,b\nX,2' ]]; then
+    ok "T257e -count refuses stdin naming -i FILE, while an edit through a pipe works / -count 拒絕 stdin 並指名 -i FILE，而經由管線的編輯可行"
+else
+    bad "T257e count_rc=$_t257_cnt err=[$(tr '\n' '|' < "$TMP/t257.err")] edit=[${_t257_edit//$'\n'/|}] / 實得如上"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

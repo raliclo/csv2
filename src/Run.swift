@@ -974,7 +974,32 @@ func runSelect(_ o: Options) throws {
     var lastEmitted = 0
     var seen = 0
     var matchedCount = 0
+    // An actual ring, which the name has claimed since it was written.
+    //
+    // It was an Array with `removeFirst()` on every record past the Nth, and
+    // `removeFirst()` on a Swift Array shifts every remaining element -- so
+    // holding N records cost O(N) per record and `-tail N` cost O(records x N).
+    // Measured on 200k records: 0.26s at N=1000 and 2.15s at N=16000, doubling
+    // with N when it should not depend on N at all. On a 3M-record file
+    // `-tail 16000` took twelve times longer than reading the whole file, for a
+    // strictly smaller answer.
+    //
+    // Nothing reported it because every answer was CORRECT. Round 85 found it
+    // by timing the buffered verb, not by disagreeing with it.
+    //
+    // 一個真正的 ring，而這個名字從它被寫下的那天起就這樣宣稱了。
+    //
+    // 它原本是一個 Array，每超過第 N 筆就 `removeFirst()`，而 Swift Array 的 `removeFirst()`
+    // 會搬移其餘每一個元素——因此持有 N 筆的成本是「每筆 O(N)」，`-tail N` 的成本是
+    // O(紀錄數 × N)。在 20 萬筆上實測：N=1000 是 0.26 秒，N=16000 是 2.15 秒，隨 N 加倍而加倍
+    // ——而它本來根本不該取決於 N。在 300 萬筆的檔案上，`-tail 16000` 比讀完整個檔案還慢十二倍，
+    // 而它給的是一個嚴格更小的答案。
+    //
+    // 沒有任何東西回報過它，因為**每一個答案都是對的**。第 85 回合是靠「量那個有緩衝的動詞」
+    // 發現它的，不是靠與它的輸出不一致。
     var tailRing: [Record] = []
+    var tailHead = 0
+    var tailFilled = 0
     let builder = ip.builder
     var scopedColumn: Int?
     var scopedRecord: Int?
@@ -1203,8 +1228,19 @@ func runSelect(_ o: Options) throws {
             }
 
             if let n = tailN {
-                tailRing.append(r)
-                if tailRing.count > n { tailRing.removeFirst() }
+                // Write at the head and advance it, growing only until the ring
+                // is full. `tailFilled` is separate from `tailRing.count`
+                // because the two differ while the ring is still filling, and
+                // the drain below needs the first of those two numbers.
+                // 寫在 head 的位置再前進，只在環還沒滿之前成長。`tailFilled` 與 `tailRing.count`
+                // 是兩個不同的數字——在環還在填滿的期間兩者不同——而底下的取出需要的是前者。
+                if tailRing.count < n {
+                    tailRing.append(r)
+                } else {
+                    tailRing[tailHead] = r
+                }
+                tailHead = (tailHead + 1) % n
+                if tailFilled < n { tailFilled += 1 }
                 traceSkip(r, "held in the -tail buffer; whether it is emitted is not known until EOF")
                 return true
             }
@@ -1271,7 +1307,17 @@ func runSelect(_ o: Options) throws {
                     "搜尋範圍要求第 \(scopedRecord) 筆，但本檔案只有 \(seen) 筆紀錄")
     }
     if let c = ctx {
-        for r in tailRing { try emitRecord(r, matches: matchesIn(r)) }
+        // Oldest first. While the ring was still filling, `tailHead` has wrapped
+        // to 0 exactly when it became full, so starting at `tailHead` is right
+        // in both cases -- but only because the modulo above uses `n` and the
+        // array never grows past it.
+        // 由舊到新。在環還在填滿的期間，`tailHead` 恰好在它填滿的那一刻繞回 0，因此從 `tailHead`
+        // 開始在兩種情況下都正確——而那只在「上面的取模用的是 `n`、且陣列永遠不會長過它」時成立。
+        if tailFilled > 0 {
+            for k in 0..<tailFilled {
+                try emitRecord(tailRing[(tailHead + k) % tailFilled], matches: matchesIn(tailRing[(tailHead + k) % tailFilled]))
+            }
+        }
         try emitter.end(c, records: seen, matched: matchedCount)
     }
     // Close the INPUT before the rename, not at function exit.

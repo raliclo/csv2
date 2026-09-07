@@ -10129,3 +10129,110 @@ metrics: read_bytes=65536 file_bytes=2808905 peak_rss_bytes=9404416
   是兩個只在執行期出現的未定義名詞。
 - **`--build-index --no-index` 是硬錯誤**（訊息清楚），未記載。而 `--no-index` 的「停止**寫入**」
   那一半，對一般讀取沒有可觀察的意義——因為一般讀取本來就不寫。
+
+---
+
+# 第 85 回合（2026-09-07，串流）—— 第 4 類有一個**效能**缺陷
+
+## MI. `-tail N` 的成本是 O(紀錄數 × N)（程式缺陷）
+
+**狀態：已修（2026-09-07）——改成真正的環（固定容量＋head 索引）。20 萬筆上 N=16000 從 2.15 秒降到 0.19 秒，且不再隨 N 變化。T257a 量的是**形狀**（同檔兩個 N 的比值）而不是秒數，並已在舊實作上驗證它會失敗（0.042 對 0.217，比值 5.2 > 門檻 4）。T257b 對上系統 `tail(1)` 比對位元組——一個會漏掉紀錄的環仍然會很快。**
+
+```sh
+# 20 萬筆的檔案
+csv2 -tail 1000  -i f.csv --no-index   # 0.26s
+csv2 -tail 2000  -i f.csv --no-index   # 0.35s
+csv2 -tail 4000  -i f.csv --no-index   # 0.71s
+csv2 -tail 8000  -i f.csv --no-index   # 1.22s
+csv2 -tail 16000 -i f.csv --no-index   # 2.15s
+```
+
+N 加倍、時間就加倍，而它本來根本不該取決於 N。回報者在 300 萬筆的檔案上量到
+**`-tail 16000` 比讀完整個檔案慢十二倍**，而它給的是一個嚴格更小的答案；`-tail 100000` 在他的
+時間內沒有跑完。
+
+起因：那個變數叫 `tailRing`，而它是一個 `Array`，每超過第 N 筆就 `removeFirst()`——Swift Array 的
+`removeFirst()` 會搬移其餘每一個元素。**名字描述的是意圖，程式做的是另一回事**，而這個專案的
+註解與名稱一向可靠，於是沒有人去看那一行。
+
+**沒有任何東西回報過它，因為每一個答案都是對的。** 這是「看起來成功」的另一個面向：不是錯的
+結果，是對的結果加上一個沒有人在量的成本。`CSV2_MAX_BUFFER_RECORDS` 的預設值是 1,000,000 並被
+記載為「正是這個緩衝的上限」——那一頁把一個「以耐心計算差了三個數量級才到得了」的值描述成一個界限。
+
+`-tail N` cost O(records x N) because `tailRing` was an Array with `removeFirst()`, which shifts
+every remaining element. The name has said "ring" since it was written. Nothing reported it
+because every answer was correct -- this is the other face of "looks like it succeeded": not a
+wrong result, but a right result at a cost nobody was measuring.
+
+## MJ. 「`--headers 1|2` 對 `.csv2` 會被拒絕」是錯的——被拒絕的是**不一致**
+
+**狀態：已修（2026-09-07，文件），由 T257d 釘住四種組合。**
+
+```sh
+csv2 -r --headers 2 -i two.csv2   # rc=0   ← 一致，被接受
+csv2 -r --headers 1 -i one.csv    # rc=0   ← 一致，被接受
+csv2 -r --headers 1 -i two.csv2   # rc=1   ← 不一致，被拒絕
+csv2 -r --headers 2 -i one.csv    # rc=1   ← 不一致，被拒絕
+```
+
+真正的規則是「不一致的 `--headers` 會被拒絕，一致的是一個被接受的無操作」。
+
+**周圍的論證讓這個錯誤更糟，而不是更好**：那一段建立了一個乾淨的二分法——`0` 特殊，因為副檔名
+蓋不過它；`1|2` 被拒絕，因為副檔名蓋得過。那個框架是假的。而緊接在它下面的錯誤範例展示的正是
+「不一致」那個情況，**它是對的**——於是唯一錯的東西是它上面那段散文。兩個語言版本帶著相同的錯誤，
+所以那不是翻譯失誤。
+
+## MK. 沒有任何地方說哪些動詞拒絕 stdin
+
+**狀態：已記載（2026-09-07）——`-count` 與 `--in-place` 拒絕 stdin；T257e 釘住。**
+
+```sh
+csv2 -count -si --headers 1 < one.csv
+# csv2: -count needs -i FILE      rc=1
+```
+
+`-count` 列在讀取選項裡、沒有任何但書，而它自己那一段還在討論「有索引與沒有索引時的複雜度」
+——那些都沒有讓人預期到這件事。`--in-place` 有同樣的缺口（`--in-place needs -i FILE`）。
+
+那一頁有一整節談 stdin、也有一整份讀取動詞清單，而**沒有任何東西把兩者連起來**。
+
+## ML. 「經由 stdin 編輯」這件事本身沒有被記載
+
+**狀態：已記載（2026-09-07）——含範例，並說明 `--in-place` 不可用、目的地是必要的；T257e 釘住。**
+
+`-si` 只出現在「輸出格式與串流」那一節；整個編輯那一節用的都是 `-i FILE --in-place`。
+一次編輯可以讀 stdin 並寫到 `-o FILE` 或 `-so`、`--in-place` 在那裡不可用、而目的地變成**必要的**
+——三件事都沒有寫下來。實測 `csv2 -update 1:1 X -si --headers 1 -so < one.csv` 正常運作。
+
+## MM. 兩件與「昨天剛寫的句子」有關的事
+
+**狀態：已記載（2026-09-07）——串流那一節現在寫出「管線永遠單執行緒」與「`file_bytes=0` 讓那個比較在管線上失去意義」。**
+
+- **stdin 是單執行緒的**。`-debug` 會說 `single-threaded: stdin`。README 說 `-contains`
+  「在格式與門檻允許時」可以平行；管線永遠不允許，而那不在所列的條件裡。
+- **`-debug` 的證據配方在管線上無效**。我在第 84 回合寫下「`read_bytes` 對上 `file_bytes` 就是
+  那個證據」；在 stdin 上 `file_bytes=0`，於是那個比較是拿來跟零比。
+
+**這是連續第三個回合，發現的是前一輪修正裡寫下的句子**（第 80 回合 LP、第 82 回合 LV/LW，
+現在是 MM）。三次的共同形狀不是「寫錯」，是**寫得太一般**：我把一個在「我當時手邊那個情況」為真
+的句子，寫成了沒有條件的通則。
+
+Third round running in which a finding is a sentence written while fixing the previous round.
+The shape is not "wrong" but "stated too generally": a sentence true of the case in front of me,
+written without the condition that made it true.
+
+## 附記：我自己的量測又錯了一次（mistakes 第 1 條，第十三次）
+
+驗證 MJ 時我寫的是：
+
+```zsh
+"$C" -r ${=x} >/dev/null 2>&1
+printf '  %-28s rc=%s\n' "${x%% -i*}  $(basename ${x##*-i })" "$?"
+```
+
+四個情況全部回報 `rc=0`，於是我一度以為 MJ 不成立。**那個 `$?` 是 `basename` 的。** 參數列裡的
+命令替換會執行一個指令並重設 `$?`，而它排在 `"$?"` 前面。
+
+與 2026-09-06 那次 `| head -2` 是同一條、不同機制：那次是管線，這次是**同一個參數列裡的命令替換**。
+判準因此要再放寬一格：**要判斷一個指令的成敗，`$?` 必須是它之後執行的第一件事**——不只是「不要放進
+管線」，而是「中間不要有任何會執行東西的展開」。修法是立刻存進區域變數：`local rc=$?`。
