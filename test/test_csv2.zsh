@@ -15895,12 +15895,34 @@ fi
 # 不是它的大小。
 mkdir -p "$TMP/t265dir"
 printf '' > "$TMP/t265empty.bin"
+# Compared on the BASENAME, not the path that was passed. On Windows MSYS
+# rewrites the argument before csv2 ever sees it -- the message names
+# `C:/Users/.../tmp/tmp.XXX/NOSUCH.bin` for an argument written
+# `/tmp/tmp.XXX/NOSUCH.bin` -- so the message is right and the first version of
+# this comparison was wrong: it checked the string this test PASSED against the
+# string csv2 RECEIVED, which are different on that node.
+#
+# `/dev/null` is exempted from the name check entirely: MSYS maps it to `nul`,
+# a different name, so there is nothing to match. What must hold everywhere is
+# that the refusal is not the bare `(path)` placeholder.
+#
+# 比對的是**basename**，不是「傳進去的那個路徑」。在 Windows 上，MSYS 會在 csv2 看到之前改寫那個
+# 參數——一個寫作 `/tmp/tmp.XXX/NOSUCH.bin` 的參數，訊息裡指名的是
+# `C:/Users/.../tmp/tmp.XXX/NOSUCH.bin`——因此**那則訊息是對的**，錯的是這個比較的第一版：它拿
+# 「這個測試傳出去的字串」去比「csv2 收到的字串」，而在那個節點上兩者不同。
+#
+# `/dev/null` 完全豁免名稱檢查：MSYS 把它映射成 `nul`，那是另一個名字，沒有東西可以比對。
+# 在每一個平台上都必須成立的，是「那個拒絕不是裸的 `(path)` 佔位符」。
 _t265_bad=()
 for _v in "$TMP/t265nosuch.bin" "$TMP/t265dir" /dev/null; do
     printf 'a,b,c\n1,2,3\n' > "$TMP/t265w.csv"
     "$CSV2" -update 1:3 --value-file "$_v" -i "$TMP/t265w.csv" --in-place >/dev/null 2>"$TMP/t265.err"
-    if (( $? != 1 )) || LC_ALL=C grep -q '(path)' "$TMP/t265.err" \
-       || ! LC_ALL=C grep -qF -- "$_v" "$TMP/t265.err"; then
+    _t265_rc=$?
+    if (( _t265_rc != 1 )) || LC_ALL=C grep -q '(path)' "$TMP/t265.err"; then
+        _t265_bad+=("${_v:t}")
+        continue
+    fi
+    if [[ $_v != /dev/null ]] && ! LC_ALL=C grep -qF -- "${_v:t}" "$TMP/t265.err"; then
         _t265_bad+=("${_v:t}")
     fi
 done

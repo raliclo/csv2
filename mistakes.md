@@ -148,6 +148,31 @@ FINAL state, which is exactly what the comment beside `langFlags` in the same fi
 do. The test caught it only because it ran both orders -- and it ran both because the defect
 was about order. When a defect's shape is "A and B are asymmetric", the case must exercise both.
 
+**2026-09-07：我比對的是「我傳出去的字串」，而不是「程式收到的字串」。** T265b 檢查
+`--value-file` 的錯誤訊息有沒有指名路徑，做法是拿 `$_v`（測試傳出去的那個值）去 `grep` 那則訊息。
+macOS、guest、WSL 全過，**Windows 三種情形全失敗**。
+
+原因不是程式：**MSYS 在 csv2 被啟動之前就把那個參數改寫成原生路徑**。一個寫作
+`/tmp/tmp.XXX/NOSUCH.bin` 的參數，csv2 收到的是 `C:/Users/lowei/scoop/.../tmp/tmp.XXX/NOSUCH.bin`
+——**那則訊息完全正確，它指名的是它真正收到的東西**。
+
+| 那個檢查問的（代理） | 它以為在問的（問題） |
+|---|---|
+| **訊息裡有沒有「我傳出去的那個字串」** | **訊息有沒有指名它處理的那個檔案** |
+
+**在一個會改寫參數的平台上，「我給了什麼」與「它收到了什麼」是兩個不同的字串**，而一個比對前者的
+測試，會在程式完全正確時失敗。改成比對 **basename**——那是兩種形式共有的部分；而 `/dev/null` 連
+名字都被換成 `nul`，那一個完全豁免名稱檢查，只斷言「不是裸的佔位符」。
+
+**而我沒有用猜的。** 第一反應是「大概是路徑轉換」，但我去問了那台機器實際印出什麼——那一步把
+「大概」變成了一行可以貼進註解的證據。
+
+I compared the string the test PASSED against a message naming the string csv2 RECEIVED. On
+Windows MSYS rewrites the argument before the program starts, so the message was right and the
+comparison was wrong. The basename is the part both forms share. And I asked the node what it
+actually printed instead of assuming the cause -- which turned a guess into a line I could put
+in the comment.
+
 ### 共同形狀
 
 **測試碰到的是環境，不是被測物。** 三次都一樣：程式在各平台行為相同，不同的是量尺。
