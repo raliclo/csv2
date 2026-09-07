@@ -134,6 +134,20 @@ thing it guarded was the CALL. Fixing it, I twice repeated the class again: a zs
 needed EXTENDED_GLOB silently matched nothing, and the scan caught its own regex and then its
 own message, which is T241a verbatim including the order.
 
+**2026-09-07：一個「只做了一半」的修法，被我自己的測試抓到。** 修 NN（`--pretty` 與 `--md-style`
+順序相依）時，我的第一版比對的是**最終**的 `o.mdStyle`——而當 `--pretty` 排在後面時它就是 `.pretty`，
+於是只抓得到一種順序。**同一個檔案裡、`langFlags` 旁邊那段註解，說的正是該怎麼做**：「數旗標，
+不要數它們留下的狀態」。我讀了它、照它加了計數器，然後在判斷式裡回頭去看狀態。
+
+抓到它的是我寫的測試**跑了兩種順序**——而我之所以寫兩種，是因為那個缺陷本身就是關於順序的。
+**當一個缺陷的形狀是「A 與 B 不對稱」時，測試必須同時測 A 與 B**；只測其中一邊的案例，會通過一個
+只修好一邊的修法。
+
+A half-fix caught by my own test. Fixing an order-dependent flag pair, I compared against the
+FINAL state, which is exactly what the comment beside `langFlags` in the same file says not to
+do. The test caught it only because it ran both orders -- and it ran both because the defect
+was about order. When a defect's shape is "A and B are asymmetric", the case must exercise both.
+
 ### 共同形狀
 
 **測試碰到的是環境，不是被測物。** 三次都一樣：程式在各平台行為相同，不同的是量尺。

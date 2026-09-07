@@ -225,8 +225,28 @@ three names are about PADDING only — none of them changes a value:
 | `pretty` | Re-aligns every column to a common width across the whole table |
 
 `preserve` therefore gives the smallest diff when editing a document in place,
-which is what it is the default for. `--pretty` (a different flag) holds the
-selected table in memory and is bounded by `CSV2_PRETTY_MAX_BYTES`.
+which is what it is the default for. On a CSV input, where no original spacing
+exists to keep, it behaves as `compact`.
+
+**`--pretty` is `--md-style pretty`** — one setting with two spellings, giving
+byte-identical output and sharing one bound. Until 2026-09-07 this page called
+it "a different flag", which was the one sentence a reader would rely on when
+choosing between them. Giving both with different values is refused rather than
+resolved, because the result used to depend on which came last. Both need `-md`
+and are refused without it.
+
+Alignment is by DISPLAY width, per column: each column is as wide as the widest
+of its header and its cells, with one space either side. Width is measured on
+the ESCAPED text, in grapheme clusters — a CJK character counts 2, a combining
+mark 0, and a ZWJ emoji sequence counts as one cluster, which is right on a
+terminal that renders the sequence and two columns narrow on one that does not.
+For a `.csv2` the header measured is the literal `<br>`-joined string.
+
+Holding a whole table to align it is what `CSV2_PRETTY_MAX_BYTES` bounds. Over
+it, the run exits 1 with an empty stdout and a message naming both ways out.
+That cap counts the DATA CELLS' escaped bytes; `CSV2_MD_MAX_BYTES` counts the
+input file's raw bytes. Both read "16 MiB" in the table below and they are not
+measuring the same thing.
 
 When a table is selected out of a document with `--md-table N`, the `line` on
 each `--json` record is the line in the DOCUMENT — the same number your editor
@@ -645,8 +665,8 @@ Environment variables used for controlled testing and tuning:
 | `CSV2_INDEX_MIN_BYTES` | 16 MiB | minimum file size for AUTOMATIC sidecar creation; `--build-index` ignores it |
 | `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | minimum size for parallel search |
 | `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | search chunk size |
-| `CSV2_PRETTY_MAX_BYTES` | 16 MiB | maximum material held by `--pretty` |
-| `CSV2_MD_MAX_BYTES` | 16 MiB | maximum Markdown input |
+| `CSV2_PRETTY_MAX_BYTES` | 16 MiB | the DATA CELLS' escaped bytes that `--pretty` may hold |
+| `CSV2_MD_MAX_BYTES` | 16 MiB | the Markdown input FILE's raw bytes |
 | `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | limit for `-tail` and context buffers |
 
 ## Testing and measurements

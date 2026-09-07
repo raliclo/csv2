@@ -15666,6 +15666,88 @@ else
     bad "T262e ends: [...${_t262_en: -46}] / 實得如上"
 fi
 
+echo "--- T263: --pretty is --md-style pretty / T263：--pretty 就是 --md-style pretty ---"
+# NM/NN/NO. `--pretty` and `--md-style pretty` are one setting with two
+# spellings, and each assignment overwrote the other, so the LAST one on the
+# command line won -- silently, at rc=0 with an empty stderr. A wrapper script
+# appending a style flag to a user's arguments flipped its own output.
+#
+# BOTH ORDERS are asserted. My first fix compared against the final `mdStyle`,
+# which is `.pretty` when `--pretty` came last, so it caught one order and not
+# the other. The comment beside `langFlags` in the same file says exactly what
+# to do -- count the flags, not the state they leave behind -- and I did half of
+# it. The two-order assertion is what caught that.
+#
+# NM／NN／NO。`--pretty` 與 `--md-style pretty` 是同一個設定的兩種寫法，而兩次賦值互相覆寫，因此
+# **命令列上最後那個贏**——靜默地，rc=0 而 stderr 空白。一支「在使用者參數後面追加一個 style」的
+# 包裝腳本，會把自己的輸出翻面。
+#
+# **兩種順序都要斷言。** 我的第一版修法是對著最終的 `mdStyle` 比對，而當 `--pretty` 排在後面時它
+# 就是 `.pretty`，於是只抓到一種順序。同一個檔案裡 `langFlags` 旁邊那段註解說的正是該怎麼做
+# ——數旗標，不要數它們留下的狀態——而我只做了一半。抓到那件事的，正是「兩種順序」這個斷言。
+printf 'pkg,version\n套件名稱,版本\nzlib,1.3\n' > "$TMP/t263.csv2"
+
+"$CSV2" -r -t -md --pretty          -i "$TMP/t263.csv2" 2>/dev/null > "$TMP/t263a"
+"$CSV2" -r -t -md --md-style pretty -i "$TMP/t263.csv2" 2>/dev/null > "$TMP/t263b"
+if cmp -s "$TMP/t263a" "$TMP/t263b" && [[ -s "$TMP/t263a" ]]; then
+    ok "T263a --pretty and --md-style pretty give byte-identical output / --pretty 與 --md-style pretty 輸出逐位元相同"
+else
+    bad "T263a they differ, or the output was empty / 兩者不同，或輸出是空的"
+fi
+
+"$CSV2" -r -t -md --pretty --md-style compact -i "$TMP/t263.csv2" >/dev/null 2>&1
+_t263_o1=$?
+"$CSV2" -r -t -md --md-style compact --pretty -i "$TMP/t263.csv2" >/dev/null 2>&1
+_t263_o2=$?
+if [[ $_t263_o1 == 1 && $_t263_o2 == 1 ]]; then
+    ok "T263b a contradicting pair is refused in BOTH orders / 互相矛盾的一對在**兩種順序**下都被拒絕"
+else
+    bad "T263b pretty-first=$_t263_o1 style-first=$_t263_o2 / 實得如上"
+fi
+
+# The agreeing combinations must survive. A fix that refused whenever both were
+# present would pass T263b and break a legitimate command line.
+# 一致的組合必須存活。一個「只要兩個都出現就拒絕」的修法會通過 T263b，並弄壞一行合法的指令。
+_t263_ok=0
+for _c in '--pretty --md-style pretty' '--md-style pretty --pretty' '--pretty' '--md-style compact'; do
+    "$CSV2" -r -t -md ${=_c} -i "$TMP/t263.csv2" >/dev/null 2>&1 && (( _t263_ok += 1 ))
+done
+if (( _t263_ok == 4 )); then
+    ok "T263c agreeing and single spellings are all still accepted / 一致的組合與單獨寫法全部仍被接受"
+else
+    bad "T263c only $_t263_ok of 4 were accepted / 四種只有 $_t263_ok 種被接受"
+fi
+
+# NO. Silent no-ops in a tool that names every other one. `--filter` and
+# `--normalize` without `-contains` are refused and the README says so; these
+# two did nothing and said nothing.
+# NO。靜默的無操作，而這支工具會指名其他每一個。`--filter` 與 `--normalize` 少了 `-contains` 會被
+# 拒絕、README 也這樣寫；而這兩個什麼都沒做、也什麼都沒說。
+"$CSV2" -r -t --pretty -i "$TMP/t263.csv2" >/dev/null 2>"$TMP/t263p.err"
+_t263_np=$?
+"$CSV2" -r -t --md-style compact -i "$TMP/t263.csv2" >/dev/null 2>"$TMP/t263s.err"
+_t263_ns=$?
+if [[ $_t263_np == 1 && $_t263_ns == 1 ]] \
+   && LC_ALL=C grep -q 'needs -md' "$TMP/t263p.err" && LC_ALL=C grep -q 'needs -md' "$TMP/t263s.err"; then
+    ok "T263d --pretty and --md-style are refused without -md, naming it / --pretty 與 --md-style 在沒有 -md 時被拒絕，並指名它"
+else
+    bad "T263d pretty=$_t263_np style=$_t263_ns / 實得如上"
+fi
+
+# NQ. Over the cap: exit 1, EMPTY stdout, and a message naming the way out.
+# The empty stdout is the half worth pinning -- the Errors section warns that a
+# mid-file fault does leave records behind, so a reader has real reason to
+# expect partial output here.
+# NQ。超過上限時：rc=1、stdout **空白**，訊息指名逃生口。空白的 stdout 是值得釘住的那一半——
+# 「錯誤」那一節警告過「檔案中途的錯誤確實會留下紀錄」，因此讀者有充分理由預期這裡也會有部分輸出。
+_t263_cap=$(CSV2_PRETTY_MAX_BYTES=1 "$CSV2" -r -t -md --pretty -i "$TMP/t263.csv2" 2>"$TMP/t263c.err")
+_t263_cap_rc=$?
+if [[ $_t263_cap_rc == 1 && -z $_t263_cap ]] && LC_ALL=C grep -q 'drop --pretty' "$TMP/t263c.err"; then
+    ok "T263e over CSV2_PRETTY_MAX_BYTES it exits 1 with empty stdout and names the escape / 超過上限時以 1 結束、stdout 空白，並指名逃生口"
+else
+    bad "T263e rc=$_t263_cap_rc stdout=[${_t263_cap//$'\n'/|}] / 實得如上"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

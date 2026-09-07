@@ -96,6 +96,31 @@ struct Options {
     /// each clears the other, so both-given looks exactly like last-given.
     /// `--en`／`--zh` 給了幾個——那是那兩個 Bool 說不出來的：它們互相清除，因此「兩個都給」
     /// 看起來與「只給了後面那個」一模一樣。
+    // Counted, not inferred from the state they leave behind -- the same
+    // reason `langFlags` exists. `--pretty` and `--md-style pretty` are the
+    // SAME setting, so each assignment overwrote the other and the last one on
+    // the command line won, silently: `--pretty --md-style compact` gave
+    // compact and the reverse order gave pretty, rc=0 with nothing on stderr.
+    // A wrapper appending a style to a user's flags flipped its own output. NN.
+    // 用**數**的，而不是從它們留下的狀態去推——與 `langFlags` 存在的理由相同。`--pretty` 與
+    // `--md-style pretty` 是**同一個**設定，因此兩次賦值互相覆寫、命令列上後面那個贏，而且是靜默的：
+    // `--pretty --md-style compact` 給出 compact，順序反過來給出 pretty，rc=0 而 stderr 什麼都沒有。
+    // 一支「在使用者旗標後面追加一個 style」的包裝腳本，會把自己的輸出翻面。NN。
+    var sawPretty = 0
+    var sawMdStyle = 0
+    /// The style `--md-style` was actually given, kept because the FINAL state
+    /// cannot answer the question. With `--md-style compact --pretty` the last
+    /// assignment leaves `.pretty`, so a check written against `o.mdStyle`
+    /// catches one order and not the other -- which my first fix did, and my own
+    /// test caught only because it ran both orders. The comment beside
+    /// `langFlags` says this exactly: count the flags, not the state they leave
+    /// behind. I read it and then did half of it.
+    /// `--md-style` **實際被給定**的那個樣式，留著是因為**最終狀態**回答不了這個問題。
+    /// `--md-style compact --pretty` 的最後一次賦值留下的是 `.pretty`，因此一個對著 `o.mdStyle`
+    /// 寫的檢查只抓得到一種順序——我的第一版修法就是這樣，而我自己的測試抓到它，只因為它跑了
+    /// **兩種**順序。`langFlags` 旁邊那段註解說的正是這件事：數旗標，不要數它們留下的狀態。
+    /// 我讀了它，然後只做了一半。
+    var explicitStyle: MDStyle? = nil
     var langFlags = 0
     var sawEn = 0
     var sawZh = 0
@@ -572,7 +597,7 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "backup": o.backup = true
         case "headers": try once("--headers"); o.headersOverride = try intVal(arg, try need(arg))
         case "md": o.markdown = true
-        case "pretty": o.pretty = true; o.mdStyle = .pretty
+        case "pretty": o.pretty = true; o.mdStyle = .pretty; o.sawPretty += 1
         case "md-style":
             let v = try need(arg)
             guard let st = MDStyle(rawValue: v) else {
@@ -582,6 +607,8 @@ func parseArgs(_ argv: [String]) throws -> Options {
             }
             o.mdStyle = st
             o.pretty = (st == .pretty)
+            o.sawMdStyle += 1
+            o.explicitStyle = st
         case "json": o.json = true
         case "json-ascii": o.json = true; o.jsonASCII = true
         case "md-table": try once("--md-table"); o.mdTable = try intVal(arg, try need(arg))
@@ -1893,6 +1920,31 @@ func validate(_ o: inout Options) throws {
     // 原本是「後面那個安靜地贏」，與順序有關，rc=0——而這個工具拒絕 `--headers 1 --headers 2`
     // 時所給的理由，正是「安靜地取最後一個，就是 `-hash note -hash ver` 把 note 留在明文的
     // 那條路」。同一類危險，卻用了兩種不同的處理方式。
+    // Both given, and disagreeing. Refused rather than resolved, which is what
+    // this tool does with `--build-index --no-index` and with `--zh --en`: a
+    // contradiction is the caller's to settle, and picking one silently is how
+    // the same command line produces two different files. NN.
+    // 兩個都給了，而且不一致。**拒絕**而不是替他決定——這正是這支工具對
+    // `--build-index --no-index` 與 `--zh --en` 的做法：一個矛盾該由呼叫端解決，而靜默地挑一個，
+    // 正是「同一行指令產生兩個不同檔案」的由來。NN。
+    if o.sawPretty > 0, let given = o.explicitStyle, given != .pretty {
+        throw usageError(
+            "--pretty is --md-style pretty, so giving it with --md-style \(given.rawValue) contradicts itself; the result depended on which came last",
+            "--pretty 就是 --md-style pretty，因此把它與 --md-style \(given.rawValue) 一起給是自相矛盾；先前的結果取決於哪一個排在後面")
+    }
+    // Silent no-ops, in a tool that names every other one. `--filter`,
+    // `-A`/`-B`/`-C` and `--normalize` are all refused without `-contains` and
+    // the README says so; these two did nothing and said nothing. NO.
+    // 靜默的無操作，而這支工具會指名其他每一個。`--filter`、`-A`／`-B`／`-C` 與 `--normalize`
+    // 在沒有 `-contains` 時全部被拒絕、README 也這樣寫；而這兩個什麼都沒做、也什麼都沒說。NO。
+    if !o.markdown && o.sawPretty > 0 {
+        throw usageError("--pretty shapes -md output, so it needs -md",
+                         "--pretty 塑形的是 -md 的輸出，因此它需要 -md")
+    }
+    if !o.markdown && o.sawMdStyle > 0 {
+        throw usageError("--md-style shapes -md output, so it needs -md",
+                         "--md-style 塑形的是 -md 的輸出，因此它需要 -md")
+    }
     if o.langFlags > 1 {
         // Two different flags and the same flag twice are different mistakes,
         // and the message has to be true of the one in front of it -- the same

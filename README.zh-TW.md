@@ -189,8 +189,23 @@ meta 行的 `fields` 是**標頭的寬度**：三欄的 CSV 是 3，而**只要�
 | `compact` | `\|zstd\|1.5.6\|BSD\|`——任何地方都沒有 padding |
 | `pretty` | 把整張表的每一欄重新對齊到共同寬度 |
 
-因此就地編輯一份文件時，`preserve` 給出最小的 diff，而那正是它是預設值的原因。
-`--pretty`（另一個旗標）會把選取的表格保留在記憶體中，受 `CSV2_PRETTY_MAX_BYTES` 限制。
+因此就地編輯一份文件時，`preserve` 給出最小的 diff，而那正是它是預設值的原因。在 CSV 輸入上，
+那裡沒有「原始間距」可以保留，它的行為等同 `compact`。
+
+**`--pretty` 就是 `--md-style pretty`**——同一個設定的兩種寫法，輸出逐位元相同，共用同一個上限。
+直到 2026-09-07 之前，這一頁稱它為「另一個旗標」，而那正是一個讀者在「該用哪一個」時會依賴的句子。
+兩者以**不同的值**同時給出時會被**拒絕**而不是替你決定，因為先前的結果取決於哪一個排在後面。
+兩者都需要 `-md`，少了它會被拒絕。
+
+對齊依的是**顯示寬度**，逐欄計算：每一欄的寬度是「它的標頭與它的儲存格之中最寬的那個」，兩側各加
+一個空格。寬度量在**已跳脫**的文字上，單位是 grapheme cluster——一個 CJK 字元算 2、一個結合字元算 0，
+而一個 ZWJ emoji 序列算**一個** cluster：那在「會把該序列算繪成一個字形」的終端機上是對的，在不會的
+終端機上會窄兩欄。`.csv2` 量的是那個以 `<br>` 接起來的標頭字面值。
+
+「為了對齊而必須持有整張表」正是 `CSV2_PRETTY_MAX_BYTES` 所限制的東西。超過它時，該次執行以 1 結束、
+stdout 空白，訊息會指名兩個逃生口。**那個上限數的是「資料儲存格」已跳脫的位元組**，而
+`CSV2_MD_MAX_BYTES` 數的是**輸入檔的原始位元組**。它們在下面那張表裡都寫成「16 MiB」，而它們量的
+不是同一樣東西。
 
 以 `--md-table N` 從一份文件中選出一張表時，每一筆 `--json` 紀錄上的 `line` 就是**文件裡**的
 行號——與你的編輯器顯示的同一個數字——而 `--physical` 的 `@L` 也是同一個數字。一筆位於文件第 27 行
@@ -522,8 +537,8 @@ metrics: read_bytes=65536 file_bytes=2808905 peak_rss_bytes=9404416
 | `CSV2_INDEX_MIN_BYTES` | 16 MiB | **自動**建立 sidecar 的最小檔案大小；`--build-index` 不理會它 |
 | `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | 平行搜尋的最小檔案大小 |
 | `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | 搜尋區塊大小 |
-| `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `--pretty` 保留材料的上限 |
-| `CSV2_MD_MAX_BYTES` | 16 MiB | Markdown 輸入上限 |
+| `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `--pretty` 可以持有的「**資料儲存格**已跳脫位元組」上限 |
+| `CSV2_MD_MAX_BYTES` | 16 MiB | Markdown **輸入檔的原始位元組**上限 |
 | `CSV2_MAX_BUFFER_RECORDS` | 1,000,000 | `-tail` 與上下文緩衝上限 |
 
 ## 測試與量測
