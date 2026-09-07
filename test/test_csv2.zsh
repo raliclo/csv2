@@ -6050,6 +6050,38 @@ t113_readme=$(grep -A6 'csv2 -contains busybox --json' "$ROOT/README.md" \
 assert_eq "$t113_meta" "$t113_readme" \
     "T113a the README's meta line matches what the fixture it names produces / README 的 meta 行與它所指名的 fixture 實際產出相符"
 
+# The meta line alone is not enough, and round 88 is why. That block showed the
+# final line of a seven-line output under a `$` prompt with no ellipsis, and
+# T113a passed the whole time -- the one line it compared WAS correct. A worked
+# example can be true line by line and false as a transcript.
+#
+# So the first HIT line is compared too, and the block must either carry every
+# line or say that it does not. `…` is the marker; a block with neither the
+# full output nor an ellipsis is the shape that shipped.
+#
+# 只比對那一行 meta 是不夠的，而第 88 回合就是理由。那個區塊在一個 `$` 提示符底下展示了七行輸出的
+# 最後一行、沒有省略號，而 T113a 自始至終都通過——它比對的那一行**確實是對的**。
+# **一個範例可以逐行為真，而作為一份轉錄為假。**
+#
+# 因此第一行**命中**也一起比對，而那個區塊要嘛帶著每一行、要嘛說出它沒有。`…` 就是那個標記；
+# 一個「既沒有完整輸出、也沒有省略號」的區塊，正是當初出貨的那個形狀。
+t113_hit=$("$CSV2" -contains busybox --json -i "$PKG" 2>/dev/null | LC_ALL=C sed -n '2p')
+t113_block=$(LC_ALL=C grep -A8 'csv2 -contains busybox --json' "$ROOT/README.md")
+t113_readme_hit=$(print -r -- "$t113_block" | LC_ALL=C grep -o '{"record":1,"field":1,[^}]*}' | head -1)
+if [[ -n $t113_readme_hit && $t113_hit == "$t113_readme_hit" ]]; then
+    ok "T113a2 and the first hit line matches too / 而第一行命中也相符"
+else
+    bad "T113a2 program=[${t113_hit:0:70}] readme=[${t113_readme_hit:0:70}] / 實得如上"
+fi
+
+t113_shown=$(print -r -- "$t113_block" | LC_ALL=C grep -c '^{')
+t113_actual=$("$CSV2" -contains busybox --json -i "$PKG" 2>/dev/null | LC_ALL=C grep -c .)
+if (( t113_shown == t113_actual )) || print -r -- "$t113_block" | LC_ALL=C grep -q '…'; then
+    ok "T113a3 the block is either complete or marked abridged / 那個區塊要嘛完整、要嘛標示了節錄"
+else
+    bad "T113a3 shows $t113_shown of $t113_actual lines with no ellipsis / 只展示了 $t113_shown 行（實際 $t113_actual 行）且沒有省略號"
+fi
+
 # Both READMEs have to carry the same numbers, or one of them is wrong for a
 # reader who only has that one.
 # 兩份 README 必須帶著相同的數字，否則其中一份對「只有那一份」的讀者是錯的。
@@ -15333,6 +15365,110 @@ if [[ $_t259_plain == 'v1,v2,v3,CHANGED,v5' ]]; then
     ok "T259f a name-addressed update with no structural edit is unchanged / 沒有結構性編輯時，以欄名定址的更新行為不變"
 else
     bad "T259f got [$_t259_plain] / 實得如上"
+fi
+
+echo "--- T260: the machine-readable side of a search / T260：搜尋的機器可讀那一側 ---"
+# Round 88's verdict: every TEXT output format was documented and every JSON
+# output format under -contains was not. The block that did exist showed one
+# line of a four-line output under a `$` prompt with no ellipsis -- the likeliest
+# thing on that page to have produced a broken parser, and it contradicted a
+# bolded warning 570 lines later.
+#
+# 第 88 回合的判詞：每一種**文字**輸出格式都被記載了，而 `-contains` 底下每一種 JSON 輸出格式都沒有。
+# 唯一存在的那個區塊，在一個 `$` 提示符底下展示了四行輸出中的一行、而且沒有省略號——那是那一頁裡
+# 最可能造出一個壞掉解析器的東西，而且它與 570 行之後一段粗體警告互相矛盾。
+printf 'pkg,license\nzlib,MIT\nzstd,BSD\nbusybox,GPL\n' > "$TMP/t260.csv"
+
+# The whole output, counted. A case asserting only "the last line is the counts"
+# would pass on the very output the README used to show.
+# **整個**輸出，連行數一起數。一個只斷言「最後一行是計數」的案例，會在 README 原本展示的那個輸出上
+# 照樣通過。
+_t260_lines=$("$CSV2" -contains busybox --json -i "$TMP/t260.csv" 2>/dev/null | LC_ALL=C grep -c .)
+_t260_first=$("$CSV2" -contains busybox --json -i "$TMP/t260.csv" 2>/dev/null | LC_ALL=C sed -n '1p')
+_t260_hit=$("$CSV2" -contains busybox --json -i "$TMP/t260.csv" 2>/dev/null | LC_ALL=C sed -n '2p')
+_t260_last=$("$CSV2" -contains busybox --json -i "$TMP/t260.csv" 2>/dev/null | LC_ALL=C sed -n '3p')
+if [[ $_t260_lines == 3 && $_t260_first == *'"header"'* && $_t260_last == *'"matched":1'* ]]; then
+    ok "T260a -contains --json emits meta, one object per hit, then counts / -contains --json 輸出 meta、每個命中一個物件、然後計數"
+else
+    bad "T260a lines=$_t260_lines first=[${_t260_first:0:60}] last=[${_t260_last:0:40}] / 實得如上"
+fi
+
+# MW: the hit shape is NOT the -r --json shape, and the absence of `fields` is
+# the half that breaks a script. Asserting the keys that are present without
+# asserting the key that is absent would miss exactly the failure reported.
+# MW：命中的形狀**不是** `-r --json` 的形狀，而「沒有 `fields`」正是弄壞腳本的那一半。只斷言「有哪些
+# 鍵」而不斷言「沒有哪個鍵」，會剛好漏掉被回報的那個失敗。
+if [[ $_t260_hit == *'"field":1'* && $_t260_hit == *'"header_en":"pkg"'* \
+      && $_t260_hit == *'"value":"busybox"'* && $_t260_hit != *'"fields"'* ]]; then
+    ok "T260b a cell hit carries field/header_en/value and no fields object / 一個命中的儲存格帶 field/header_en/value，而沒有 fields 物件"
+else
+    bad "T260b got [$_t260_hit] / 實得如上"
+fi
+
+# And under -C the shape changes back, plus "match". Both halves: the fields
+# object returns AND the match key appears, because that key is the only
+# programmatic way to tell a hit from its context.
+# 而在 -C 之下形狀變回去，並多出 "match"。兩半都要：`fields` 物件回來了，**而且** match 鍵出現了
+# ——因為那個鍵是「以程式分辨命中與上下文」的唯一方法。
+_t260_ctx=$("$CSV2" -contains zstd -C 1 --json -i "$TMP/t260.csv" 2>/dev/null)
+if [[ $_t260_ctx == *'"match":true'* && $_t260_ctx == *'"match":false'* && $_t260_ctx == *'"fields"'* ]]; then
+    ok "T260c under -C the records carry fields and a match flag / 在 -C 之下，紀錄帶著 fields 與一個 match 旗標"
+else
+    bad "T260c got [${_t260_ctx//$'\n'/|}] / 實得如上"
+fi
+
+# MX: the locating report's escapes. A TAB inside a value must not be able to
+# look like the separator -- that is the whole reason the format is TAB-separated
+# and the reason the escape rules had to be written down.
+# MX：定位報告的跳脫。一個值裡面的 TAB 不可以看起來像那個分隔符——那正是這個格式採用 TAB 分隔的
+# 全部理由，也是那些跳脫規則必須被寫下來的理由。
+{ print -r -- 'k,v'; printf 'x,"a\tb"\n'; printf 'y,"c\nd"\n' } > "$TMP/t260esc.csv"
+_t260_tab=$("$CSV2" -contains a -i "$TMP/t260esc.csv" 2>/dev/null)
+_t260_nl=$("$CSV2" -contains c -i "$TMP/t260esc.csv" 2>/dev/null)
+if [[ $_t260_tab == '1:2	v	a\tb' && $_t260_nl == '2:2	v	c\nd' ]]; then
+    ok "T260d a TAB and a newline in a value are escaped in the report / 值裡的 TAB 與換行在報告中被跳脫"
+else
+    bad "T260d tab=[$_t260_tab] nl=[$_t260_nl] / 實得如上"
+fi
+
+# MY: -A/-B/-C REPLACE the report, and `--` separates non-adjacent groups while
+# overlapping groups merge without one.
+# MY：`-A`／`-B`／`-C` **取代**那份報告，而 `--` 分隔不相鄰的群組，重疊的群組則合併且沒有分隔線。
+{ print -r -- 'k,v'; print -r -- '1,hit'; print -r -- '2,x'; print -r -- '3,y'
+  print -r -- '4,z'; print -r -- '5,w'; print -r -- '6,hit' } > "$TMP/t260g.csv"
+_t260_far=$("$CSV2" -contains hit -C 1 -i "$TMP/t260g.csv" 2>/dev/null | LC_ALL=C tr '\n' '|')
+{ print -r -- 'k,v'; print -r -- '1,hit'; print -r -- '2,hit'; print -r -- '3,y' } > "$TMP/t260h.csv"
+_t260_near=$("$CSV2" -contains hit -C 1 -i "$TMP/t260h.csv" 2>/dev/null | LC_ALL=C tr '\n' '|')
+if [[ $_t260_far == '1,hit|2,x|--|5,w|6,hit|' && $_t260_near == '1,hit|2,hit|3,y|' ]]; then
+    ok "T260e -C emits whole records, with -- between non-adjacent groups only / -C 輸出整筆紀錄，只有不相鄰的群組之間有 --"
+else
+    bad "T260e far=[$_t260_far] near=[$_t260_near] / 實得如上"
+fi
+
+# MY: a search that matches nothing exits 0. Anyone porting a grep idiom needs
+# this, and nothing said it.
+# MY：一次沒有命中的搜尋以 0 結束。任何把 grep 慣用法搬過來的人都需要這件事，而沒有任何地方說。
+"$CSV2" -contains NOTHING_HERE -i "$TMP/t260.csv" >/dev/null 2>&1
+_t260_none=$?
+if [[ $_t260_none == 0 ]]; then
+    ok "T260f a search matching nothing still exits 0 / 沒有命中的搜尋仍然以 0 結束"
+else
+    bad "T260f rc=$_t260_none / 實得如上"
+fi
+
+# MZ: --normalize normalises BOTH sides and can REMOVE a match. The ASCII
+# control is what proves the flag is not simply broken.
+# MZ：`--normalize` 會把**兩邊**都正規化，而它可能**移除**一個命中。那個 ASCII 對照組，正是證明
+# 「這個旗標不是單純壞掉」的東西。
+{ print -r -- 'name'; printf 'Jos\xcc\x81e\n' } > "$TMP/t260nfd.csv"
+printf 'name\nJose\n' > "$TMP/t260asc.csv"
+_t260_raw=$("$CSV2" -contains Jos -i "$TMP/t260nfd.csv" 2>/dev/null)
+_t260_norm=$("$CSV2" -contains Jos --normalize -i "$TMP/t260nfd.csv" 2>/dev/null)
+_t260_ascii=$("$CSV2" -contains Jos --normalize -i "$TMP/t260asc.csv" 2>/dev/null)
+if [[ -n $_t260_raw && -z $_t260_norm && -n $_t260_ascii ]]; then
+    ok "T260g --normalize can remove a match, while ASCII is unaffected / --normalize 可能讓命中消失，而 ASCII 不受影響"
+else
+    bad "T260g raw=[$_t260_raw] norm=[$_t260_norm] ascii=[$_t260_ascii] / 實得如上"
 fi
 
 echo

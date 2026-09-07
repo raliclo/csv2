@@ -73,21 +73,38 @@ csv2 -contains MIT -i data.csv
 csv2 -contains MIT --filter -t -o matches.csv -i data.csv
 ```
 
-對 repository fixture，JSON metadata 會回報「紀錄編號走到了哪裡」以及「幾個儲存格命中」：
+`-contains --json` 會在兩行 metadata 之間，為**每一個命中的儲存格**輸出一個物件。下面是一個三筆
+紀錄的檔案的**完整輸出**，不是節錄——直到 2026-09-07 之前，這個區塊在一個 `$` 提示符底下只展示了
+**最後一行**、而且沒有省略號，那是這一頁裡最可能造出一個壞掉解析器的東西：
 
 ```text
 $ csv2 -contains busybox --json -i test/fixtures/TARGET_PACKAGES.csv
+{"meta":{"format":"csv","headers":1,"fields":7,"header":["pkg_name",…]}}
+{"record":1,"field":1,"header_en":"pkg_name","value":"busybox","line":2}
+…此處省略另外四行命中，值也已截短…
 {"meta":{"records":21,"matched":3}}
 ```
+
+那些 `…` 是**這一頁的**，不是程式印的：共有五個儲存格命中，分佈在三筆紀錄裡。直到 2026-09-07
+之前，這個區塊在一個 `$` 提示符底下**只**展示了最後一行、而且沒有省略號，那是這一頁裡最可能造出
+一個壞掉解析器的東西。
+
+**那個紀錄形狀與 `-r --json` 用的不是同一個。** 一個命中的儲存格帶的是 `record`、`field`、
+`header_en`（`.csv2` 還有 `header_zh`）、`value` 與 `line`，而且**完全沒有 `fields` 物件**——因此一個
+對著 `.fields` 寫成的腳本，會在每一行拿到 `undefined`。在 `-A`／`-B`／`-C` 之下形狀又變回整筆紀錄
+（有 `fields` 物件），並多出 `"match": true|false`——那是以程式分辨「命中」與「它的上下文」的唯一方法。
+
+結尾的 `records` 是「紀錄編號走到了哪裡」，而 `matched` 數的是命中的**紀錄**——三筆紀錄裡的五個
+儲存格會回報 `matched:3`，因此它**不是**上面那些命中行的行數。
 
 讀取選項：
 
 ```text
 -r                 讀取紀錄（預設）
--contains S        回報每個含有 S 的儲存格，格式為 record:field
+-contains S        回報命中的儲存格：record:field TAB 欄名 TAB 值
 --filter           搭配 -contains 時輸出命中的紀錄
 --include-headers  搜尋標頭列
---normalize       以 NFC 比對；儲存位元組不正規化
+--normalize       **兩邊**都以 NFC 比對；可能讓命中變少，見下
 -A N -B N -C N     命中前後的紀錄上下文
 -head N -tail N    前 N 筆／後 N 筆紀錄；N 至少要是 1
 -mid a,b           包含兩端的紀錄範圍；任一端可省略
@@ -111,7 +128,23 @@ $ csv2 -contains busybox --json -i test/fixtures/TARGET_PACKAGES.csv
 紀錄號計算資料紀錄，不是實體行。`.csv` 標頭位址是 `0`，`.csv2` 標頭位址是
 `0a`／`0b`。`-contains` 預設搜尋所有欄位；使用 `--search-cell R:C`、
 `--search-row R` 或 `--search-column C`，即可限定只搜尋一格、一筆或一欄。
-這些範圍選項互斥，且必須搭配 `-contains`。
+這些範圍選項**彼此**互斥，且必須搭配 `-contains`；它們可以自由地與 `--filter`、`-A`／`-B`／`-C`、
+`-rownum` 與 `--json` 併用。在 `.csv2` 上，欄名必須來自**英文**那一列標頭。
+
+`--filter`、`-A`／`-B`／`-C` 與 `--normalize` 同樣需要 `-contains`，少了它們會這樣說。
+**一次沒有命中的搜尋仍然以 0 結束**，因此 `if csv2 -contains X …; then` 在每一個檔案上都成立
+——那與 `grep` 的行為不同。
+
+定位報告的格式是 `record:field`、TAB、欄名、TAB、值。值裡面的 TAB 會寫成 `\t`、換行寫成 `\n`、
+反斜線寫成 `\\`，因此一行永遠只描述一個儲存格，而那個分隔符不可能出現在儲存格內部。
+`--a1` 會把試算表的格號加進位址：`2:2 [B3]`。
+
+`-A`／`-B`／`-C` 不是「加在那份報告上」——它們**取代**它，改為輸出整筆紀錄，並在**不相鄰**的群組之間
+放一行 `--`。重疊的群組會合併成一個，而且沒有分隔線。
+
+`--normalize` 會在比對之前把**搜尋字串與儲存的文字兩邊**都正規化成 NFC，而它可能讓一個命中
+**消失**：在一個存著 `Jos` 後接結合用尖音符的檔案裡，`-contains Jos` 命中原始位元組，而在 NFC 之後
+不命中——因為把那個重音組合起來之後，`s` 被換成了 `ś`。它從不改變被儲存的東西。
 欄名不可包含 `:`，因為該字元保留給 `r:c` 定址語法。`:hash`、`:hmac:` 與 `:enc:`
 後綴是 csv2 保留的保護標記，不是使用者定義的欄名。
 

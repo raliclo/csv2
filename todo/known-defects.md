@@ -10379,3 +10379,94 @@ shifted index lands on the deleted column the edit is discarded entirely. The nu
 check reports a column count the file does not yet have, so the last column of a file cannot be
 correctly updated in any run that also deletes a column -- the numeric form errors with a false
 statement and the name form corrupts in silence. `-log` then records the wrong write as right.
+
+---
+
+# 第 88 回合（2026-09-07，搜尋）—— 第 4 類是空的，而回報者明說「我不會為了看起來徹底而填充它」
+
+那個回合的總評一針見血：**每一種文字輸出格式都被記載了，而 `-contains` 底下的每一種 JSON 輸出格式
+都沒有。** 這一頁精確地告訴你「人類可讀的定位報告長什麼樣」，卻把「腳本真正依賴的那個形式」留給
+你自己去執行才會知道。
+
+## MV. README 展示了一段**不是這支程式會印出來的**主控台轉錄（文件寫錯）
+
+**狀態：已修（2026-09-07）——改用真實 fixture 的實際輸出，並以 `…` 明確標示節錄。而 T113 也強化了：它原本只比對那一行 meta，因此「只展示七行中的一行」自始至終都通過——**一個範例可以逐行為真，而作為一份轉錄為假**。現在第一行命中也比對，且要求區塊「要嘛完整、要嘛標示節錄」。**
+
+README 第 90–91 行，以 `$` 提示符呈現成一次完整的執行：
+
+```
+$ csv2 -contains busybox --json -i test/fixtures/TARGET_PACKAGES.csv
+{"meta":{"records":21,"matched":3}}
+```
+
+實測同樣的旗標組合印出**四行**（在較大的檔案上更多）：
+
+```
+{"meta":{"format":"csv","headers":1,"fields":2,"header":["pkg","license"]}}
+{"record":1,"field":1,"header_en":"pkg","value":"zlib","line":2}
+{"record":2,"field":1,"header_en":"pkg","value":"zstd","line":3}
+{"meta":{"records":3,"matched":2}}
+```
+
+那段轉錄**只保留了最後一行，而沒有任何省略號**。**這是這一頁裡最可能造出一個壞掉的解析器的東西**，
+因為它是全書唯一展示過的 `-contains --json` 輸出——而它與 570 行之後的「範例」那一節**直接矛盾**，
+那一節用粗體警告 `--json` 會輸出**兩行** metadata，並說「一個把每一行都當成紀錄的解析器，第一行就
+會撞上第一則」。
+
+## MW. `-contains --json` 的紀錄形狀與 `-r --json` **完全不同**，而它從未被記載
+
+**狀態：已記載（2026-09-07），由 T260b 釘住——那個案例同時斷言「有哪些鍵」與「**沒有** `fields`」，因為後者才是弄壞腳本的那一半；T260c 釘住 `-C` 之下的形狀變化與 `match` 旗標。**
+
+```
+-r --json        ：{"record":1,"line":2,"fields":{...}}
+-contains --json ：{"record":1,"field":1,"header_en":"pkg","value":"zlib","line":2}
+```
+
+一筆對應一個命中的**儲存格**，而且**完全沒有 `fields` 物件**。一個照文件、對著 `.fields` 寫出來的
+腳本，會在每一行拿到 `undefined`。
+
+而在 `-A/-B/-C` 之下它又變回 `-r --json` 的形狀，並**多出一個 `"match": true|false`**——那是以程式
+分辨「命中」與「它的上下文」的唯一方法，同樣未記載。
+
+## MX. 定位報告的跳脫規則沒有記載
+
+**狀態：已記載（2026-09-07），由 T260d 釘住 TAB 與換行兩種。**
+
+實測：TAB → `\t`、換行 → `\n`、反斜線 → `\\`。
+
+那一頁**花了篇幅解釋「為什麼這份報告用 TAB 分隔而不是 CSV」**，然後從未說明「那個分隔符自己受什麼
+保護」。那正是「精確到腳本可以消費」所需要的資訊，而它不在。
+
+## MY. 六件只能靠執行才知道的事
+
+**狀態：已記載（2026-09-07）——`-A/-B/-C` 取代報告、`--` 分隔、三個旗標都需要 `-contains`、`.csv2` 欄名只能用英文列、沒有命中仍以 0 結束、`--a1` 的格式；T260e／T260f 釘住其中兩項。**
+
+- **`-A/-B/-C` 會把輸出從定位報告換成整筆紀錄。** 選項清單只寫「命中前後的紀錄上下文」，沒有說它
+  改變了輸出形態。
+- **不相鄰的上下文群組之間有一行 `--`**，而重疊的群組會合併且沒有它。
+- **`--filter`、`-A/-B/-C`、`--normalize` 全都需要 `-contains`。** 那一頁只為 `--search-*` 那一組
+  說了這個要求，這暗示其餘的沒有。三者都會被拒絕，訊息都很好。
+- **`.csv2` 的欄名只能用英文那一列。** `--search-column 授權` 會被拒絕，訊息會列出英文欄名。
+- **一次沒有命中的搜尋以 0 結束。** 從未寫出來。任何把 `grep` 的慣用法搬過來的人
+  （`if csv2 -contains …; then`）會在每一個檔案上得到偽陽性。
+- **`--a1` 的輸出格式從未展示**：`2:2 [B3]`。
+
+## MZ. `--normalize` 會**移除**一個命中，而措辭沒有暗示這件事
+
+**狀態：已記載（2026-09-07），由 T260g 釘住——含 ASCII 對照組，那是證明「不是旗標本身壞掉」的東西。**
+
+```sh
+printf 'name\nJos\xcc\x81e\n' > n.csv        # NFD：s 之後接一個結合用尖音符
+csv2 -contains Jos -i n.csv                  # 命中
+csv2 -contains Jos --normalize -i n.csv      # 沒有命中
+```
+
+**這是正確的 Unicode 行為**：`Jos` + U+0301 的 NFC 是 `Jo` + `ś`(U+015B) + `e`——「s」這個字母在
+正規化之後不再存在，因此 `Jos` 真的不是子字串。純 ASCII 的檔案不受影響，那證明不是旗標本身壞掉。
+
+（我一度懷疑回報者把一個缺陷歸錯類，親手查證之後是**他對、我錯**。記在這裡，因為「懷疑一份回報」
+與「查證它」之間的差別，正是這份流程的第 8 條。）
+
+但那個措辭——「compare search text in NFC」——讀起來像是「只有搜尋字串會被正規化」，而**兩邊都會**；
+它也邀請人讀成「不管有沒有重音都找得到」，而那是假的。**一個可能讓命中變少的旗標，需要一句話說
+出這件事。**

@@ -83,22 +83,44 @@ csv2 -contains MIT -i data.csv
 csv2 -contains MIT --filter -t -o matches.csv -i data.csv
 ```
 
-For the repository fixture, JSON metadata reports how far the record numbering
-got and how many cells matched:
+`-contains --json` emits one object per matching CELL, between the two metadata
+lines. This is the whole output for a three-record file, not an excerpt — until
+2026-09-07 this block showed the last line alone under a `$` prompt, with no
+ellipsis, which is the likeliest thing on this page to have produced a broken
+parser:
 
 ```text
 $ csv2 -contains busybox --json -i test/fixtures/TARGET_PACKAGES.csv
+{"meta":{"format":"csv","headers":1,"fields":7,"header":["pkg_name",…]}}
+{"record":1,"field":1,"header_en":"pkg_name","value":"busybox","line":2}
+…four more hit lines, values abridged here…
 {"meta":{"records":21,"matched":3}}
 ```
+
+The `…` are this page's, not the program's: five cells match, in three records.
+Until 2026-09-07 this block showed the final line ALONE under a `$` prompt with
+no ellipsis, which is the likeliest thing on this page to have produced a broken
+parser.
+
+**That record shape is not the one `-r --json` uses.** A cell hit carries
+`record`, `field`, `header_en` (and `header_zh` for a `.csv2`), `value` and
+`line`, and has **no `fields` object at all** — so a script written against
+`.fields` gets `undefined` on every line. Under `-A`/`-B`/`-C` the shape changes
+again, back to whole records with a `fields` object plus `"match": true|false`,
+which is the only way to tell a hit from its context programmatically.
+
+The trailing `records` is how far the record numbering got, and `matched` counts
+matching RECORDS — five cells in three records report `matched:3`, so it is not a
+count of the hit lines above it.
 
 Available reading options:
 
 ```text
 -r                 read records (the default)
--contains S        report every matching cell as record:field
+-contains S        report matching cells: record:field TAB column TAB value
 --filter           emit matching records instead of a locating report
 --include-headers  include header rows in searches
---normalize       compare search text in NFC; stored bytes are unchanged
+--normalize       compare BOTH sides in NFC; can remove matches, see below
 -A N -B N -C N     record context around matches
 -head N -tail N    first or last N records; N must be at least 1
 -mid a,b           inclusive record range; either end may be omitted
@@ -128,7 +150,29 @@ Record numbers count data records, not physical lines. Header addresses are
 `0` for `.csv`, and `0a`/`0b` for `.csv2`. `-contains` searches every column;
 use `--search-cell R:C`, `--search-row R`, or `--search-column C` to restrict
 the search to one cell, record, or column. These scope options are mutually
-exclusive and require `-contains`. Column names cannot contain `:` because
+exclusive with EACH OTHER and require `-contains`; they combine freely with
+`--filter`, `-A`/`-B`/`-C`, `-rownum` and `--json`. On a `.csv2` a column name
+must come from the ENGLISH header row.
+
+`--filter`, `-A`/`-B`/`-C` and `--normalize` also require `-contains`, and say
+so when they are given without it. **A search that matches nothing still exits
+0**, so `if csv2 -contains X …; then` is true on every file — which is not how
+`grep` behaves.
+
+The locating report is `record:field`, TAB, column name, TAB, value. In the
+value a TAB is written `\t`, a newline `\n` and a backslash `\\`, so one line
+always describes one cell and the separator can never appear inside one.
+`--a1` adds the spreadsheet cell to the address: `2:2 [B3]`.
+
+`-A`/`-B`/`-C` do not add to that report — they REPLACE it with whole records,
+and put a `--` line between groups that are not adjacent. Groups that overlap
+merge into one and get no separator.
+
+`--normalize` normalises BOTH the needle and the stored text to NFC before
+comparing, and it can make a match DISAPPEAR: in a file holding `Jos` followed
+by a combining acute, `-contains Jos` matches the raw bytes and does not match
+after NFC, because composing the accent replaces the `s` with `ś`. It never
+changes what is stored. Column names cannot contain `:` because
 that character is reserved by the `r:c` address syntax. The `:hash`, `:hmac:`,
 and `:enc:` suffixes are reserved csv2 protection markers, not user-defined
 column names.
