@@ -8,7 +8,24 @@ zmodload zsh/datetime
 
 HERE=${0:A:h}
 ROOT=${HERE:h}
-: ${CSV2:=$ROOT/release/csv2}
+# `release/csv2` on macOS and Linux, `release/csv2.exe` on Windows -- the same
+# name compile_csv2.zsh's Windows branch produces. Hard-wiring the POSIX name
+# made this script exit "build first" on a node that HAD just built, and the one
+# Windows measurement on record was taken by passing CSV2= by hand, an
+# incantation that appears nowhere. 2026-09-08.
+# macOS 與 Linux 上是 `release/csv2`，Windows 上是 `release/csv2.exe`——也就是 compile_csv2.zsh
+# 的 Windows 分支產生的那個名字。寫死 POSIX 那個名字，會讓這支腳本在一個**剛剛建置完成**的節點上
+# 印出「build first」而結束，而現存唯一一份 Windows 量測，是靠手動傳入 CSV2= 取得的——那個咒語
+# 不存在於任何地方。2026-09-08。
+if [[ -z ${CSV2:-} ]]; then
+    if [[ -x $ROOT/release/csv2 ]]; then
+        CSV2=$ROOT/release/csv2
+    elif [[ -x $ROOT/release/csv2.exe ]]; then
+        CSV2=$ROOT/release/csv2.exe
+    else
+        CSV2=$ROOT/release/csv2
+    fi
+fi
 : ${RSS_RECORDS:=10000000}
 : ${MEASURE_OUTPUT:=$HERE/measure_parallel_rss_output.txt}
 
