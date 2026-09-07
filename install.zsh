@@ -274,7 +274,39 @@ in_user_shell() {
     PROBE_KIND=""; PROBE_OUT=""
     local -a E; E=(env -i ${(z)$(probe_env)})
     if out=$($E $LOGIN_SHELL -c "$1" 2>/dev/null) && [[ -n $out ]]; then
-        PROBE_KIND="every shell, scripts over ssh included / 每一種 shell，包含經 ssh 的腳本"
+        # A non-login shell finding it does NOT imply every shell finds THIS
+        # one. The ladder below reads as "least-equipped environment first, so
+        # anything richer must also succeed" -- true if a login shell only ADDS
+        # to PATH. On macOS it does not: `path_helper`, run from /etc/zprofile
+        # for login shells, REORDERS it. README.md:35-39 explains that exact
+        # mechanism, and the check three lines up did not use it.
+        #
+        # So a second csv2 earlier in the login PATH -- which is what you have
+        # the moment you install twice, which is what --prefix and --dir are
+        # for -- makes `reachable from: every shell` true about reachability and
+        # false about identity, while the line beside it promises identity:
+        # "and it is the file just installed".
+        #
+        # Round 96 hit this with a /usr/local/bin/csv2 nobody in the round had
+        # placed. OK.
+        #
+        # 一個非登入 shell 找得到它，**不**蘊涵每一種 shell 都找得到**這一個**。底下那個階梯的讀法是
+        # 「先問配備最少的環境，因此更豐富的環境必然也成功」——那在「登入 shell 只會**增加** PATH」時
+        # 成立。而 macOS 上不成立：`path_helper` 由 /etc/zprofile 在登入 shell 執行，它會**重排** PATH。
+        # README.md 第 35–39 行解釋的正是那個機制，而上面三行的檢查沒有用到它。
+        #
+        # 於是一個排在登入 PATH 更前面的第二個 csv2——那正是「你裝第二次」時會有的東西，而
+        # --prefix 與 --dir 存在的理由就是讓你裝第二次——會讓 `reachable from: every shell` 對
+        # **可達性**為真、對**同一性**為假；而它旁邊那一行承諾的正是同一性：「就是剛剛裝的那個檔案」。
+        #
+        # 第 96 回合就是被一個「沒有任何人在那個回合裡放置」的 /usr/local/bin/csv2 撞到的。OK。
+        local login_out
+        if login_out=$($E $LOGIN_SHELL -lc "$1" 2>/dev/null) && [[ -n $login_out ]] \
+           && [[ $login_out != $out ]]; then
+            PROBE_KIND="non-login shells; a LOGIN shell finds $login_out first / 非登入 shell；而**登入** shell 會先找到 $login_out"
+        else
+            PROBE_KIND="every shell, scripts over ssh included / 每一種 shell，包含經 ssh 的腳本"
+        fi
     elif out=$($E $LOGIN_SHELL -lc "$1" 2>/dev/null) && [[ -n $out ]]; then
         PROBE_KIND="login shells only; a script over ssh will NOT find it / 只有登入 shell；經 ssh 的腳本找不到"
     elif out=$($E $LOGIN_SHELL -lic "$1" 2>/dev/null) && [[ -n $out ]]; then

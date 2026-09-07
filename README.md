@@ -28,9 +28,29 @@ SwiftNIO.
 ```
 
 The build detects macOS, Linux, and Windows. It writes `release/csv2` on
-POSIX systems and `release/csv2.exe` on Windows. `install.zsh` supports
-`--dry-run`, `--prefix DIR` (installs into `DIR/bin`), `--dir DIR` (installs
-into `DIR` exactly), `--no-rc`, and `--uninstall`.
+POSIX systems and `release/csv2.exe` on Windows. `install.zsh` takes:
+
+| Flag | |
+|---|---|
+| `--dry-run` | says what it would do and writes nothing |
+| `--prefix DIR` | installs into `DIR/bin`, creating it if absent |
+| `--dir DIR` | installs into `DIR` exactly, creating it if absent |
+| `--no-rc` | writes no startup file — so `csv2` will NOT run by name afterwards |
+| `--uninstall` | removes the binary and the block it wrote |
+
+They compose: `--uninstall` on its own looks only in the default location and
+exits 0 having removed nothing, so pair it with the same `--prefix`/`--dir` you
+installed with.
+
+**The default is Homebrew's `bin`** — the directory the paragraph above tells you
+to avoid for ssh-reachable scripts. `--dry-run` prints it. Installing elsewhere
+leaves any earlier binary on disk and replaces the startup block, so the old one
+stays and stops being found.
+
+**It writes `~/.zshenv`**, creating it if absent, and `--uninstall` removes its
+own marked block but not that file. Exit 0 does not mean `csv2` runs by name:
+under `--no-rc` it explicitly does not, which is why the installer probes and
+prints what it found.
 
 On macOS, install into `/usr/local/bin` rather than Homebrew's directory if a
 script run over ssh needs to find it: a clean non-login shell has

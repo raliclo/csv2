@@ -11463,7 +11463,17 @@ else
     # 而且它會這樣說：每一種 shell 都找得到，包含 ssh。那個宣稱正是 .zshenv 換來、而 .zshrc
     # 換不到的東西。
     case $_t203_out in
-        *"every shell, scripts over ssh included"*)
+    # Matches the SUBSTANCE -- a non-interactive shell finds it -- not the exact
+    # sentence. On 2026-09-08 that sentence gained a qualified form: when a
+    # login shell resolves a DIFFERENT csv2 first, the report names the
+    # competitor instead of claiming every shell. The fact `.zshenv` buys over
+    # `.zshrc` is unchanged; only the wording moved, and matching wording made a
+    # correct program fail.
+    # 比對的是**實質**——非互動 shell 找得到——而不是那個確切的句子。2026-09-08 那個句子多了一個
+    # 限定形式：當登入 shell 先解析到**另一個** csv2 時，那份回報會指名那個競爭者，而不是宣稱
+    # 每一種 shell。`.zshenv` 相對於 `.zshrc` 換來的那個事實沒有變；動的只有措辭，
+    # **而比對措辭讓一個正確的程式失敗了。**
+        *"every shell, scripts over ssh included"*|*"non-login shells"*)
             ok "T203b and reports it is reachable from a non-interactive shell / 並回報非互動 shell 也找得到" ;;
         *) bad "T203b got: $_t203_out / 實得如上" ;;
     esac
@@ -16159,6 +16169,83 @@ if [[ $_t267_ctx == *'-A/-B/-C'* ]]; then
     ok "T267c -C declines as -A/-B/-C, not as --filter / -C 以 -A/-B/-C 的名義婉拒，而不是 --filter"
 else
     bad "T267c got [$_t267_ctx] / 實得如上"
+fi
+
+echo "--- T268: the installer's reachability claim / T268：安裝器對「可達性」的宣稱 ---"
+# OK. The probe is a ladder -- non-login, then login, then login-interactive --
+# and concluding "every shell" from the first rung assumes a login shell only
+# ADDS to PATH. On macOS it does not: path_helper runs from /etc/zprofile for
+# login shells and REORDERS it, which README.md:35-39 explains three lines above
+# the check that did not use it.
+#
+# So with a second csv2 earlier in the login PATH -- what you have the moment you
+# install twice, which is what --prefix and --dir are for -- "reachable from:
+# every shell" was true about reachability and false about identity, beside a
+# line promising identity.
+#
+# This is the second layer of one lesson: on 2026-08-25 the same probe was fixed
+# for inheriting the caller's PATH, and the fix was "start a shell from
+# nothing". This time: from nothing, but only one KIND of nothing.
+#
+# OK。那個探測是一個階梯——非登入、登入、登入互動——而從第一階就結論「每一種 shell」，前提是
+# 「登入 shell 只會**增加** PATH」。macOS 上不是：`path_helper` 由 /etc/zprofile 在登入 shell 執行、
+# 它會**重排** PATH；而 README.md 第 35–39 行解釋的正是這件事，就在那個沒有用到它的檢查上方三行。
+#
+# 於是當登入 PATH 上有第二個 csv2 時——那正是你裝第二次就會有的東西，而 --prefix 與 --dir 存在的
+# 理由就是讓你裝第二次——「reachable from: every shell」對**可達性**為真、對**同一性**為假，
+# 而它旁邊那一行承諾的正是同一性。
+#
+# 這是同一個教訓的第二層：2026-08-25 同一個探測才因為「繼承呼叫者的 PATH」被修過，那次的修法是
+# 「從零開始一個 shell」。這一次是：從零開始，但只從**一種**零開始。
+_t268_install="$ROOT/install.zsh"
+if [[ ! -x $_t268_install ]]; then
+    bad "T268a install.zsh is not executable / install.zsh 不可執行"
+else
+    # A directory nothing else will find, so the probe's answer is about this
+    # install and not about a csv2 that happens to be on PATH already.
+    # 一個沒有別的東西找得到的目錄，好讓那個探測的答案是關於**這一次安裝**，而不是關於一個碰巧
+    # 已經在 PATH 上的 csv2。
+    _t268_dir="$TMP/t268/nested/bin"
+    _t268_out=$("$_t268_install" --dir "$_t268_dir" --dry-run 2>&1)
+    _t268_rc=$?
+    if [[ $_t268_rc == 0 ]] && [[ ! -e $_t268_dir ]]; then
+        ok "T268a --dry-run reports without creating the target / --dry-run 回報而不建立目標"
+    else
+        bad "T268a rc=$_t268_rc created=$([[ -e $_t268_dir ]] && echo yes || echo no) / 實得如上"
+    fi
+
+    # The reachability line must never say "every shell" while a login shell
+    # resolves a DIFFERENT file. Asserted as an implication, not as a fixed
+    # string: on a machine with no competing csv2 "every shell" is the truth,
+    # and a case demanding the warning would fail there for being right.
+    # 那一行「可達性」絕不可以在「登入 shell 解析到**另一個**檔案」時說「每一種 shell」。這裡斷言的是
+    # 一個**蘊涵**，不是一個固定字串：在一台沒有競爭者的機器上，「每一種 shell」就是實話，而一個
+    # 硬要求那則警告的案例，會在那裡因為「它是對的」而失敗。
+    "$_t268_install" --dir "$_t268_dir" --no-rc >/dev/null 2>&1
+    if [[ -x "$_t268_dir/csv2" || -x "$_t268_dir/csv2.exe" ]]; then
+        ok "T268b --dir installs into that directory exactly, creating it / --dir 就裝進那個目錄，並建立它"
+    else
+        bad "T268b nothing was installed into $_t268_dir / 該目錄下沒有任何東西被安裝"
+    fi
+
+    _t268_report=$("$_t268_install" --dir "$_t268_dir" 2>&1)
+    _t268_login=$(env -i HOME=$HOME PATH=/usr/bin:/bin zsh -lc 'command -v csv2' 2>/dev/null)
+    _t268_claims_every=0
+    print -r -- "$_t268_report" | LC_ALL=C grep -q 'every shell' && _t268_claims_every=1
+    _t268_diverges=0
+    [[ -n $_t268_login && $_t268_login != "$_t268_dir/csv2" ]] && _t268_diverges=1
+    if (( ! (_t268_claims_every && _t268_diverges) )); then
+        ok "T268c it never claims every shell while a login shell finds another csv2 / 當登入 shell 找到另一個 csv2 時，它不會宣稱「每一種 shell」"
+    else
+        bad "T268c claimed every shell while a login shell resolves $_t268_login / 宣稱了「每一種 shell」，而登入 shell 解析到的是 $_t268_login"
+    fi
+
+    "$_t268_install" --dir "$_t268_dir" --uninstall >/dev/null 2>&1
+    if [[ ! -e "$_t268_dir/csv2" && ! -e "$_t268_dir/csv2.exe" ]]; then
+        ok "T268d --uninstall with the same --dir removes what it installed / --uninstall 搭配同一個 --dir 會移除它裝的東西"
+    else
+        bad "T268d the binary is still at $_t268_dir / 執行檔仍在該目錄"
+    fi
 fi
 
 echo

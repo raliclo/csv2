@@ -25,9 +25,25 @@ Dispatch，不使用 SwiftPM 或 SwiftNIO。
 ```
 
 建置腳本會自動辨識 macOS、Linux 與 Windows。POSIX 系統輸出
-`release/csv2`，Windows 輸出 `release/csv2.exe`。`install.zsh` 支援
-`--dry-run`、`--prefix DIR`（裝進 `DIR/bin`）、`--dir DIR`（就裝進 `DIR` 這個目錄）、
-`--no-rc` 與 `--uninstall`。
+`release/csv2`，Windows 輸出 `release/csv2.exe`。`install.zsh` 接受：
+
+| 旗標 | |
+|---|---|
+| `--dry-run` | 說出它會做什麼，不寫入任何東西 |
+| `--prefix DIR` | 裝進 `DIR/bin`，不存在時建立 |
+| `--dir DIR` | 就裝進 `DIR` 這個目錄，不存在時建立 |
+| `--no-rc` | 不寫任何啟動檔——因此之後 `csv2` **不會**能用名字執行 |
+| `--uninstall` | 移除那個執行檔，以及它寫下的那個區塊 |
+
+它們可以組合：`--uninstall` 單獨使用時只看預設位置，會在什麼都沒移除的情況下以 0 結束，因此請把它
+與你當初安裝時用的那個 `--prefix`／`--dir` 一起給。
+
+**預設是 Homebrew 的 `bin`**——正是上一段叫你「經 ssh 的腳本不要用」的那個目錄。`--dry-run` 會印出
+它。裝到別處會把先前的執行檔留在磁碟上並替換那個啟動區塊，於是舊的那個還在、只是不再被找到。
+
+**它會寫 `~/.zshenv`**，不存在時建立；而 `--uninstall` 移除的是它自己標記的區塊，不是那個檔案。
+rc=0 **不代表** `csv2` 可以用名字執行：在 `--no-rc` 之下明確地不代表——那也正是這支安裝器要去探測、
+並把探測結果印出來的理由。
 
 在 macOS 上，如果有「經 ssh 執行的腳本」需要找到它，請裝到 `/usr/local/bin` 而不是 Homebrew
 的目錄：一個乾淨的非登入 shell，PATH 裡有 `/usr/local/bin`，而**沒有** `/opt/homebrew/bin`
