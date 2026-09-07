@@ -1757,21 +1757,57 @@ plain_mit=$(cell "$TMP/t55_plain.csv" 1 2)
 # 無金鑰形式就是該值的純 SHA-256，此處直接斷言「它就是」——讓讀測試的人看見這個
 # 暴露面，而不是自己去推論。
 # An INDEPENDENT SHA-256, so this assertion means something: computing it with
-# csv2 would only prove csv2 agrees with itself. macOS ships `shasum`, the
-# guest's busybox ships `sha256sum`, and neither ships both -- so pick whichever
-# is present rather than skipping the case on the platform that lacks one.
-# 使用「獨立的」SHA-256，這個斷言才有意義：用 csv2 自己算只能證明它與自己一致。
-# macOS 提供 `shasum`，guest 的 busybox 提供 `sha256sum`，兩邊都不會同時有——
-# 因此挑存在的那一個，而不是在缺少其一的平台上把案例略過。
+# csv2 would only prove csv2 agrees with itself. It cannot be `cmp` either --
+# this needs a second implementation of the algorithm, not a comparison.
+#
+# NOT `shasum`, which this used until 2026-09-06. On macOS `shasum` is a Perl
+# script -- its shebang is a perl interpreter -- and this project does not
+# depend on Perl; the guest has neither perl nor python, which is why T68 uses
+# `dd` rather than a scripting language. That reason was written beside T68
+# and nowhere else, so it constrained one case and nothing else, and `shasum`
+# came back twice. It is now stated in AGENTS.md, where it is read.
+#
+# `sha256sum` first (busybox, coreutils, MSYS2), then `openssl dgst -sha256`,
+# which stock macOS ships at /usr/bin/openssl and which produces the identical
+# digest. Neither is Perl. If a node has neither, this returns empty and the
+# check below names that rather than letting the case pass on nothing.
+#
+# 使用「獨立的」SHA-256，這個斷言才有意義：用 csv2 自己算只能證明它與自己一致。這裡也不能用
+# `cmp`——需要的是這個演算法的**第二份實作**，不是一次比對。
+#
+# **不用 `shasum`**，而它直到 2026-09-06 都還在這裡。在 macOS 上 `shasum` 是一支 Perl 腳本
+# ——它的 shebang 就是一個 perl 直譯器——而本專案不依賴 Perl；guest 上既沒有 perl 也沒有
+# python，那正是 T68 用 `dd` 而不用腳本語言的原因。那個理由只寫在 T126 旁邊、沒有寫在別處，
+# 於是它只約束了一個案例，而 `shasum` 回來了兩次。現在它寫進了 AGENTS.md，那是會被讀到的地方。
+#
+# 先 `sha256sum`（busybox、coreutils、MSYS2 都有），再 `openssl dgst -sha256`——原廠 macOS 的
+# /usr/bin/openssl 就有，摘要完全相同。兩者都不是 Perl。若某個節點兩者皆無，這裡回傳空字串，
+# 而底下那個檢查會**指名這件事**，不會讓案例在什麼都沒有的情況下通過。
 sha256_of() {
     if (( $+commands[sha256sum] )); then
         printf '%s' "$1" | sha256sum | cut -d' ' -f1
-    else
-        printf '%s' "$1" | shasum -a 256 | cut -d' ' -f1
+    elif (( $+commands[openssl] )); then
+        printf '%s' "$1" | openssl dgst -sha256 -r | cut -d' ' -f1
     fi
 }
 want_sha=$(sha256_of 'MIT')
 [[ -n "$want_sha" ]] || bad "T55a has no independent SHA-256 tool to check against / 沒有可用的獨立 SHA-256 工具可供比對"
+
+# When a node has BOTH, check they agree. Without this the openssl branch is
+# never executed on any node that has sha256sum -- which is all four -- so a
+# typo in it would sit unnoticed until the one platform that needs it, which is
+# exactly the platform nobody is watching when it breaks.
+# 當一個節點**兩者都有**時，檢查它們一致。少了這一段，`openssl` 那一支在任何有 `sha256sum` 的
+# 節點上都不會被執行——而那是全部四個節點——因此它裡面的一個打字錯誤會一直沒有人發現，直到那個
+# 真正需要它的平台為止，而那正是「壞掉時沒有人在看」的那一個平台。
+if (( $+commands[sha256sum] )) && (( $+commands[openssl] )); then
+    _t55_ossl=$(printf '%s' 'MIT' | openssl dgst -sha256 -r | cut -d' ' -f1)
+    if [[ -n $_t55_ossl && $_t55_ossl == $want_sha ]]; then
+        ok "T55a0 openssl and sha256sum agree, so the fallback branch is exercised / openssl 與 sha256sum 一致，因此那條退路確實被執行過"
+    else
+        bad "T55a0 openssl gave [$_t55_ossl], sha256sum gave [$want_sha] / 實得如上"
+    fi
+fi
 assert_eq "$plain_mit" "$want_sha" "T55a -hash without a key is plain SHA-256 of the value, dictionary-attackable / 無金鑰的 -hash 就是該值的純 SHA-256，可被字典攻擊"
 
 "$CSV2" -hash lic -keyfile "$TMP/t55.key" -i "$TMP/t55.csv" -o "$TMP/t55_keyed.csv" -t 2>/dev/null
@@ -14379,7 +14415,9 @@ fi
 # 那讀起來像選配；那個回合不給它試了一次，被拒絕。這裡連檔案一起檢查，因為「一個已經寫過了的
 # 拒絕」正是這個專案一再找到的那個形狀。
 printf '| pkg | version |\n|---|---|\n| zlib | 1.3.2 |\n' > "$TMP/t248g.md"
-cp "$TMP/t248g.md" "$TMP/t248g.orig"          # cmp, not shasum -- see T246a
+# cmp against a copy, not a hash of the path twice -- see T246a.
+# 用 cmp 與複本比對，不要對同一路徑取兩次雜湊——見 T246a。
+cp "$TMP/t248g.md" "$TMP/t248g.orig"
 "$CSV2" -update 1:version '9.9.9' -i "$TMP/t248g.md" --in-place >/dev/null 2>"$TMP/t248g.err"
 _t248_rc=$?
 if [[ $_t248_rc == 1 ]] && cmp -s "$TMP/t248g.orig" "$TMP/t248g.md" \
@@ -14387,6 +14425,97 @@ if [[ $_t248_rc == 1 ]] && cmp -s "$TMP/t248g.orig" "$TMP/t248g.md" \
     ok "T248f editing a .md without -md is refused and the file is untouched / 編輯 .md 而不給 -md 會被拒絕，且檔案未被動到"
 else
     bad "T248f rc=$_t248_rc err=[$(tr '\n' '|' < "$TMP/t248g.err")] / 實得如上"
+fi
+
+echo "--- T249: no script here DEPENDS on Perl or Python / T249：這裡沒有腳本「依賴」Perl 或 Python ---"
+# The rule is in AGENTS.md; this is what makes it hold. It was agreed in
+# conversation, written down beside T68 as a note about T68, and `shasum` --
+# which is Perl on macOS and does not look like Perl -- came back into the tree
+# twice with nothing saying anything.
+#
+# The line is DEPENDENCY, not mention. T166e runs python3 for an independent
+# second implementation of a checksum, guarded by `command -v python3` with a
+# skip when it is absent -- the guest has no python3 and that case skips there.
+# That is allowed and is the pattern to copy: an optional cross-check that
+# strengthens an assertion where the tool exists and never becomes the only
+# path. `shasum` and `perl` have no such use here and are banned outright,
+# because `sha256sum` and `openssl` cover every node.
+#
+# The first version of this case checked for the names at a "command position"
+# -- start of line, or after a pipe or semicolon. It PASSED with a real
+# violation planted in install.zsh: `sum_of() { shasum -a 256 ... }` puts the
+# name after `{`, which was not in the list. The bait case below had passed at
+# the same moment, because the bait was shaped the way the author could imagine
+# a violation being shaped. So this looks for the name ANYWHERE in code, which
+# cannot be outguessed, and full-line comments are stripped instead.
+#
+# 規則寫在 AGENTS.md；讓它成立的是這裡。它在對話中講定過，被寫在 T68 旁邊、成為一則關於 T68 的
+# 附註，而 `shasum`——它在 macOS 上是 Perl，且看起來不像 Perl——兩度回到這棵樹裡，沒有任何東西出聲。
+#
+# 界線是**依賴**，不是提及。T166e 會執行 python3，作為某個檢查碼的獨立第二實作，並由
+# `command -v python3` 守住、缺席時跳過——guest 上沒有 python3，那個案例在那裡就是 SKIP。那是被
+# 允許的，也是該仿效的形狀：一個在工具存在時強化斷言、而且永遠不會成為唯一路徑的可選交叉比對。
+# `shasum` 與 `perl` 在這裡沒有這種用途，因此直接禁止，因為 `sha256sum` 與 `openssl` 涵蓋了每一個節點。
+#
+# 這個案例的第一版是找「指令位置」上的名字——行首，或在管線、分號之後。它在 install.zsh 被植入一個
+# **真的**違規時照樣通過：`sum_of() { shasum -a 256 ... }` 把名字放在 `{` 之後，而那不在清單裡。
+# 底下那個誘餌案例在同一刻也是通過的，因為那個誘餌的形狀，正是作者想像得出來的違規形狀。所以這裡改成
+# 在程式碼裡找**任何位置**的那個名字——那猜不過去——並改以剝掉整行註解來排除說明文字。
+_ban=("sha"$'sum' "per"$'l')
+_scan_files=("$ROOT"/*.zsh(N) "$ROOT"/test/*.zsh(N) "$ROOT"/verifications/*.zsh(N) "$ROOT"/csv2view/*.zsh(N) "$ROOT"/csv2view/test/*.zsh(N))
+scan_for_banned() {
+    local needle=$1 f body hits=()
+    for f in "${_scan_files[@]}"; do
+        [[ -f $f ]] || continue
+        body=$(LC_ALL=C grep -v '^[[:space:]]*#' "$f" 2>/dev/null)
+        if print -r -- "$body" | LC_ALL=C grep -qE "(^|[^[:alnum:]_])${needle}([^[:alnum:]_]|$)"; then
+            hits+=("${f:t}")
+        fi
+    done
+    print -r -- "${hits[@]}"
+}
+_ban_hits=()
+for _b in $_ban; do
+    _h=$(scan_for_banned "$_b")
+    [[ -z $_h ]] || _ban_hits+=("${_b}: ${_h}")
+done
+if (( ${#_ban_hits} == 0 )); then
+    ok "T249a no .zsh here names either banned tool in code / 這裡沒有任何 .zsh 在程式碼中出現那兩個被禁的工具"
+else
+    bad "T249a ${_ban_hits} / 實得如上"
+fi
+
+# The guard must be able to FAIL, and the shape it is given must be the shape
+# that defeated its first version -- inside a function body, after a brace.
+# A bait the author finds natural proves only that the author can be matched.
+# 這道守衛必須**有能力失敗**，而給它的形狀必須是「打敗它第一版」的那個形狀——在函式主體裡、
+# 在一個大括號之後。一個作者覺得自然的誘餌，只證明得了作者自己會被抓到。
+mkdir -p "$TMP/banscan"
+printf 'x=1\nsum_of() { %s -a 256 "$1" | cut -d" " -f1 }\n' "${_ban[1]}" > "$TMP/banscan/bait.zsh"
+_bait_body=$(LC_ALL=C grep -v '^[[:space:]]*#' "$TMP/banscan/bait.zsh")
+if print -r -- "$_bait_body" | LC_ALL=C grep -qE "(^|[^[:alnum:]_])${_ban[1]}([^[:alnum:]_]|$)"; then
+    ok "T249b the scan catches an invocation inside a function body / 這個掃描抓得到函式主體裡的呼叫"
+else
+    bad "T249b the scan missed a planted invocation, which is how its first version passed / 掃描漏掉了一個植入的呼叫，而那正是它第一版通過的方式"
+fi
+
+# python3 is allowed, but only where its absence is handled. Any file invoking
+# it must also guard it -- otherwise the guest, which has no python3, loses the
+# case silently rather than skipping it visibly.
+# python3 是被允許的，但只限於「它不存在時有被處理」的地方。任何呼叫它的檔案都必須同時守住它——
+# 否則沒有 python3 的 guest 會**安靜地失去**那個案例，而不是**看得見地**跳過它。
+_py_unguarded=()
+for _f in "${_scan_files[@]}"; do
+    [[ -f $_f ]] || continue
+    _fb=$(LC_ALL=C grep -v '^[[:space:]]*#' "$_f" 2>/dev/null)
+    print -r -- "$_fb" | LC_ALL=C grep -qE '(^|[^[:alnum:]_])python3?([^[:alnum:]_]|$)' || continue
+    print -r -- "$_fb" | LC_ALL=C grep -qE 'command -v python3|\$\+commands\[python3\]' \
+        || _py_unguarded+=("${_f:t}")
+done
+if (( ${#_py_unguarded} == 0 )); then
+    ok "T249c every file invoking python3 also guards on its presence / 每個呼叫 python3 的檔案都同時檢查了它是否存在"
+else
+    bad "T249c unguarded python3 in: ${_py_unguarded} / 實得如上"
 fi
 
 echo

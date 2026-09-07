@@ -209,6 +209,52 @@ do not quietly implement something else.
   測試且要求輸出逐位元相同。Linux 的 Foundation 是 swift-corelibs-foundation，另一份
   實作——「macOS 會過」對 Linux 不構成證據。暫不隨 rootfs 出貨並不放寬這一點。
 
+## No Perl, and therefore no `shasum` / 不用 Perl，因此不用 `shasum`
+
+**Nothing in this tree may depend on Perl or Python.** The aarch64 guest is one
+of the four nodes every change is verified on, and it has neither: its
+userspace is busybox. A script that reaches for a scripting language works on
+three nodes and fails on the fourth, and it fails there for a reason that has
+nothing to do with what it was testing.
+
+**`shasum` is Perl.** On macOS its shebang is a perl interpreter, so every call
+starts one. It is banned here by name because the name does not look like Perl
+and so it does not look like a violation -- it came back into this tree twice
+after the rule was agreed, and both times nothing said anything.
+
+For an independent SHA-256, use `sha256sum` (busybox, coreutils, MSYS2) and
+fall back to `openssl dgst -sha256`, which stock macOS ships at
+/usr/bin/openssl. To assert a file did not change, do not hash it at all: `cp`
+it first and use `cmp -s`. Hashing the same path twice passes when the hash
+tool is missing, because the empty string equals the empty string -- T246a did
+exactly that in the guest and reported PASS having measured nothing.
+
+**This rule lived only in one comment beside T68 until 2026-09-06.** That
+comment gave the reason (the guest has no perl or python) and it constrained
+that one case and nothing else, because a rule written next to its first
+application is a note about that application. It is here now because this is a
+file that gets read before the work, not during it.
+
+## 不用 Perl，因此不用 `shasum`
+
+**這棵樹上任何東西都不得依賴 Perl 或 Python。** aarch64 guest 是每一次變更都要驗證的四個節點
+之一，而它兩者皆無：它的 userspace 是 busybox。一支伸手去拿腳本語言的腳本，會在三個節點上正常、
+在第四個上失敗，而它在那裡失敗的理由與它原本要測的事情毫無關係。
+
+**`shasum` 就是 Perl。** 在 macOS 上它的 shebang 是一個 perl 直譯器，因此每一次呼叫都會啟動一個。
+這裡**指名**禁止它，因為那個名字看起來不像 Perl，於是它也看起來不像違規——在規則講定之後，它兩度
+回到這棵樹裡，而兩次都沒有任何東西出聲。
+
+需要一份獨立的 SHA-256 時，用 `sha256sum`（busybox、coreutils、MSYS2 都有），退路是
+`openssl dgst -sha256`——原廠 macOS 的 /usr/bin/openssl 就有。而要斷言「一個檔案沒有被改動」時，
+**根本不要對它取雜湊**：先 `cp` 一份，再用 `cmp -s`。對同一個路徑取兩次雜湊，會在雜湊工具缺席時
+通過，因為空字串等於空字串——T246a 在 guest 上就是這樣，回報 PASS 而什麼都沒量。
+
+**這條規則直到 2026-09-06 為止，只活在 T68 旁邊的一段註解裡。** 那段註解寫出了理由（guest 上沒有
+perl 或 python），而它只約束了那一個案例、沒有約束別的，因為**一條寫在它第一個應用旁邊的規則，
+是一則關於那個應用的附註。** 它現在在這裡，因為這是一份會在動手**之前**被讀到的檔案，而不是動手
+當中。
+
 ## Shell scripts here: `zstat`, never `stat(1)` / 這裡的 shell 腳本：用 `zstat`，不用 `stat(1)`
 
 A rule for this tree since 2026-08-26, and it was aimed at two real lines:

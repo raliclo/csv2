@@ -493,7 +493,32 @@ fi
 # 那個測試會讓這支腳本去改那台機器的 ~/.profile，修一個沒有壞的東西。反過來，一個目錄可以
 # 在 PATH 上，而 shell 仍然執行到更前面某個目錄裡的另一支 csv2。
 # ---------------------------------------------------------------------
-sum_of() { shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1 || sha256sum "$1" 2>/dev/null | cut -d' ' -f1 }
+# `sum_of` stood here and was never called -- defined once, referenced nowhere.
+# It went out for two reasons, either of which is enough.
+#
+# It ran Perl. `shasum` is a Perl script on macOS, and this project does not
+# depend on Perl (see AGENTS.md); the aarch64 guest has neither perl nor python.
+#
+# And its fallback could not work. `shasum ... | cut ... || sha256sum ...` takes
+# the exit status of the PIPELINE, which is `cut`'s, which is 0 whether or not
+# `shasum` exists -- so the `||` half was unreachable, and on a node without
+# `shasum` the function would have returned the empty string with nothing said.
+# That is the same shape as T246a's first version, which passed in the guest by
+# comparing "" with "". Dead code cannot be caught by a test, so it is deleted
+# rather than fixed: a repaired function nobody calls is still a claim nobody
+# checks.
+#
+# `sum_of` 曾經在這裡，而且**從來沒有被呼叫過**——定義一次、引用零次。它被移除有兩個理由，
+# 任何一個都足夠。
+#
+# 它會啟動 Perl。`shasum` 在 macOS 上是一支 Perl 腳本，而本專案不依賴 Perl（見 AGENTS.md）；
+# aarch64 guest 上既沒有 perl 也沒有 python。
+#
+# 而且它的 fallback 根本不會運作。`shasum ... | cut ... || sha256sum ...` 取的是**管線**的
+# 退出碼，也就是 `cut` 的，無論 `shasum` 在不在都是 0——因此 `||` 那一半到不了，而在沒有
+# `shasum` 的節點上，這個函式會回傳空字串而且什麼都不說。那與 T246a 的第一版是同一個形狀，
+# 它在 guest 裡以「拿 "" 比 ""」的方式通過了。死碼抓不到，因為沒有測試會呼叫它——所以它被
+# **刪除**而不是修好：一個沒有人呼叫的、修好的函式，仍然是一個沒有人檢查的宣稱。
 
 # Follow a shim rather than hashing it: its own bytes are not the program's.
 # 遇到 shim 要跟著它走，而不是對它算雜湊：shim 自己的位元組不是那支程式的。
