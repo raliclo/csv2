@@ -48,6 +48,49 @@ func runMarkdownEdit(_ o: Options) throws {
     guard let input = o.input else {
         throw fault("Markdown editing needs -i FILE", "Markdown 編輯需要 -i FILE")
     }
+
+    // Dry run leaves BEFORE anything below can write, and it is a separate
+    // branch rather than a flag threaded through the rest.
+    //
+    // The rest of this function needs `csv.dryRun = false` on the inner edit,
+    // because that inner run is what produces the temp file the renderer then
+    // reads -- a dry inner run would leave nothing to render. That assignment
+    // is correct. What was missing is this early exit: once dryRun had been
+    // cleared for the inner edit, nothing ever consulted `o.dryRun` again, so
+    // both exits below wrote. `--dry-run` with `-md` therefore modified the
+    // input under `--in-place` and reported exit 0 with zero bytes on stdout
+    // AND stderr -- the completest form of "looks like it succeeded" this
+    // program collects: no output, no error, no status to read, only a
+    // different file on disk. LK, found by a blind-test round that caught it
+    // solely by comparing sha256 before and after.
+    //
+    // Delegating to runEdit with dryRun kept also makes the report the one the
+    // README promises, `old -> new` per changed cell, instead of a second
+    // Markdown-shaped report that would have to be written and then kept true.
+    //
+    // dry run 在底下任何東西能寫入「之前」就離開，而且是一條獨立的分支，不是一個穿過其餘程式碼
+    // 的旗標。
+    //
+    // 這個函式的其餘部分需要內層編輯的 `csv.dryRun = false`，因為那次內層執行正是「產生暫存檔
+    // 供算繪器讀取」的那一步——一次乾跑的內層會讓後面沒有東西可以算繪。那一行賦值是對的。缺的是
+    // 這個提前離開：一旦 dryRun 為了內層編輯被清掉，就再也沒有任何地方回頭看 `o.dryRun`，於是
+    // 底下兩個出口都寫了。因此 `--dry-run` 搭配 `-md` 會在 `--in-place` 之下改掉輸入檔，並回報
+    // rc=0、stdout 與 stderr 皆零位元組——那是這支程式收集到的「看起來成功」最完整的形式：沒有
+    // 輸出、沒有錯誤、沒有退出碼可看，只有磁碟上一個不一樣的檔案。LK，由一個盲測回合發現，而它
+    // 唯一的憑據是前後比對 sha256。
+    //
+    // 委派給仍保留 dryRun 的 runEdit，也讓報告就是 README 承諾的那一份（每個變更儲存格一行
+    // `old -> new`），而不是另外寫一份 Markdown 形狀的報告、再想辦法讓它保持為真。
+    if o.dryRun {
+        var report = o
+        report.markdown = false
+        report.output = nil
+        report.inPlace = false
+        report.backup = false
+        try runEdit(report)
+        return
+    }
+
     let probe = try openInput(o)
     let extensionName = probe.headerRows == 2 ? "csv2" : "csv"
     probe.source.close()
@@ -1448,7 +1491,7 @@ func runEdit(_ o: Options) throws {
         return nil
     }
     if !anchored.isEmpty {
-        guard let path = o.input, !o.useStdin else {
+        guard o.input != nil, !o.useStdin else {
             throw fault(
                 "-update-where needs -i FILE because it must scan the complete input before writing; it cannot be used with -si",
                 "-update-where 需要搭配 -i FILE，因為它必須在寫出前掃描完整輸入；不可與 -si 併用")
@@ -1459,13 +1502,33 @@ func runEdit(_ o: Options) throws {
         // deliberate: refusing after partial output would not be recoverable.
         // 依內容定位的編輯必須在任何目的地或 stdout 收到位元組之前，先知道每個 OLD 是否唯一。
         // 第二次掃描是刻意的：寫出部分內容後才拒絕，結果無法復原。
+        // Re-open through openInput, NOT through ByteSource(path:) directly.
+        //
+        // `ByteSource(path:)` hands back the file's raw bytes; openInput hands
+        // back the RECORD STREAM, and for a `.md` input those differ, because
+        // openInput is where MarkdownIn.translate turns the table into records.
+        // Reading the raw bytes instead meant `| pkg | version |` arrived as a
+        // single comma-free field and `|---|---|` as the next, so the guard
+        // against feeding `-md` output back in as CSV fired -- on a file that
+        // was correctly named `.md` and was never being read as CSV. The
+        // message blamed the file's format; the cause was this line. LL.
+        //
+        // 用 openInput 重新開啟，**不要**直接用 `ByteSource(path:)`。
+        //
+        // `ByteSource(path:)` 交回的是檔案的原始位元組，openInput 交回的是**紀錄流**，而對 `.md`
+        // 輸入而言兩者不同——因為 openInput 正是 MarkdownIn.translate 把表格轉成紀錄的地方。
+        // 改讀原始位元組，等於讓 `| pkg | version |` 以「一個不含逗號的欄位」抵達、`|---|---|` 成為
+        // 下一個，於是那道「防止有人把 `-md` 的輸出當 CSV 餵回來」的守衛開火了——而那個檔案的
+        // 副檔名正確地是 `.md`，從頭到尾也沒有被當成 CSV 讀。那則訊息怪的是檔案的格式，起因卻是
+        // 這一行。LL。
         plan.source.close()
-        let scan = try ByteSource(path: path, chunkSize: 1 << 16)
+        let scanPlan = try openInput(o)
+        let scan = scanPlan.source
         var scanHeaders: [Record] = []
         var scanExpected = 0
         var scanError: Error?
         var found: [[(record: Int, column: Int)]] = Array(repeating: [], count: anchored.count)
-        let parser = RecordParser(format: plan.format) { rec in
+        let parser = RecordParser(format: scanPlan.format) { rec in
             do {
                 if scanHeaders.count < plan.headerRows {
                     var h = rec
@@ -1526,7 +1589,12 @@ func runEdit(_ o: Options) throws {
             updates[hit.record, default: []].append((String(hit.column), [UInt8](anchored[i].1.utf8)))
         }
         scan.close()
-        plan.source = try ByteSource(path: path, chunkSize: 1 << 16)
+        // Same reason as the scan's own open, one pass later: this rewind fed
+        // the MAIN pass, so taking the raw bytes here would have carried the
+        // fault past the scan even once the scan itself was right.
+        // 與掃描自己的開啟同一個理由，只是晚一個階段：這次倒帶餵的是**主要**那一趟，因此在這裡取
+        // 原始位元組，會讓這個毛病在掃描本身已經正確之後仍然穿過去。
+        plan.source = try openInput(o).source
     }
 
     // The same clash, one axis over. `-delete -col X` combined with an edit

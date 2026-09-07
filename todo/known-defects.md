@@ -9606,3 +9606,78 @@ updated the `.md` and stdin routes and not this one: mistakes.md entry 3. The re
 to it is worth keeping -- two wrong hypotheses, both consistent with an error message that
 truthfully described a parse that should never have happened, and what broke it open was
 running both spellings side by side instead of guessing again.
+
+---
+
+## LK. `--dry-run` 在 `-md` 那條路上會**實際寫入**（2026-09-06，第 79 回合盲測，親手重現）
+
+```sh
+printf '# Notes\n\n| pkg | version | license |\n|---|---|---|\n| zlib | 1.3.2 | Zlib |\n| zstd | 1.5.6 | BSD |\n' > doc.md
+csv2 -update 2:version '9.9.9' -md -t --md-table 1 --dry-run -i doc.md --in-place
+```
+
+實得：
+
+```
+rc=0   stdout=0 bytes   stderr=0 bytes
+sha 前=2f8b89e03e47401b   後=e8cf317d0dceb933
+8c8
+< | zstd | 1.5.6 | BSD |
+---
+> |zstd|9.9.9|BSD|
+```
+
+**一個「全部承諾就是不寫入任何東西」的旗標，寫了。** 而且是在 rc=0、兩個串流都零位元組的情況下
+——那正是「看起來成功」的最完整形式：**沒有輸出、沒有錯誤、沒有退出碼可看，只有磁碟上的檔案變了。**
+
+順帶，那一列的 padding 也被去掉了（`| zstd | 1.5.6 |` → `|zstd|9.9.9|`），所以就算有人事後 diff，
+看到的也不只是他以為的那一格。
+
+**README 有兩句因此是假的：**
+
+- 「`--dry-run` … 不寫入任何檔案」——在 `-md` 在場時為假
+- 「以 `old -> new` 印出每個變更儲存格」——在 `-md` 底下它什麼都不印
+
+**對照組成立**：同樣的旗標拿掉 `-md`，行為完全正確——印出 `update 2:version: "1.5.6" -> "9.9.9"`
+且檔案未動。所以缺的是 `-md` 那條路上的 dry-run 檢查，不是 dry-run 本身。
+
+**這是第 79 回合唯一一個「我以為成功、其實是錯的」的任務**，而回報者是靠 sha256 前後比對抓到的
+——不是靠輸出，因為根本沒有輸出。
+
+`--dry-run`, whose entire promise is that it writes nothing, writes the file when `-md` is in
+play: exit 0, zero bytes on stdout, zero bytes on stderr, and the file changed. That is the
+most complete form of "looks like it succeeded" this tree collects -- no output, no error, no
+exit status to read, only a different file on disk. The edited row also loses its padding, so
+even a later diff shows more than the one cell the caller asked about. The same flags without
+`-md` behave correctly, so what is missing is the dry-run check on the Markdown path.
+
+---
+
+## LL. `-update-where` 在 Markdown 上失敗，而 `-update` 在同一個檔案上成功（2026-09-06，第 79 回合，親手重現）
+
+```sh
+printf '| pkg | version |\n|---|---|\n| zlib | 1.3.2 |\n| zstd | 1.5.6 |\n' > pure.md
+csv2 -update       2:version '9.9.9' -md -t -i pure.md --in-place   # rc=0，改成功
+csv2 -update-where '1.5.6'   '9.9.9' -md -t -i pure.md --in-place   # 失敗
+```
+
+失敗時的訊息是：
+
+> record 2 (line 2) is a Markdown separator row in a file with one column, so this is -md
+> output rather than CSV. Name it without a .md suffix …
+
+**那則訊息說的是「這個檔案的格式不對」，而真正的原因是「這個動詞不走 Markdown 那條路」。**
+同一個檔案、同一組旗標，`-update` 成功、`-update-where` 失敗——所以檔案的格式顯然沒有問題。
+
+README 把 `-update-where` 列為支援的編輯動詞，並說「當目的地是 Markdown 時，編輯可以搭配 `-md`」。
+兩句合起來承諾了一件做不到的事。
+
+**這一條的形狀與 LK 相反而互補**：LK 是「一個承諾不做事的旗標做了事」，LL 是「一個被列為支援的
+動詞其實不支援，而它的拒絕理由指向錯的東西」。兩者都會讓人往錯的方向找。
+
+`-update-where` fails on a Markdown file where `-update` succeeds with the same flags, and the
+refusal blames the file's format -- "this is -md output rather than CSV" -- when the actual
+cause is that this verb does not take the Markdown path at all. The same file accepts
+`-update`, so the format is evidently fine. The README lists `-update-where` among the edit
+verbs and says an edit may use `-md` when the destination is Markdown; together those promise
+something that does not work.

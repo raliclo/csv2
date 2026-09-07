@@ -14200,6 +14200,82 @@ else
     bad "T245c got [${_t245_csv//$'\n'/|}] / 實得如上"
 fi
 
+echo "--- T246: --dry-run with -md writes nothing / T246：--dry-run 搭配 -md 不寫入任何東西 ---"
+# LK, found by blind-test round 79 -- and found ONLY by comparing sha256 before
+# and after, because there was nothing else to look at: exit 0, zero bytes on
+# stdout, zero bytes on stderr, and a changed file. That is why this case
+# asserts the CHECKSUM first and the report second. A case that checked only
+# the report would have passed the moment the report was added, while the write
+# went on happening underneath it.
+# LK，由第 79 回合盲測發現——而且**只**能靠前後比對 sha256 發現，因為沒有別的東西可看：rc=0、
+# stdout 零位元組、stderr 零位元組，以及一個被改掉的檔案。這正是本案例先斷言**校驗和**、再斷言
+# 報告的原因。一個只檢查報告的案例，會在報告被加上去的那一刻就通過，而底下那次寫入照樣繼續發生。
+printf '# Notes\n\n| pkg | version | license |\n|---|---|---|\n| zlib | 1.3.2 | Zlib |\n| zstd | 1.5.6 | BSD |\n' > "$TMP/t246.md"
+_t246_before=$(shasum -a 256 "$TMP/t246.md" | cut -d' ' -f1)
+_t246_out=$("$CSV2" -update 2:version '9.9.9' -md -t --md-table 1 --dry-run \
+            -i "$TMP/t246.md" --in-place 2>"$TMP/t246.err"); _t246_rc=$?
+_t246_after=$(shasum -a 256 "$TMP/t246.md" | cut -d' ' -f1)
+if [[ $_t246_rc == 0 && $_t246_before == $_t246_after ]]; then
+    ok "T246a --dry-run --in-place -md leaves the document byte-identical / --dry-run --in-place -md 讓文件逐位元不變"
+else
+    bad "T246a rc=$_t246_rc before=${_t246_before:0:16} after=${_t246_after:0:16} / 實得如上"
+fi
+
+# The report is the other half of the promise: the README says --dry-run
+# previews each changed cell as `old -> new`. Under -md it printed nothing at
+# all, so silence was indistinguishable from "no changes" -- and it was on
+# stdout that a caller would have looked to find out.
+# 報告是那個承諾的另一半：README 說 --dry-run 會以 `old -> new` 預覽每個變更的儲存格。在 -md 底下
+# 它什麼都沒印，於是「沉默」與「沒有變更」分不出來——而呼叫端要查明這件事，看的正是 stdout。
+if [[ $_t246_out == *'update 2:version:'* && $_t246_out == *'"1.5.6" -> "9.9.9"'* ]]; then
+    ok "T246b and it previews the cell as old -> new / 並以 old -> new 預覽那個儲存格"
+else
+    bad "T246b stdout=[${_t246_out//$'\n'/|}] err=[$(tr '\n' '|' < "$TMP/t246.err")] / 實得如上"
+fi
+
+echo "--- T247: -update-where reaches a Markdown table / T247：-update-where 能編輯 Markdown 表 ---"
+# LL. The pre-scan that -update-where needs re-opened the RAW file instead of
+# going back through openInput, so a `.md` input skipped the Markdown-to-record
+# translation and arrived as one comma-free field per line. The guard against
+# feeding `-md` output back in as CSV then fired, blaming the file's format --
+# on a file correctly named `.md` that was never read as CSV.
+#
+# The control matters as much as the case: `-update` on the SAME file with the
+# SAME flags already worked, and that difference is the whole evidence that the
+# format was never the problem. Without it, a reader has only a refusal that
+# sounds reasonable.
+#
+# LL。`-update-where` 需要的預掃描重新開啟的是**原始檔**，而不是再走一次 openInput，因此 `.md`
+# 輸入跳過了「Markdown 轉紀錄」那一步，以「每行一個不含逗號的欄位」抵達。那道防止「把 `-md` 的
+# 輸出當 CSV 餵回來」的守衛於是開火，怪罪檔案的格式——而那個檔案的副檔名正確地是 `.md`，且從未
+# 被當成 CSV 讀。
+#
+# 對照組與案例本身一樣重要：`-update` 在**同一個檔案**、用**同一組旗標**早就能動，而那個差異正是
+# 「格式從來不是問題」的全部證據。少了它，讀者手上只剩一則聽起來合理的拒絕。
+printf '| pkg | version |\n|---|---|\n| zlib | 1.3.2 |\n| zstd | 1.5.6 |\n' > "$TMP/t247.md"
+cp "$TMP/t247.md" "$TMP/t247ctl.md"
+"$CSV2" -update-where '1.5.6' '9.9.9' -md -t -i "$TMP/t247.md" --in-place 2>"$TMP/t247.err"
+_t247_rc=$?
+"$CSV2" -update 2:version '9.9.9' -md -t -i "$TMP/t247ctl.md" --in-place 2>/dev/null
+_t247_ctl=$?
+if [[ $_t247_rc == 0 && $_t247_ctl == 0 ]]; then
+    ok "T247a -update-where succeeds where -update already did / -update-where 在 -update 早已成功之處也成功"
+else
+    bad "T247a where=$_t247_rc control=$_t247_ctl err=[$(tr '\n' '|' < "$TMP/t247.err")] / 實得如上"
+fi
+
+# It has to have edited the RIGHT cell, and left the other row alone. An
+# anchored edit that matched nothing would also exit 0 if the refusal were ever
+# relaxed, so the file is read back rather than trusted.
+# 它必須改到**對的**那一格，並且不動另一列。一次什麼都沒對上的定位編輯，在那個拒絕若被放寬時也會
+# 以 0 結束，因此這裡把檔案讀回來，而不是相信它。
+_t247_body=$(cat "$TMP/t247.md")
+if [[ $_t247_body == *'9.9.9'* && $_t247_body == *'1.3.2'* && $_t247_body != *'1.5.6'* ]]; then
+    ok "T247b the anchored cell changed and the other row is untouched / 被定位的那一格改了，另一列沒有被動"
+else
+    bad "T247b got [${_t247_body//$'\n'/|}] / 實得如上"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
