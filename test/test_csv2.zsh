@@ -15580,6 +15580,92 @@ else
     bad "T261g up=[${_t261_up:0:50}] bak=[${_t261_bak:0:50}] / 實得如上"
 fi
 
+echo "--- T262: what reaches stdout when a run fails / T262：一次失敗的執行，有什麼到達了 stdout ---"
+# NI. `-mid` past the end under --json wrote BOTH meta lines and no records: a
+# syntactically valid, semantically complete document announcing zero matching
+# records, while exiting 1. The closing line is the one sentinel a consumer has
+# for noticing a run that was cut short, so emitting it here defeated the only
+# mitigation there was -- and the README argues in this exact context that empty
+# output must not be confusable with an invalid range. The check ran after the
+# line it was supposed to prevent.
+#
+# NI。`-mid` 越界搭配 --json 寫出了**兩行** meta 而沒有任何紀錄：一份語法正確、語意完整、宣告
+# 「零筆符合」的文件，同時以 1 結束。那行結尾是消費端唯一可以用來察覺「一次被中途切斷的執行」的
+# 標記，因此在這裡送出它，恰好抵銷了僅有的那個緩解手段——而 README 就在這個脈絡裡論證「空輸出不可以
+# 與無效範圍混淆」。那個檢查跑在「它本該防止的那一行」之後。
+printf 'pkg,version\na,1\nb,2\nc,3\n' > "$TMP/t262.csv"
+_t262_out=$("$CSV2" -mid 99,100 --json -i "$TMP/t262.csv" 2>"$TMP/t262.err")
+_t262_rc=$?
+if [[ $_t262_rc == 1 && -z $_t262_out ]]; then
+    ok "T262a an out-of-range -mid under --json writes nothing to stdout / --json 之下越界的 -mid 不會寫出任何 stdout"
+else
+    bad "T262a rc=$_t262_rc stdout=[${_t262_out//$'\n'/|}] / 實得如上"
+fi
+
+# ...and the error still arrives, as one JSON object. A fix that suppressed the
+# output by suppressing the failure would pass the line above.
+# ……而那個錯誤仍然抵達，形式是一個 JSON 物件。一個「靠壓掉失敗來壓掉輸出」的修法會通過上面那一行。
+if LC_ALL=C grep -q '"code"' "$TMP/t262.err" && LC_ALL=C grep -q 'starts after the last record' "$TMP/t262.err"; then
+    ok "T262b and the refusal still arrives on stderr as one JSON object / 而那個拒絕仍然以一個 JSON 物件抵達 stderr"
+else
+    bad "T262b err=[$(tr '\n' '|' < "$TMP/t262.err")] / 實得如上"
+fi
+
+# A legitimate selection that happens to be empty must still produce BOTH meta
+# lines. That is the case the fix could most easily have broken, and it is the
+# distinction the whole design rests on: empty-and-valid must look different
+# from invalid.
+# 一個合法、只是剛好沒有內容的選取，仍然必須產生**兩行** meta。那是這個修正最容易弄壞的情況，
+# 也是整個設計所依賴的那個區別：**「空而有效」必須看起來與「無效」不同。**
+_t262_ok=$("$CSV2" -mid 3,3 --json -i "$TMP/t262.csv" 2>/dev/null)
+if [[ $(print -r -- "$_t262_ok" | LC_ALL=C grep -c '^{"meta"') == 2 ]]; then
+    ok "T262c a valid selection still carries both meta lines / 一個有效的選取仍然帶著兩行 meta"
+else
+    bad "T262c got [${_t262_ok//$'\n'/|}] / 實得如上"
+fi
+
+# NH. The other half, which is NOT a defect and must stay true: a fault found
+# part-way through a file leaves good records on stdout. The README promised the
+# opposite until 2026-09-07, and a tool that streams cannot promise it. This
+# case pins the REALITY so the sentence cannot drift back.
+#
+# The fixture has to exceed the 64 KiB output buffer, or nothing is flushed
+# before the throw and the case passes while measuring a smaller claim -- which
+# is what happened on the first attempt at reproducing this.
+#
+# NH。另外一半，它**不是**缺陷、而且必須保持為真：在讀到檔案中途才發現的錯誤，會在 stdout 上留下
+# 好的紀錄。README 直到 2026-09-07 都承諾了相反的事，而一個會串流的工具不可能做到那個承諾。
+# 這個案例釘住**現實**，好讓那個句子不能漂回去。
+#
+# fixture 必須超過 64 KiB 的輸出緩衝，否則在拋出之前什麼都還沒被沖出去，而這個案例會在量測一個
+# 更小的宣稱時通過——而那正是第一次重現它時發生的事。
+{ print -r -- 'a,b,c'
+  for _i in {1..20000}; do printf '%d,xxxxxxxxxx,yyyyyyyyyy\n' $_i; done
+  print -r -- 'BROKEN' } > "$TMP/t262big.csv"
+_t262_partial=$("$CSV2" -r -i "$TMP/t262big.csv" 2>/dev/null | LC_ALL=C wc -l | tr -d ' ')
+"$CSV2" -r -i "$TMP/t262big.csv" >/dev/null 2>&1
+_t262_big_rc=$?
+if [[ $_t262_big_rc == 1 ]] && (( _t262_partial > 1000 )); then
+    ok "T262d a mid-file fault still leaves records on stdout, so the exit status must be read / 檔案中途的錯誤仍會在 stdout 留下紀錄，因此必須讀退出碼"
+else
+    bad "T262d rc=$_t262_big_rc lines=$_t262_partial / 實得如上"
+fi
+
+# NJ. An error message that is cut off mid-sentence loses exactly the half that
+# tells the reader how to recover. The English and Chinese halves are compared
+# for completeness against each other -- the Chinese one was intact throughout,
+# which is what made the truncation visible at all.
+# NJ。一則在句子中間被切斷的錯誤訊息，失去的恰好是「告訴讀者怎麼補救」的那一半。這裡把英文與中文
+# 兩半互相對照——中文那一半自始至終是完整的，而那正是這個截斷之所以看得出來的原因。
+printf 'x\n|---|---|\n' > "$TMP/t262md.csv"
+"$CSV2" -r -i "$TMP/t262md.csv" >/dev/null 2>"$TMP/t262md.err"
+_t262_en=$(LC_ALL=C sed -n '1p' "$TMP/t262md.err")
+if [[ $_t262_en == *'when it learned to read one'* ]]; then
+    ok "T262e the refusal's English half ends in a complete clause / 那則拒絕的英文半段以一個完整的子句結束"
+else
+    bad "T262e ends: [...${_t262_en: -46}] / 實得如上"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

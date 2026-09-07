@@ -301,8 +301,47 @@ CONTAIN a table rather than being one.
 ## Errors
 
 Errors are written to stderr as an English line followed by a Traditional
-Chinese line. stdout remains empty, so failures can be handled safely in a
-pipeline. All errors exit non-zero.
+Chinese line — always exactly two, or exactly one JSON object under `--json`.
+Every failure exits 1.
+
+**stdout is NOT empty when a fault is found part-way through a file, and you
+have to check the exit status.** csv2 streams, and a tool that streams cannot
+also promise nothing reached stdout before it stopped: a 537 KB file with a bad
+record at 20001 wrote 19,126 good records and then failed, and that truncated
+output reads back as a perfectly valid CSV of 19,125 records with no marker of
+any kind. `csv2 -r -i data.csv > out.csv` without testing `$?` is how you get a
+silently shortened file.
+
+Until 2026-09-07 this section said stdout remains empty "so failures can be
+handled safely in a pipeline", which contradicted the streaming guarantee four
+sections away. The promise was the false one.
+
+Errors found BEFORE reading starts — an unusable flag combination, a missing
+file, a suffix conflict — do leave stdout empty, and they are most of them.
+
+Under `--json` a refusal is one object on stderr with `code`, `message` and
+`message_zh`. There are three codes:
+
+| `code` | Raised by |
+|---|---|
+| `not-found` | the input, output or key file could not be opened |
+| `invalid-input` | a value or address the file cannot satisfy, and some flag conflicts |
+| `conflicting-options` | other flag conflicts |
+
+The split between the last two follows where the check happens rather than a
+rule you can predict — `--physical --json` reports `invalid-input` while
+`-md --json` reports `conflicting-options`, and both are flag conflicts. Branch
+on the exit status, or treat those two codes as one class; the `code` values
+themselves are stable across versions.
+
+`-get` refuses `--json` as well, and that refusal REPLACES the error you were
+about to get, so an out-of-range record under `-get --json` is reported as the
+flag conflict rather than as the range.
+
+**A failed edit leaves the input byte-identical.** `--in-place` writes a private
+temporary file and renames it, so there is no state in which the input is half
+written; `-append --in-place` is the documented exception, appending directly.
+That guarantee was previously only inferable from the exception.
 
 ```text
 csv2: vs-sqlite.csv2 declares 2 header row(s) by its suffix, but --headers says 1. The suffix declares the format; --headers is for input with no suffix to declare it. Drop --headers to read the file as it is. Renaming it instead makes the suffix agree with --headers, which is NOT the same thing: a header row then becomes data record 1, at rc=0, and nothing afterwards can tell it was one
@@ -381,7 +420,7 @@ and applied to a record before it, which wrote to a neighbouring column at exit
 `--in-place` writes through a private temporary file and rename, except for
 `-append`, which uses an append-only fast path. `-append` validates the input
 before writing and writes only the appended bytes, while still reading the
-existing file to validate its final record. Concurrent appends are serialized
+existing file to validate it — the WHOLE file, not just its final record: appending to a file with a fault at record 5000 of 8000 is refused, naming 5000. Concurrent appends are serialized
 by the operating system for complete writes, but general concurrent edits are
 not supported.
 

@@ -1304,6 +1304,52 @@ func runSelect(_ o: Options) throws {
         throw fault("\(plan.describedPath): expected \(plan.headerRows) header row(s), found \(headers.count)",
                     "\(plan.describedPath)：預期 \(plan.headerRows) 列標頭，實際只有 \(headers.count) 列")
     }
+    // BEFORE emitter.end, which is the closing meta line.
+    //
+    // This ran after it until 2026-09-07, so `-mid 99,100 --json` on a
+    // three-record file wrote BOTH meta lines and no records: a syntactically
+    // valid, semantically complete JSON Lines document announcing zero matching
+    // records, while exiting 1. A consumer reading stdout and not the exit
+    // status concludes "the range is empty" when the truth is "the range is
+    // invalid" -- and the closing line is the one sentinel that lets a consumer
+    // notice a run cut short, so its presence here defeated the only mitigation
+    // there was.
+    //
+    // The README argues in this exact context that this must not happen: the
+    // asymmetry between `a` past the end (an error) and `b` past the end (fine)
+    // exists "because empty output cannot be told apart from 'these rows are
+    // genuinely empty'". Emitting a complete empty result was that confusion,
+    // produced by the check meant to prevent it. NI.
+    //
+    // The opening meta line has already gone out and cannot be recalled: the
+    // total is not knowable until the file has been read. That wrinkle was
+    // recorded here before, for `-t`, and it is the price of streaming.
+    //
+    // 放在 emitter.end **之前**，而 emitter.end 就是那一行結尾 meta。
+    //
+    // 直到 2026-09-07 之前它跑在那之後，於是三筆紀錄的檔案上 `-mid 99,100 --json` 寫出了**兩行**
+    // meta 而沒有任何紀錄：一份語法正確、語意完整、宣告「零筆符合」的 JSON Lines 文件，同時以 1
+    // 結束。一個讀 stdout 而不讀退出碼的消費端會得出「這個範圍是空的」，而事實是「這個範圍是
+    // 無效的」——而那行結尾正是「讓消費端察覺一次執行被中途切斷」的唯一標記，因此它出現在這裡，
+    // 恰好抵銷了僅有的那個緩解手段。
+    //
+    // README 就在這個脈絡裡論證這件事不可以發生：`a` 越界是錯誤、`b` 越界沒事，這個不對稱存在
+    // 「是因為空輸出與『這幾列真的是空的』分不出來」。輸出一份完整的空結果，就是那個混淆本身
+    // ——而它是由那個為了防止它而存在的檢查造出來的。NI。
+    //
+    // 開頭那行 meta 已經送出去了，收不回來：總筆數要讀完檔案才知道。那個皺褶先前為 `-t` 記在
+    // 這裡，而它是串流的代價。
+    if let (a, _) = o.mid, a > seen {
+        if seen == 0 {
+            throw fault(
+                "-mid \(a): this file has no data records at all, so no window can start there",
+                "-mid \(a)：這個檔案完全沒有資料紀錄，因此沒有任何視窗能從那裡開始")
+        }
+        throw fault(
+            "-mid \(a) starts after the last record: this file has \(seen)",
+            "-mid \(a) 的起點在最後一筆之後：這個檔案有 \(seen) 筆")
+    }
+
     if let scopedRecord, !scopedRecordSeen {
         throw fault("search scope requested record \(scopedRecord), but the file has only \(seen) records",
                     "搜尋範圍要求第 \(scopedRecord) 筆，但本檔案只有 \(seen) 筆紀錄")
@@ -1437,16 +1483,6 @@ func runSelect(_ o: Options) throws {
     // 這裡拋出之前就已經到達 stdout 了。不帶 `-t` 時 stdout 是空的，那才是一般的承諾。把標頭
     // 緩衝到「有資料紀錄出現」為止，會改變 `-t` 對每一種空選取的意義，那是比這一項所要求的
     // 更大的改動。
-    if let (a, _) = o.mid, a > seen {
-        if seen == 0 {
-            throw fault(
-                "-mid \(a): this file has no data records at all, so no window can start there",
-                "-mid \(a)：這個檔案完全沒有資料紀錄，因此沒有任何視窗能從那裡開始")
-        }
-        throw fault(
-            "-mid \(a) starts after the last record: this file has \(seen)",
-            "-mid \(a) 的起點在最後一筆之後：這個檔案有 \(seen) 筆")
-    }
 
     Logger.shared.debug("format=\(plan.format.rawValue) fields=\(expectedFields) records=\(seen)")
     Metrics.report(bytesRead: plan.source.bytesRead,
