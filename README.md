@@ -657,10 +657,19 @@ by it to find which key opens them — that finds nothing, and every file appear
 to need a different key. A wrong key is reported by decryption, which says both
 fingerprints and names the salt.
 
-**What an encrypted column still leaks.** Ciphertext length is the plaintext's
-plus 28 bytes with no padding, so value lengths are visible and an empty cell is
-distinguishable. The column's own name, every other column, the record count and
-the row order are all in the clear. What does NOT leak is equality: two records
+**What an encrypted column still leaks.** Ciphertext is the plaintext's length
+plus 28 bytes with no padding, and it is stored **base64**, so a cell holds
+`4 * ceil((len + 28) / 3)` characters. Length is therefore visible in steps of
+three: plaintexts of 0, 1 and 2 bytes all store as 40 characters, so an empty
+cell is NOT distinguishable from a one- or two-byte one, and 3 and 4 bytes both
+store as 44. Until 2026-09-08 this paragraph said an empty cell WAS
+distinguishable — it erred conservatively, claiming more leakage than exists,
+but a reader padding values to hide an empty cell was acting on a false
+statement and a reader sizing a column could not compute the stored width at
+all, because base64 appeared nowhere on this page.
+
+The column's own name, every other column, the record count and the row order
+are all in the clear. What does NOT leak is equality: two records
 holding the same value encrypt to different bytes, which is the concrete
 advantage over `-hash`.
 
@@ -829,33 +838,94 @@ storage, corpus size, and host conditions are included. The macOS and Windows
 runs used 200,000 records (25.4 MiB); the Linux guest run used 20,000 records
 (2.48 MiB), so compare only like-for-like rows.
 
-| Measurement | macOS arm64<br>2026-08-17 | Windows x86_64<br>2026-08-27 | Linux aarch64 guest<br>2026-08-30 |
-|---|---:|---:|---:|
-| Whole-file search, single-threaded | 556,000 µs | 2,512,000 µs | 93,000 µs |
-| Whole-file search, parallel | 203,000 µs | 839,000 µs | 101,000 µs |
-| Small durable edit | 19,200 µs | 81,500 µs | 10,600 µs |
-| Full-file rewrite | 655,000 µs | 2,444,000 µs | 192,000 µs |
+All four columns were measured on 2026-09-08 with the same binary, best of five
+runs, and the two macOS columns interleaved rather than run back to back.
+
+| Measurement | macOS arm64<br>sparse image | macOS arm64<br>local SSD | Windows x86_64 | Linux aarch64 guest |
+|---|---:|---:|---:|---:|
+| Whole-file search, single-threaded | 549,000 µs | 543,000 µs | 1,812,000 µs | 62,000 µs |
+| Whole-file search, parallel | 195,000 µs | 196,000 µs | 808,000 µs | 70,000 µs |
+| Small durable edit | 35,800 µs | 5,800 µs | 74,800 µs | 7,200 µs |
+| Full-file rewrite | 1,201,000 µs | 611,000 µs | 1,870,000 µs | 146,000 µs |
+
+**The two macOS columns are the same machine, the same binary and the same
+minute.** Only the filesystem holding the corpus differs. The two read rows do
+not notice it — 1% — and the two write rows differ by 6.2× and 2.0×. Until
+2026-09-08 this table had one macOS column and never said where the corpus was,
+which made a 6× storage effect look like a property of csv2.
+
+**The guest's parallel row is SLOWER than its single-threaded row, and that is
+the real result.** On a 2.48 MiB corpus the boundary-finding pass and the worker
+handoff cost more than four workers save: the harness reports `speedup 0.88x on
+4 workers`. It is a genuine parallel run — the harness now refuses to report a
+row that did not take the path the row is named after — and it is the honest
+answer to "should I parallelise a small file".
 
 The source measurements are kept in `verifications/measure_output*.txt` and
 are produced by `verifications/measure.zsh` using best-of-N timings.
+`RECORDS=20000 ./verifications/measure.zsh` measures a smaller corpus, which is
+how a like-for-like comparison against the guest column is made; the script
+takes no positional argument and ignores one silently. It also sets
+`CSV2_PARALLEL_MIN_BYTES` itself on each row, to force the path that row is
+about, so exporting that variable before running it has no effect.
+
+**Where the corpus lives changes these numbers more than anything else on this
+page.** The harness builds it inside its own directory, so a checkout on a
+sparse image measures that sparse image.
 
 ### Parallel-search throughput and RSS
 
 The parallel-search measurement uses the same 10,000,000 data records in a
 1,307,777,815-byte `.csv` file and a 1,307,777,833-byte `.csv2` file. Every
-record matches `needle`; the values below are one run per format and cap on
-macOS arm64, with 10 workers and 4 MiB chunks.
+record matches `needle`. Measured 2026-09-08 on macOS arm64 (sparse image), 10
+workers, 4 MiB chunks, best of three interleaved rounds; elapsed and peak RSS
+are taken from the same run.
 
-| Format | `CSV2_PARALLEL_MAX_BYTES` | Elapsed | Throughput | Peak RSS |
-|---|---:|---:|---:|---:|
-| `.csv` | default 1 GiB | 34.886 s | 35.8 MiB/s | 9.28 MiB |
-| `.csv2` | default 1 GiB | 39.609 s | 31.5 MiB/s | 51.84 MiB |
-| `.csv` | 8 MiB | 34.354 s | 36.3 MiB/s | 9.30 MiB |
-| `.csv2` | 8 MiB | 32.376 s | 38.5 MiB/s | 51.69 MiB |
+**A `.csv` needs an `.index` to be searched in parallel at all**, so the `.csv`
+rows below have one. The last row is the same file without it, and it is there
+because it is both the most useful tuning fact here and the evidence for what
+this table used to be.
+
+| Format | Index | `CSV2_PARALLEL_MAX_BYTES` | Elapsed | Throughput | Peak RSS |
+|---|---|---:|---:|---:|---:|
+| `.csv` | yes | default 1 GiB | 9.636 s | 129.4 MiB/s | 52.05 MiB |
+| `.csv2` | not needed | default 1 GiB | 36.980 s | 33.7 MiB/s | 52.19 MiB |
+| `.csv` | yes | 8 MiB | 34.259 s | 36.4 MiB/s | 51.56 MiB |
+| `.csv2` | not needed | 8 MiB | 38.166 s | 32.7 MiB/s | 49.03 MiB |
+| `.csv` | **none — single-threaded** | — | 31.150 s | 40.0 MiB/s | **9.44 MiB** |
+
+**Until 2026-09-08 the two `.csv` rows of this table were that last row.** The
+harness never built the index, and setting `CSV2_PARALLEL_MIN_BYTES=1` did not
+help because the obstacle was never the size threshold. The published figures
+were 34.886 s at 9.28 MiB — which is, to within noise, the single-threaded row
+above. A table headed "parallel" was reporting the scan path's time and the scan
+path's memory for half its rows, and the `CSV2_PARALLEL_MAX_BYTES` column, whose
+whole purpose is to show what that knob costs, was measured where the knob
+cannot do anything: there are no chunks in flight on the single-threaded path.
+Anyone who sized a container from 9.28 MiB was sizing it for a scan.
+
+Two things the corrected table says that the old one could not:
+
+- **Build the index.** 31.150 s to 9.636 s on the same file, same search.
+- **The cap costs time here and saves no memory.** 9.636 s to 34.259 s, and peak
+  RSS barely moves. With every record matching, the peak is dominated by the
+  output side rather than by chunks in flight, so capping the chunks throttles
+  the search without touching what is actually large. On a corpus where few
+  records match, the same knob is what keeps memory bounded — which is why this
+  is a measurement of one workload and not a rule.
 
 This is a measurement, not a performance guarantee; compare only runs with
-the same binary, record count, host, and search conditions. The raw output is
+the same binary, record count, host, storage and search conditions. It is
+produced by `verifications/measure_parallel_rss.zsh` — a separate script from
+the one above, and NOT covered by the `measure_output*.txt` glob — and the raw
+output is
 [`verifications/measure_parallel_rss_output.txt`](verifications/measure_parallel_rss_output.txt).
+
+Throughput here is dominated by OUTPUT, not by input bytes: every record matches
+and every match is a line written. That is why this table's MiB/s and the
+`parallel` row of the previous section disagree by a factor of three on the same
+host and binary — they are measuring different bottlenecks, and neither is
+"the speed of csv2".
 
 ## When to stop using this
 

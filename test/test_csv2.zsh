@@ -16538,6 +16538,151 @@ fi
 
 
 echo
+echo "--- T275: -count says whether the index answered / T275：-count 說出索引有沒有作答 ---"
+# OZ. README calls -debug the only window onto whether an index was used, and
+# says it prints `index hit` or the reason it did not. `-count` is the verb whose
+# ENTIRE claim is O(1)-via-index, and it was the one verb with that window shut:
+# only timing revealed it. The failure half already worked.
+# OZ。README 說 -debug 是「索引有沒有被用到」的唯一窗口，會印出 `index hit` 或它沒被用到的原因。
+# `-count` 是那個「全部賣點就是有索引時 O(1)」的動詞，而它恰好是那扇窗關著的唯一一個：只有計時
+# 看得出來。失敗的那一半本來就是好的。
+_t275=$TMP/t275
+mkdir -p "$_t275"
+printf 'a,b\n1,2\n3,4\n' > "$_t275/f.csv"
+"$CSV2" --build-index -i "$_t275/f.csv" >/dev/null 2>&1
+_t275_hit=$("$CSV2" -count -debug -i "$_t275/f.csv" 2>&1 >/dev/null)
+_t275_no=$("$CSV2" -count --no-index -debug -i "$_t275/f.csv" 2>&1 >/dev/null)
+if [[ $_t275_hit == *"index hit"* && $_t275_no != *"index hit"* ]]; then
+    ok "T275a -count -debug reports the index hit, and --no-index does not / -count -debug 回報 index hit，而 --no-index 不會"
+else
+    bad "T275a hit=[${_t275_hit##*DEBUG}] noindex=[${_t275_no##*DEBUG}] / 實得如上"
+fi
+
+# And the normal path stays silent. A DEBUG line that leaked without -debug
+# would break every pipeline; this tool prints nothing on the normal path.
+# 而正常路徑保持安靜。一行在沒有 -debug 時外洩的 DEBUG，會弄壞每一條管線；這個工具在正常路徑上
+# 什麼都不印。
+"$CSV2" -count -i "$_t275/f.csv" >/dev/null 2>"$_t275/err"
+if [[ ! -s "$_t275/err" ]]; then
+    ok "T275b without -debug nothing reaches stderr / 沒有 -debug 時 stderr 上什麼都沒有"
+else
+    bad "T275b err=[$(head -1 "$_t275/err")] / 實得如上"
+fi
+
+echo
+echo "--- T276: an index is what makes a .csv parallel / T276：索引才是讓 .csv 走平行的東西 ---"
+# OW. This is the fact the parallel measurement harness did not know. It set
+# CSV2_PARALLEL_MIN_BYTES=1 to force the parallel path, but the obstacle for a
+# .csv is not the size threshold -- it is that nothing has proved one record per
+# line. So half the rows of a table headed "parallel" were scan-path runs, at
+# the scan path's memory, and the harness reported them as parallel because it
+# only ever grepped for lines BOTH paths print.
+#
+# Pinned here at a size the suite can afford, via the same threshold variable
+# the harness uses. The harness cannot be a test case -- it needs 1.3 GB and
+# twenty minutes -- so the FACT is pinned instead of the script.
+#
+# OW。這正是那支平行量測 harness 不知道的事實。它設了 `CSV2_PARALLEL_MIN_BYTES=1` 來強制平行路徑，
+# 但一個 `.csv` 的阻擋者不是大小門檻——而是「沒有任何東西證明過每行一筆」。於是一張標題寫著
+# 「平行」的表，有一半的列是掃描路徑的執行、帶著掃描路徑的記憶體，而 harness 把它們當成平行回報，
+# 因為它從頭到尾只 grep 了兩條路徑**都會**印的那些行。
+#
+# 這裡用測試負擔得起的大小、透過 harness 用的同一個門檻變數來釘住它。那支 harness 本身當不了測試
+# 案例——它需要 1.3 GB 與二十分鐘——所以釘住的是那個**事實**，不是那支腳本。
+_t276=$TMP/t276
+mkdir -p "$_t276"
+{
+    print -r -- 'pkg,license'
+    _i=1
+    while (( _i <= 3000 )); do print -r -- "p$_i,needle"; (( _i++ )); done
+} > "$_t276/s.csv"
+_t276_before=$(CSV2_PARALLEL_MIN_BYTES=1000 "$CSV2" -contains needle -debug -i "$_t276/s.csv" 2>&1 >/dev/null)
+"$CSV2" --build-index -i "$_t276/s.csv" >/dev/null 2>&1
+_t276_after=$(CSV2_PARALLEL_MIN_BYTES=1000 "$CSV2" -contains needle -debug -i "$_t276/s.csv" 2>&1 >/dev/null)
+if [[ $_t276_before == *"single-threaded: .csv with no index"* && $_t276_after == *"parallel: 1 chunks"* ]]; then
+    ok "T276a a .csv is single-threaded without an index and parallel with one, at the same size / 同樣大小下，.csv 沒有索引時單執行緒、有索引時平行"
+else
+    bad "T276a before=[${_t276_before##*DEBUG }] after=[${_t276_after##*DEBUG }] / 實得如上"
+fi
+
+# A .csv2 needs no index -- it is the asymmetry that made the old table's two
+# .csv2 rows genuine while its two .csv rows were not.
+# 一個 `.csv2` 不需要索引——正是這個不對稱，讓舊表的兩個 `.csv2` 列是真的，而兩個 `.csv` 列不是。
+sed '1a\
+套件,授權' "$_t276/s.csv" > "$_t276/s.csv2"
+_t276_c2=$(CSV2_PARALLEL_MIN_BYTES=1000 "$CSV2" -contains needle -debug -i "$_t276/s.csv2" 2>&1 >/dev/null)
+if [[ $_t276_c2 == *"parallel: 1 chunks"* ]]; then
+    ok "T276b a .csv2 takes the parallel path with no index at all / .csv2 完全不需要索引就走平行路徑"
+else
+    bad "T276b [${_t276_c2##*DEBUG }] / 實得如上"
+fi
+
+echo
+echo "--- T277: stored ciphertext length is base64, in steps of three / T277：密文儲存長度是 base64，以三為一階 ---"
+# OY. README said ciphertext is plaintext + 28 bytes "so value lengths are
+# visible and an empty cell is distinguishable". The +28 is right, but the cell
+# holds base64, so 0, 1 and 2 bytes all store as 40 characters -- an empty cell
+# is NOT distinguishable. It erred conservatively, claiming more leakage than
+# exists, but a reader padding values to hide an empty cell was acting on a
+# false statement, and base64 appeared nowhere on the page.
+# OY。README 先前說密文是明文加 28 個位元組「因此值的長度看得見，空儲存格也分辨得出來」。+28 是對的，
+# 但儲存格裡放的是 base64，於是 0、1、2 位元組都存成 40 個字元——空儲存格**分辨不出來**。它錯的方向
+# 是保守的（宣稱的洩漏比實際多），但一個為了藏起空儲存格而去補齊值的讀者，是依據一句假話在行動，
+# 而 base64 這件事整頁從未出現。
+_t277=$TMP/t277
+mkdir -p "$_t277"
+LC_ALL=C head -c 32 /dev/urandom > "$_t277/k.bin"
+printf 'id,secret\n1,\n2,a\n3,ab\n4,abc\n5,abcd\n' > "$_t277/s.csv"
+"$CSV2" -encrypt secret -keyfile "$_t277/k.bin" -i "$_t277/s.csv" -o "$_t277/e.csv" 2>/dev/null
+_t277_len=()
+for _r in 1 2 3 4 5; do
+    _v=$("$CSV2" -get "${_r}:secret" -i "$_t277/e.csv" 2>/dev/null)
+    _t277_len+=(${#_v})
+done
+# 0,1,2 -> 40 ; 3,4 -> 44. The formula the README now states is
+# 4 * ceil((len + 28) / 3), and these five values are the two buckets it
+# predicts either side of a step.
+# 0、1、2 → 40；3、4 → 44。README 現在寫出的公式是 4 * ceil((len + 28) / 3)，而這五個值正是它
+# 預測的、跨過一個階的兩個桶。
+if [[ ${_t277_len[1]} == 40 && ${_t277_len[2]} == 40 && ${_t277_len[3]} == 40 \
+   && ${_t277_len[4]} == 44 && ${_t277_len[5]} == 44 ]]; then
+    ok "T277a plaintexts 0,1,2 all store as 40 characters and 3,4 as 44 / 明文 0、1、2 都存成 40 個字元，3、4 存成 44"
+else
+    bad "T277a lengths=[${_t277_len[*]}] / 實得如上"
+fi
+
+echo
+echo "--- T278: the measurement scripts find the binary this platform builds / T278：量測腳本找得到這個平台建出來的執行檔 ---"
+# measure.zsh named release/csv2 unconditionally, so on Windows -- where the
+# build produces release/csv2.exe -- it exited "build first" on a node that had
+# just built successfully, and the one Windows measurement on record was taken
+# by passing CSV2= by hand. That incantation appeared in no file while the
+# README said to run the script, full stop.
+#
+# Checked by reading the scripts rather than by running them: they need a
+# 25 MiB corpus and minutes, which is not a test case. What can regress is the
+# hard-wired name, and that is what this looks for.
+#
+# `measure.zsh` 無條件指名 `release/csv2`，於是在 Windows 上——那裡建出來的是 `release/csv2.exe`
+# ——它會在一個剛剛建置成功的節點上印出「build first」並結束，而現存唯一一份 Windows 量測是靠手動
+# 傳入 `CSV2=` 取得的。那個咒語不存在於任何檔案裡，而 README 說的是「執行這支腳本」，句號。
+#
+# 這裡用**讀腳本**而不是跑腳本來檢查：它們需要 25 MiB 的語料與好幾分鐘，那不是一個測試案例。
+# 會退化的是那個寫死的名字，而這就是它要找的東西。
+_t278_bad=()
+for _f in "$ROOT"/verifications/measure.zsh "$ROOT"/verifications/measure_parallel_rss.zsh "$ROOT"/verifications/benchmark.zsh; do
+    [[ -r $_f ]] || continue
+    if ! LC_ALL=C grep -q 'release/csv2\.exe' "$_f"; then
+        _t278_bad+=(${_f:t})
+    fi
+done
+if (( ${#_t278_bad} == 0 )); then
+    ok "T278a all three measurement scripts know about csv2.exe / 三支量測腳本都知道 csv2.exe 的存在"
+else
+    bad "T278a these still name only the POSIX binary: ${_t278_bad[*]} / 這幾支仍然只指名 POSIX 那個名字"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

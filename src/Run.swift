@@ -635,6 +635,17 @@ func runCount(_ o: Options) throws {
     // 因此一份過期或不可用的 sidecar 在這裡被捨棄的方式與那裡完全相同——而底下的掃描接著會給出
     // 同一個答案，那正是 T80 斷言的東西。
     if !o.noIndex, let idx = CSVIndex.load(dataPath: path) {
+        // Say so. README calls -debug the only window onto whether an index was
+        // used, and prints `index hit` or the reason it was not -- and `-count`
+        // is the verb whose entire claim is O(1)-via-index, so it was the one
+        // verb where that window was shut. Only timing revealed it. The failure
+        // half already worked: a stale sidecar reports itself through
+        // CSVIndex.load. OZ.
+        // 把它說出來。README 說 -debug 是「索引有沒有被用到」的唯一窗口，會印出 `index hit`
+        // 或它沒被用到的原因——而 `-count` 是那個「全部賣點就是有索引時 O(1)」的動詞，於是它
+        // 恰好是那扇窗關著的唯一一個。只有計時看得出來。失敗的那一半本來就是好的：一份過期的
+        // sidecar 會透過 CSVIndex.load 自己回報。OZ。
+        Logger.shared.debug("index hit: \(idx.records) records from the sidecar; the file was not read")
         Platform.writeStdout("\(idx.records)\n")
         return
     }

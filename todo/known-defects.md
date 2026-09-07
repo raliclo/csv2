@@ -11402,7 +11402,7 @@ run one way: the tool is faster than the page says and uses far more memory.
 
 ## OW. 「平行搜尋吞吐量與 RSS」那張表的 `.csv` 兩列是**單執行緒**跑出來的
 
-**狀態：待修。**
+**狀態：已修（2026-09-08）。** harness 現在會為 `.csv` 語料建索引，而表格已重新量測並帶上日期與儲存媒介。事實由 T276a／T276b 釘住；harness 本身當不了測試案例（1.3 GB、二十分鐘），因此釘住的是「索引才是讓 `.csv` 平行的東西」這個事實。新表最後一列就是舊表兩個 `.csv` 列的真身：peak RSS 9.44 MiB，對上舊表公布的 9.28 MiB。
 
 那張表的標題是平行搜尋。而 `.csv` 需要一個 `.index` 才會走平行——**這一頁自己的需求表就是這樣
 寫的**。產生那張表的 harness 從來不建索引：
@@ -11439,7 +11439,7 @@ csv2: … DEBUG parallel: 6 chunks, 10 workers, chunk 4194304 bytes
 
 ## OX. 兩支量測腳本都不斷言「剛剛跑的是哪一條路徑」
 
-**狀態：待修。這是 OW 的成因，而不是它的症狀。**
+**狀態：已修（2026-09-08）。** 兩支 harness 現在都斷言路徑並在不符時以非零結束。守衛的驗法是把 `measure.zsh` 的平行列指向一個沒有索引的 `.csv`——正是 OW 的條件——它以 rc=1 結束並印出真正的原因。
 
 `measure_parallel_rss.zsh` 設了 `CSV2_PARALLEL_MIN_BYTES=1` 來強制平行——但 `.csv` 的阻擋者
 不是大小門檻，是缺索引。它抓的是 `metrics:` 那一行（單執行緒也會印）與 `parallel: holding`
@@ -11464,7 +11464,7 @@ nothing, turning a failed measurement into a plausible number.
 
 ## OY. 密文以 base64 存放，因此「空儲存格可以分辨」是假的
 
-**狀態：待修（文件）。**
+**狀態：已修（2026-09-08），由 T277a 釘住。**
 
 README：「Ciphertext length is the plaintext's plus 28 bytes with no padding, so
 value lengths are visible and **an empty cell is distinguishable**.」
@@ -11487,7 +11487,7 @@ plain_len=10 stored_len=52
 
 ## OZ. `-count -debug` 不印 `index hit`，而那一頁說 `-debug` 是唯一的窗
 
-**狀態：待修。**
+**狀態：已修（2026-09-08），由 T275a／T275b 釘住。**
 
 ```console
 $ csv2 --build-index -i s.csv
@@ -11507,7 +11507,7 @@ csv2: … DEBUG format=csv fields=2 records=1
 
 ## PA. 那張平行表沒有日期，而它是漂得最遠的一張
 
-**狀態：待修（文件）。**
+**狀態：已修（2026-09-08）。** 那張表現在帶著日期、儲存媒介、工作者數、區塊大小與「交錯三輪取最小值」。
 
 這一頁其他每一組數字旁邊都有日期——「macOS arm64 2026-08-17」、「Windows x86_64 2026-08-27」、
 「Linux aarch64 guest 2026-08-30」。**唯一沒有日期的那一張，正是唯一一張半數的列走錯路徑的。**
@@ -11515,7 +11515,7 @@ csv2: … DEBUG format=csv fields=2 records=1
 
 ## PB. 三個「找不到」
 
-**狀態：待修（文件）。**
+**狀態：已修（2026-09-08）。** 三項都補進 README（`measure_parallel_rss.zsh` 的名字、那個 glob 不涵蓋它、以及 `RECORDS=`）。
 
 1. **README 從未提到 `measure_parallel_rss.zsh`**（出現 0 次）。它指名了輸出檔，卻沒有指名產生
    那個檔的指令。受測者是用 `ls verifications/` 找到它的。
@@ -11528,7 +11528,7 @@ csv2: … DEBUG format=csv fields=2 records=1
 
 ## PC. guest 的「平行」列比它上面的單執行緒列**慢**，而沒有東西解釋
 
-**狀態：待修（文件）。這一列不是壞掉的。**
+**狀態：已修（2026-09-08）。** README 現在解釋那一列。而它是不是平行已由證據定案，不是由推理：guest 的執行通過了新的斷言並回報 `speedup 0.88x on 4 workers`——四個工作者，確實走了平行路徑，而且確實比較慢。
 
 guest 那一欄：單執行緒 93,000 µs、平行 101,000 µs。受測者由此推論那一列「不可能是平行跑的」，
 理由是 2.48 MiB 遠低於這一頁記載的 16 MiB 下限。**那個推論是錯的**：`measure.zsh` 在那一列上
@@ -11537,3 +11537,53 @@ guest 那一欄：單執行緒 93,000 µs、平行 101,000 µs。受測者由此
 真正的原因是：**在 2.48 MiB 上，平行的額外成本超過它的收益。** 那是一個真實而且有用的事實，
 而這一頁把它留成一個看起來像錯誤的數字。一個有能力自己算的讀者，會像受測者那樣得出一個錯誤
 的結論——而那正是「一個沒有被解釋的數字」的代價。
+
+## PD. `measure.zsh` 只認得 POSIX 那個執行檔名字
+
+**狀態：已修（2026-09-08），由 T278a 釘住。** 修 OW 的過程中發現的。
+
+三支量測腳本都寫著 `: ${CSV2:=$ROOT/release/csv2}`，而 `compile_csv2.zsh` 的 Windows 分支產生的是
+`release/csv2.exe`：
+
+```console
+$ # 在一個剛剛建置成功的 Windows 節點上
+$ ./verifications/measure.zsh
+build first: /c/Users/lowei/proj/csv2/compile_csv2.zsh
+$ echo $?
+1
+```
+
+現存唯一一份 Windows 量測（`measure_output_windows.txt`，2026-08-30）是靠手動傳入 `CSV2=` 取得的，
+而**那個咒語不存在於任何檔案裡**——README 說的是「執行這支腳本」，句號。於是那一欄實際上是不可重現的，
+而它不可重現的方式看起來像「你忘了建置」。
+
+Three measurement scripts named `release/csv2` unconditionally while the Windows
+build produces `release/csv2.exe`, so the script exited "build first" on a node
+that had just built successfully. The one Windows measurement on record was
+taken by passing `CSV2=` by hand, an incantation that appears in no file.
+
+## PE. 修好 OX 的那一版量測腳本，自己無聲地死掉
+
+**狀態：已修（2026-09-08）。** 這一條是這個回合的主題演了第二遍。
+
+`measure_parallel_rss.zsh` 的交錯版第一次執行時，在 `errexit` 與 `pipe_fail` 之下停在這一行：
+
+```zsh
+best_holding[$key]=$(grep -E 'parallel: holding' $log | head -1)
+```
+
+沒有 cap 壓力時就沒有 `holding` 行，於是 `grep` 回傳 1、命令替換繼承它、賦值失敗、`errexit` 殺掉
+整支腳本——**而它已經先執行過 `: > $MEASURE_OUTPUT`**。留在磁碟上的是一個表頭和零列，stderr 上
+一個字也沒有。
+
+那個檔案讀起來像**一張被截斷的表**，不像一次死掉的執行。而「空的」才是那一列的正常情況。
+
+修法有兩半：`|| true`，以及一個 `TRAPZERR`——因為一支安靜死掉的量測腳本，比大聲當掉的更糟，
+它會留下一個看起來很合理的半成品。
+
+The interleaved version of the RSS harness died silently on its first run: with
+errexit and pipe_fail, a grep that finds nothing returns 1, the command
+substitution inherits it, and the assignment kills the script -- after it has
+already truncated the output file. What was left was a header and no rows, with
+nothing on stderr: a file that reads like a table cut short rather than a run
+that died. The empty case is the normal one.
