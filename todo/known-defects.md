@@ -11151,7 +11151,7 @@ wrong thing" philosophy.
 
 ## OP. `-count` 靜默丟棄它旁邊的每一個旗標，包括五個編輯動詞
 
-**狀態：待修。**
+**狀態：已修（2026-09-08），由 T269a–T269e 釘住。**
 
 `-count` 印出計數、以 0 結束，而**同一條命令列上要求的其他事情一件也沒有發生**——沒有訊息，
 沒有非零狀態。最重的一種是它吞掉一次 `--in-place` 編輯：
@@ -11236,7 +11236,7 @@ flag that neither refuses nor honours its companions. The fix is a refusal.
 
 ## OQ. `-col` 用在 `-delete` 之外時，訊息從不提到 `-col`
 
-**狀態：待修。**
+**狀態：已修（2026-09-08），由 T270a–T270c 釘住。**
 
 ```console
 $ csv2 -col license -i f.csv
@@ -11255,7 +11255,7 @@ message on this page names the flag.
 
 ## OR. 第 6 列的做法照字面執行不會轉換任何東西
 
-**狀態：待修（文件）。**
+**狀態：已修（2026-09-08），由 T273a–T273c 釘住。**
 
 那一列寫的是：「把紀錄寫到一個**沒有副檔名**的路徑，自己撰寫第二列表頭，然後把它讀回來」。
 第三步照字面做，得到的是 `.lines` 模式：
@@ -11291,7 +11291,7 @@ direction, though the row is titled "between `.csv` and `.csv2`".
 
 ## OS. 兩個 jq 的做法，一個沒有 jq、一個在真實資料上會失敗
 
-**狀態：待修（文件）。**
+**狀態：已修（2026-09-08），由 T274a（釘住讓 `select(.record)` 成為必要的那個事實；jq 本身不在每個節點上） 釘住。**
 
 1. **整頁沒有出現過任何一個 jq 運算式。** 第 1 列與第 2 列都以 `--json` 加 jq 為正解，兩列都
    只說「用 jq」。而最直觀的那個寫法是錯的——meta 那兩行會變成 `null` 混進欄位清單：
@@ -11327,7 +11327,7 @@ not.
 
 ## OT. CRLF 會被靜默正規化，而 README 一次都沒提過 CRLF
 
-**狀態：待修（文件）。**
+**狀態：已修（2026-09-08），由 T271a–T271b 釘住。**
 
 ```console
 $ printf 'a,b\r\n1,2\r\n' > crlf.csv
@@ -11347,7 +11347,7 @@ announces it is visible only under `-debug` and documented nowhere.
 
 ## OU. `#` 的拒絕被寫成「在檔案開頭」，實際上是任何位置
 
-**狀態：待修（文件）。**
+**狀態：已修（2026-09-08），由 T272a 釘住。**
 
 README 第 421 行：「A file with `# ...` **at the top** is refused by naming the `#`」。實際上
 中段的 `#` 同樣被拒絕，而且訊息更好——它指名了紀錄與行號：
@@ -11370,7 +11370,7 @@ mid-file `#` is fine.
 
 ## OV. 五處不清楚
 
-**狀態：待修（文件）。**
+**狀態：已修（2026-09-08）——五處全部改寫進表格與各自的段落。**
 
 1. **第 6 列的「write the records」要不要 `-t`。** 兩者都不會報錯，產生的檔案不同。
 2. **第 2 列的「use `--json` and one pass of your own」不是一份做法**，它只是說工具不幫忙。

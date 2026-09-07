@@ -89,8 +89,12 @@ insert one into is not editable. A `.csv` or `.csv2` still refuses `''`,
 because there the suffix has said how many fields a record has and an empty
 string is not one of them.
 
-Output record separators are always LF. CR and other bytes inside quoted CSV
-fields remain data. UTF-8 BOMs are removed; UTF-16 input is refused with a
+Output record separators are always LF, and **CRLF input is normalised to LF**
+on the way in — a file written on Windows reads correctly and comes back out
+with LF endings, which is a change to the bytes rather than only to what is
+added. `-debug` announces it (`input contained CRLF line endings; normalised to
+LF`); nothing is printed on the normal path. CR and other bytes inside quoted
+CSV fields remain data. UTF-8 BOMs are removed; UTF-16 input is refused with a
 conversion instruction.
 
 Header rows are omitted from selection output unless `-t` is supplied. Writing
@@ -167,6 +171,16 @@ sidecar either way. A file with only a header row counts 0, which is not an
 error. There is deliberately no `total` in `--json`'s meta: that number is only
 known when an index is, so the field would come and go, and a caller not
 finding it could not tell an empty file from a run without an index.
+
+**`-count` takes no companions and refuses them by name.** It is a whole-file
+count and does nothing else, so combining it with a verb, an output shape or a
+destination is refused: the refusal lists exactly the flags that were typed.
+Until 2026-09-08 those flags were accepted and DISCARDED at exit 0 —
+`csv2 -count -update 1:1 X -i f.csv --in-place` printed a number and left the
+file byte-identical, and `-contains ZZZ -count` returned the file's total, so
+"how many records mention this" got a plausible answer to a different question.
+`--no-index`, `--headers` and `-debug` are not companions in this sense and
+still work.
 
 **`-mid a,b` with `a` past the last record is an error**, and the message names
 the total. `b` past the last record is not: a window that starts inside the
@@ -418,8 +432,12 @@ csv2：vs-sqlite.csv2 的副檔名宣告了 2 列標頭，但 --headers 說 1 �
 
 **A `#` line is data, not a comment.** CSV has no comment syntax, and a
 column named `#id` is legal, so skipping such a line would mean guessing which
-lines are data. A file with `# ...` at the top is refused by naming the `#`
-rather than by counting fields, because the count is two steps from the cause.
+lines are data. A `#` line is refused by naming the `#` rather than by counting
+fields, because the count is two steps from the cause. It fires wherever the
+line is: a `#` in the MIDDLE of a file is refused too, with a message naming the
+record and the line. This paragraph said "at the top" until 2026-09-08, which
+invited the reader to assume a mid-file `#` was fine — an assumption that would
+surface only after half the file had been read.
 To read such a file as lines without touching it, pipe it in:
 `csv2 -si --headers 0 < FILE`. Reading it under a name with no `.csv`/`.csv2`
 suffix does the same, and removing the line makes it a CSV. Note that
@@ -851,13 +869,13 @@ re-reading them.
 
 | Not offered | What to do instead |
 |---|---|
-| column projection (`-cols`) | `--json` and `jq`, or `-get` per cell |
-| case-insensitive matching | nothing does — `-contains mit` finds no `MIT`. Use `--json` and one pass of your own |
+| column projection (`-cols`) | `csv2 -r --json -i f.csv \| jq -r 'select(.record) \| .fields.license'`. The `select(.record)` is not optional: without it the two meta lines arrive as `null`s in your column. Or `-get` per cell, with `csv2 -count -i f.csv` for the loop's upper bound. Both go through `--json`, which REFUSES a file holding non-UTF-8 bytes that `-get` reads fine |
+| case-insensitive matching | nothing does — `-contains mit` finds no `MIT`, **and prints nothing at exit 0**, which is indistinguishable from "no such data". Fold the case yourself: `csv2 -r --json -i f.csv \| jq -r 'select(.record) as $r \| $r.fields\|to_entries[] \| select(.value\|ascii_downcase\|contains("mit")) \| "\\($r.record)\\t\\(.key)\\t\\(.value)"'` |
 | a search that ignores which column it is in | `-contains` matches a substring in EVERY column, so `-contains MIT` also finds `transMITter` — see the last example below. Use `--search-column license` to scope it, or `--search-row`/`--search-cell`. Until 2026-09-07 this row said scoping was not offered at all, and warned that counting would be "silently wrong", 260 lines below the section documenting the flag that fixes it |
-| skipping `#` comment lines | nothing does, and deliberately: a `#` is data and `#id` is a legal column name, so skipping one would mean guessing which lines are data. The refusal names the `#` |
-| a header-only read | `csv2 -head 1 --json -i f.csv \| head -1` — the meta line carries `header`; no verb returns the names alone |
-| converting between `.csv` and `.csv2` | refused on purpose. To do it by hand: write the records to a SUFFIX-LESS path, author the second header row yourself, then read that back — csv2 will not invent a header row it was not given |
-| safe concurrent writers, EXCEPT append against append | serialise them yourself; two writers silently lose one edit. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one finishing SECOND warns it could not update the index |
+| skipping `#` comment lines | nothing does, and deliberately: a `#` is data and `#id` is a legal column name, so skipping one would mean guessing which lines are data. The refusal names the `#`, and it fires wherever the line is — a `#` in the MIDDLE is refused too, naming the record and the line. Read the file under a suffix-less name to get every line verbatim |
+| a header-only read | `csv2 -head 1 --json -i f.csv \| head -1 \| jq -r '.meta.header[]'` — the meta line carries `header`; no verb returns the names alone. On a `.lines` input there is no `header` key at all |
+| converting between `.csv` and `.csv2` | refused on purpose. To do it by hand, `.csv` → `.csv2`: `csv2 -r -t -i p.csv -o work` (the `-t` is required — without it the header row is dropped silently), then `csv2 -insert 2 '套件,版本,授權' -i work --in-place`, then **rename it**: `mv work out.csv2`. The rename is the step that converts; reading the suffix-less path back gives you `.lines`, which is what it already was. Reverse: `csv2 -r -t -i p.csv2 -o work`, `csv2 -delete 2 -i work --in-place`, `mv work out.csv`. csv2 will not invent a header row it was not given |
+| safe concurrent writers, EXCEPT append against append | serialise them yourself; two writers silently lose one edit — the file stays VALID, and the surviving version is whichever run renamed its temp file last, so the loss is a missing edit rather than damage you would notice. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one finishing SECOND warns it could not update the index |
 
 One thing this table used to say and no longer does: **editing a Markdown
 table** is supported, and it is in the examples below.

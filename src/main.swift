@@ -523,6 +523,25 @@ func parseArgs(_ argv: [String]) throws -> Options {
     while i < argv.count {
         let arg = argv[i]
         guard arg.hasPrefix("-"), arg.count > 1 else {
+            // A pending modifier changes what this stray word MEANS. `csv2
+            // -col license -i f.csv` said `unexpected argument "license"` and
+            // never mentioned `-col` -- so the message accused the value while
+            // the mistake was the flag's context, and `-col` IS a real flag,
+            // just one that belongs to `-delete`. Every other wrong-flag
+            // message here names the flag. The dangling-modifier refusal below
+            // says exactly the right thing and could not be reached: a bare
+            // word after the modifier ends the parse first. OQ.
+            // 一個還沒依附的修飾符，會改變這個落單的字**代表什麼**。`csv2 -col license -i f.csv`
+            // 先前回答 `unexpected argument "license"`，從頭到尾沒提過 `-col`——於是那則訊息指控
+            // 的是「值」，而使用者打錯的是「旗標的位置」，何況 `-col` **是**一個真旗標，只是它
+            // 屬於 `-delete`。這裡其他每一則錯用旗標的訊息都會指名那個旗標。而底下那條「修飾符
+            // 找不到動詞」的拒絕說的正是對的話，卻永遠到不了：修飾符後面一個落單的字會先結束解析。OQ。
+            if o.cellModifier || o.colModifier {
+                let which = o.cellModifier ? "-cell" : "-col"
+                throw usageError(
+                    "\(which) is a modifier, not a verb: it takes no value of its own, so \"\(arg)\" has nowhere to go. It attaches to the -delete (or -insert) that FOLLOWS it -- you may have meant `-delete \(which) \"\(arg)\"`",
+                    "\(which) 是修飾符而不是動詞：它自己不帶值，因此「\(arg)」無處可去。它依附在「其後」的 -delete（或 -insert）上——你想打的可能是 `-delete \(which) 「\(arg)」`")
+            }
             throw usageError(
                 "unexpected argument \"\(arg)\"; csv2 takes flags only",
                 "非預期的參數「\(arg)」；csv2 只接受旗標")
@@ -988,6 +1007,100 @@ func parseCellAddress(_ s: String, flag: String) throws -> (Int, String) {
 // ---------------------------------------------------------------------
 
 func validate(_ o: inout Options) throws {
+    // Placed FIRST, before `--in-place` derives `o.output` from `o.input`
+    // further down: with the check at the end, `-count -update ... --in-place`
+    // reported `-o` among the discarded flags and the caller had never typed
+    // `-o`. That is OQ in miniature -- a message accusing a flag that is not on
+    // the command line -- introduced by the fix for OP an hour earlier.
+    // 放在最前面，在下方 `--in-place` 由 `o.input` 推導出 `o.output` 之前：這個檢查原本放在
+    // 函式結尾，於是 `-count -update … --in-place` 會把 `-o` 列進被丟棄的旗標裡，而呼叫端從來
+    // 沒有打過 `-o`。那正是 OQ 的縮影——一則指控「不在命令列上的旗標」的訊息——而它是 OP 的修法
+    // 在一小時前自己帶進來的。
+    // `-count` is dispatched FIRST and ignores everything beside it. Every
+    // companion below was accepted, discarded, and reported as success --
+    // including the five edit verbs: `csv2 -count -update 1:1 X -i f.csv
+    // --in-place` printed a number, exited 0, wrote nothing to stderr, and left
+    // the file byte-identical. `-o` was swallowed too, so the destination was
+    // never created. The search form is the one that reads as a wrong ANSWER
+    // rather than as nothing happening: `-contains ZZZ -count` returns the
+    // file's total, so someone asking "how many records mention this" gets a
+    // plausible number to a question they did not ask. OP.
+    //
+    // This page already refuses `-rownum --json`, `-md --json`, `--physical
+    // --json`, `-get --json`, two `--search-*` together and `--build-index
+    // --no-index`, and the edit path refuses `--dry-run` verbs in so many
+    // words -- "rather than returning empty output that looks like 'nothing
+    // would change'". `-count` was the one flag that neither refused nor
+    // honoured its companions, which is why the fix is a refusal and not a
+    // documentation line.
+    //
+    // Named individually rather than as "other flags": the caller has to know
+    // WHICH of the things they asked for did not happen, and a script that
+    // built the command line from parts cannot see its own mistake otherwise.
+    //
+    // `-count` 是分派鏈上的第一個，而它會忽略旁邊的一切。底下每一個同伴先前都是「被接受、被
+    // 丟棄、並回報成功」——包含五個編輯動詞：`csv2 -count -update 1:1 X -i f.csv --in-place`
+    // 印出一個數字、以 0 結束、stderr 什麼都沒有，而檔案逐位元未變。`-o` 也一樣被吞掉，於是
+    // 目的地根本沒有被建立。搜尋那一種形狀最像一個**錯誤的答案**而不是「什麼都沒發生」：
+    // `-contains ZZZ -count` 回傳的是整個檔案的筆數，於是問「有幾筆提到這個」的人，會拿到一個
+    // 看起來完全合理、卻回答了另一個問題的數字。OP。
+    //
+    // 這個程式早就拒絕 `-rownum --json`、`-md --json`、`--physical --json`、`-get --json`、
+    // 兩個 `--search-*` 併用與 `--build-index --no-index`，而編輯路徑拒絕 `--dry-run` 底下的
+    // 動詞時，理由白紙黑字寫著「而不是回傳一個看似『不會有任何變更』的空輸出」。`-count` 是
+    // 唯一一個既不拒絕、也不履行同伴的旗標——所以修法是一則拒絕，不是一行文件。
+    //
+    // 逐一指名而非統稱「其他旗標」：呼叫端必須知道**哪一件**他要求的事沒有發生，否則一支由
+    // 片段組出命令列的腳本，看不見自己的錯誤。
+    if o.count {
+        var ignored: [String] = []
+        // The verbs are named individually, not lumped as "an edit verb": a
+        // half-English half-Chinese item would land inside BOTH halves of a
+        // bilingual message, and the caller wants the spelling they typed.
+        // 逐一指名動詞，而不是統稱「一個編輯動詞」：一個半英半中的項目會同時落進雙語訊息的
+        // 兩半裡，而呼叫端要看到的是他自己打的那個拼法。
+        for e in o.edits {
+            switch e {
+            case .insert: ignored.append("-insert")
+            case .append: ignored.append("-append")
+            case .deleteRange, .deleteCell, .deleteColumn: ignored.append("-delete")
+            case .addColumn: ignored.append("-add-column")
+            case .update: ignored.append("-update")
+            case .updateWhere: ignored.append("-update-where")
+            }
+        }
+        if o.getCell != nil { ignored.append("-get") }
+        if o.contains != nil { ignored.append("-contains") }
+        if o.head != nil { ignored.append("-head") }
+        if o.tail != nil { ignored.append("-tail") }
+        if o.mid != nil { ignored.append("-mid") }
+        if o.read { ignored.append("-r") }
+        if o.withHeader { ignored.append("-t") }
+        if o.rownum { ignored.append("-rownum") }
+        if o.json { ignored.append("--json") }
+        if o.markdown { ignored.append("-md") }
+        if o.sawPretty > 0 { ignored.append("--pretty") }
+        if o.sawMdStyle > 0 { ignored.append("--md-style") }
+        if o.physical { ignored.append("--physical") }
+        if o.a1 { ignored.append("--a1") }
+        if o.filter { ignored.append("--filter") }
+        if o.output != nil { ignored.append("-o") }
+        if o.useStdout { ignored.append("-so") }
+        if o.inPlace { ignored.append("--in-place") }
+        if o.dryRun { ignored.append("--dry-run") }
+        if o.backup { ignored.append("--backup") }
+        if o.buildIndex { ignored.append("--build-index") }
+        if o.verifyIndex { ignored.append("--verify-index") }
+        if o.encryptCols != nil { ignored.append("-encrypt") }
+        if o.decryptCols != nil { ignored.append("-decrypt") }
+        if o.hashCols != nil { ignored.append("-hash") }
+        if !ignored.isEmpty {
+            let list = ignored.joined(separator: ", ")
+            throw usageError(
+                "-count cannot be combined with \(list): -count answers how many DATA records the whole file has and does nothing else, so the rest of this command line would be silently discarded. Run it as a separate command",
+                "-count 不可與 \(list) 併用：-count 回答的是「整個檔案有幾筆資料紀錄」，除此之外什麼都不做，因此這條命令列上的其餘部分會被靜默丟棄。請另外執行一次")
+        }
+    }
     if o.input != nil && o.useStdin {
         throw usageError("-i and -si are mutually exclusive; giving both is an error rather than a silent choice",
                          "-i 與 -si 互斥；同時給出即為錯誤，而非默默擇一")
@@ -2107,6 +2220,7 @@ func validate(_ o: inout Options) throws {
                 "\(shape) 是一種輸出形狀，而編輯寫出的是 CSV，兩者不能併用。要用 \(shape) 讀，請另外執行一次")
         }
     }
+
 }
 
 // ---------------------------------------------------------------------

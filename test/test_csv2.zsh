@@ -16249,6 +16249,295 @@ else
 fi
 
 echo
+echo "--- T269: -count refuses its companions instead of discarding them / T269：-count 拒絕同伴，而不是丟棄它們 ---"
+# OP. `-count` is dispatched first and ignored everything beside it: it printed
+# a number, exited 0, said nothing on stderr, and did not do the other thing
+# asked for. The heaviest form swallowed an --in-place edit.
+#
+# Each case below asserts BOTH halves -- that it refuses, AND that the thing it
+# used to swallow did not happen. Asserting only the refusal would pass against
+# a version that refuses and edits anyway, which is a real shape here: OB was a
+# refusal that had already written its backup.
+#
+# OP。`-count` 是分派鏈上的第一個，而它會忽略旁邊的一切：印出一個數字、以 0 結束、stderr
+# 什麼都沒有，而另一件被要求的事沒有發生。最重的一種是它吞掉一次 --in-place 編輯。
+#
+# 底下每個案例都斷言**兩半**——它會拒絕，**而且**它先前吞掉的那件事沒有發生。只斷言拒絕，
+# 會在一個「拒絕之後照樣編輯」的版本上通過，而那是這裡真實存在過的形狀：OB 就是一則
+# 「已經先寫好備份」的拒絕。
+_t269=$TMP/t269
+mkdir -p "$_t269"
+printf 'pkg,license,maintainer\nzlib,MIT,alice\ntransMITter,BSD,bob\nlibfoo,MIT,carol\n' > "$_t269/f.csv"
+_t269_before=$(cksum < "$_t269/f.csv")
+
+"$CSV2" -count -update 1:1 'CLOBBERED' -i "$_t269/f.csv" --in-place >"$_t269/out" 2>"$_t269/err"
+_t269_rc=$?
+_t269_after=$(cksum < "$_t269/f.csv")
+if (( _t269_rc != 0 )) && [[ $_t269_before == $_t269_after ]] && ! [[ -s $_t269/out ]] \
+   && [[ "$(<"$_t269/err")" == *"-count cannot be combined"*"-update"* ]]; then
+    ok "T269a -count -update is refused, names -update, and the file is unchanged / -count -update 被拒絕、指名 -update，且檔案未變"
+else
+    bad "T269a rc=$_t269_rc changed=$([[ $_t269_before == $_t269_after ]] && echo no || echo YES) out=[$(<"$_t269/out")] err=[$(head -1 "$_t269/err")] / 實得如上"
+fi
+
+# The message must name only what was TYPED. --in-place derives o.output from
+# o.input inside validate(), so a check placed at the END of validate() listed
+# `-o` for a caller who never typed it -- OQ in miniature, introduced by this
+# very fix. This case is why the check sits first.
+# 訊息只能指名**打過的**東西。`--in-place` 會在 validate() 裡由 o.input 推導出 o.output，
+# 因此一個放在 validate() **結尾**的檢查，會對一個從沒打過 `-o` 的呼叫端列出 `-o`——那正是
+# OQ 的縮影，而且是這個修法自己帶進來的。這個案例就是那個檢查為什麼放在最前面。
+# Read the LIST, not the whole sentence: the prose after the colon is long and
+# any substring test against it answers about the wrong text.
+# 讀那份**清單**，不要讀整句話：冒號之後的散文很長，任何對它做的子字串比對，回答的都是
+# 另一段文字的事。
+_t269_list=${${"$(head -1 "$_t269/err")"#*combined with }%%:*}
+if [[ $_t269_list == '-update, --in-place' ]]; then
+    ok "T269b the refusal lists exactly the two flags that were typed / 那則拒絕恰好列出被打出的那兩個旗標"
+else
+    bad "T269b list=[$_t269_list] / 實得如上"
+fi
+
+# The search form is the one that reads as a WRONG ANSWER rather than as
+# nothing happening: -contains ZZZ -count used to return the file's total, so
+# "how many records mention this" got a plausible number to another question.
+# 搜尋那一種形狀最像一個**錯誤的答案**而不是「什麼都沒發生」：`-contains ZZZ -count` 先前
+# 回傳整個檔案的筆數，於是「有幾筆提到這個」拿到的是一個回答了另一個問題的合理數字。
+_t269_s=$("$CSV2" -contains ZZZNOMATCH -count -i "$_t269/f.csv" 2>&1); _t269_src=$?
+if (( _t269_src != 0 )) && [[ $_t269_s == *"-count cannot be combined"*"-contains"* ]]; then
+    ok "T269c -contains -count is refused rather than answering a different question / -contains -count 被拒絕，而不是回答另一個問題"
+else
+    bad "T269c rc=$_t269_src out=[${_t269_s%%$'\n'*}] / 實得如上"
+fi
+
+# -o was swallowed too, so the destination was never even created. Asserting
+# the file's absence and not just the refusal: a refusal that had already
+# created an empty file is the shape OB had.
+# `-o` 也被吞掉，於是目的地連建立都沒有。這裡斷言的是「檔案不存在」而不只是「有拒絕」：
+# 一則「已經先建好一個空檔」的拒絕，正是 OB 的形狀。
+rm -f "$_t269/dest.csv"
+"$CSV2" -count -o "$_t269/dest.csv" -i "$_t269/f.csv" >/dev/null 2>&1
+_t269_drc=$?
+if (( _t269_drc != 0 )) && [[ ! -e "$_t269/dest.csv" ]]; then
+    ok "T269d -count -o is refused and the destination is not created / -count -o 被拒絕，且目的地未被建立"
+else
+    bad "T269d rc=$_t269_drc dest exists=$([[ -e $_t269/dest.csv ]] && echo yes || echo no) / 實得如上"
+fi
+
+# And the plain forms still work. A refusal that swallowed the legitimate use
+# would be a worse defect than the one it fixes, and `--no-index` is a
+# companion that -count genuinely honours.
+# 而單純的用法仍然可行。一則把正當用法也吞掉的拒絕，會比它修掉的那個缺陷更糟；而
+# `--no-index` 是 `-count` 真正會履行的同伴。
+_t269_plain=$("$CSV2" -count -i "$_t269/f.csv" 2>&1); _t269_prc=$?
+_t269_ni=$("$CSV2" -count --no-index -i "$_t269/f.csv" 2>&1)
+if (( _t269_prc == 0 )) && [[ $_t269_plain == 3 && $_t269_ni == 3 ]]; then
+    ok "T269e -count alone and with --no-index still answer 3 / 單獨的 -count 與搭 --no-index 仍回答 3"
+else
+    bad "T269e plain=[$_t269_plain] rc=$_t269_prc no-index=[$_t269_ni] / 實得如上"
+fi
+
+echo
+echo "--- T270: a modifier followed by a value names the modifier / T270：修飾符後面接一個值時要指名修飾符 ---"
+# OQ. `csv2 -col license` answered `unexpected argument "license"` and never
+# mentioned `-col`. The message accused the value; the mistake was the flag's
+# context, and `-col` IS a real flag -- it belongs to `-delete`. The refusal
+# that says the right thing lives at the end of the parse and could not be
+# reached, because a bare word ends the parse first.
+# OQ。`csv2 -col license` 先前回答 `unexpected argument "license"`，從頭到尾沒提過 `-col`。
+# 那則訊息指控的是「值」，而使用者打錯的是「旗標的位置」，何況 `-col` **是**真旗標——它屬於
+# `-delete`。說得對的那則拒絕住在解析的最後，而它永遠到不了，因為一個落單的字會先結束解析。
+_t270_col=$("$CSV2" -col license -i "$_t269/f.csv" 2>&1)
+_t270_cell=$("$CSV2" -cell 1:1 -i "$_t269/f.csv" 2>&1)
+if [[ $_t270_col == *"-col is a modifier"* && $_t270_col == *license* \
+   && $_t270_cell == *"-cell is a modifier"* && $_t270_cell == *1:1* ]]; then
+    ok "T270a -col and -cell each name themselves and quote the stray value / -col 與 -cell 各自指名自己並引用那個落單的值"
+else
+    bad "T270a col=[${_t270_col%%$'\n'*}] cell=[${_t270_cell%%$'\n'*}] / 實得如上"
+fi
+
+# A stray word with NO modifier pending must keep the old message. Widening the
+# modifier branch to every stray argument would have made this pass while
+# hiding the general case, which is the shape the modifier fix could take by
+# accident.
+# 一個**沒有**待決修飾符的落單字，必須維持原本的訊息。把修飾符那一支放寬到所有落單參數，
+# 會讓上面那個案例通過、同時把一般情況藏起來——而那正是這個修法可能不小心變成的形狀。
+_t270_stray=$("$CSV2" stray -i "$_t269/f.csv" 2>&1)
+if [[ $_t270_stray == *'unexpected argument "stray"'* && $_t270_stray != *"modifier"* ]]; then
+    ok "T270b a stray word with no modifier pending keeps the general message / 沒有待決修飾符時，落單的字維持一般訊息"
+else
+    bad "T270b [${_t270_stray%%$'\n'*}] / 實得如上"
+fi
+
+# And the correct spelling still works -- the fix must not make -delete -col
+# unreachable, which a check on colModifier placed one line too early would.
+# 而正確的拼法仍然可用——這個修法不能讓 `-delete -col` 變得到不了，而一個放早一行的
+# colModifier 檢查就會這樣。
+cp "$_t269/f.csv" "$_t269/g.csv"
+"$CSV2" -delete -col license -i "$_t269/g.csv" --in-place 2>/dev/null
+_t270_crc=$?
+_t270_first=$("$CSV2" -r -i "$_t269/g.csv" 2>&1 | head -1)
+if (( _t270_crc == 0 )) && [[ $_t270_first == 'zlib,alice' ]]; then
+    ok "T270c -delete -col still drops the column / -delete -col 仍然會刪掉那一欄"
+else
+    bad "T270c rc=$_t270_crc first=[$_t270_first] / 實得如上"
+fi
+
+echo
+echo "--- T271: CRLF is normalised, and only -debug says so / T271：CRLF 會被正規化，而只有 -debug 說得出來 ---"
+# OT. README.md held the string CRLF zero times. "Output record separators are
+# always LF" implies the normalisation without stating it, and the INFO that
+# announces it is visible only under -debug. For a tool that runs on a Windows
+# node this is something the reader walks straight into.
+#
+# Both halves are asserted: that the bytes change, AND that the normal path
+# stays silent. A version that started printing the INFO unconditionally would
+# break every pipeline this tool is meant to sit in.
+# OT。`README.md` 裡「CRLF」出現 0 次。「輸出的紀錄分隔符一律是 LF」暗示了正規化卻沒有說出來，
+# 而宣告它的那則 INFO 只在 `-debug` 底下看得到。對一個要在 Windows 節點上跑的工具，這是讀者會
+# 直接撞上的事。
+#
+# 兩半都要斷言：位元組確實變了，**而且**正常路徑保持安靜。一個開始無條件印出那則 INFO 的版本，
+# 會弄壞這個工具本來就該待在裡面的每一條管線。
+_t271=$TMP/t271
+mkdir -p "$_t271"
+printf 'a,b\r\n1,2\r\n3,4\r\n' > "$_t271/crlf.csv"
+printf 'a,b\n1,2\n3,4\n' > "$_t271/lf.csv"
+"$CSV2" -r -t -i "$_t271/crlf.csv" > "$_t271/from_crlf" 2> "$_t271/quiet.err"
+"$CSV2" -r -t -i "$_t271/lf.csv" > "$_t271/from_lf" 2>/dev/null
+if cmp -s "$_t271/from_crlf" "$_t271/from_lf" && [[ ! -s "$_t271/quiet.err" ]] \
+   && ! LC_ALL=C grep -q $'\r' "$_t271/from_crlf"; then
+    ok "T271a a CRLF file reads identically to its LF twin, with nothing on stderr / CRLF 檔與其 LF 孿生檔讀出相同，且 stderr 什麼都沒有"
+else
+    bad "T271a same=$(cmp -s "$_t271/from_crlf" "$_t271/from_lf" && echo yes || echo no) err=[$(head -1 "$_t271/quiet.err")] / 實得如上"
+fi
+
+"$CSV2" -r -debug -i "$_t271/crlf.csv" >/dev/null 2> "$_t271/debug.err"
+if LC_ALL=C grep -q 'CRLF line endings; normalised to LF' "$_t271/debug.err"; then
+    ok "T271b -debug announces the normalisation in the words the README quotes / -debug 以 README 引用的那句話宣告這次正規化"
+else
+    bad "T271b [$(LC_ALL=C grep -i crlf "$_t271/debug.err" | head -1)] / 實得如上"
+fi
+
+echo
+echo "--- T272: a '#' in the MIDDLE is refused too / T272：檔案中段的 '#' 同樣被拒絕 ---"
+# OU. README.md said a file with '# ...' "at the top" is refused. A '#' anywhere
+# is refused, and the message is better than the page: it names the record AND
+# the line, which differ once a header row is in front of them. "At the top"
+# invited the reader to assume a mid-file '#' was fine -- an assumption that
+# surfaces only after half the file has been read.
+# OU。`README.md` 先前說的是「開頭有 `# ...` 的檔案」會被拒絕。任何位置的 `#` 都會被拒絕，而且
+# 那則訊息比那一頁更好：它同時指名**紀錄**與**行號**，而有了標頭列在前面，這兩個數字就不一樣了。
+# 「開頭」會邀請讀者假設中段的 `#` 沒關係——而那個假設要等到半個檔案讀完之後才浮現。
+_t272=$TMP/t272
+mkdir -p "$_t272"
+printf 'a,b\n1,2\n#note\n3,4\n' > "$_t272/mid.csv"
+"$CSV2" -r -i "$_t272/mid.csv" > "$_t272/out" 2> "$_t272/err"
+_t272_rc=$?
+# record 2 and line 3 -- the two numbers differ here, which is the whole reason
+# the message carries both. A case matching only "record 2" would pass against a
+# message that had quietly stopped naming the line.
+# 紀錄 2 與行號 3——這兩個數字在這裡是不同的，而那正是訊息要同時帶著它們的全部理由。一個只比對
+# 「record 2」的案例，會在一個「悄悄不再說出行號」的訊息上照樣通過。
+if (( _t272_rc != 0 )) && [[ ! -s "$_t272/out" ]] \
+   && [[ "$(<"$_t272/err")" == *"record 2 (line 3) starts with '#'"* ]]; then
+    ok "T272a a mid-file '#' is refused, naming record 2 and line 3, with no output / 中段的 '#' 被拒絕，指名 record 2 與 line 3，且沒有輸出"
+else
+    bad "T272a rc=$_t272_rc out=$(wc -c < "$_t272/out") err=[$(head -1 "$_t272/err")] / 實得如上"
+fi
+
+echo
+echo "--- T273: the documented .csv <-> .csv2 conversion, both directions / T273：文件記載的 .csv 與 .csv2 互轉，兩個方向 ---"
+# OR. The row said "write the records to a suffix-less path, author the second
+# header row yourself, then read that back". Read back, that path is `.lines` --
+# which is what it already was. The step that converts is the RENAME, and the
+# row did not have it; nor did it have the reverse direction, though its title
+# is "between .csv and .csv2".
+#
+# This case runs the README's text verbatim, including the rename. It is the
+# only kind of case that can catch a recipe which is merely incomplete: every
+# individual command in the old version exited 0.
+# OR。那一列寫的是「把紀錄寫到一個沒有副檔名的路徑、自己撰寫第二列標頭，然後把它讀回來」。
+# 讀回來時那個路徑是 `.lines`——而它本來就是。完成轉換的那一步是**改名**，而那一列沒有它；
+# 它也沒有反方向，儘管它的標題是「在 `.csv` 與 `.csv2` 之間轉換」。
+#
+# 這個案例逐字執行 README 的文字，包含那次改名。這是唯一抓得住「一份只是不完整的做法」的案例
+# 形式：舊版裡的每一道指令，單獨看都以 0 結束。
+_t273=$TMP/t273
+mkdir -p "$_t273"
+printf 'pkg,version,license\nzlib,1.3.1,MIT\nzstd,1.5.6,BSD\n' > "$_t273/p.csv"
+"$CSV2" -r -t -i "$_t273/p.csv" -o "$_t273/work" 2>/dev/null \
+  && "$CSV2" -insert 2 '套件,版本,授權' -i "$_t273/work" --in-place 2>/dev/null \
+  && mv "$_t273/work" "$_t273/out.csv2"
+_t273_fwd=$("$CSV2" -r --json -i "$_t273/out.csv2" 2>/dev/null | head -1)
+_t273_recs=$("$CSV2" -r -i "$_t273/out.csv2" 2>/dev/null | wc -l | tr -d ' ')
+if [[ $_t273_fwd == *'"format":"csv2"'* && $_t273_fwd == *'"headers":2'* && $_t273_recs == 2 ]]; then
+    ok "T273a the forward recipe, rename included, produces a real .csv2 / 正向的做法（含改名）產生一個真正的 .csv2"
+else
+    bad "T273a meta=[${_t273_fwd:0:90}] records=$_t273_recs / 實得如上"
+fi
+
+# The reverse, and a byte-identical round trip -- the only check that says the
+# pair of recipes is closed rather than merely each half working.
+# 反方向，以及一次逐位元相同的來回——那是唯一能說出「這兩份做法是閉合的」而不只是「各自跑得動」
+# 的檢查。
+"$CSV2" -r -t -i "$_t273/out.csv2" -o "$_t273/work2" 2>/dev/null \
+  && "$CSV2" -delete 2 -i "$_t273/work2" --in-place 2>/dev/null \
+  && mv "$_t273/work2" "$_t273/back.csv"
+if cmp -s "$_t273/p.csv" "$_t273/back.csv"; then
+    ok "T273b the reverse recipe returns the original file byte for byte / 反向的做法逐位元還原出原始檔案"
+else
+    bad "T273b [$(cmp "$_t273/p.csv" "$_t273/back.csv" 2>&1 | head -1)] / 實得如上"
+fi
+
+# And -t really is required: without it the header row is dropped silently, so
+# the recipe would build a .csv2 whose first header row is a data record. The
+# README now says "the -t is required"; this is the case behind that clause.
+# 而 `-t` 真的是必要的：少了它，標頭列會被靜默丟掉，於是那份做法會做出一個「第一列標頭其實是
+# 一筆資料」的 `.csv2`。README 現在寫著「`-t` 是必要的」；這就是那個子句背後的案例。
+"$CSV2" -r -i "$_t273/p.csv" -o "$_t273/nohdr" 2>/dev/null
+_t273_first=$(head -1 "$_t273/nohdr" 2>/dev/null)
+if [[ $_t273_first == 'zlib,1.3.1,MIT' ]]; then
+    ok "T273c without -t the header row is gone, which is why the recipe requires it / 少了 -t 標頭列就不見了，那正是做法要求它的原因"
+else
+    bad "T273c first=[$_t273_first] / 實得如上"
+fi
+
+echo
+echo "--- T274: --json puts a meta line at BOTH ends / T274：--json 在頭尾各放一行 meta ---"
+# OS. The table prescribes `--json` and jq for two rows and showed no jq
+# expression anywhere, and the obvious one is wrong: `.fields.license` yields a
+# null for each meta line, so a column list silently gains two entries that are
+# not data. The README now carries `select(.record)`, and this case pins the
+# fact that makes it necessary rather than the jq text, which cannot be run
+# where jq is absent.
+# OS。那張表為兩列開的藥方是 `--json` 加 jq，而整頁沒有出現過任何一個 jq 運算式，何況最直觀的
+# 那個是錯的：`.fields.license` 會為每一行 meta 產生一個 null，於是一份欄位清單會靜默地多出
+# 兩個不是資料的項目。README 現在寫著 `select(.record)`，而這個案例釘住的是「讓它成為必要」的
+# 那個事實，而不是那段 jq 文字——jq 在某些節點上並不存在。
+_t274=$TMP/t274
+mkdir -p "$_t274"
+printf 'pkg,version,license\nzlib,1.3.1,MIT\nzstd,1.5.6,BSD\n' > "$_t274/p.csv"
+"$CSV2" -r --json -i "$_t274/p.csv" > "$_t274/j" 2>/dev/null
+_t274_n=$(wc -l < "$_t274/j" | tr -d ' ')
+_t274_head=$(head -1 "$_t274/j")
+_t274_tail=$(tail -1 "$_t274/j")
+_t274_norec=$(LC_ALL=C grep -c -v '"record"' "$_t274/j")
+# Two records, four lines: the count is asserted against the fixture rather than
+# quoted from a different one. The first version of this case expected five,
+# copied from a three-record file used earlier in the session, and failed for
+# being right about a file that was not there.
+# 兩筆紀錄、四行：這個數字是對著**這個** fixture 斷言的，不是從另一個 fixture 引用來的。這個案例
+# 的第一版期望 5，那是從本 session 稍早一個三筆的檔案抄來的——它因為「對著一個不在場的檔案說了
+# 實話」而失敗。
+if [[ $_t274_n == 4 && $_t274_head == '{"meta":'* && $_t274_tail == '{"meta":'* && $_t274_norec == 2 ]]; then
+    ok "T274a two records come back as four lines, two of them meta at the ends / 兩筆紀錄回來的是四行，其中兩行是頭尾的 meta"
+else
+    bad "T274a lines=$_t274_n head=[${_t274_head:0:40}] tail=[${_t274_tail:0:40}] non-record=$_t274_norec / 實得如上"
+fi
+
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
