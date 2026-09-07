@@ -484,8 +484,37 @@ refused before output is written. It is a whole-cell update, not substring
 replacement.
 
 `--value-file PATH` and `--value-stdin` supply the `-update` value as exact
-bytes, including trailing newlines and whitespace. They require exactly one
-`-update` and cannot be combined with a literal value or `-si`.
+bytes, including trailing newlines and whitespace.
+
+**They exist because a command-line argument cannot carry every byte.** An
+argument is a NUL-terminated string, so a value containing a NUL is cut there
+before csv2 ever sees it — silently, at exit 0 — and a literal that is not valid
+UTF-8 is refused outright. Neither limit applies to these two flags, and that is
+the whole reason to reach for them:
+
+```sh
+printf 'before\0after' > value.bin
+csv2 -update 1:3 --value-file value.bin -i data.csv --in-place
+printf 'from a pipe' | csv2 -update 1:3 --value-stdin -i data.csv --in-place
+```
+
+Under either flag, `-update` takes the ADDRESS only — the value slot is gone.
+They require exactly one `-update` (`-update-where` does not count), cannot be
+repeated, are mutually exclusive with each other, and cannot be combined with a
+literal value or with `-si`. `--value-file -` is not stdin; it is a file named
+`-`. An empty regular file is accepted and blanks the cell at exit 0; a
+directory, a device such as `/dev/null`, and a missing path are each refused
+with the path and the reason named.
+
+`--in-place` works with `--value-stdin` — the "refuses stdin" rule elsewhere on
+this page is about `-si`, the INPUT, not about where a value comes from.
+
+**Reading the bytes back.** `-get r:c` writes the stored bytes and exactly one
+LF terminator, so a round-trip check is `cmp <(csv2 -get 1:3 -i f.csv) <(cat
+value.bin; printf '\n')`. The locating report cannot print bytes that are not
+UTF-8 and renders such a cell as `<non-UTF-8: 58 ff 59>`, and `--json` refuses
+the file entirely with `invalid-input` rather than substituting U+FFFD. So a
+column holding arbitrary bytes is readable with `-get` and not with `--json`.
 
 `--dry-run` currently previews `-update` and `-update-where`, printing each
 changed cell as `old -> new`, and writes no DATA file. It is not silent on disk

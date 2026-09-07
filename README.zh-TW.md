@@ -388,8 +388,30 @@ VALUE 寫進每一筆既有紀錄的那一格。在 `.csv` 上 NAME 是一個標
 零個命中、多個命中，或重複指定而命中同一格，都會在寫出任何內容前被拒絕。
 這是整格更新，不是子字串取代。
 
-`--value-file PATH` 與 `--value-stdin` 會把 `-update` 的值當成原始位元組讀取，
-包括結尾換行與空白。它們必須恰好搭配一個 `-update`，不可與字面值或 `-si` 併用。
+`--value-file PATH` 與 `--value-stdin` 會把 `-update` 的值當成原始位元組讀取，包括結尾換行與空白。
+
+**它們存在的理由是：一個命令列參數帶不了每一種位元組。** 一個參數是 NUL 結尾的字串，因此一個含有
+NUL 的值會**在 csv2 看到它之前**就被切掉——靜默地、rc=0——而一個不是合法 UTF-8 的字面值則會直接被
+拒絕。這兩個限制都不適用於這兩個旗標，而那正是要用它們的全部理由：
+
+```sh
+printf 'before\0after' > value.bin
+csv2 -update 1:3 --value-file value.bin -i data.csv --in-place
+printf 'from a pipe' | csv2 -update 1:3 --value-stdin -i data.csv --in-place
+```
+
+在這兩個旗標之下，`-update` **只收位址**——那個放值的位置消失了。它們必須恰好搭配一個 `-update`
+（`-update-where` 不算），不可重複，彼此互斥，也不可與字面值或 `-si` 併用。`--value-file -` **不是**
+stdin，它是一個名字叫 `-` 的檔案。一個空的**一般**檔案會被接受並把那一格清空（rc=0）；而一個目錄、
+一個像 `/dev/null` 的裝置、以及一個不存在的路徑，都會被拒絕，並指名路徑與理由。
+
+`--in-place` 可以與 `--value-stdin` 併用——這一頁別處那條「拒絕 stdin」講的是 `-si`（**輸入**），
+不是「值從哪裡來」。
+
+**怎麼把位元組讀回來。** `-get r:c` 會寫出被儲存的位元組，加上**恰好一個** LF 結尾，因此往返檢查是
+`cmp <(csv2 -get 1:3 -i f.csv) <(cat value.bin; printf '\n')`。定位報告印不出非 UTF-8 的位元組，
+會把那樣的儲存格呈現為 `<non-UTF-8: 58 ff 59>`；而 `--json` 會以 `invalid-input` **拒絕整個檔案**，
+不會拿 U+FFFD 去替換。因此一個存著任意位元組的欄位，用 `-get` 讀得回來，用 `--json` 讀不回來。
 
 `--dry-run` 目前預覽 `-update` 與 `-update-where`，會以 `old -> new` 印出每個變更儲存格，
 且不寫入任何**資料**檔。但若你同時給了 `-log`，它在磁碟上並不是沉默的：那次預覽會被追加到記錄裡，

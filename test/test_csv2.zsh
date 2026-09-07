@@ -15849,6 +15849,108 @@ else
     bad "T264e got [$_t264_a1], wanted 1:2 [B3] / 實得如上"
 fi
 
+echo "--- T265: why --value-file exists, and what its refusals say / T265：--value-file 為什麼存在，以及它的拒絕說了什麼 ---"
+# NY, the round's most valuable finding and NOT a defect: a command-line
+# argument is a NUL-terminated string, so a literal value is cut at the first
+# NUL before csv2 is even started -- silently, at exit 0. That is the whole
+# reason these two flags exist and the page never said it.
+#
+# Both halves are asserted together. The literal case alone proves nothing (it
+# looks like a csv2 bug), and the file case alone proves nothing (it looks like
+# an ordinary feature). Side by side they are the argument.
+#
+# NY，那個回合最有價值的發現，而且**不是**缺陷：一個命令列參數是 NUL 結尾的字串，因此一個字面值
+# 會在第一個 NUL 處被切掉——**在 csv2 被啟動之前**，靜默地、rc=0。那正是這兩個旗標存在的全部理由，
+# 而那一頁從未說過。
+#
+# 兩半一起斷言。只有字面值那一半什麼也證明不了（看起來像 csv2 的臭蟲），只有檔案那一半也什麼都
+# 證明不了（看起來像一個普通功能）。並排放，它們才是那個論證。
+printf 'a,b,c\n1,2,3\n' > "$TMP/t265lit.csv"
+printf 'a,b,c\n1,2,3\n' > "$TMP/t265file.csv"
+printf 'AA\000BB' > "$TMP/t265.bin"
+"$CSV2" -update 1:3 "$(printf 'AA\000BB')" -i "$TMP/t265lit.csv" --in-place >/dev/null 2>&1
+"$CSV2" -update 1:3 --value-file "$TMP/t265.bin" -i "$TMP/t265file.csv" --in-place >/dev/null 2>&1
+_t265_lit=$("$CSV2" -get 1:3 -i "$TMP/t265lit.csv" 2>/dev/null | LC_ALL=C wc -c | tr -d ' ')
+_t265_file=$("$CSV2" -get 1:3 -i "$TMP/t265file.csv" 2>/dev/null | LC_ALL=C wc -c | tr -d ' ')
+# 3 = "AA" + LF ; 6 = "AA\0BB" + LF
+if [[ $_t265_lit == 3 && $_t265_file == 6 ]]; then
+    ok "T265a a literal stops at a NUL while --value-file carries it / 字面值在 NUL 處停住，而 --value-file 帶得過去"
+else
+    bad "T265a literal=$_t265_lit bytes file=$_t265_file bytes (want 3 and 6) / 實得如上"
+fi
+
+# NX. Four causes, four messages, each naming the path. The placeholder was
+# literal `(path)` for all of them, so a script over many value files could not
+# tell which one failed -- and the wording blamed readability while the real
+# cause for /dev/null is that it is not a regular file.
+#
+# The empty REGULAR file is in the same loop deliberately: it is the control
+# that shows the refusal is about the KIND of file, not its size.
+#
+# NX。四種成因、四則訊息，每一則都指名路徑。那個佔位符對四者都是字面的 `(path)`，因此一支跑過許多
+# 值檔案的腳本說不出哪一個失敗——而那個措辭把原因說成「讀不到」，但 `/dev/null` 真正的原因是
+# 「它不是一般檔案」。
+#
+# 空的**一般**檔案刻意放在同一個迴圈裡：它是那個對照組，證明那個拒絕是關於檔案的**種類**、
+# 不是它的大小。
+mkdir -p "$TMP/t265dir"
+printf '' > "$TMP/t265empty.bin"
+_t265_bad=()
+for _v in "$TMP/t265nosuch.bin" "$TMP/t265dir" /dev/null; do
+    printf 'a,b,c\n1,2,3\n' > "$TMP/t265w.csv"
+    "$CSV2" -update 1:3 --value-file "$_v" -i "$TMP/t265w.csv" --in-place >/dev/null 2>"$TMP/t265.err"
+    if (( $? != 1 )) || LC_ALL=C grep -q '(path)' "$TMP/t265.err" \
+       || ! LC_ALL=C grep -qF -- "$_v" "$TMP/t265.err"; then
+        _t265_bad+=("${_v:t}")
+    fi
+done
+printf 'a,b,c\n1,2,3\n' > "$TMP/t265w.csv"
+"$CSV2" -update 1:3 --value-file "$TMP/t265empty.bin" -i "$TMP/t265w.csv" --in-place >/dev/null 2>&1
+_t265_empty=$?
+if (( ${#_t265_bad} == 0 )) && [[ $_t265_empty == 0 ]]; then
+    ok "T265b each refusal names its path, and an empty regular file is still accepted / 每一則拒絕都指名它的路徑，而空的一般檔案仍被接受"
+else
+    bad "T265b unnamed: $_t265_bad  empty_rc=$_t265_empty / 實得如上"
+fi
+
+# NZ. Reading the bytes back is the half the page sold and never explained:
+# `-get` adds exactly one LF, the locating report cannot print non-UTF-8 and
+# renders it, and `--json` refuses the file rather than substituting U+FFFD.
+# All three are how a caller finds out what is actually stored.
+# NZ。「把位元組讀回來」是那一頁賣了、卻從未說明的那一半：`-get` 加上恰好一個 LF、定位報告印不出
+# 非 UTF-8 而改用一種呈現、而 `--json` 會**拒絕整個檔案**而不是拿 U+FFFD 去替換。這三件事就是一個
+# 呼叫端用來查明「到底存了什麼」的方法。
+printf 'a,b,c\n1,2,3\n' > "$TMP/t265u.csv"
+printf 'X\xffY' > "$TMP/t265bad.bin"
+"$CSV2" -update 1:3 --value-file "$TMP/t265bad.bin" -i "$TMP/t265u.csv" --in-place >/dev/null 2>&1
+# Whitespace squeezed AND trimmed: `od` pads its line and `tr -s` leaves the
+# padding as a single trailing space, which made the first version of this
+# comparison fail on a correct program. The bytes are the assertion; the
+# spacing around them is the tool's.
+# 空白既壓縮**也**修掉：`od` 會補齊它那一行，而 `tr -s` 會留下一個結尾空白，那讓這個比較的第一版
+# 在一個正確的程式上失敗。**位元組才是斷言，它們周圍的空白是那個工具的。**
+_t265_get=$("$CSV2" -get 1:3 -i "$TMP/t265u.csv" 2>/dev/null | LC_ALL=C od -An -tx1 | LC_ALL=C tr -s ' ' | LC_ALL=C tr -d ' \n')
+_t265_rep=$("$CSV2" -contains X -i "$TMP/t265u.csv" 2>/dev/null)
+"$CSV2" -r --json -i "$TMP/t265u.csv" >/dev/null 2>"$TMP/t265j.err"
+_t265_json=$?
+if [[ $_t265_get == '58ff590a' && $_t265_rep == *'<non-UTF-8: 58 ff 59>'* && $_t265_json == 1 ]] \
+   && LC_ALL=C grep -q 'not valid UTF-8' "$TMP/t265j.err"; then
+    ok "T265c -get returns the bytes plus one LF, the report renders them, --json refuses / -get 回傳位元組加一個 LF，報告改用呈現，--json 拒絕"
+else
+    bad "T265c get=[$_t265_get] report=[$_t265_rep] json_rc=$_t265_json / 實得如上"
+fi
+
+# `--value-file -` is a file named `-`, not stdin. Every reader tries it.
+# `--value-file -` 是一個名字叫 `-` 的檔案，不是 stdin。每一個讀者都會試。
+printf 'a,b,c\n1,2,3\n' > "$TMP/t265d.csv"
+printf 'Z' | "$CSV2" -update 1:3 --value-file - -i "$TMP/t265d.csv" --in-place >/dev/null 2>"$TMP/t265d.err"
+_t265_dash=$?
+if [[ $_t265_dash == 1 ]] && LC_ALL=C grep -q 'no such file' "$TMP/t265d.err"; then
+    ok "T265d --value-file - is a file named -, not stdin / --value-file - 是一個叫 - 的檔案，不是 stdin"
+else
+    bad "T265d rc=$_t265_dash err=[$(tr '\n' '|' < "$TMP/t265d.err")] / 實得如上"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

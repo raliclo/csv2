@@ -1572,9 +1572,43 @@ func runEdit(_ o: Options) throws {
     if o.valueFile != nil || o.valueStdin {
         let bytes: [UInt8]
         if let path = o.valueFile {
+            // `(path)` was literal here -- an unsubstituted placeholder printed
+            // where the path belongs, in both language lines, for four distinct
+            // causes. Every comparable message on this tool names its subject
+            // ("cannot open input file: nosuch.csv", "naming 5000"), so a script
+            // driving `-update` over many value files got an error that could
+            // not say WHICH one failed. NX.
+            //
+            // The reason is named too. `Data(contentsOf:)` fails for a missing
+            // file and for a non-regular one alike, and `/dev/null` took the
+            // "cannot read" wording while an empty REGULAR file of the same
+            // size is accepted -- so the old message misdescribed its own cause.
+            // A directory and a device are not unreadable; they are not files
+            // whose bytes can be a cell's value.
+            //
+            // `(path)` 原本是**字面**寫在這裡的——一個沒有被替換的佔位符，印在路徑該出現的位置，
+            // 兩種語言都是，涵蓋四種不同的成因。這支工具其他每一則同類訊息都會指名它的主體
+            //（「cannot open input file: nosuch.csv」、「naming 5000」），因此一支對許多值檔案跑
+            // `-update` 的腳本，拿到的是一個說不出「哪一個失敗了」的錯誤。NX。
+            //
+            // 理由也一併指名。`Data(contentsOf:)` 對「不存在的檔案」與「不是一般檔案的東西」都會
+            // 失敗，而 `/dev/null` 拿到的是「無法讀取」的措辭——但同樣大小的空**一般**檔案是被接受的
+            // ——因此舊訊息誤述了它自己的成因。一個目錄或一個裝置不是「讀不到」，它們是「它們的位元組
+            // 不能成為一個儲存格的值」的那種東西。
+            var isDir: ObjCBool = false
+            let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
             guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
-                throw fault("--value-file (path): cannot read the value file",
-                            "--value-file (path)：無法讀取值檔案")
+                let why: (String, String)
+                if !exists {
+                    why = ("there is no such file", "沒有這個檔案")
+                } else if isDir.boolValue {
+                    why = ("that is a directory", "那是一個目錄")
+                } else {
+                    why = ("it is not a regular file, so it has no bytes to read as a value",
+                           "它不是一般檔案，因此沒有可以當成值讀取的位元組")
+                }
+                throw fault("--value-file \(path): \(why.0)",
+                            "--value-file \(path)：\(why.1)")
             }
             bytes = [UInt8](data)
         } else {
