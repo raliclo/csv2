@@ -590,6 +590,34 @@ verified discourages the next person from checking. Do not write "all of these
 were checked" unless the check is something that runs; if it is manual, list
 which ones and when -- a list shows its gaps, a summary hides them.
 
+### 第七次：我把一個觀察推廣成一句通則，而沒有量那個推廣
+
+2026-09-07，第 86 回合的修正裡我寫下：「**一次執行可以給好幾個編輯動詞。**」——沒有任何限定，
+涵蓋全部六個動詞。
+
+我測過的是 `-insert 2 'NEW' -delete 4`。那一對可行。
+
+第 87 回合測了另一對——`-delete -col a` 加上以欄名定址的 `-update 1:d`——而程式**寫進了錯的欄位**，
+rc=0、兩條串流都空的。我那句話承諾了一種程式並不具備的可組合性。
+
+| 我量的 | 我寫的 |
+|---|---|
+| **兩個「列」動詞可以一起給** | **任意幾個動詞都可以一起給** |
+
+**推廣一個觀察，與量測那個推廣，是兩件事。** 前三次（第 80、82、85 回合）我寫的是「太一般的真話」
+——一句在我當時情況下為真、但少了條件的句子。這一次不同：**我寫的是一句假話**，而它假的地方，
+正是我沒有去試的那一半。
+
+**判準：一句宣稱「X 類的東西都可以」的話，要嘛至少量兩個彼此不同的 X，要嘛就把它縮回你真的量過
+的那一個。** 那句話現在為真了——因為 MS 被修好了——但它在寫下的那一刻不是。
+
+I generalised one measurement into a rule and did not measure the generalisation. I had tested
+two ROW verbs together and wrote that any verbs may be combined; the next round combined a
+structural COLUMN verb with a column address and the program wrote to the wrong column. The
+previous three of these were true statements missing their condition; this one was false. A
+claim that "any X may be combined" needs at least two unlike X measured, or it needs shrinking
+back to the one that was.
+
 ### 矯正措施
 
 **在使用者可見的文字裡說出「我會做 X」的當下就記下來**（TaskCreate），不要等做完再回頭數。

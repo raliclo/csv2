@@ -10302,3 +10302,80 @@ between the syntax that does what they meant and one that silently takes everyth
 
 `.txt` 與 `.md` 都是「其他」，而 `.md` 被獨立成另一列、行為完全不同——於是「other」這個字在默默地
 做事。讀者只能假設 `.txt` 落在那一列（它確實是）。
+
+---
+
+# 第 87 回合（2026-09-07，欄位操作）—— 這一系列最嚴重的程式缺陷
+
+## MS. 結構性編輯與欄位定址併用時，**寫進錯的欄位**（程式缺陷，靜默資料損壞）
+
+**狀態：已修（2026-09-07）——留下一份「抵達時的標頭」供位址解析用，因為紀錄那一側本來就保持輸入形狀到最後。同一個修正解掉了三個症狀：寫錯欄、被靜默丟棄的編輯（現在正確拒絕）、以及那句「the file has 4 columns」的假範圍錯誤。T259a–T259f 釘住六種情形，含反方向的 `-add-column` 與「不可退化」的常規路徑。**
+
+```sh
+printf 'a,b,c,d,e\nv1,v2,v3,v4,v5\n' > x.csv
+csv2 -delete -col a -update 1:d 'CHANGED' -i x.csv --in-place
+```
+
+實得：
+
+```
+rc=0   stdout=0 bytes   stderr=0 bytes
+b,c,d,e
+v2,CHANGED,v4,v5          ← CHANGED 落在 c 欄
+```
+
+應為 `v2,v3,CHANGED,v5`。**對照組成立**：單獨 `-update 1:d 'CHANGED'` 正確地改到 `d`。
+
+每有一次「發生在目標之前的結構性變動」，就偏移一格；`-delete -col`（往下移）與 `-add-column`
+（往上移）兩個方向都會，`.csv` 與 `.csv2` 都會，`-update` 與 `-delete -cell` 都會。
+
+**三個衍生後果，每一個都比上一個更難察覺：**
+
+1. **當偏移後的索引正好落在「那個被刪掉的欄位」上，那次編輯被完全靜默地丟棄**——輸出與
+   「只做刪除」的執行逐位元相同，rc=0。使用者要求的改動沒有發生，而沒有任何東西說。
+
+2. **數字位址的範圍檢查用的是「刪除之後」的欄數。**
+   ```
+   csv2 -delete -col 2 -update 1:5 'X' -i x.csv --in-place
+   csv2: column 5 is out of range; the file has 4 columns
+   ```
+   **那個檔案此刻有 5 欄。** 4 欄是一次還沒發生的編輯之後的事。合起來看：
+   **在任何「同時刪掉一欄」的執行裡，一個檔案的最後一欄都無法被正確更新**——數字寫法會以一句
+   不成立的敘述報錯，欄名寫法會靜默寫錯。
+
+3. **`-log` 把那次寫錯的欄位記成正確的**，在同一行印出目標的**名字**與另一欄的**舊值**：
+   `update 1:d: "v3" -> "CHANGED"`。稽核軌跡因此為那次損壞背書。
+
+## MT. 「Several may be given in one invocation」是我 2026-09-07 寫下的，而程式做不到
+
+**狀態：那句話現在**為真**（MS 已修），但它在寫下的那一刻不是。記為 mistakes 第 4 條第七次：推廣一個觀察，與量測那個推廣，是兩件事。**
+
+那句話是第 86 回合的修正加進去的，沒有任何限定，涵蓋全部六個編輯動詞。它承諾了一種
+**程式並不具備**的可組合性。
+
+**這是連續第四個回合，發現的是前一輪修正裡寫下的句子**（第 80 回合 LP、第 82 回合 LV/LW、
+第 85 回合 MM，現在是 MT）。而這一次不同於前三次：前三次我寫的是「太一般的真話」，這一次我寫的
+是一句**假話**——我從「`-insert 2 X -delete 4` 可行」推廣到「幾個動詞都可以一起給」，而我沒有測
+結構性動詞與欄位定址的組合。
+
+**推廣一個觀察，與量測那個推廣，是兩件事。**
+
+## MU. 欄位定址的其餘缺口
+
+**狀態：已記載（2026-09-07）——`-add-column N NAME VALUE` 的三個參數與位置語意、單標頭與雙標頭的差別、標題會依逗號切開且無跳脫、`-delete -col` 可重複，以及「任何接受欄號之處都可用欄名」。**
+
+- **`-add-column` 在單標頭 `.csv` 上的用法沒有範例**，只有 `.csv2` 那一個；單一標題的寫法只能猜。
+- **`-add-column` 的第三個參數是什麼從未說明**——那是寫進每一筆既有紀錄的預設值。
+- **`-add-column` 的位置 N 是什麼意思沒有寫**（之前／之後／成為第 N 欄）。
+- **`-delete -col` 與 `-update` 可以用欄「名」定址這件事沒有寫。** `-get 1:license` 是全書唯一一個
+  在位址裡出現名字的地方，而它是**讀取**。名字在每個地方都能用——**而名字那條路正是壞掉的那條**。
+  一個從未猜到「名字可以用」的讀者，是靠運氣而安全。
+- **`-delete -cell` 與 `-delete -col` 從未被列在任何選項清單裡**，只在三行相鄰的範例裡被示範過。
+- **`-add-column` 的標題參數會依逗號切開**，因此一個含逗號的標題沒有任何被記載的跳脫方式。
+
+Combining a structural column edit with a column address writes to the WRONG column, silently:
+exit 0, both streams empty, the intended cell untouched and a neighbour overwritten. When the
+shifted index lands on the deleted column the edit is discarded entirely. The numeric range
+check reports a column count the file does not yet have, so the last column of a file cannot be
+correctly updated in any run that also deletes a column -- the numeric form errors with a false
+statement and the name form corrupts in silence. `-log` then records the wrong write as right.

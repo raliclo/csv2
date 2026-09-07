@@ -1740,6 +1740,30 @@ func runEdit(_ o: Options) throws {
     defer { if aborted { sink.abort() } }
 
     var headers: [Record] = []
+    // The header as it ARRIVED, kept for resolving column addresses.
+    //
+    // `headers` is rewritten in place by `-delete -col` and `-add-column`
+    // before any record is processed, while each record keeps its input shape
+    // until the very end -- deliberately, and the comment at the bottom of the
+    // record path says why: "so that every index above still refers to the
+    // input". Resolving an address against the REWRITTEN header and applying it
+    // to an UNREWRITTEN record is an index from one shape used on another, and
+    // it silently wrote to a neighbouring column: `-delete -col a -update 1:d`
+    // on `a,b,c,d,e` put the new value in `c`, exit 0, both streams empty.
+    //
+    // The record side was right and the header side broke the invariant the
+    // record side depends on, so the fix belongs here rather than there. MS.
+    //
+    // 標頭**抵達時**的樣子，留著用來解析欄位位址。
+    //
+    // `headers` 會在任何紀錄被處理之前，就被 `-delete -col` 與 `-add-column` 就地改寫，而每一筆
+    // 紀錄保持它輸入時的形狀直到最後——那是刻意的，紀錄那條路徑底部的註解說明了理由：
+    // 「讓上面每一個索引都仍指向輸入」。拿**改寫過的**標頭去解析位址、再套到一筆**還沒改寫的**
+    // 紀錄上，就是把一種形狀的索引用在另一種形狀上，而它會靜默地寫進隔壁那一欄：
+    // `a,b,c,d,e` 上的 `-delete -col a -update 1:d` 把新值放進了 `c`，rc=0，兩條串流都空的。
+    //
+    // 紀錄那一側是對的，是標頭這一側破壞了紀錄那一側所依賴的不變量，因此修正屬於這裡而不是那裡。MS。
+    var addressHeader: Record?
     var expectedFields = 0
     var transform: CellTransform = .none
     var total = 0
@@ -2024,6 +2048,7 @@ func runEdit(_ o: Options) throws {
                                 "\(clash.sorted().joined(separator: ", ")) targets a column that -delete -col is removing; the edit would have no effect and would still be reported as done",
                                 "\(clash.sorted().joined(separator: "、")) 指向一個正被 -delete -col 移除的欄位；該編輯不會有任何效果，卻仍會被回報為已完成")
                         }
+                        if addressHeader == nil { addressHeader = headers.first }
                         for i in headers.indices { dropColumns(&headers[i]) }
                     }
                     // An edit rewrites the whole file, so the header always
@@ -2055,6 +2080,7 @@ func runEdit(_ o: Options) throws {
                                 + "csv2：-add-column \(a.at) \(a.name)：未提供中文標題，第 2 列留空；請以 'english,中文' 一併給出\n")
                         }
                     }
+                    if addressHeader == nil { addressHeader = headers.first }
                     for i in headers.indices { try addColumns(&headers[i], headerRow: i) }
                     for h in headers { emit(h) }
                     builder?.headerEnded(at: UInt64(outOffset))
@@ -2152,7 +2178,7 @@ func runEdit(_ o: Options) throws {
                 for (colToken, value) in ups {
                     let c: Int
                     let name: String
-                    if let h0 = headers.first {
+                    if let h0 = addressHeader ?? headers.first {
                         c = try resolveColumn(colToken, header: h0)
                         name = baseName(headerName(h0.fields[c]))
                     } else if let numeric = Int(colToken), numeric >= 1 {
@@ -2188,7 +2214,7 @@ func runEdit(_ o: Options) throws {
                 for colToken in cols {
                     let c: Int
                     let name: String
-                    if let h0 = headers.first {
+                    if let h0 = addressHeader ?? headers.first {
                         c = try resolveColumn(colToken, header: h0)
                         name = baseName(headerName(h0.fields[c]))
                     } else if let numeric = Int(colToken), numeric >= 1 {

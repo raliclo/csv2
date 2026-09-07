@@ -15236,6 +15236,105 @@ else
     bad "T258d got [$_t258_both], wanted [alpha NEW bravo charlie echo ] / 實得如上"
 fi
 
+echo "--- T259: a column address survives a structural column edit / T259：欄位位址在結構性欄位編輯之下仍然成立 ---"
+# MS, the worst defect these rounds have found. `headers` is rewritten in place
+# by `-delete -col`/`-add-column` before any record is processed, while each
+# record keeps its input shape until the very end. Resolving an address against
+# the rewritten header and applying it to an unrewritten record wrote to a
+# neighbouring column -- exit 0, both streams empty, the intended cell untouched.
+#
+# Every case below asserts the FULL record, not just the target cell. Checking
+# only the target would pass on a program that wrote the right value into the
+# right place and also corrupted something else.
+#
+# MS，這幾個回合找到最嚴重的缺陷。`headers` 會在任何紀錄被處理之前，就被 `-delete -col`／
+# `-add-column` 就地改寫，而每一筆紀錄保持它輸入的形狀直到最後。拿改寫過的標頭解析位址、再套到
+# 還沒改寫的紀錄上，就會寫進隔壁那一欄——rc=0、兩條串流都空的、而使用者要改的那一格沒有被動。
+#
+# 底下每一個案例斷言的是**整筆紀錄**，不只是目標那一格。只檢查目標的話，會在「正確地寫對了地方、
+# 同時又弄壞了別處」的程式上通過。
+_t259_mk() { printf 'a,b,c,d,e\nv1,v2,v3,v4,v5\n' > "$1" }
+
+_t259_mk "$TMP/t259a.csv"
+"$CSV2" -delete -col a -update 1:d 'CHANGED' -i "$TMP/t259a.csv" --in-place >"$TMP/t259.out" 2>"$TMP/t259.err"
+_t259_rc=$?
+_t259_del=$(LC_ALL=C tail -1 "$TMP/t259a.csv")
+if [[ $_t259_rc == 0 && $_t259_del == 'v2,v3,CHANGED,v5' ]]; then
+    ok "T259a -delete -col with a name-addressed -update writes the named column / -delete -col 搭配以欄名定址的 -update，寫進的是被指名的那一欄"
+else
+    bad "T259a rc=$_t259_rc got [$_t259_del] wanted [v2,v3,CHANGED,v5] / 實得如上"
+fi
+
+# The other direction. A fix that adjusted for deletions only would pass T259a
+# and fail here, and `-add-column` shifts the opposite way.
+# 反方向。一個只針對「刪除」做補償的修法會通過 T259a 而在這裡失敗，而 `-add-column` 的位移方向
+# 是相反的。
+_t259_mk "$TMP/t259b.csv"
+"$CSV2" -add-column 1 'z' 'ZZ' -update 1:d 'CHANGED' -i "$TMP/t259b.csv" --in-place >/dev/null 2>&1
+_t259_add=$(LC_ALL=C tail -1 "$TMP/t259b.csv")
+if [[ $_t259_add == 'ZZ,v1,v2,v3,CHANGED,v5' ]]; then
+    ok "T259b -add-column shifts the other way and the address still holds / -add-column 往另一個方向位移，而那個位址仍然成立"
+else
+    bad "T259b got [$_t259_add] wanted [ZZ,v1,v2,v3,CHANGED,v5] / 實得如上"
+fi
+
+# `-delete -cell` resolves the same way, and had the same bug.
+# `-delete -cell` 走同一條解析，而它有同一個毛病。
+_t259_mk "$TMP/t259c.csv"
+"$CSV2" -delete -col a -delete -cell 1:d -i "$TMP/t259c.csv" --in-place >/dev/null 2>&1
+_t259_cell=$(LC_ALL=C tail -1 "$TMP/t259c.csv")
+if [[ $_t259_cell == 'v2,v3,,v5' ]]; then
+    ok "T259c -delete -cell by name survives a column deletion / 以欄名指定的 -delete -cell 在刪欄之下仍然成立"
+else
+    bad "T259c got [$_t259_cell] wanted [v2,v3,,v5] / 實得如上"
+fi
+
+# A numeric address naming the LAST column, in a run that also deletes one. The
+# range check used the post-delete count, so this was refused with "the file has
+# 4 columns" about a file that had 5 -- which meant the last column of a file
+# could not be correctly updated in any run that also deleted a column: the
+# numeric form errored with a false statement, the name form corrupted silently.
+# 一個指向**最後一欄**的數字位址，而同一次執行也刪掉了一欄。那個範圍檢查用的是刪除後的欄數，
+# 於是它以「the file has 4 columns」拒絕了一個當下有 5 欄的檔案——那表示在任何「同時刪掉一欄」的
+# 執行裡，一個檔案的最後一欄都無法被正確更新：數字寫法以一句不成立的敘述報錯，欄名寫法靜默寫錯。
+_t259_mk "$TMP/t259d.csv"
+"$CSV2" -delete -col 2 -update 1:5 'X' -i "$TMP/t259d.csv" --in-place >/dev/null 2>"$TMP/t259d.err"
+_t259_num_rc=$?
+_t259_num=$(LC_ALL=C tail -1 "$TMP/t259d.csv")
+if [[ $_t259_num_rc == 0 && $_t259_num == 'v1,v3,v4,X' ]]; then
+    ok "T259d a numeric address for the last column works alongside a deletion / 指向最後一欄的數字位址，在同時刪欄時仍然可用"
+else
+    bad "T259d rc=$_t259_num_rc got [$_t259_num] err=[$(tr '\n' '|' < "$TMP/t259d.err")] / 實得如上"
+fi
+
+# The refusal that must SURVIVE the fix: an edit aimed at the column being
+# removed is still refused, rather than being silently applied to whatever now
+# sits at that index. This is the case the shifted index used to land on.
+# 一個必須在修正之後**仍然存在**的拒絕：瞄準「正被移除的那一欄」的編輯仍會被拒絕，而不是被
+# 靜默地套到「現在位於那個索引上的東西」。那正是偏移後的索引原本會落上去的情況。
+_t259_mk "$TMP/t259e.csv"
+"$CSV2" -delete -col a -update 1:a 'X' -i "$TMP/t259e.csv" --in-place >/dev/null 2>"$TMP/t259e.err"
+_t259_clash=$?
+if [[ $_t259_clash == 1 ]] && LC_ALL=C grep -q 'would have no effect' "$TMP/t259e.err"; then
+    ok "T259e an edit aimed at the removed column is still refused / 瞄準被移除欄位的編輯仍然被拒絕"
+else
+    bad "T259e rc=$_t259_clash err=[$(tr '\n' '|' < "$TMP/t259e.err")] / 實得如上"
+fi
+
+# And a plain update must not have regressed. The fix changed which header a
+# name resolves against, which is the same header when nothing structural
+# happens -- so this is the case that catches a fix that broke the ordinary path.
+# 而一般的更新不可以退化。這個修正改的是「名字對著哪一份標頭解析」，而在沒有任何結構性變動時
+# 那是同一份標頭——因此這個案例抓的是「修好了特例、弄壞了常規路徑」的那種修法。
+_t259_mk "$TMP/t259f.csv"
+"$CSV2" -update 1:d 'CHANGED' -i "$TMP/t259f.csv" --in-place >/dev/null 2>&1
+_t259_plain=$(LC_ALL=C tail -1 "$TMP/t259f.csv")
+if [[ $_t259_plain == 'v1,v2,v3,CHANGED,v5' ]]; then
+    ok "T259f a name-addressed update with no structural edit is unchanged / 沒有結構性編輯時，以欄名定址的更新行為不變"
+else
+    bad "T259f got [$_t259_plain] / 實得如上"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

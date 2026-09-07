@@ -293,8 +293,22 @@ everything after it shift down. It cannot address one past the end — use
 
 `-delete -cell` clears a field without changing the field count.
 `-delete -col` removes a column from every record and every header row.
-`-add-column` takes both header titles for `.csv2`; omitting the Traditional
-Chinese title leaves that header cell empty and emits a warning.
+`-add-column N NAME VALUE` makes the new column number N — the column
+previously at N and everything after it shift right — and writes VALUE into that
+cell of every existing record. On a `.csv` NAME is one title; on a `.csv2` it is
+both, comma-separated, and omitting the Traditional Chinese half leaves that
+header cell empty and emits a warning. NAME is always split on commas, so a
+title that contains one cannot be expressed.
+
+`-delete -col` may be repeated to remove several columns in one run.
+
+**A column may be addressed by NAME anywhere a number is accepted** — `-update
+1:license`, `-delete -cell 1:license`, `-delete -col license`. Names and numbers
+both refer to the column as it is in the INPUT, so an address stays correct
+alongside `-delete -col` or `-add-column` in the same run. Until 2026-09-07 it
+did not: an address was resolved against the header AFTER the structural edit
+and applied to a record before it, which wrote to a neighbouring column at exit
+0 with nothing on either stream.
 
 `--in-place` writes through a private temporary file and rename, except for
 `-append`, which uses an append-only fast path. `-append` validates the input
