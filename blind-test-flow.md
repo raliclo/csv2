@@ -195,6 +195,32 @@ A blind-test agent runs in a full macOS shell where `shasum` exists; this suite 
 busybox, where it does not -- and both captures collapse to the empty string, which are equal,
 so the case passes having measured nothing.
 
+### 8c. 驗證一項回報，包含「驗證它建議的補救」
+
+規則 8 說「逐條親手驗證」，而那通常被讀成「確認它說的現象是真的」。**那只是一半。**
+
+2026-09-07，第 92 回合回報：`-rownum` 在定位報告上被靜默忽略，而 `--json` 底下是硬拒絕；它建議
+讓報告那一側也拒絕。**那個現象是真的**——我重現了。我照建議改了程式，然後 **T15a 與 T15d 立刻失敗**。
+
+T15 的註解寫著：「`-rownum` 只作用在輸出側：它**必須不**改變定址、也**必須不**可被搜尋——否則一個
+『只是多印一欄』的旗標，會安靜地改變每一個位址的意義。」而它正是以「跑 `-contains -rownum` 並檢查
+位址沒有移動」來斷言那件事。**拒絕那一對，等於刪掉那個不變量被表達的方式。**
+
+一個盲測回合看得見這一頁與這支程式，**看不見這棵樹為什麼決定成這樣**。它指出的不一致往往是真的；
+它提議的方向則是在沒有那段歷史的情況下猜的。
+
+**做法**：一項回報若建議「讓 A 也變成 B 那樣」，在改之前先問——**有沒有任何測試是靠 A 現在的樣子
+才寫得出來的？** 有的話，那個不對稱多半是被決定過的，該做的是**記載它**，不是抹平它。
+
+### 8c. Verifying a report includes verifying its proposed remedy
+
+Rule 8 says reproduce every claim by hand, which is usually read as confirming the SYMPTOM. That
+is half of it. Round 92 correctly reported an asymmetry and proposed removing it; the removal
+broke T15, whose comment records the invariant the asymmetry exists to express. A round sees the
+page and the program, never why the tree decided what it decided. When a report says "make A
+behave like B", ask first whether any test is written the way it is BECAUSE of A. If one is, the
+asymmetry was chosen, and the fix is to document it rather than flatten it.
+
 ### 9. Write it down BEFORE fixing it
 
 Every reproduced finding goes into [`todo/known-defects.md`](./todo/known-defects.md)

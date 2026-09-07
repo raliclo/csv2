@@ -555,7 +555,26 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "search-row":
             try once("--search-row")
             o.searchScopeFlags += 1
-            o.searchScope = .row(try positiveInt(arg, try need(arg)))
+            let rowArg = try need(arg)
+            // A header address here answered with the wrong CONCEPT: `0` gave
+            // "a count must be at least 1" and `0a` gave "not a number". A row
+            // address is not a count, and `--search-row 0` is precisely what a
+            // reader tries straight after reading that the locating report
+            // prints `0` for a header. The right message already exists in this
+            // binary -- `-get 0:1` and `--search-cell 0a:1` both reach it -- and
+            // two call sites did not, because it lives in the `r:c` parser and
+            // a row address is a single token. NT.
+            // 一個標頭位址在這裡得到的是**錯誤的概念**：`0` 回答「a count must be at least 1」、
+            // `0a` 回答「not a number」。一個列位址不是一個計數，而 `--search-row 0` 正是讀者在
+            // 讀到「定位報告為標頭印 `0`」之後下一步會打的東西。那則正確的訊息**已經在這個執行檔
+            // 裡**——`-get 0:1` 與 `--search-cell 0a:1` 都到得了它——而有兩個呼叫點到不了，因為它住在
+            // `r:c` 的解析器裡，而一個列位址只是單一個 token。NT。
+            if ["0", "0a", "0b"].contains(rowArg) {
+                throw usageError(
+                    "--search-row: \(rowArg) names a header row (the locating report prints 0 on a .csv and 0a/0b on a .csv2), and no verb can address one; use --include-headers to search them",
+                    "--search-row：\(rowArg) 指的是標頭列（定位報告在 .csv 上印 0，在 .csv2 上印 0a/0b），而沒有任何動詞可以定址它；要搜尋標頭請用 --include-headers")
+            }
+            o.searchScope = .row(try positiveInt(arg, rowArg))
         case "search-column":
             try once("--search-column")
             o.searchScopeFlags += 1
@@ -1959,6 +1978,36 @@ func validate(_ o: inout Options) throws {
         throw usageError("\(f) is given more than once; a repeated flag is refused rather than taken once, because the second one may have been meant to change something",
                          "\(f) 給了不只一次；重複的旗標會被拒絕而不是「只取一次」，因為第二個很可能是想改變什麼")
     }
+    // NOT refused on a locating report, though round 92 asked for it and the
+    // asymmetry it named is real: `--json` rejects `-rownum` while the report
+    // accepts it in silence.
+    //
+    // T15 is why. `-rownum` is output-side ONLY -- it must not shift addressing
+    // and must not be searchable -- and T15a/T15b assert exactly that by running
+    // `-contains -rownum` and checking the addresses did not move. Refusing the
+    // pair removes the way that invariant is expressed, and the invariant is
+    // the older and more load-bearing fact: a flag that "just prints one more
+    // column" quietly changing what every address means is the failure being
+    // guarded against.
+    //
+    // The `--json` refusal stays, because there the flag is not merely inert:
+    // `--json` names fields rather than numbering them, so a rownum column
+    // would have nowhere to go and the caller would be owed an explanation.
+    //
+    // The asymmetry is therefore documented rather than removed. NS.
+    //
+    // 在定位報告上**不**拒絕，儘管第 92 回合要求了，而它指出的那個不對稱是真的：`--json` 拒絕
+    // `-rownum`，而報告靜默地接受。
+    //
+    // 理由是 T15。`-rownum` **只**作用在輸出側——它必須不改變定址、也必須不可被搜尋——而 T15a／T15b
+    // 正是以「跑 `-contains -rownum` 並檢查位址沒有移動」來斷言這件事。拒絕這一對，等於拿掉了那個
+    // 不變量被表達的方式，而那個不變量是更早、也更承重的事實：一個「只是多印一欄」的旗標安靜地
+    // 改變每一個位址的意義，正是它所要防的那個失敗。
+    //
+    // `--json` 那個拒絕保留，因為在那裡這個旗標不只是惰性的：`--json` 是替欄位命名而不是編號，
+    // 一個 rownum 欄無處可去，而呼叫端應該得到一個說明。
+    //
+    // 因此那個不對稱是被**記載**下來，而不是被移除。NS。
     if o.rownum && o.json {
         throw usageError(
             "-rownum adds a column and --json names fields instead of numbering them, so it would be ignored; --json already carries the record number in its `record` key",

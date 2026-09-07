@@ -15748,6 +15748,107 @@ else
     bad "T263e rc=$_t263_cap_rc stdout=[${_t263_cap//$'\n'/|}] / 實得如上"
 fi
 
+echo "--- T264: which addresses can be written, and which are only printed / T264：哪些位址寫得進去，哪些只會被印出來 ---"
+# Round 92's verdict: addressing was documented as a syntax without ever saying
+# which addresses are WRITABLE and which are only PRINTABLE. Header addresses
+# (0 / 0a / 0b) and A1 cells ([C3]) both look like things you can type; neither
+# is.
+#
+# 第 92 回合的判詞：定址被記載成一種語法，卻從未說出哪些位址**寫得進去**、哪些只是會被**印出來**。
+# 標頭位址（0／0a／0b）與 A1 格號（[C3]）看起來都像可以打進去的東西；兩者都不是。
+printf 'pkg,version\n套件,版本\nzlib,1.3.1\nzstd,1.5.6\n' > "$TMP/t264.csv2"
+
+# NT. Four entry points, one concept. Two reached the right message and two
+# answered with the wrong CONCEPT -- `--search-row 0` said "a count must be at
+# least 1", and a row address is not a count. That is exactly what a reader
+# tries after reading that the report prints 0 for a header, and the correct
+# message was already in the binary.
+#
+# All four are asserted together because the defect WAS the divergence: any
+# case checking one entry point would have passed throughout.
+#
+# NT。四個入口、一個概念。兩個到得了正確的訊息，兩個用**錯誤的概念**回答——`--search-row 0` 說
+# 「a count must be at least 1」，而一個列位址不是一個計數。那正是讀者在讀到「報告為標頭印 0」
+# 之後會打的東西，而正確的訊息本來就在執行檔裡。
+#
+# 四個一起斷言，因為那個缺陷**就是**這種分歧：任何只檢查其中一個入口的案例，自始至終都會通過。
+_t264_bad=()
+for _addr in '-get 0:1' '-get 0a:1'; do
+    "$CSV2" ${=_addr} -i "$TMP/t264.csv2" >/dev/null 2>"$TMP/t264.err"
+    (( $? == 1 )) && LC_ALL=C grep -q 'header' "$TMP/t264.err" || _t264_bad+=("$_addr")
+done
+for _scope in '--search-cell 0a:1' '--search-row 0' '--search-row 0a' '--search-row 0b'; do
+    "$CSV2" -contains x ${=_scope} -i "$TMP/t264.csv2" >/dev/null 2>"$TMP/t264.err"
+    if (( $? != 1 )) || ! LC_ALL=C grep -q 'header' "$TMP/t264.err"; then
+        _t264_bad+=("$_scope")
+    fi
+done
+if (( ${#_t264_bad} == 0 )); then
+    ok "T264a every header address is refused and the refusal says header / 每一種標頭位址都被拒絕，而拒絕訊息說出了 header"
+else
+    bad "T264a these did not say header: $_t264_bad / 這些沒有說出 header：如上"
+fi
+
+# A real row address must still work. A fix that refused every --search-row
+# would pass the line above.
+# 一個真正的列位址仍然必須可用。一個「拒絕每一個 --search-row」的修法會通過上面那一行。
+"$CSV2" -contains 1.3.1 --search-row 1 -i "$TMP/t264.csv2" >/dev/null 2>&1
+if [[ $? == 0 ]]; then
+    ok "T264b a real row address still works / 真正的列位址仍然可用"
+else
+    bad "T264b --search-row 1 was refused / --search-row 1 被拒絕了"
+fi
+
+# NS. Round 92 asked for `-rownum` to be refused on a locating report, since
+# `--json` refuses it and the report accepts it in silence. The asymmetry is
+# real and the remedy was wrong: T15 asserts that `-rownum` does not shift
+# addressing by running exactly that pair, and refusing it would delete the way
+# that invariant is expressed. The invariant is older and load-bearing -- a flag
+# that "just prints one more column" quietly changing every address is the
+# failure it guards. So the report ACCEPTS it inertly and `--json` refuses it,
+# and both halves are asserted here so neither can drift.
+#
+# NS。第 92 回合要求在定位報告上拒絕 `-rownum`，因為 `--json` 拒絕它而報告靜默接受。那個不對稱是
+# 真的，而那個補救方向是錯的：T15 正是以「跑那一對」來斷言 `-rownum` 不會改變定址，拒絕它等於刪掉
+# 那個不變量被表達的方式。而那個不變量更早、也更承重——一個「只是多印一欄」的旗標安靜地改變每一個
+# 位址，正是它所防的失敗。因此報告**惰性地接受**它、而 `--json` 拒絕它，兩半都在這裡斷言，
+# 好讓哪一邊都不能漂走。
+_t264_plain=$("$CSV2" -contains 1. -i "$TMP/t264.csv2" 2>/dev/null)
+_t264_rown=$("$CSV2" -contains 1. -rownum -i "$TMP/t264.csv2" 2>/dev/null)
+"$CSV2" -contains 1. -rownum --json -i "$TMP/t264.csv2" >/dev/null 2>"$TMP/t264r.err"
+_t264_rj=$?
+if [[ $_t264_plain == $_t264_rown && -n $_t264_plain && $_t264_rj == 1 ]] \
+   && LC_ALL=C grep -q 'would be ignored' "$TMP/t264r.err"; then
+    ok "T264c -rownum is inert on the locating report and refused under --json / -rownum 在定位報告上是惰性的，而在 --json 下被拒絕"
+else
+    bad "T264c report_changed=$([[ $_t264_plain == $_t264_rown ]] && echo no || echo YES) json_rc=$_t264_rj / 實得如上"
+fi
+
+# ...and where it DOES something it must still be accepted: --filter emits
+# records, and a plain read emits records.
+# ……而在它**確實有作用**的地方仍然必須被接受：`--filter` 輸出的是紀錄，一般讀取輸出的也是紀錄。
+"$CSV2" -contains 1. -rownum --filter -i "$TMP/t264.csv2" >/dev/null 2>&1
+_t264_f=$?
+"$CSV2" -r -rownum -i "$TMP/t264.csv2" >/dev/null 2>&1
+_t264_p=$?
+if [[ $_t264_f == 0 && $_t264_p == 0 ]]; then
+    ok "T264d -rownum still works where records are emitted / 在輸出紀錄之處，-rownum 仍然可用"
+else
+    bad "T264d filter=$_t264_f plain=$_t264_p / 實得如上"
+fi
+
+# NV. The --a1 row is header rows + record number, not the physical line. The
+# fixture has two header rows, so record 1 is A1 row 3 -- and the two numbers
+# only differ once a header row exists, which is why a .csv2 is used here.
+# NV。`--a1` 的列號是「標頭列數 ＋ 紀錄號」，不是實體行號。這個 fixture 有兩列標頭，因此第 1 筆是
+# A1 的第 3 列——而那兩個數字只有在「有標頭列」時才會不同，那正是這裡用 .csv2 的原因。
+_t264_a1=$("$CSV2" -contains 1.3.1 --a1 -i "$TMP/t264.csv2" 2>/dev/null)
+if [[ $_t264_a1 == '1:2 [B3]'* ]]; then
+    ok "T264e the --a1 row is header rows plus the record number / --a1 的列號是標頭列數加紀錄號"
+else
+    bad "T264e got [$_t264_a1], wanted 1:2 [B3] / 實得如上"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

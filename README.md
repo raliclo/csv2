@@ -152,12 +152,23 @@ is there. The asymmetry exists because empty output cannot be told apart from
 "these rows are genuinely empty" -- the same reason `-get` past the end has
 always been an error.
 
-Record numbers count data records, not physical lines. Header addresses are
-`0` for `.csv`, and `0a`/`0b` for `.csv2`. `-contains` searches every column;
+Record numbers count data records, not physical lines.
+
+**A header address is something csv2 PRINTS, never something you write.** The
+locating report shows `0` for a `.csv` header and `0a`/`0b` for a `.csv2`'s two
+rows — and no verb accepts one. `-get 0:1`, `--search-cell 0a:1` and
+`--search-row 0` are all refused. To search header rows, use
+`--include-headers`. Until 2026-09-07 this sentence gave the two spellings with
+no such warning, sitting between `-get r:c` and `--search-cell R:C`, which are
+both things that take addresses.
+
+`-contains` searches every column;
 use `--search-cell R:C`, `--search-row R`, or `--search-column C` to restrict
 the search to one cell, record, or column. These scope options are mutually
-exclusive with EACH OTHER and require `-contains`; they combine freely with
-`--filter`, `-A`/`-B`/`-C`, `-rownum` and `--json`. On a `.csv2` a column name
+exclusive with EACH OTHER and require `-contains`; each of them pairs with
+`--filter`, `-A`/`-B`/`-C`, `-rownum` and `--json` — but those four are not all
+compatible with EACH other: `-rownum --json` is refused, and so is `-rownum` on
+a locating report. On a `.csv2` a column name
 must come from the ENGLISH header row.
 
 `--filter`, `-A`/`-B`/`-C` and `--normalize` also require `-contains`, and say
@@ -168,7 +179,21 @@ so when they are given without it. **A search that matches nothing still exits
 The locating report is `record:field`, TAB, column name, TAB, value. In the
 value a TAB is written `\t`, a newline `\n` and a backslash `\\`, so one line
 always describes one cell and the separator can never appear inside one.
-`--a1` adds the spreadsheet cell to the address: `2:2 [B3]`.
+`--a1` adds the spreadsheet cell to the address: `2:2 [B3]`. Its ROW is the
+header rows plus the record number — not the physical line — so a value holding a
+quoted newline shifts the two apart. It requires `-contains` and is refused with
+`--filter`, `-md` and `--json`. A1 is printed, never accepted: `-get C3` is
+refused like a header address.
+
+`-rownum` prepends a record-number column to RECORDS. On a locating report it
+is INERT — accepted and ignored — because the report's address already carries
+the record number and `-rownum` is output-side only: it must never shift what an
+address means. Under `--json` it is refused instead, because there it would not
+merely be inert: `--json` names fields rather than numbering them, so the column
+would have nowhere to go.
+
+The report's column-name field follows `--en`/`--zh` and defaults to English,
+including for a hit whose value came from a `.csv2`'s Chinese header row.
 
 `-A`/`-B`/`-C` do not add to that report — they REPLACE it with whole records,
 and put a `--` line between groups that are not adjacent. Groups that overlap
