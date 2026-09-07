@@ -432,17 +432,51 @@ csv2 --verify-index -i data.csv
 csv2 -contains needle --no-index -i data.csv
 ```
 
-Missing, stale, corrupt, or unsupported indexes are discarded in favour of a
-scan. `--verify-index` performs a full validation and exits non-zero when the
-sidecar is absent or invalid. `--no-index` disables both reading and writing
-the sidecar. `-contains` can use parallel search when the format and thresholds
-permit it; output is byte-identical to the single-threaded path.
+Missing, stale, corrupt, or unsupported indexes are **silently** discarded in
+favour of a scan. The run exits 0, the answer is correct, and nothing is printed
+on either stream — so an index you built for speed can be lost to one changed
+mtime and you will not be told. Reads stay right and get much slower. `-debug`
+is the only window onto this and prints `index hit` or the reason it did not:
+
+```text
+$ csv2 -mid 500,500 -debug -i data.csv
+index hit
+metrics: read_bytes=65536 file_bytes=2808905 peak_rss_bytes=9404416
+```
+
+`read_bytes` against `file_bytes` is the evidence that a window was seeked to
+rather than scanned for; a discarded index shows the whole file read.
+
+**Some verbs create a sidecar without being asked.** Above
+`CSV2_INDEX_MIN_BYTES`, `-tail` and any `-update … --in-place` write one beside
+the data, silently — `-r`, `-count`, `-head`, `-mid`, `-get` and `-contains` do
+not. Use `--no-index` to prevent it. Until 2026-09-07 this page mentioned
+non-creation for `-count` alone, which invited reading that as the general rule.
+
+**Editing maintains the index rather than invalidating it**, so a file under
+active editing keeps its sidecar useful. The exception is two concurrent
+`-append --in-place` runs, where the second warns that it could not update it.
+
+`--verify-index` checks the sidecar's own integrity — its checksum, header and
+shape — and exits non-zero when it is absent or invalid. It does **not** compare
+the index against the data, which is what its own failure text says and what
+this page said the opposite of until 2026-09-07 by calling it "a full
+validation". An unusable sidecar is left on disk unchanged; `--build-index`
+replaces it.
+
+`--build-index` ignores `CSV2_INDEX_MIN_BYTES` — an explicit request beats the
+heuristic — and combining it with `--no-index` is refused as a contradiction.
+`--no-index` disables both reading and writing the sidecar; the writing half
+matters only for the two verbs above.
+
+`-contains` can use parallel search when the format and thresholds permit it;
+output is byte-identical to the single-threaded path.
 
 Environment variables used for controlled testing and tuning:
 
 | Variable | Default | Purpose |
 |---|---:|---|
-| `CSV2_INDEX_MIN_BYTES` | 16 MiB | minimum file size for sidecar creation |
+| `CSV2_INDEX_MIN_BYTES` | 16 MiB | minimum file size for AUTOMATIC sidecar creation; `--build-index` ignores it |
 | `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | minimum size for parallel search |
 | `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | search chunk size |
 | `CSV2_PRETTY_MAX_BYTES` | 16 MiB | maximum material held by `--pretty` |

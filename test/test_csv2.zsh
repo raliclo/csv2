@@ -14934,6 +14934,103 @@ else
     bad "T255e h1=[$_t255_h1] h2=[$_t255_h2] / 實得如上"
 fi
 
+echo "--- T256: what the index section now claims / T256：索引那一節現在宣稱的事 ---"
+# Round 84 found the index implementation in better shape than its page. Every
+# case here is a sentence added because that round had to run the program to
+# learn it, and the fixture is sized to clear CSV2_INDEX_MIN_BYTES via the
+# override rather than by building a 16 MiB file -- the variable exists so the
+# threshold can be tested without one.
+#
+# 第 84 回合發現索引的**實作**比它那一頁健康得多。這裡每一個案例都對應一句「因為那個回合必須真的
+# 執行程式才學得到」而加進文件的話；fixture 的大小是用覆寫變數跨過 CSV2_INDEX_MIN_BYTES，而不是去
+# 造一個 16 MiB 的檔案——那個變數存在的理由，正是讓這個門檻不需要那種 fixture 就能被測試。
+{ print -r -- 'id,payload'
+  for _i in {1..4000}; do printf '%d,%s\n' $_i 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; done } > "$TMP/t256.csv"
+
+# MD: an explicit --build-index ignores the threshold. The variable is
+# documented as gating creation, and it gates the AUTOMATIC kind only.
+# MD：明確的 --build-index 不理會那個門檻。那個變數被記載為「管建立」，而它只管**自動**那一種。
+rm -f "$TMP/t256.csv.index"
+CSV2_INDEX_MIN_BYTES=999999999 "$CSV2" --build-index -i "$TMP/t256.csv" >/dev/null 2>&1
+if [[ -f "$TMP/t256.csv.index" ]]; then
+    ok "T256a --build-index builds below CSV2_INDEX_MIN_BYTES / --build-index 在門檻之下仍然建立"
+else
+    bad "T256a no sidecar was built / 沒有建立 sidecar"
+fi
+
+# ME: which verbs create one unasked, and which do not. Both halves matter --
+# a fix that stopped ALL automatic creation would satisfy a case that only
+# checked `-r`.
+# ME：哪些動詞會未經要求就建立，哪些不會。兩半都重要——一個「停掉所有自動建立」的改動，會讓一個
+# 只檢查 `-r` 的案例照樣通過。
+_t256_makes=()
+_t256_quiet=()
+for _v in '-r' '-count' '-head 3' '-mid 5,6' '-tail 3'; do
+    rm -f "$TMP/t256.csv.index"
+    CSV2_INDEX_MIN_BYTES=1000 "$CSV2" ${=_v} -i "$TMP/t256.csv" >/dev/null 2>&1
+    if [[ -f "$TMP/t256.csv.index" ]]; then _t256_makes+=("$_v"); else _t256_quiet+=("$_v"); fi
+done
+if [[ ${#_t256_makes} == 1 && $_t256_makes[1] == '-tail 3' && ${#_t256_quiet} == 4 ]]; then
+    ok "T256b -tail creates a sidecar unasked and the other four do not / -tail 會未經要求建立 sidecar，另外四個不會"
+else
+    bad "T256b creates=[$_t256_makes] quiet=[$_t256_quiet] / 實得如上"
+fi
+
+# And it is silent about it. The round's point was not that it happens but that
+# nothing says so: a 500 MB CSV gets a file written beside it with no output.
+# 而且它對此不出聲。那個回合的重點不是「它會發生」，而是「沒有東西說它發生了」：一個 500 MB 的
+# CSV 旁邊會多出一個檔案，而沒有任何輸出。
+rm -f "$TMP/t256.csv.index"
+CSV2_INDEX_MIN_BYTES=1000 "$CSV2" -tail 3 -i "$TMP/t256.csv" >/dev/null 2>"$TMP/t256.err"
+if [[ $? == 0 && ! -s "$TMP/t256.err" ]]; then
+    ok "T256c and it says nothing on stderr while doing it / 而它做這件事時 stderr 上什麼都不說"
+else
+    bad "T256c rc=$? stderr=[$(tr '\n' '|' < "$TMP/t256.err")] / 實得如上"
+fi
+
+# MF: a damaged sidecar is discarded SILENTLY, and the answer stays correct.
+# Both halves are the finding: correct output is why nobody notices, and silence
+# is why nobody can notice.
+# MF：壞掉的 sidecar 會被**靜默地**捨棄，而答案仍然正確。兩半合起來才是那個發現：答案正確是「沒有
+# 人注意到」的原因，而沉默是「沒有人**能**注意到」的原因。
+"$CSV2" --build-index -i "$TMP/t256.csv" >/dev/null 2>&1
+printf 'X' | dd of="$TMP/t256.csv.index" bs=1 seek=200 conv=notrunc 2>/dev/null
+_t256_want=$("$CSV2" -mid 500,500 --no-index -i "$TMP/t256.csv" 2>/dev/null)
+_t256_got=$("$CSV2" -mid 500,500 -i "$TMP/t256.csv" 2>"$TMP/t256b.err")
+_t256_rc=$?
+if [[ $_t256_rc == 0 && $_t256_got == $_t256_want && ! -s "$TMP/t256b.err" ]]; then
+    ok "T256d a damaged sidecar is discarded silently and the answer is unchanged / 損毀的 sidecar 被靜默捨棄，而答案不變"
+else
+    bad "T256d rc=$_t256_rc got=[$_t256_got] want=[$_t256_want] err=$(wc -c < "$TMP/t256b.err" | tr -d ' ')B / 實得如上"
+fi
+
+# MG: -debug is the only window onto which path ran. The README now shows this
+# output, so it has to keep existing.
+# MG：`-debug` 是唯一看得見「走了哪條路」的窗口。README 現在展示了這段輸出，因此它必須繼續存在。
+"$CSV2" --build-index -i "$TMP/t256.csv" >/dev/null 2>&1
+_t256_dbg=$("$CSV2" -mid 500,500 -debug -i "$TMP/t256.csv" 2>&1 >/dev/null)
+if [[ $_t256_dbg == *'index hit'* && $_t256_dbg == *'read_bytes='* && $_t256_dbg == *'file_bytes='* ]]; then
+    ok "T256e -debug reports index hit and the read_bytes/file_bytes evidence / -debug 回報 index hit 與 read_bytes/file_bytes 這個證據"
+else
+    bad "T256e got [${_t256_dbg//$'\n'/|}] / 實得如上"
+fi
+
+# MH: --verify-index checks the sidecar, not the data, and says so; and
+# --build-index with --no-index is a contradiction rather than a silent winner.
+# MH：--verify-index 檢查的是 sidecar 而不是資料，而且它自己這樣說；以及 --build-index 搭配
+# --no-index 是一個「矛盾」，而不是其中一方安靜地勝出。
+printf 'X' | dd of="$TMP/t256.csv.index" bs=1 seek=200 conv=notrunc 2>/dev/null
+_t256_ver=$("$CSV2" --verify-index -i "$TMP/t256.csv" 2>&1)
+_t256_ver_rc=$?
+_t256_conflict=$("$CSV2" --build-index --no-index -i "$TMP/t256.csv" 2>&1)
+_t256_conflict_rc=$?
+if [[ $_t256_ver_rc != 0 && $_t256_ver == *'not compared against the data'* \
+      && $_t256_conflict_rc == 1 && $_t256_conflict == *'contradict'* ]]; then
+    ok "T256f --verify-index says it did not compare against the data, and --no-index with --build-index is refused / --verify-index 說明它沒有與資料比對，而 --no-index 搭配 --build-index 被拒絕"
+else
+    bad "T256f ver_rc=$_t256_ver_rc conflict_rc=$_t256_conflict_rc ver=[${_t256_ver:0:80}] / 實得如上"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

@@ -351,15 +351,43 @@ csv2 --verify-index -i data.csv
 csv2 -contains needle --no-index -i data.csv
 ```
 
-缺少、過期、損毀或不支援的索引會被捨棄並改用掃描。`--verify-index` 會完整驗證，
-sidecar 不存在或無效時以非零結束。`--no-index` 同時停用讀取與寫入 sidecar。
+缺少、過期、損毀或不支援的索引會被**靜默地**捨棄並改用掃描。那次執行以 0 結束、答案正確，
+而兩條串流都不印任何東西——因此一個你為了速度而建的索引，可能因為一次 mtime 變動就失去，
+**而沒有人會告訴你**。讀取仍然正確，只是慢上許多。`-debug` 是唯一看得見這件事的窗口，它會印出
+`index hit`，或印出它沒有用到索引的理由：
+
+```text
+$ csv2 -mid 500,500 -debug -i data.csv
+index hit
+metrics: read_bytes=65536 file_bytes=2808905 peak_rss_bytes=9404416
+```
+
+`read_bytes` 對上 `file_bytes`，就是「這個視窗是 seek 過去的、不是掃出來的」的證據；一個被捨棄的
+索引會顯示整個檔案都被讀過。
+
+**有些動詞會在你沒有要求的情況下建立 sidecar。** 在 `CSV2_INDEX_MIN_BYTES` 之上，`-tail` 與任何
+`-update … --in-place` 都會在資料旁邊寫出一個，而且是**靜默的**——`-r`、`-count`、`-head`、`-mid`、
+`-get` 與 `-contains` 不會。要阻止它請用 `--no-index`。直到 2026-09-07 之前，這一頁只為 `-count`
+提到「不會寫」，那讓人把它讀成通則。
+
+**編輯會維護索引，而不是讓它失效**，因此一個正在被編輯的檔案，它的 sidecar 仍然有用。例外是兩個
+並行的 `-append --in-place`，其中第二個會警告它無法更新索引。
+
+`--verify-index` 檢查的是 sidecar **自身的**完整性——它的檢查碼、檔頭與形狀——並在它不存在或無效時
+以非零結束。它**不會**把索引拿去與資料比對，那是它自己的失敗訊息說的話，而這一頁直到 2026-09-07
+之前用「完整驗證」說了相反的事。無法使用的 sidecar 會原封不動留在磁碟上；`--build-index` 會取代它。
+
+`--build-index` **不理會** `CSV2_INDEX_MIN_BYTES`——明確的要求勝過啟發式——而把它與 `--no-index`
+併用會以「兩者互相矛盾」被拒絕。`--no-index` 同時停用讀取與寫入 sidecar；「寫入」那一半只對上面
+那兩個動詞有意義。
+
 在格式與門檻允許時，`-contains` 可使用平行搜尋，輸出與單執行緒路徑逐位元相同。
 
 測試與調校使用的環境變數：
 
 | 變數 | 預設值 | 用途 |
 |---|---:|---|
-| `CSV2_INDEX_MIN_BYTES` | 16 MiB | 建立 sidecar 的最小檔案大小 |
+| `CSV2_INDEX_MIN_BYTES` | 16 MiB | **自動**建立 sidecar 的最小檔案大小；`--build-index` 不理會它 |
 | `CSV2_PARALLEL_MIN_BYTES` | 16 MiB | 平行搜尋的最小檔案大小 |
 | `CSV2_PARALLEL_CHUNK_BYTES` | 4 MiB | 搜尋區塊大小 |
 | `CSV2_PRETTY_MAX_BYTES` | 16 MiB | `--pretty` 保留材料的上限 |
