@@ -77,6 +77,23 @@ T237d 要證明的是「`.csv` 與 `.csv2` 仍然拒絕插入空列，因為副�
 **矯正：暫存複本一律保留原檔名的辨識部分。** 這棵樹上「副檔名決定格式」是核心設計，任何把
 fixture 複製到新名字的動作都在冒著改變格式的險；用 `w_$name` 這種前綴，不要用固定的暫存名。
 
+**2026-09-07，第十二次，與上面那一次逐字相同。** 為 T254 寫的 fixture 用 `cp t254.csv t254.orig`
+留了一份「原始」複本，然後拿 `t254.orig` 當 `-encrypt` 的輸入——沒有 `.csv` 副檔名，於是它被當成
+`.lines` 讀，`secret` 這一欄不存在，六次執行全部沒有產生輸出檔。
+
+**症狀不是「測試失敗」，是六行 `head: ... No such file or directory`**——抓到它的是 run_checked 的
+shell 層級失敗掃描，不是那個案例的斷言。那個案例自己算出「3 個 KEYID 裡有 1 個相異」並照實回報，
+它對「它拿到的東西」的描述完全正確。
+
+同一條、同一個機制、同一個修法（複本保留副檔名），相隔三週。這一次值得記的是**它被什麼抓到**：
+不是斷言，是關口 1 的那支腳本——而如果我當時只看 `PASS/FAIL` 那一行，我會看到「FAIL 1」而不知道
+原因，因為那六行在 stderr 上、不在任何一個案例的訊息裡。
+
+Twelfth, and a verbatim repeat of the seventh: a scratch copy named `.orig` lost the suffix, so
+the file was read as `.lines`, the column did not exist, and six runs produced no output. What
+caught it was the shell-level failure scan in run_checked, not the case's own assertion -- the
+case computed its answer from what it actually got and reported it correctly.
+
 ### 共同形狀
 
 **測試碰到的是環境，不是被測物。** 三次都一樣：程式在各平台行為相同，不同的是量尺。

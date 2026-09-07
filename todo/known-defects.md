@@ -9853,3 +9853,90 @@ The unkeyed digest is unsalted sha256 of the value, verified byte for byte again
 The page calls it one-way and never says it is dictionary-reversible for a guessable column,
 which is the entire reason to supply a key. The key file's requirements live only in an error
 message -- one that is better written than the section, and reachable only by making a mistake.
+
+---
+
+# 第 82 回合（2026-09-07，加解密）—— 第 4 類**不是空的**
+
+## LU. `--backup` 被 `-encrypt --in-place` 靜默忽略，明文就此消失（程式缺陷）
+
+**狀態：已修（2026-09-07）——`runSelect` 現在在建立 sink 之前呼叫 `makeInPlaceBackup`，由 T254a／T254b／T254c 釘住。** / Status: fixed.
+
+```sh
+printf 'id,secret\n1,alpha\n2,beta\n' > b1.csv
+head -c 32 /dev/urandom > key.bin
+csv2 -encrypt secret -keyfile key.bin -i b1.csv --in-place --backup
+```
+
+實得：
+
+```
+rc=0   stdout=0 bytes   stderr=0 bytes
+sha 前=6e2b9d50e4374b8b   後=c248cce2fffb5292
+目錄內容：b1.csv key.bin        ← 沒有 b1.csv.bak
+```
+
+**對照組成立**：`csv2 -update 1:2 x -i c.csv --in-place --backup` 會建立 `c.csv.bak`。所以
+`--backup` 本身是有效的，它只在這一條路上被忽略。
+
+**這是這四個回合裡最嚴重的一個，而嚴重性不在於機率，在於不可逆。** 一般編輯弄丟備份，原值還在你
+腦子裡或在版本控制裡；**加密弄丟備份，明文就真的沒有了**——那正是使用者打出 `--backup` 的理由。
+而它 rc=0、兩條串流零位元組：沒有任何東西告訴他那個旗標沒有生效。
+
+`--backup` is silently ignored by `-encrypt --in-place`: exit 0, nothing on either stream, the
+plaintext overwritten and no `.bak` beside it. The same flag works for an ordinary edit. It
+fails on the one path where losing the original is irreversible, which is the path the user
+typed the flag for.
+
+## LV. 「`KEYID` 標識那把金鑰，而它本身不是金鑰」對 `:enc:` 為假——那句是我寫的
+
+**狀態：已修（2026-09-07）——README 現在用一張表分開兩種 KEYID，由 T254d 釘住。** / Status: fixed, pinned by T254d.
+
+```sh
+for i in 1 2 3 4 5; do csv2 -encrypt secret -keyfile k.bin -i d.csv -o e$i.csv; done
+# KEYID：17186327 / 69c9d04d / 87f3729b / 1e1f43eb / d2d3914b   ← 同一把金鑰，五次全異
+for i in 1 2 3; do csv2 -hash secret -keyfile k.bin -i d.csv -o h$i.csv; done
+# KEYID：9e0e169e / 9e0e169e / 9e0e169e                          ← :hmac: 穩定
+```
+
+程式自己的錯誤訊息把設計說得很清楚：
+
+> the key you gave derives 56a784c0 **against this file's stored salt**
+
+那是一個對「金鑰 ＋ 每檔隨機 salt」取的指紋，因此它只在**單一檔案之內**標識那把金鑰。相信我那句話
+的人，會寫一支「依 KEYID 把檔案分組、找出哪把金鑰開得了它們」的腳本——**那支腳本什麼也找不到，
+而且每個檔案看起來都需要不同的金鑰。**
+
+## LW. 標記的第四個欄位是 **salt**，不是 nonce——而我把它寫成 nonce，因此描述了一個壞掉的設計
+
+**狀態：已修（2026-09-07）——改為 `name:enc:KEYID:SALT`，並明說真正的 nonce 是每格一個；T254e 釘住「相等性不洩漏」這個由它保證的性質。** / Status: fixed.
+
+我在 2026-09-07 的第 81 回合修正裡寫下 `name:enc:KEYID:NONCE`。那個名字是我**從觀察猜的**，而程式
+在它自己的兩則錯誤訊息裡都叫它 **salt**（「this header's **salt** has been altered」）。
+
+**這比一個命名瑕疵嚴重。** 照我寫的讀，那是「一個 nonce 覆蓋整個欄位」的 ChaCha20-Poly1305——那是
+**災難性的 nonce 重用**，任何只讀這一頁的安全審閱者都該據此否決它。真正的 AEAD nonce 是**每格一個**、
+藏在各自的密文裡（回報者以「固定 28 bytes 的額外開銷（12 + 16）」與「相同明文得到不同密文」證明了
+這件事）。
+
+**實作是對的。文件描述了一個這支工具並不具有的、壞掉的設計。**
+
+這是連續第二個回合，發現的是我前一輪「修正」時寫下的句子。第 80 回合是 LP（一個行不通的換算），
+這一輪是 LV 與 LW。兩次的共同形狀：**我從觀察推出一個名字或一條規則，把它當成事實寫下，而程式
+自己的錯誤訊息裡就有正確答案。**
+
+The fourth field is the salt, not a nonce; the program says so in its own error messages. As
+written the page describes one nonce covering a whole column under ChaCha20-Poly1305 -- textbook
+catastrophic reuse -- which the implementation does not do. Second round running in which the
+finding is a sentence I wrote while fixing the previous round, and both times the correct answer
+was already in an error message I did not read.
+
+## LX. `-encrypt` 沒有洩漏面說明，而 `-hash` 有
+
+**狀態：已記載（2026-09-07）——新增一段洩漏面說明，並寫出 `--in-place`／重複加密／對未加密欄位解密的行為。** / Status: documented.
+
+`-encrypt --in-place` 可用但沒有記載（保護那一節的每個範例都用 `-o`）；對已加密的欄位再加密會被
+拒絕（訊息清楚，未記載）；對「未加密」或「已雜湊」的欄位解密的行為未記載。而最需要的是一段與
+`-hash` 同等水準的洩漏面說明：密文長度是明文長度加 28 且沒有 padding、空儲存格分辨得出來、其他
+欄位與紀錄數與列序都是明文、欄位名稱本身也是明文——以及**相等性不會洩漏**，那正是它相對於 `-hash`
+的具體優勢，而現在讀者只能自己發現。

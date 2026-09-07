@@ -928,6 +928,22 @@ func runSelect(_ o: Options) throws {
     defer { plan.source.close() }
 
     var pendingError: Error?
+    // Before the sink, because the sink is what replaces the file.
+    //
+    // Three write paths called this and the fourth did not, and the fourth is
+    // the one that runs `-encrypt --in-place`. `--backup` was accepted, exited
+    // 0, printed nothing on either stream, overwrote the plaintext and left no
+    // `.bak` -- on the single path where losing the original cannot be undone,
+    // which is the path the caller typed the flag for. An ordinary edit backed
+    // up correctly the whole time, so nothing looked wrong from outside. LU.
+    //
+    // 放在 sink 之前，因為 sink 正是「取代那個檔案」的東西。
+    //
+    // 有三條寫入路徑呼叫了它，第四條沒有——而第四條正是跑 `-encrypt --in-place` 的那一條。
+    // `--backup` 被接受、以 0 結束、兩條串流都不印任何東西、覆寫了明文，而旁邊沒有 `.bak`
+    // ——**偏偏在那條「原檔一旦失去就無法復原」的路上**，而那正是呼叫端打出這個旗標的理由。
+    // 一般編輯自始至終都正確地備份，因此從外面看不出任何異狀。LU。
+    if o.backup, o.inPlace, let path = o.input { try makeInPlaceBackup(path) }
     let sink = try makeSink(o)
     var aborted = true
     defer { if aborted { sink.abort() } }

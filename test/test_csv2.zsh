@@ -14743,6 +14743,109 @@ if [[ -r "$HOME/.multissh/generated/mldsa44-ed25519.key.raw" ]]; then
     fi
 fi
 
+echo "--- T254: --backup on the protection path, and what the markers mean / T254：保護路徑上的 --backup，以及那些標記的意義 ---"
+# LU is the worst defect these rounds have turned up, and the reason is not
+# probability: an ordinary edit that loses its backup loses a value you still
+# know, while an ENCRYPTION that loses its backup loses the plaintext for good.
+# The flag was accepted, exit 0, nothing on either stream, and no `.bak`. Three
+# write paths called makeInPlaceBackup and the fourth -- the one -encrypt uses
+# -- did not, so an ordinary edit backed up correctly the whole time and nothing
+# looked wrong from outside.
+#
+# LU 是這幾個回合裡最嚴重的缺陷，而理由不是機率：一般編輯弄丟備份，弄丟的是一個你還知道的值；
+# 而**加密**弄丟備份，弄丟的是明文本身。那個旗標被接受、rc=0、兩條串流都沒有輸出，而沒有 `.bak`。
+# 有三條寫入路徑呼叫了 makeInPlaceBackup，第四條——`-encrypt` 走的那一條——沒有，因此一般編輯自始至終
+# 都正確地備份，從外面看不出任何異狀。
+printf 'id,secret\nA,alpha\nB,beta\n' > "$TMP/t254.csv"
+# Both copies keep the .csv suffix. A scratch copy named `.orig` is read as
+# `.lines` -- one field per line -- so `-encrypt secret` finds no such column
+# and the run fails for a reason that has nothing to do with what is being
+# tested. That is mistakes entry 1's seventh occurrence repeated verbatim.
+# 兩份複本都保留 .csv 副檔名。一個叫 `.orig` 的暫存複本會被當成 `.lines` 讀——每行一個欄位——於是
+# `-encrypt secret` 找不到那一欄，而該次執行失敗的理由與被測的事情毫無關係。那是 mistakes 第 1 條
+# 第七次的逐字重演。
+cp "$TMP/t254.csv" "$TMP/t254.orig.csv"
+head -c 32 /dev/urandom > "$TMP/t254key.bin"
+"$CSV2" -encrypt secret -keyfile "$TMP/t254key.bin" -i "$TMP/t254.csv" --in-place --backup \
+    >/dev/null 2>"$TMP/t254.err"
+_t254_rc=$?
+if [[ $_t254_rc == 0 ]] && cmp -s "$TMP/t254.orig.csv" "$TMP/t254.csv.bak"; then
+    ok "T254a -encrypt --in-place --backup keeps the plaintext in INPUT.bak / -encrypt --in-place --backup 把明文留在 INPUT.bak"
+else
+    bad "T254a rc=$_t254_rc bak=$([[ -f "$TMP/t254.csv.bak" ]] && echo present || echo MISSING) err=[$(tr '\n' '|' < "$TMP/t254.err")] / 實得如上"
+fi
+
+# And the file really was encrypted, so T254a is not passing on a run that did
+# nothing. A backup of an unchanged file would satisfy the assertion above.
+# 而那個檔案確實被加密了，因此 T254a 不是在一次「什麼都沒做」的執行上通過的。一份「沒有變動的檔案」
+# 的備份，也會滿足上面那個斷言。
+if ! cmp -s "$TMP/t254.orig.csv" "$TMP/t254.csv" && LC_ALL=C grep -q 'secret:enc:' "$TMP/t254.csv"; then
+    ok "T254b and the input really was encrypted in place / 而那個輸入確實被就地加密了"
+else
+    bad "T254b the input was not encrypted: [$(LC_ALL=C head -1 "$TMP/t254.csv")] / 實得如上"
+fi
+
+# No --backup means no .bak. A fix that always backed up would pass T254a.
+# 不給 --backup 就不該有 .bak。一個「一律備份」的修法也會讓 T254a 通過。
+printf 'id,secret\nA,alpha\n' > "$TMP/t254b.csv"
+"$CSV2" -encrypt secret -keyfile "$TMP/t254key.bin" -i "$TMP/t254b.csv" --in-place >/dev/null 2>&1
+if [[ ! -f "$TMP/t254b.csv.bak" ]]; then
+    ok "T254c without --backup no .bak is written / 沒有給 --backup 就不會寫出 .bak"
+else
+    bad "T254c a .bak appeared without --backup / 沒有給 --backup 卻出現了 .bak"
+fi
+
+# LV: an :enc: KEYID is a fingerprint over the key AND the file's salt, so it
+# changes on every encryption with one unchanged key, while an :hmac: KEYID does
+# not. The README said KEYID identified the key -- a sentence added the previous
+# day -- and a script grouping files by it would find nothing.
+# LV：`:enc:` 的 KEYID 是對「金鑰**與**該檔 salt」取的指紋，因此同一把金鑰每次加密都不同，而 `:hmac:`
+# 的 KEYID 不會。README 說 KEYID 標識那把金鑰——那句是前一天加上去的——而一支依它把檔案分組的腳本
+# 什麼也找不到。
+_t254_enc_ids=()
+_t254_mac_ids=()
+for _i in 1 2 3; do
+    "$CSV2" -encrypt secret -keyfile "$TMP/t254key.bin" -i "$TMP/t254.orig.csv" -o "$TMP/t254e$_i.csv" 2>/dev/null
+    _t254_enc_ids+=("$(LC_ALL=C head -1 "$TMP/t254e$_i.csv" | LC_ALL=C sed 's/.*:enc:\([^:]*\):.*/\1/')")
+    "$CSV2" -hash secret -keyfile "$TMP/t254key.bin" -i "$TMP/t254.orig.csv" -o "$TMP/t254h$_i.csv" 2>/dev/null
+    _t254_mac_ids+=("$(LC_ALL=C head -1 "$TMP/t254h$_i.csv" | LC_ALL=C sed 's/.*:hmac:\(.*\)/\1/')")
+done
+_t254_enc_uniq=$(print -rl -- $_t254_enc_ids | sort -u | wc -l | tr -d ' ')
+_t254_mac_uniq=$(print -rl -- $_t254_mac_ids | sort -u | wc -l | tr -d ' ')
+if [[ $_t254_enc_uniq == 3 && $_t254_mac_uniq == 1 ]]; then
+    ok "T254d an :enc: KEYID differs per encryption while an :hmac: KEYID is stable / :enc: 的 KEYID 每次加密都不同，而 :hmac: 的穩定不變"
+else
+    bad "T254d enc distinct=$_t254_enc_uniq/3 hmac distinct=$_t254_mac_uniq/3 / 實得如上"
+fi
+
+# LW: equality does not leak. Two records holding the SAME value must encrypt to
+# different bytes -- which is what per-cell nonces buy, and the property the
+# README's "NONCE" wording would have destroyed had the program worked the way
+# that page described.
+# LW：相等性不會洩漏。兩筆持有**相同值**的紀錄必須加密成不同的位元組——那正是「每格一個 nonce」買到的
+# 東西，也正是「若程式真的照那一頁寫的 NONCE 那樣運作」會被摧毀的性質。
+printf 'id,secret\nA,same\nB,same\n' > "$TMP/t254eq.csv"
+"$CSV2" -encrypt secret -keyfile "$TMP/t254key.bin" -i "$TMP/t254eq.csv" -o "$TMP/t254eq_out.csv" 2>/dev/null
+_t254_c1=$("$CSV2" -get 1:2 -i "$TMP/t254eq_out.csv" 2>/dev/null)
+_t254_c2=$("$CSV2" -get 2:2 -i "$TMP/t254eq_out.csv" 2>/dev/null)
+if [[ -n $_t254_c1 && $_t254_c1 != $_t254_c2 ]]; then
+    ok "T254e equal plaintexts encrypt to different bytes, so equality does not leak / 相同的明文加密成不同的位元組，因此相等性不會洩漏"
+else
+    bad "T254e c1=[${_t254_c1:0:24}] c2=[${_t254_c2:0:24}] / 實得如上"
+fi
+
+# The round trip, on values holding a comma, a quote and a newline -- the three
+# things a CSV writer has to escape. Encryption must not be where they are lost.
+# 往返測試，值裡含逗號、引號與換行——那是 CSV 寫出端必須跳脫的三樣東西。加密不可以是它們消失的地方。
+printf 'id,secret\n1,"a,b"\n2,"say ""hi"""\n3,"x\ny"\n' > "$TMP/t254rt.csv"
+"$CSV2" -encrypt secret -keyfile "$TMP/t254key.bin" -i "$TMP/t254rt.csv" -o "$TMP/t254rt_e.csv" 2>/dev/null
+"$CSV2" -decrypt secret -keyfile "$TMP/t254key.bin" -i "$TMP/t254rt_e.csv" -o "$TMP/t254rt_d.csv" 2>/dev/null
+if cmp -s "$TMP/t254rt.csv" "$TMP/t254rt_d.csv"; then
+    ok "T254f a comma, a quote and a newline survive encrypt then decrypt byte for byte / 逗號、引號與換行在加密後解密仍逐位元相同"
+else
+    bad "T254f round trip differs: [$(cmp "$TMP/t254rt.csv" "$TMP/t254rt_d.csv" 2>&1)] / 實得如上"
+fi
+
 echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

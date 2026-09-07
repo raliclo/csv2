@@ -329,8 +329,40 @@ because that is where the protection marker lives. `-md` editing genuinely does
 require `-t`; these do not.
 
 Protected columns are marked in the header: `name:hash`, `name:hmac:KEYID` for a
-keyed hash, and `name:enc:KEYID:NONCE` for a ciphertext. `KEYID` identifies the
-key without being it.
+keyed hash, and `name:enc:KEYID:SALT` for a ciphertext.
+
+The fourth field is a per-file **salt**, not a nonce. Until 2026-09-07 this page
+called it NONCE, which describes one nonce covering a whole column under
+ChaCha20-Poly1305 — catastrophic reuse, and a design csv2 does not have. The
+real AEAD nonces are per cell, inside each ciphertext; that is why the same
+plaintext encrypts to different bytes in two rows of one column.
+
+The two `KEYID`s are not the same kind of thing:
+
+| Marker | `KEYID` |
+|---|---|
+| `name:hmac:KEYID` | Stable for a given key. The same key gives the same value on every file and every run |
+| `name:enc:KEYID:SALT` | A fingerprint over the key AND that file's salt, so it differs on every encryption even with one unchanged key |
+
+So an `:enc:` KEYID identifies the key only WITHIN one file. Do not group files
+by it to find which key opens them — that finds nothing, and every file appears
+to need a different key. A wrong key is reported by decryption, which says both
+fingerprints and names the salt.
+
+**What an encrypted column still leaks.** Ciphertext length is the plaintext's
+plus 28 bytes with no padding, so value lengths are visible and an empty cell is
+distinguishable. The column's own name, every other column, the record count and
+the row order are all in the clear. What does NOT leak is equality: two records
+holding the same value encrypt to different bytes, which is the concrete
+advantage over `-hash`.
+
+`-encrypt`, `-decrypt` and `-hash` accept `--in-place`, and `--backup` applies to
+them. Until 2026-09-07 `--backup` was silently ignored there — exit 0, nothing on
+either stream, the plaintext overwritten and no `.bak` — on the one path where
+losing the original cannot be undone. Encrypting a column that is already
+encrypted is refused, and so is decrypting a column that was never encrypted or
+was hashed rather than encrypted; hashing is one-way, so there is nothing to
+return.
 
 Edits that would put a raw value into a protected column are refused — and that
 covers more verbs than "edit" suggests:
