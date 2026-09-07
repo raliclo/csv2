@@ -11130,3 +11130,254 @@ verified: a fresh zsh runs …/deeper/bin/csv2, and it is the file just installe
 3. **「install.zsh says which of the two you got」** 可以讀成「它回報它選了哪個目錄」或「它告訴你拿到
    的是哪一種可達性」。是前者。**而後者恰恰是後來被證明會出錯的那件事**，所以這句話很不巧。
 4. **`--prefix DIR` 的 `DIR/bin` 需不需要事先存在**——它會建立。
+
+---
+
+# 第 97 回合（2026-09-08，「何時該停用」那張表）—— 第 4 類有一個吞掉編輯的洞
+
+一個全新的 `claude -p` 行程，只讀 `README.md` 與 `README.zh-TW.md`，主題是那張「不提供什麼／
+改用什麼」的表：每一列都做兩半——先用一個「沒讀過這張表的人」的方式去試那件不提供的事，再
+**逐字**照著「改用什麼」那一欄做一遍。
+
+第 3、4、5、7 列在直接測試下毫髮無傷。第 6 列照著做**不會產生任何轉換**。而在表格之外，
+它撞到了這一頁的整套「我們拒絕，而不是安靜地做錯事」哲學裡唯一的一個洞。
+
+A fresh `claude -p`, README-only, worked the "not offered / what to do instead"
+table in both halves: try the missing thing the way someone who had not read
+the row would, then follow the recipe verbatim. Rows 3, 4, 5 and 7 survived
+without a scratch. Row 6's recipe produces no conversion. And outside the
+table it hit the one hole in this page's "we refuse rather than silently do the
+wrong thing" philosophy.
+
+## OP. `-count` 靜默丟棄它旁邊的每一個旗標，包括五個編輯動詞
+
+**狀態：待修。**
+
+`-count` 印出計數、以 0 結束，而**同一條命令列上要求的其他事情一件也沒有發生**——沒有訊息，
+沒有非零狀態。最重的一種是它吞掉一次 `--in-place` 編輯：
+
+```console
+$ printf 'pkg,license,maintainer\nzlib,MIT,alice\ntransMITter,BSD,bob\nlibfoo,MIT,carol\nmitmproxy,Apache,dave\nbar,BSD,SMITH\n' > f.csv
+$ md5 -q f.csv
+b8effa8de6d933d8c11a457a9a94ac63
+$ csv2 -count -update 1:1 'CLOBBERED' -i f.csv --in-place
+5
+$ echo $?
+0
+$ md5 -q f.csv
+b8effa8de6d933d8c11a457a9a94ac63          # 一個位元組都沒動
+$ csv2 -get 1:1 -i f.csv
+zlib
+```
+
+**五個編輯動詞全部如此**，順序也不影響（`-update … -count` 與 `-count -update …` 相同）：
+
+| 命令 | 印出 | rc | 檔案 |
+|---|---:|---:|---|
+| `csv2 -count -update 1:1 X -i e.csv --in-place` | `5` | 0 | 未改變 |
+| `csv2 -count -append 'a,b,c' -i e.csv --in-place` | `5` | 0 | 未改變 |
+| `csv2 -count -delete 1 -i e.csv --in-place` | `5` | 0 | 未改變 |
+| `csv2 -count -insert 2 'x,y,z' -i e.csv --in-place` | `5` | 0 | 未改變 |
+| `csv2 -count -update-where MIT ZZ -i e.csv --in-place` | `5` | 0 | 未改變 |
+
+讀取端同樣被吞：`-head 2`、`-mid 2,3`、`-get 1:1`、`-t`、`-rownum`、`--json` 一律只印出 `5`，
+rc=0。`-o` 也是——**目標檔連建立都沒有**：
+
+```console
+$ csv2 -count -o out.csv -i f.csv
+5
+$ ls out.csv
+ls: out.csv: No such file or directory
+```
+
+而搜尋被吞掉的那一種，形狀最像一個真實的錯誤答案：**它回答了另一個問題**。
+
+```console
+$ csv2 -contains MIT -count -i f.csv
+5
+$ csv2 -contains ZZZNOMATCH -count -i f.csv
+5
+```
+
+兩次都是「這個檔案有幾筆」，而使用者問的是「有幾筆含 MIT」。5 是一個看起來完全合理的數字，
+沒有任何東西說它答的不是那個問題。
+
+不是所有組合都這樣——有三個**確實**拒絕了，而它們正好證明這個洞是遺漏而非設計：
+
+```console
+$ csv2 -md -count -i f.csv
+csv2: -md needs -t: a Markdown table has no shape without a header row
+$ csv2 --search-column license -count -i f.csv
+csv2: a search scope needs -contains
+```
+
+**為什麼這一條比它的體積重要。** 這一頁拒絕了 `-rownum --json`、`-md --json`、
+`--physical --json`、`-get --json`、兩個 `--search-*` 併用、`--build-index --no-index`，而
+「編輯」那一節拒絕 `--dry-run` 底下的編輯動詞，理由白紙黑字寫著：**「而不是回傳一個可能被
+誤讀成『沒有變更』的空輸出」**。`-count` 是唯一一個既不拒絕、也不履行它同伴的旗標。因此正確
+的修法是一則拒絕，不是一行文件。
+
+`-count` prints a number, exits 0, and NOTHING ELSE asked for on that command
+line happens -- no message, no non-zero status. The heaviest form swallows an
+`--in-place` edit: the file is byte-identical afterwards. All five edit verbs
+behave this way, in either order. Reads are swallowed too (`-head`, `-mid`,
+`-get`, `-t`, `-rownum`, `--json`), and so is `-o` -- the destination file is
+never even created. The search form is the one that reads as a wrong answer
+rather than as nothing happening: `-contains ZZZNOMATCH -count` returns the
+file's total, so the user asking "how many records mention MIT" gets a
+perfectly plausible number to a question they did not ask. Three combinations
+DO refuse (`-md`, `--search-column`, and a bare `--filter`), which is what
+shows this is an omission rather than a design. The page refuses
+`-rownum --json`, `-md --json`, `--physical --json`, `-get --json`, two
+`--search-*` together and `--build-index --no-index`, and the Editing section
+refuses edit verbs under `--dry-run` in so many words -- "rather than returning
+empty output that could be mistaken for 'no changes'". `-count` is the single
+flag that neither refuses nor honours its companions. The fix is a refusal.
+
+## OQ. `-col` 用在 `-delete` 之外時，訊息從不提到 `-col`
+
+**狀態：待修。**
+
+```console
+$ csv2 -col license -i f.csv
+csv2: unexpected argument "license"; csv2 takes flags only
+csv2：非預期的參數「license」；csv2 只接受旗標
+$ echo $?
+1
+```
+
+`-col` **是**一個真旗標，只是它屬於 `-delete`。這則訊息指控的是那個值，而使用者打錯的是旗標
+的所在位置。這一頁上其他每一則錯用旗標的訊息都會指名那個旗標。
+
+`-col` IS a real flag; it belongs to `-delete`. The message accuses the value
+while the user's mistake was the flag's context, and every other wrong-flag
+message on this page names the flag.
+
+## OR. 第 6 列的做法照字面執行不會轉換任何東西
+
+**狀態：待修（文件）。**
+
+那一列寫的是：「把紀錄寫到一個**沒有副檔名**的路徑，自己撰寫第二列表頭，然後把它讀回來」。
+第三步照字面做，得到的是 `.lines` 模式：
+
+```console
+$ csv2 -r -t -i p.csv -o step1
+$ csv2 -insert 2 '套件,版本,授權' -i step1 --in-place
+$ csv2 -r -i step1                      # 「把它讀回來」
+pkg,version,license
+套件,版本,授權
+zlib,1.3.1,MIT
+zstd,1.5.6,BSD
+```
+
+四行原封不動，包含兩列表頭——它本來就是這樣，什麼都沒有被轉換。真正完成轉換的那一步是**改名
+成 `.csv2`**，而那一步不在這一列裡：
+
+```console
+$ cp step1 final.csv2 && csv2 -r -i final.csv2
+zlib,1.3.1,MIT
+zstd,1.5.6,BSD
+```
+
+同一列還少了兩件事：第一步需要 `-t`（「write the records」讀起來像是不要表頭，而不加 `-t`
+會靜默丟掉表頭列），以及**反方向**——這一列的標題是「在 `.csv` 與 `.csv2` 之間轉換」，內文卻
+只描述了「加上一列」，從未描述刪掉一列（`-delete 2`）。
+
+Following row 6 literally converts nothing: reading the suffix-less path back
+gives `.lines`, which is what it already was. The step that converts is the
+rename, and the row does not mention it. It is also missing `-t` on step one
+(without it the header row is dropped silently) and the entire reverse
+direction, though the row is titled "between `.csv` and `.csv2`".
+
+## OS. 兩個 jq 的做法，一個沒有 jq、一個在真實資料上會失敗
+
+**狀態：待修（文件）。**
+
+1. **整頁沒有出現過任何一個 jq 運算式。** 第 1 列與第 2 列都以 `--json` 加 jq 為正解，兩列都
+   只說「用 jq」。而最直觀的那個寫法是錯的——meta 那兩行會變成 `null` 混進欄位清單：
+
+   ```console
+   $ csv2 -r --json -i pkgs.csv | jq -r '.fields.license'
+   null
+   MIT
+   BSD
+   null
+   ```
+
+   要的是 `jq -r 'select(.record) | .fields.license'`。
+
+2. **`--json` 在遇到非 UTF-8 位元組時是拒絕的**，而 `-get` 在同一格上照常運作：
+
+   ```console
+   $ csv2 -r --json -i u.csv
+   {"error":{"code":"invalid-input","message":"record 2, field 2 is not valid UTF-8, and JSON is text: --json would put U+FFFD where those bytes are …"}}
+   $ csv2 -get 2:2 -i u.csv | od -c
+   0000000  377 376  \n
+   ```
+
+   那則訊息本身很好，還指向了 `-get`。但**表格不知道這件事**：它為兩列開的藥方，在
+   `-get` 處理得了的資料上會失效。
+
+No jq expression appears anywhere on the page although `--json`-plus-jq is the
+prescribed workaround for two rows, and the obvious expression is wrong -- the
+two meta lines arrive as `null`s in the column. Separately, `--json` refuses a
+file with non-UTF-8 bytes that `-get` reads fine, so the prescription fails on
+data the tool itself handles; the refusal points at `-get`, but the table does
+not.
+
+## OT. CRLF 會被靜默正規化，而 README 一次都沒提過 CRLF
+
+**狀態：待修（文件）。**
+
+```console
+$ printf 'a,b\r\n1,2\r\n' > crlf.csv
+$ csv2 -r -debug -i crlf.csv 2>&1 | grep -i crlf
+csv2: … INFO  input contained CRLF line endings; normalised to LF
+$ grep -ci crlf README.md
+0
+```
+
+`README.md` 裡「CRLF」出現 **0 次**。「輸出的紀錄分隔符永遠是 LF」暗示了這件事但沒有說出來，
+而那則 INFO 只在 `-debug` 底下看得到，任何地方都沒有記載。對一個要在 Windows 節點上跑的工具，
+這是讀者會直接撞上的事。
+
+`README.md` contains the string CRLF zero times. "Output record separators are
+always LF" implies the normalisation without stating it, and the INFO line that
+announces it is visible only under `-debug` and documented nowhere.
+
+## OU. `#` 的拒絕被寫成「在檔案開頭」，實際上是任何位置
+
+**狀態：待修（文件）。**
+
+README 第 421 行：「A file with `# ...` **at the top** is refused by naming the `#`」。實際上
+中段的 `#` 同樣被拒絕，而且訊息更好——它指名了紀錄與行號：
+
+```console
+$ printf 'a,b\n1,2\n#note\n3,4\n' > m.csv
+$ csv2 -r -i m.csv > /dev/null 2> e; echo $?
+1
+$ cat e
+csv2: record 2 (line 3) starts with '#'. csv2 has no comment syntax: …
+```
+
+這一次程式比文件好。而「at the top」讓讀者有理由相信中段的 `#` 是可以的——那是一個會在半個
+檔案讀進去之後才發現的假設。
+
+Line 421 says a file with `#` "at the top" is refused. A `#` anywhere is
+refused, with a better message that names the record and the line. The tool is
+ahead of the page here, and "at the top" invites the reader to assume a
+mid-file `#` is fine.
+
+## OV. 五處不清楚
+
+**狀態：待修（文件）。**
+
+1. **第 6 列的「write the records」要不要 `-t`。** 兩者都不會報錯，產生的檔案不同。
+2. **第 2 列的「use `--json` and one pass of your own」不是一份做法**，它只是說工具不幫忙。
+3. **第 1 列的「`-get` per cell」沒有說迴圈的上界從哪裡來**（是 `-count`），也沒有警告
+   直觀的 jq 寫法會混進 `null`。
+4. **第 2 列沒有重複「沒有命中也是 rc=0」這件事。** 它寫在約 700 行之前的「讀取與選取」一節。
+   而第 2 列正是使用者在 `-contains mit` 找不到 `MIT` 之後**降落的那一列**——`-contains mit`
+   在 stdout 與 stderr 上都是空的、rc=0，與「沒有這筆資料」完全無法區分。
+5. **第 7 列沒有說「活下來的是哪一個」**（最後改名的那個），也沒有說檔案仍然是有效的而不是
+   壞掉的。這兩件事都會改變讀者要擔心到什麼程度。
