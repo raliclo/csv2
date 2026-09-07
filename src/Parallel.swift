@@ -470,7 +470,8 @@ func runParallelSearch(_ o: Options) throws {
 
     let ctx = EmitContext(
         format: plan.format, headers: headers, withHeader: o.withHeader,
-        rownum: o.rownum, zh: o.zh, physical: o.physical, a1: o.a1,
+        rownum: o.rownum, zh: o.zh, physical: o.physical,
+        mdLineOffset: plan.mdLineOffset, a1: o.a1,
         jsonASCII: o.jsonASCII, enOnly: o.enOnly, preserveRaw: true)
 
     if o.json {

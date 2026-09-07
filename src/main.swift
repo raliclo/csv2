@@ -2291,6 +2291,12 @@ struct InputPlan {
     /// 原封不動地寫回成它送達時的那一行。放在這裡而不是全域，是因為 Swift 6 直接拒絕可變的全域
     /// 狀態——而它拒對了：這東西屬於**某一個**輸入，而 openInput 正是那個輸入的事實被組起來的地方。
     var mdLayout: MarkdownLayout? = nil
+    /// Added to a parsed record's line to get the line in the DOCUMENT, and 0
+    /// for every input that is not a Markdown table -- where the two are the
+    /// same number and adding zero is not a special case to remember.
+    /// 加到「解析出來的紀錄行號」上，就得到**文件**裡的行號；對每一個不是 Markdown 表的輸入
+    /// 而言它是 0——那裡兩者本來就是同一個數字，而加 0 不是一個需要記住的特例。
+    var mdLineOffset: Int = 0
 }
 
 /// The `-log` path against the other files this run names. Called before the
@@ -2386,7 +2392,7 @@ func openInput(_ o: Options) throws -> InputPlan {
         }
         return InputPlan(format: t.headerRows == 2 ? .csv2 : .csv, headerRows: t.headerRows,
                          source: ByteSource(bytes: t.bytes), describedPath: path,
-                         mdLayout: t.layout)
+                         mdLayout: t.layout, mdLineOffset: t.lineOffset)
     }
     guard let fmt = Format.from(path: path) else {
         // No suffix: one column, no header rows, the line's bytes verbatim.

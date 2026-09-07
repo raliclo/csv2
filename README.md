@@ -83,8 +83,8 @@ csv2 -contains MIT -i data.csv
 csv2 -contains MIT --filter -t -o matches.csv -i data.csv
 ```
 
-For the repository fixture, JSON metadata reports the number of data records
-and matches:
+For the repository fixture, JSON metadata reports how far the record numbering
+got and how many cells matched:
 
 ```text
 $ csv2 -contains busybox --json -i test/fixtures/TARGET_PACKAGES.csv
@@ -104,7 +104,7 @@ Available reading options:
 -mid a,b           inclusive record range; either end may be omitted
 -t                 include header rows in output
 -rownum            prepend a record-number column
---physical         include the physical starting line in addresses
+--physical         include the source line in addresses; not with --json
 --a1               include spreadsheet A1 notation in addresses
 -get r:c           print one cell value
 -count             print how many data records the file has
@@ -151,7 +151,12 @@ whenever the file HAS a header row, so a `.lines` file — which has none — ca
 no `header` key at all, and a script that reads column order from it must expect
 that rather than an empty list. To get the order WITHOUT the file's records, take
 the first line alone: `csv2 -head 1 --json -i f.csv | head -1`. There is no
-header-only verb.
+header-only verb. With no header row the `fields` object is keyed by position
+as decimal strings — `{"1":"one"}` — so a script written against column NAMES
+gets numbers there, not an error.
+
+The meta line's `fields` is the number of fields per record: 3 for a
+three-column CSV, and 0 for a `.lines` file, where the count is not fixed.
 
 `--json-ascii` escapes non-ASCII characters. `-md` and `--json` are mutually
 exclusive and say so; there is no single run that emits both.
@@ -169,11 +174,20 @@ three names are about PADDING only — none of them changes a value:
 which is what it is the default for. `--pretty` (a different flag) holds the
 selected table in memory and is bounded by `CSV2_PRETTY_MAX_BYTES`.
 
-When a table is selected out of a document with `--md-table N`, the `line`
-number on each `--json` record line is relative to THAT TABLE, not to the
-document: the first data row is `line 2` however far down the file the table
-begins. A script that maps those back onto the document has to add the table's
-own offset, which csv2 does not report.
+When a table is selected out of a document with `--md-table N`, the `line` on
+each `--json` record is the line in the DOCUMENT — the same number your editor
+shows — and `--physical`'s `@L` is that same number. A record on document line
+27 reports 27, however far down the file the table begins.
+
+Between 2026-09-06 and 09-07 this said the opposite: the number was relative to
+the table, and this page told you to add the table's offset yourself. That
+advice did not work — the `|---|` separator is a line in your document and not
+a line in the translated table, so the offset was +25 for data rows and +24 for
+the header, and the obvious implementation was off by one. The number is now
+the document's and there is nothing to add.
+
+`--physical` cannot be combined with `--json`; it adds to the address in the
+locating report, which `--json` does not produce. Use `--json`'s own `line`.
 
 Use `--en` or `--zh` to choose the header language in human-readable output.
 `--version`/`-V` prints the build version; `--help`/`-h` prints the complete
@@ -270,7 +284,10 @@ and refuses to overwrite an existing backup. Under `--json`, refusals are one
 JSON error object on stderr with a stable `code`, `message`, and `message_zh`;
 the exit status remains 1.
 
-An edit whose destination is Markdown MUST pass `-md` — it is not optional.
+An edit whose destination is Markdown MUST pass BOTH `-md` and `-t`, and
+neither is optional — `-t` is required for the same reason it is when reading,
+because a Markdown table has no shape without its header row. The examples in
+this section are CSV edits and show neither.
 Editing a `.md` file without it is refused, naming the suffix, and the file is
 left alone. With `--md-table N --in-place`, only the selected table is replaced;
 surrounding prose is carried across and all output line endings are LF.
@@ -389,7 +406,7 @@ re-reading them.
 |---|---|
 | column projection (`-cols`) | `--json` and `jq`, or `-get` per cell |
 | case-insensitive matching | nothing does — `-contains mit` finds no `MIT`. Use `--json` and one pass of your own |
-| scoping a search to ONE column | nothing does. `-contains` matches a substring in EVERY column, so `-contains MIT` also finds `transMITter` — see the last example below. Counting with it is silently wrong the moment the word appears elsewhere |
+| a search that ignores which column it is in | `-contains` matches a substring in EVERY column, so `-contains MIT` also finds `transMITter` — see the last example below. Use `--search-column license` to scope it, or `--search-row`/`--search-cell`. Until 2026-09-07 this row said scoping was not offered at all, and warned that counting would be "silently wrong", 260 lines below the section documenting the flag that fixes it |
 | skipping `#` comment lines | nothing does, and deliberately: a `#` is data and `#id` is a legal column name, so skipping one would mean guessing which lines are data. The refusal names the `#` |
 | a header-only read | `csv2 -head 1 --json -i f.csv \| head -1` — the meta line carries `header`; no verb returns the names alone |
 | converting between `.csv` and `.csv2` | refused on purpose; write the records out and read them back in |

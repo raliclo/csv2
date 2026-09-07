@@ -57,6 +57,16 @@ struct EmitContext: Sendable {
     var rownum: Bool
     var zh: Bool
     var physical: Bool
+    /// Added to a record's parsed line to give the DOCUMENT's line, and 0 for
+    /// every input that is not a Markdown table. Both places a line reaches a
+    /// caller -- `--json`'s `line` and `--physical`'s `@L` -- add it, because
+    /// a number that is right in one of them and wrong in the other is worse
+    /// than one that is wrong in both: the two would disagree and neither would
+    /// say which was which. LM.
+    /// 加到紀錄「解析出來的行號」上，就得到**文件**的行號；對每一個不是 Markdown 表的輸入是 0。
+    /// 行號抵達呼叫端的**兩個**出口——`--json` 的 `line` 與 `--physical` 的 `@L`——都要加它，因為
+    /// 「一個對、一個錯」比「兩個都錯」更糟：那樣兩者會互相矛盾，而沒有任何一方說得出哪個才對。LM。
+    var mdLineOffset: Int = 0
     var a1: Bool
     var jsonASCII: Bool
     var enOnly: Bool
@@ -327,7 +337,7 @@ final class ReportEmitter: RecordEmitter {
                 label = "\(r.number)"
             }
             var addr = "\(label):\(idx + 1)"
-            if ctx.physical { addr += "@L\(r.line)" }
+            if ctx.physical { addr += "@L\(r.line + ctx.mdLineOffset)" }
             // The A1 row is the record number plus the header rows above it,
             // which is the row a spreadsheet puts the record on.
             //
@@ -587,12 +597,12 @@ final class JSONEmitter: RecordEmitter {
                     parts.append("\"header_zh\":\(JSONOut.string(ctx.headers[1].fields[idx].value, asciiOnly: ctx.jsonASCII))")
                 }
                 parts.append("\"value\":\(try carry(r.fields[idx].value, record: r.number, field: idx + 1))")
-                parts.append("\"line\":\(r.line)")
+                parts.append("\"line\":\(r.line + ctx.mdLineOffset)")
                 sink.write("{" + parts.joined(separator: ",") + "}\n")
             }
             return
         }
-        var parts = ["\"record\":\(r.number)", "\"line\":\(r.line)"]
+        var parts = ["\"record\":\(r.number)", "\"line\":\(r.line + ctx.mdLineOffset)"]
         // Only when context is on. Without it every emitted record matched, so
         // the key would be constant true on every line -- noise that a consumer
         // has to read and can never learn anything from, and a change to output

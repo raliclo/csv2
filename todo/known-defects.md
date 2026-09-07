@@ -9685,3 +9685,87 @@ cause is that this verb does not take the Markdown path at all. The same file ac
 `-update`, so the format is evidently fine. The README lists `-update-where` among the edit
 verbs and says an edit may use `-md` when the destination is Markdown; together those promise
 something that does not work.
+
+---
+
+# 第 80 回合（2026-09-07）—— 四項，全部親手重現
+
+第 4 類（工具壞了）是**空的**。以下四項都是文件與呈現的問題，而其中兩項是「一個數字被冠上一個
+它不是的名字」，那與工具壞掉的差別只在誰該被修。
+
+## LM. `--physical` 在 `--md-table` 底下回報的是表格相對行號，而它的名字說那是實體行
+
+**狀態：已修（2026-09-07）——兩個出口都改為回報文件行號，由 T250a／T250b／T250c 釘住。** / Status: fixed; both surfaces now report the document line.
+
+```sh
+{ for i in $(seq 1 24); do echo "prose line $i"; done
+  echo '| pkg | version |'; echo '|---|---|'
+  echo '| pkg01 | 1.0 |'; } > big.md
+csv2 -contains pkg01 --physical --md-table 1 -i big.md
+```
+
+實得 `1:1@L2`，而 `pkg01` 在**文件的第 27 行**。
+
+**這比 `--json` 的 `line` 嚴重。** `line` 只是個數字，讀者還得自己決定它相對於什麼；`--physical`
+這個旗標的**整個名字與它被記載的用途**都是「實體行」——它承諾了「不是相對的那一個」，然後給了
+相對的那一個。一個錯的數字冠上一個說它是對的名字，比一個沒有名字的錯數字更難發現。
+
+順帶：`--physical` 與 `--json` 不能併用（訊息清楚、rc=1），而 README 完全沒說。要「機器可讀 ＋
+文件行號」的人會先撞上這一條，然後才撞上 LM。
+
+`--physical` reports a TABLE-relative line under `--md-table` while its name and its documented
+purpose both say physical. That is worse than `--json`'s `line`, which at least does not claim
+to be the one thing it is not.
+
+## LN. 「什麼時候該停止使用它」那張表說「限定一欄搜尋」做不到，而 README 早 260 行就記載了它
+
+**狀態：已修（2026-09-07）——那一列改寫，並由 T252a 釘住，好讓它不能再悄悄過時。** / Status: fixed, and pinned by T252a so the row cannot go stale silently again.
+
+```sh
+printf 'pkg,license\nzlib,MIT\ntransMITter,BSD\n' > lic.csv
+csv2 -contains MIT -i lic.csv                          # 兩筆：MIT 與 transMITter
+csv2 -contains MIT --search-column license -i lic.csv  # 一筆
+```
+
+那張表寫的是「沒有任何東西做得到……用它計數會**安靜地錯**」。**兩句都不成立**，而第二句主動叫人
+不要去找一個就在同一份文件裡的解法。
+
+**這是我 2026-09-06 才編輯過的同一張表。** 我修掉了被指出的那一列（`-count`），沒有把其餘各列
+重跑一遍——而那張表的前言，是我自己改寫成「每一列都是 2026-09-06 實測的」。**那句話在我寫下它
+的時候就是假的。** 一張宣稱自己被重新量測過的表，比一張沒有這種宣稱的更危險。
+
+## LO. `--json` 結尾 meta 的 `records` 是「到達過的最大紀錄號」，不是紀錄數
+
+**狀態：已記載（2026-09-07），語意未改。** 那個數字定義一致、有 12 處測試釘著，而第 80 回合自己也把它歸在「文件寫錯」而非「工具壞了」。README 現在說的是它實際是什麼，T251a 釘住「records 與輸出筆數不同」的那個情況。/ Status: documented, semantics unchanged; T251a pins the case where it differs from the emitted count.
+
+```sh
+csv2 -r      --json -i twenty.csv | tail -1   # {"meta":{"records":20,...}}   檔案 20 筆
+csv2 -mid 5,8  --json -i twenty.csv | tail -1 # {"meta":{"records":8,...}}    輸出 4 筆
+csv2 -mid 15,16 --json -i twenty.csv | tail -1 # {"meta":{"records":16,...}}  輸出 2 筆
+```
+
+8 既不是總數（20）也不是輸出數（4）。README 對它唯一的說明把它當成筆數。
+
+**它在全檔讀取時是對的**——而那正是它活下來的原因：最常見的用法會給出正確答案，於是沒有人去
+問它在別的用法下是什麼。
+
+## LP. README 說「加上那張表自己的偏移量」，而那不是一個數字
+
+**狀態：已消失（2026-09-07）——隨 LM 一併解決：行號現在就是文件的，沒有東西要加。** / Status: gone with LM -- the number is the document's, so there is nothing to add.
+
+那句話是我在 2026-09-06 為了說明 LM 的近親（`--json` 的 `line` 是表格相對）而寫的。實測：
+
+| 東西 | csv2 的 line | 文件行 | 偏移 |
+|---|---:|---:|---:|
+| 標頭列 | 1 | 25 | **+24** |
+| 第 1 筆資料 | 2 | 27 | **+25** |
+| 第 20 筆資料 | 21 | 46 | **+25** |
+
+`|---|` 分隔列存在於文件裡，卻不計入 csv2 的行號。因此「找到表格起始行、加上去」——那句話最直接
+的實作——對標頭列會差一行。
+
+**一條寫進文件、卻其實做不到的解法，比沒有解法更糟**，因為讀者會依賴它。而 T248e 只釘住了「第一筆
+資料是 line 2」，沒有釘住我描述的那個換算——**測試涵蓋了那個事實，沒有涵蓋那個建議。**
+
+A workaround written into the documentation that does not actually work is worse than no
+workaround, because a reader relies on it. T248e pinned the fact and not the advice.

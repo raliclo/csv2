@@ -14392,19 +14392,36 @@ else
     bad "T248d default and preserve differ: [$(tr '\n' '|' < "$TMP/t248d.md")] vs [$(tr '\n' '|' < "$TMP/t248e.md")] / 實得如上"
 fi
 
-# `line` under `--md-table N` counts within the TABLE. The first data row is
-# line 2 however far down the document the table starts -- here it starts at
-# document line 5, and the record still reports 2. A script mapping these back
-# onto the document has to add the offset itself, and cannot get it from csv2.
-# `--md-table N` 底下的 `line` 是在**那張表**之內計數的。無論那張表從文件多下面開始，第一筆
-# 資料列都是 line 2——這裡它從文件第 5 行開始，而那筆紀錄仍然回報 2。要把它們對回文件的腳本
-# 必須自己加上偏移量，而且無法從 csv2 取得它。
+# `line` under `--md-table N` is the DOCUMENT's line. The fixture puts its one
+# data row on document line 7, and that is the number reported.
+#
+# This case asserted the OPPOSITE for one day. It pinned line 2 -- the
+# table-relative number -- and it was right about the program while the program
+# was wrong about the document, which is the state a test cannot distinguish on
+# its own. Round 80 found it from the outside: given a 48-line document it was
+# told its record was on line 2, and the offset this suite's README then told it
+# to add did not work.
+#
+# The literal 7 is deliberate. Computing the expected value from the fixture
+# would reproduce whatever off-by-one the code has; a number counted by hand
+# from the printf above cannot agree with a wrong implementation by construction.
+#
+# `--md-table N` 底下的 `line` 就是**文件**的行號。這個 fixture 把它唯一的資料列放在文件第 7 行，
+# 而那正是被回報的數字。
+#
+# 這個案例曾有一天斷言**相反**的事。它釘住 line 2——那個表格相對的數字——而它對「程式」的描述是
+# 正確的，同時程式對「文件」的描述是錯的；那正是一個測試靠自己分辨不出來的狀態。第 80 回合是從
+# 外面發現的：給它一份 48 行的文件，它被告知自己的紀錄在第 2 行，而這份 README 當時叫它加的那個
+# 偏移量行不通。
+#
+# 那個字面上的 7 是刻意的。從 fixture 去「算」出預期值，會把程式裡的任何差一錯誤一起重現；而一個
+# 從上面那行 printf 用手數出來的數字，在構造上就不可能與一個錯的實作一致。
 printf '# Doc\n\ntext\n\n| pkg | version |\n|---|---|\n| zlib | 1.3.2 |\n' > "$TMP/t248f.md"
 _t248_line=$("$CSV2" -r --json --md-table 1 -i "$TMP/t248f.md" 2>/dev/null | LC_ALL=C grep '"record":1')
-if [[ $_t248_line == *'"line":2'* ]]; then
-    ok "T248e --json line is table-relative, not document-relative / --json 的 line 相對於表格，而不是相對於文件"
+if [[ $_t248_line == *'"line":7'* ]]; then
+    ok "T248e --json line is the document's line, not the table's / --json 的 line 是文件的行號，不是表格的"
 else
-    bad "T248e got [$_t248_line] / 實得如上"
+    bad "T248e got [$_t248_line], wanted \"line\":7 / 實得如上，預期 \"line\":7"
 fi
 
 # `-md` on a Markdown destination is mandatory, and the refusal must leave the
@@ -14516,6 +14533,117 @@ if (( ${#_py_unguarded} == 0 )); then
     ok "T249c every file invoking python3 also guards on its presence / 每個呼叫 python3 的檔案都同時檢查了它是否存在"
 else
     bad "T249c unguarded python3 in: ${_py_unguarded} / 實得如上"
+fi
+
+echo "--- T250: document line numbers for a table inside a document / T250：文件裡的表格，行號是文件的行號 ---"
+# LM and LP. `--physical`'s whole name says it reports the line in the source,
+# and under `--md-table` it reported the line in the TRANSLATED table -- a wrong
+# number under a name that says it is the right one, which is harder to catch
+# than a wrong number with no name at all.
+#
+# The fixture is written so the expected values can be counted by eye: 24 prose
+# lines, header on 25, separator on 26, so data records start at 27. Those
+# literals are used rather than computed, for the reason given at T248e.
+#
+# LM 與 LP。`--physical` 的整個名字就是在說它回報的是「來源裡的行號」，而在 `--md-table` 底下它
+# 回報的是**翻譯後那張表**裡的行號——一個錯的數字冠上一個說它是對的名字，那比一個沒有名字的錯數字
+# 更難抓到。
+#
+# 這個 fixture 是刻意寫成「預期值可以用眼睛數出來」的：24 行散文、標頭在 25、分隔列在 26，因此資料
+# 從 27 開始。那些數字是直接寫死而不是算出來的，理由與 T248e 相同。
+{ for _i in {1..24}; do print -r -- "prose line $_i"; done
+  print -r -- '| pkg | version |'
+  print -r -- '|---|---|'
+  print -r -- '| pkg01 | 1.0 |'
+  print -r -- '| pkg02 | 2.0 |' } > "$TMP/t250.md"
+_t250_json=$("$CSV2" -r --json --md-table 1 -i "$TMP/t250.md" 2>/dev/null)
+if [[ $_t250_json == *'"record":1,"line":27'* && $_t250_json == *'"record":2,"line":28'* ]]; then
+    ok "T250a --json reports the document's line for each record / --json 為每一筆回報文件的行號"
+else
+    bad "T250a got [${_t250_json//$'\n'/|}] / 實得如上"
+fi
+
+# The two surfaces must agree. A number that is right in --json and wrong in
+# --physical is worse than one wrong in both: the two would disagree and nothing
+# would say which to believe.
+# 兩個出口必須一致。一個在 --json 對、在 --physical 錯的數字，比兩者都錯更糟：那樣它們會互相矛盾，
+# 而沒有任何東西說得出該相信哪一個。
+_t250_phys=$("$CSV2" -contains pkg02 --physical --md-table 1 -i "$TMP/t250.md" 2>&1)
+if [[ $_t250_phys == *'@L28'* ]]; then
+    ok "T250b --physical reports the same document line / --physical 回報同一個文件行號"
+else
+    bad "T250b got [${_t250_phys//$'\n'/|}] / 實得如上"
+fi
+
+# A `<br>` header is ONE line in the document and TWO in the translation, so the
+# offset carries a `- headerRows` term. Without it this fixture would be off by
+# one, and only here -- the ordinary single-header case would still pass.
+# `<br>` 形式的標頭在文件裡是**一行**、在翻譯裡是**兩行**，因此那個偏移量帶著一個 `- headerRows`
+# 項。少了它，這個 fixture 會差一行，而且**只有這裡**會——一般的單列標頭仍然會通過。
+{ print -r -- 'intro'
+  print -r -- ''
+  print -r -- '| pkg<br>套件 | version<br>版本 |'
+  print -r -- '|---|---|'
+  print -r -- '| zlib | 1.3.2 |' } > "$TMP/t250b.md"
+_t250_br=$("$CSV2" -r --json --md-table 1 -i "$TMP/t250b.md" 2>/dev/null | LC_ALL=C grep '"record":1')
+if [[ $_t250_br == *'"line":5'* ]]; then
+    ok "T250c a two-row <br> header still gives the document's line / <br> 形式的雙列標頭仍給出文件行號"
+else
+    bad "T250c got [$_t250_br], wanted \"line\":5 / 實得如上，預期 \"line\":5"
+fi
+
+# Nothing that is not a Markdown table may move. The offset is 0 there, and a
+# case that only checked the .md side would pass with a constant added to every
+# input in the program.
+# 任何「不是 Markdown 表」的東西都不可以動。那裡的偏移是 0，而一個只檢查 .md 那一側的案例，會在
+# 「程式對每一種輸入都加了一個常數」的情況下照樣通過。
+printf 'pkg\na\nb\n' > "$TMP/t250.csv"
+_t250_csv=$("$CSV2" -r --json -i "$TMP/t250.csv" 2>/dev/null | LC_ALL=C grep '"record":2')
+if [[ $_t250_csv == *'"line":3'* ]]; then
+    ok "T250d a plain CSV's line is unchanged / 一般 CSV 的行號沒有改變"
+else
+    bad "T250d got [$_t250_csv] / 實得如上"
+fi
+
+# --physical with --json is refused. Undocumented until round 80 needed both.
+# --physical 與 --json 併用會被拒。直到第 80 回合同時需要這兩者，這件事都沒有被記載。
+"$CSV2" -r --json --physical --md-table 1 -i "$TMP/t250.md" >/dev/null 2>"$TMP/t250.err"
+if [[ $? == 1 ]] && LC_ALL=C grep -q 'physical' "$TMP/t250.err"; then
+    ok "T250e --physical with --json is refused, naming the flag / --physical 與 --json 併用被拒，且指名了那個旗標"
+else
+    bad "T250e rc=$? err=[$(tr '\n' '|' < "$TMP/t250.err")] / 實得如上"
+fi
+
+echo "--- T251: what --json's trailing records actually counts / T251：--json 結尾的 records 到底數的是什麼 ---"
+# It is how far the record NUMBERING got, not how many records were emitted and
+# not the file's total. For a whole-file read those three coincide, which is why
+# nothing noticed: the common case gives the right answer to the wrong question.
+# 它是「紀錄編號走到了哪裡」，不是輸出了幾筆，也不是檔案的總數。全檔讀取時這三者重合，而那正是
+# 沒有人發現的原因：最常見的用法，對一個錯的問題給出了正確的答案。
+{ print -r -- 'pkg'; for _i in {1..20}; do printf 'p%02d\n' $_i; done } > "$TMP/t251.csv"
+_t251_all=$("$CSV2" -r --json -i "$TMP/t251.csv" 2>/dev/null | tail -1)
+_t251_mid=$("$CSV2" -mid 5,8 --json -i "$TMP/t251.csv" 2>/dev/null | tail -1)
+_t251_emitted=$("$CSV2" -mid 5,8 --json -i "$TMP/t251.csv" 2>/dev/null | LC_ALL=C grep -c '"record":')
+if [[ $_t251_all == *'"records":20'* && $_t251_mid == *'"records":8'* && $_t251_emitted == 4 ]]; then
+    ok "T251a records is 8 for a window that emitted 4 out of 20 / 一個從 20 筆中輸出 4 筆的視窗，records 是 8"
+else
+    bad "T251a all=[$_t251_all] mid=[$_t251_mid] emitted=$_t251_emitted / 實得如上"
+fi
+
+echo "--- T252: the flags the \"stop using this\" table used to deny / T252：那張「停止使用」表曾經否認的旗標 ---"
+# LN. That table said scoping a search to one column was not offered, and warned
+# that counting would be "silently wrong", 260 lines below the section that
+# documents --search-column. It is tested here so the row cannot go stale again
+# without something failing.
+# LN。那張表說「把搜尋限定在一欄」不提供，還警告計數會「安靜地錯」——而記載了 --search-column 的
+# 段落就在它上面 260 行處。這裡把它測起來，好讓那一列不能再一次悄悄過時而沒有東西失敗。
+printf 'pkg,license\nzlib,MIT\ntransMITter,BSD\n' > "$TMP/t252.csv"
+_t252_all=$("$CSV2" -contains MIT -i "$TMP/t252.csv" 2>/dev/null | wc -l | tr -d ' ')
+_t252_one=$("$CSV2" -contains MIT --search-column license -i "$TMP/t252.csv" 2>/dev/null | wc -l | tr -d ' ')
+if [[ $_t252_all == 2 && $_t252_one == 1 ]]; then
+    ok "T252a --search-column scopes the search, so counting is not silently wrong / --search-column 確實限定了範圍，因此計數不會安靜地錯"
+else
+    bad "T252a unscoped=$_t252_all scoped=$_t252_one / 實得如上"
 fi
 
 echo

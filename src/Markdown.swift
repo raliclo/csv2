@@ -196,7 +196,7 @@ extension MarkdownIn {
     /// 接起來，因此一個「切得開兩半」的標頭儲存格說出這個檔案來自兩列標頭的格式，而切不開的那個
     /// 說它來自 `.csv`。每一個標頭儲存格都必須一致：一個「這一欄切得開、那一欄切不開」的檔案是有
     /// 歧義的，而這個工具面對歧義的做法是指名它，不是替它挑一個。
-    static func translate(path: String, table wanted: Int?) throws -> (bytes: [UInt8], headerRows: Int, layout: MarkdownLayout) {
+    static func translate(path: String, table wanted: Int?) throws -> (bytes: [UInt8], headerRows: Int, layout: MarkdownLayout, lineOffset: Int) {
         guard let data = FileManager.default.contents(atPath: path) else {
             throw fault("cannot open input file: \(path)", "無法開啟輸入檔：\(path)")
         }
@@ -339,7 +339,40 @@ extension MarkdownIn {
         var out: [UInt8] = []
         try appendRow(chosen.header, headerRows: headerRows, format: wire, into: &out)
         for r in chosen.rows { try appendRow(r.1, headerRows: 1, format: wire, into: &out) }
-        return (out, headerRows, layout)
+
+        // What has to be added to a parsed record's line to get the DOCUMENT's.
+        //
+        // The translated bytes are a table and nothing else, so the parser
+        // numbers them from 1 and a caller holding a 48-line document was told
+        // its record was on line 2. The document line is the only line that
+        // exists for that caller, and until 2026-09-07 csv2 reported the other
+        // one -- under `--physical`, whose entire name says it is not doing
+        // that. LM.
+        //
+        // One integer is enough, and that is worth stating because the README
+        // briefly told readers to compute it themselves and got it wrong: the
+        // `|---|` separator is a line in the document and is NOT a line in the
+        // translation, so "find the table and add where it starts" is off by
+        // one for the header. Anchoring on the separator removes the special
+        // case -- data record N is always the separator's line plus N -- and
+        // `headerAt + 1 - headerRows` is that same number expressed from what
+        // is already in hand. The `- headerRows` term is for a `<br>` header,
+        // which is one line in the document and two in the translation. LP.
+        //
+        // 要得到**文件**的行號，必須加到「解析出來的紀錄行號」上的那個數。
+        //
+        // 翻譯後的位元組就只是一張表，因此 parser 從 1 開始編號，而一個手上拿著 48 行文件的呼叫端，
+        // 被告知他的紀錄在第 2 行。對那個呼叫端而言，文件的行號是**唯一存在**的行號；而直到
+        // 2026-09-07 為止，csv2 回報的是另一個——還是在 `--physical` 底下，而那個旗標的整個名字
+        // 就是在說它不會這樣做。LM。
+        //
+        // 一個整數就夠，而這件事值得寫出來，因為 README 曾短暫地叫讀者自己算、而且算錯了：`|---|`
+        // 分隔列在文件裡是一行，在翻譯裡**不是**一行，所以「找到那張表、加上它的起始位置」對標頭會
+        // 差一行。改以**分隔列**為錨點就沒有特例——第 N 筆資料永遠是分隔列的行號加 N——而
+        // `headerAt + 1 - headerRows` 正是同一個數字，用手邊已有的東西表示出來。`- headerRows`
+        // 那一項是為了 `<br>` 形式的標頭：它在文件裡是一行，在翻譯裡是兩行。LP。
+        let lineOffset = chosen.headerAt + 1 - headerRows
+        return (out, headerRows, layout, lineOffset)
     }
 
     /// How many header rows the table had, recovered from the header cells.
