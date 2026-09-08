@@ -11629,3 +11629,237 @@ disagreed by 3x on one row, both being plausible figures in the same units. The
 repair is not correcting the numbers -- that lasts until the next measurement --
 but T279, which compares all sixteen published figures against the four files
 and requires them in the translation too.
+
+---
+
+# 第 99 回合（2026-09-08，`--json` 作為機器介面）—— 弱點全在「封閉列舉」上
+
+一個全新的 `claude -p` 行程，只讀兩份 README，主題不是「它會不會印出 JSON」，而是：**一個人能不能
+對它寫一支腳本，而那支腳本會一直能用？**
+
+**第 4 類是空的。** 二十個惡意值——含內嵌 NUL、單獨的 CR、ZWJ 序列、U+FFFE——在 `--json` 與
+`--json-ascii` 底下**全部逐位元原樣返回**；非 UTF-8 是被拒絕而不是被 U+FFFD 汙染；輸出是真的串流
+（24.7 MB 檔案第一行 0.01 秒、peak RSS 7.8 MB 平坦）；名為 `meta`、`record`、`fields`、`line`、
+`error` 的欄位不會與外框衝突；重複欄名是被拒絕而不是靜默丟掉一個值。
+
+**而這一頁的弱點全部是同一種：封閉的列舉。**「有三個碼」、「五個鍵」、「絕不是 JSON」——每一個都是
+關於「什麼**不**存在」的承諾，而那正是**程式會去檢查、而讀散文的人不會**的那一種。
+
+Category 4 empty. Twenty hostile values -- embedded NUL, lone CR, ZWJ, U+FFFE --
+all returned byte-identical under both `--json` and `--json-ascii`; non-UTF-8 is
+refused rather than corrupted; output is genuinely streamed; columns named like
+the frame's own keys cannot collide; duplicate column names are refused rather
+than silently dropping a value. Every weakness is the same shape: a CLOSED
+ENUMERATION. Three codes, five keys, "never JSON" -- each is a promise about
+what does NOT exist, and that is the kind a program checks and a prose reader
+does not.
+
+## PG. 「`#` 不論在哪裡都會觸發」過度概括了——真正的條件是「恰好一個欄位」
+
+**狀態：待修（文件）。這一條是第 97 回合我自己寫進去的。**
+
+第 97 回合修 OU 時，我把那一段改成「它不論那一行在哪裡都會觸發」。實測：
+
+```console
+$ printf 'a,b\n1,2\n#note\n3,4\n' > one.csv        # 一個欄位
+$ csv2 -r -i one.csv
+csv2: record 2 (line 3) starts with '#'. …          rc=1     <- 觸發
+
+$ printf 'a,b\n1,2\n#comment,x\n3,4\n' > two.csv    # 兩個欄位
+$ csv2 -r -i two.csv
+1,2
+#comment,x                                          rc=0     <- 當成資料
+3,4
+
+$ printf '#a,b\n1,2\n' > hdr.csv                    # 標頭以 # 開頭
+$ csv2 -r --json -i hdr.csv | head -1
+{"meta":{…,"header":["#a","b"]}}                    rc=0     <- 合法欄名
+
+$ printf 'a,b\n1,2\n#x,y,z\n' > three.csv           # 三個欄位
+csv2: record 2 (line 3) has 3 fields but the header has 2     <- 從頭到尾沒提 '#'
+```
+
+真正的規則是：**一行恰好只有一個欄位時才會被那則訊息接住**，而 `#` 只是**選擇了訊息**，不是觸發
+條件。觸發條件是欄數。這一頁自己寫著「一個叫 `#id` 的欄位是合法的」——那句才是行為，而我改寫的那
+一段與它矛盾。
+
+**而 T272a 通過了。** 它的 fixture 剛好是一個單欄位的 `#` 行，於是它釘住了程式的**窄**行為，卻沒有
+釘住我寫進 README 的那句**寬**宣稱。一個與程式一致、卻與它本該保護的句子不一致的測試。
+
+### 同一條規則的第二張臉：Markdown 分隔列
+
+```console
+$ printf 'a,b\n|---|,2\n' > md.csv
+$ csv2 -r -i md.csv
+|---|,2                                             rc=0
+```
+
+而這一頁說「一個含有 `|---|` 列的 `.csv` 或 `.csv2` **會**被拒絕」。同一個「恰好一個欄位」的述詞，
+同一種「把訊息的選擇條件誤寫成觸發條件」的錯。
+
+The predicate is ONE FIELD, not the `#`. A `#` merely selects which message a
+one-field line gets; a `#` line with two fields is data at exit 0 and a header
+starting with `#` is a legal column name -- which this page says elsewhere. The
+sentence I wrote in round 97 claims more than the program keeps, and T272a
+passed because its fixture happened to be the narrow case. The Markdown
+separator claim has the identical shape.
+
+## PH. 中文版仍然說「空儲存格也分辨得出來」，而英文版正在為那句話道歉
+
+**狀態：待修（文件）。這一條是第 98 回合我自己留下的。**
+
+第 98 回合修 OY 時，我改寫了英文那一段（密文以 base64 存放，`4*ceil((len+28)/3)` 個字元，因此
+**空儲存格分辨不出來**），也改了中文版的**量測表格**——但**沒有改中文版的加密段落**。
+
+```console
+$ grep -c base64 README.md README.zh-TW.md
+README.md:2
+README.zh-TW.md:0
+$ sed -n '524p' README.zh-TW.md
+空儲存格也分辨得出來。…
+```
+
+於是兩份文件現在在一個**與安全有關**的宣稱上互相矛盾，而英文那一段的內容，正是在說明那句中文話
+為什麼是假的。
+
+**這是 mistakes.md 第 3 條的形狀：一條規則只套用到它成立範圍的一部分。** 我修了兩份文件裡的一份，
+而修的時候我兩份都開著。
+
+I corrected the English paragraph in round 98 and the Chinese measurement tables
+in the same commit, and left the Chinese encryption paragraph saying the exact
+thing the English one now apologises for. The two pages contradict each other on
+a security-relevant claim.
+
+## PI. 「有三個碼」——而 `ambiguous-match` 是第四個
+
+**狀態：待修（文件）。**
+
+```console
+$ printf 'pkg,pkg,license\n1,2,MIT\n' > col.csv
+$ csv2 -r --json -i col.csv
+{"error":{"code":"ambiguous-match", …}}
+$ grep -c ambiguous-match README.md README.zh-TW.md
+0
+0
+```
+
+`README.md:405` 寫著「There are three codes:」，而下一句是「**the `code` values themselves are
+stable across versions**」——那句話讓這個列舉變成承重的。一支寫成三向分支加上
+`default: unknown` 的腳本，在任何一個有重複欄名的檔案上都會掉進 default。
+
+那則**訊息**本身很好，甚至指名了兩種解法；假的只有那個封閉列舉。
+
+## PJ. 「一次編輯的拒絕絕不會是 JSON 錯誤物件」——它就是
+
+**狀態：待修（文件）。**
+
+```console
+$ csv2 -update 1:a X --json -i e.csv --in-place
+{"error":{"code":"conflicting-options","message":"--json is an output shape and …"}}
+$ echo $?
+1
+```
+
+這一頁在三個地方說了相反的事：「an edit's refusal is never a JSON error object」、
+「an edit's refusal is available only as text on stderr」（在「何時該停用」那張表裡）、以及
+「JSON error objects … are for READS」。
+
+它們想說的那件事是**真的而且有價值**：你拿不到「那次編輯自己的錯誤」的 JSON，因為 `--json` 會先被
+旗標衝突攔下來。但**照字面寫出來的那三句，是在叫一個腳本作者不要費事去解析**——而那讓他失去一條
+本來可以運作的程式路徑。
+
+## PK. `--include-headers` 多出一個鍵、`record` 是 0、而 `matched` 是 0
+
+**狀態：待修（文件）。**
+
+```console
+$ csv2 -contains pkg --include-headers --json -i h.csv
+{"meta":{"format":"csv","headers":1,"fields":2,"header":["pkg","license"]}}
+{"record":0,"field":1,"header_row":"0","header_en":"pkg","value":"pkg","line":1}
+{"meta":{"records":1,"matched":0}}
+```
+
+三件事都沒有被記載：
+
+1. **`header_row`。** 那一頁把 cell-hit 的形狀**逐一列舉**過（「carries `record`, `field`,
+   `header_en` … `value` and `line`, and has no `fields` object at all」）。`grep header_row` -> 兩份
+   文件皆 0 命中。
+2. **`record` 是 `0`。** 這一頁說標頭位址印成 `0`／`0a`／`0b`，而**沒有任何動詞接受它**——所以一支
+   把 `.record` 餵回 `-get` 的腳本會斷，而 `--json` 這一層沒有任何地方警告它。
+3. **只有標頭命中時 `matched` 是 0**，而串流裡明明有一行命中。
+   `if [ "$(… .meta.matched)" -gt 0 ]` 會回報「沒有命中」。
+
+## PL. 早退的消費者拿到的是 141，而這一頁一次都沒提過
+
+**狀態：待修（文件）。**
+
+```console
+$ csv2 -r --json -i big.csv | head -1 >/dev/null
+$ print $pipestatus
+141 0
+$ # stderr 是空的
+```
+
+`grep -c 141` 與 `grep -ci SIGPIPE`：兩份文件皆 **0**。而這一頁說「每一種失敗都以 1 結束」再加上
+「你必須檢查結束狀態」，會直接把一個**正常**的早退消費者引導成「這是失敗」。
+
+實際行為是理想的——141、乾淨、stderr 全空——而它值得一句話。
+
+## PM. `--json` 的截斷**有**結構性標記，而這一頁說沒有
+
+**狀態：待修（文件）。**
+
+```console
+$ csv2 -r --json -i bad.csv > o; echo $?
+1
+$ wc -l < o
+29052
+$ tail -1 o
+{"record":29051,"line":29052,"fields":{…}}          <- 不是 meta
+
+$ csv2 -r --json -i good.csv | tail -1
+{"meta":{"records":200000,"matched":0}}             <- 正常結尾
+```
+
+「錯誤」那一節說被截斷的 **CSV**「沒有任何標記」，那是對的；但它讓讀者以為 JSON 也一樣。
+**JSON 有：結尾那行 meta 不見了。** 對一個 `--json` 的腳本作者來說，這是這一整節裡最有用的一件事。
+
+## PN. `.md` 的 `format` 是 `"csv"`，而 `format` 的值域從未被列出
+
+**狀態：待修（文件）。**
+
+```console
+$ csv2 -r --json -i t.md | head -1
+{"meta":{"format":"csv","headers":1,"fields":2,"header":["a","b"]}}
+```
+
+一個依 `meta.format` 分支的消費者，**分不出 Markdown 表與 CSV**。而 `format` 到底有哪些可能的值，
+兩份文件都沒有列出——只有 `"lines"` 在一個表格註腳裡出現過。
+
+## PO. 三個 Unicode 分行字元原樣輸出，而 `--json-ascii` 被描述成只是外觀
+
+**狀態：待修（文件）。**
+
+U+0085（NEL）、U+2028（LINE SEPARATOR）與 U+2029（PARAGRAPH SEPARATOR）以原始位元組輸出。那是合法的
+JSON、也是合法的 JSON Lines（分隔符是 `\n`），`jq` 與 `while IFS= read -r` 都沒問題。但一個用
+Python `str.splitlines()` 分行的消費者——那是很平常的寫法——會把 8 行變成 11 行，其中 6 行是無法
+解析的碎片。
+
+`--json-ascii` 完全解決它（三者都變成 `\uXXXX` 轉義）而且不花任何代價。這一頁只把 `--json-ascii`
+描述成「escapes non-ASCII characters」，讀起來像是外觀選項，從未把它與**分行安全**連起來。
+
+## PP. 四個較小的缺口
+
+**狀態：待修（文件）。**
+
+1. **`-t` 在 `--json` 底下是靜默無效的**（兩者都輸出 3 行）。這一頁很仔細地解釋了 `-rownum` 為什麼是
+   **被拒絕**而不是被忽略；`-t` 什麼都沒有。
+2. **`--filter --json` 的紀錄形狀從未被寫出。** 那一段列舉了 plain、`-A/-B/-C` 與 `-r` 三種形狀，
+   跳過了這一種。
+3. **沒有「零筆紀錄」的 `--json` 範例。** 那個退化輸出是兩行 meta、中間什麼都沒有。而
+   「第一行與最後一行是 metadata」的說法，正好**邀請**讀者去切 `2 … n-1`——受測者的消費腳本就是
+   這樣壞掉的。
+4. **`meta.records` 的兩種讀法。**「記錄編號走到哪裡」照字面是對的，但它對**除了 `-head` 與
+   `-mid a,b` 以外**的每一個動詞都等於檔案總筆數。那句話住在 `-contains` 那一節，離 `-head` 的
+   說明約 200 行，而且緊鄰著「為什麼刻意沒有 `total`」那一段。一支把 `records` 讀成筆數的腳本，
+   六次會對五次。
