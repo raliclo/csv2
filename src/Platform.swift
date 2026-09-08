@@ -810,6 +810,44 @@ enum Platform {
     /// The text of an errno, for a message that has to say what actually
     /// stopped it rather than what usually stops things.
     /// 一個 errno 的文字，供「必須說出真正阻止了它的東西、而不是通常會阻止東西的那個」的訊息使用。
+    /// A path with its spelling normalised, for Windows.
+    ///
+    /// Lives here rather than beside `resolved()` in main.swift for the plain
+    /// reason that main.swift does not import WinSDK -- which the first attempt
+    /// discovered as three `cannot find type 'DWORD' in scope` errors on the
+    /// node, after macOS had compiled the same file without complaint. A
+    /// conditional branch is only ever checked by the platform it is for.
+    ///
+    /// GetFullPathNameW does not follow symlinks and does not need to: the
+    /// caller normalises spelling here and asks the filesystem for identity
+    /// separately, treating that as the authority. QA.
+    ///
+    /// 一個「拼法已正規化」的路徑，供 Windows 使用。
+    ///
+    /// 放在這裡而不是放在 main.swift 的 `resolved()` 旁邊，理由很單純：main.swift 沒有
+    /// import WinSDK——而那是第一次嘗試時，在節點上以三個 `cannot find type 'DWORD' in scope`
+    /// 發現的，在 macOS 對同一個檔案毫無怨言地編譯完成之後。**一個條件分支，永遠只會被
+    /// 「它所服務的那個平台」檢查到。**
+    ///
+    /// GetFullPathNameW 不跟隨 symlink，而它不需要：呼叫端在這裡做的是拼法正規化，並另外向
+    /// 檔案系統詢問身分、以那個答案為準。QA。
+    static func normalisedPath(_ path: String) -> String {
+        #if canImport(ucrt)
+        let n: DWORD = path.withCString(encodedAs: UTF16.self) { GetFullPathNameW($0, 0, nil, nil) }
+        guard n > 0 else { return path }
+        var buf = [UInt16](repeating: 0, count: Int(n))
+        let written: DWORD = path.withCString(encodedAs: UTF16.self) { wpath in
+            buf.withUnsafeMutableBufferPointer { out in
+                GetFullPathNameW(wpath, n, out.baseAddress, nil)
+            }
+        }
+        guard written > 0, written < n else { return path }
+        return String(decodingCString: buf, as: UTF16.self)
+        #else
+        return path
+        #endif
+    }
+
     static func fileKind(path: String) -> FileKind? {
         #if canImport(ucrt)
         // Windows answers through the native API rather than the CRT's stat.

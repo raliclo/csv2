@@ -219,16 +219,7 @@ func resolved(_ path: String) -> String {
     //
     // GetFullPathNameW 不跟隨 symlink。它不需要：這個函式做的是「拼法正規化」，而 `sameFile`
     // 會另外向檔案系統詢問「身分」，並以那個答案為準。QA。
-    let n: DWORD = path.withCString(encodedAs: UTF16.self) { GetFullPathNameW($0, 0, nil, nil) }
-    guard n > 0 else { return path }
-    var buf = [UInt16](repeating: 0, count: Int(n))
-    let written: DWORD = path.withCString(encodedAs: UTF16.self) { wpath in
-        buf.withUnsafeMutableBufferPointer { out in
-            GetFullPathNameW(wpath, n, out.baseAddress, nil)
-        }
-    }
-    guard written > 0, written < n else { return path }
-    return String(decodingCString: buf, as: UTF16.self)
+    return Platform.normalisedPath(path)
     #else
     return URL(fileURLWithPath: path).resolvingSymlinksInPath().path
     #endif
