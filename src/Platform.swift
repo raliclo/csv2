@@ -842,7 +842,15 @@ enum Platform {
             }
         }
         guard written > 0, written < n else { return path }
-        return String(decodingCString: buf, as: UTF16.self)
+        // `written` excludes the terminating NUL, so the slice is the whole
+        // path. `String(decodingCString:)` would read to the NUL and do the
+        // same thing, but it is deprecated and this tree builds with
+        // -warnings-as-errors, which turned it into the THIRD Windows-only
+        // build failure of this one fix.
+        // `written` 不含結尾的 NUL，因此這個切片就是整個路徑。`String(decodingCString:)` 會讀到
+        // NUL 為止、做同一件事，但它已被標為 deprecated，而這棵樹以 -warnings-as-errors 建置——
+        // 那讓它成為這**同一個修正**裡的第三個「只在 Windows 上出現」的建置失敗。
+        return String(decoding: buf[0..<Int(written)], as: UTF16.self)
         #else
         return path
         #endif
