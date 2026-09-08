@@ -478,7 +478,7 @@ skill 說「摘要樣式是附加的，失敗掃描是強制的」。**把整個
 
 ## 3. 一條規則只套用到它成立範圍的一部分
 
-**14 次 / 7 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
+**16 次 / 7 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
 2026-09-08），單日最多 5 次（2026-09-03）。
 
 *數字的權威來源是 `mistakes_counter.csv2`；這一行是它的副本。副本會漂，而那本身是第 1 類——
@@ -498,6 +498,8 @@ skill 說「摘要樣式是附加的，失敗掃描是強制的」。**把整個
 | 2026-09-04 | **`errnoText`** | 「errno 要轉成文字」，而 `Platform.errorText()` 早就存在、有 Windows 分支、被六個地方呼叫 | 我在同一個檔案裡、相隔七十行，寫了第二份實作，而它在 Windows 上編不過 |
 | 2026-09-06 | **LJ** | 第 12 階段把 `--headers 0` 映射成 `.lines`——`.md` 那條路改了、stdin 那條路改了 | **無後綴檔案那條路沒改**，而正確的寫法在同一個檔案裡、相距五十行 |
 | 2026-09-08 | **PH** | 第 98 回合修正了「密文是 base64、所以空儲存格分辨不出來」——改了英文那一段，也改了中文的**量測表格** | **中文的加密段落**。兩份檔案在同一個 commit 裡都開著，而那一段被留在原地，繼續說著英文段落正在道歉的那件事 |
+| 2026-09-08 | **PR** | 第 99 回合把「`code` 跨版本穩定」那句承諾從**英文版**移除——因為正是它讓封閉清單變成承重的 | **中文版**。而這是在我**同一個回合裡**才剛記下 PH（同一個錯，隔壁一段）並為它寫了 T287a 之後 |
+| 2026-09-08 | **PS** | 第 99 回合把「早退的消費者拿到 141」寫進兩份文件 | **它的前提**。那句話在大檔上為真、小檔上為假，而我是在一個大檔上觀察到它的。一個宣稱的**邊界**也是它成立範圍的一部分 |
 
 ### 為什麼它不會報錯
 
@@ -772,6 +774,18 @@ is true again.
 
 Still missing: the general form. Three of the seven were a second site of the same rule in
 ordinary code, which no check covers.
+
+The two 2026-09-08 occurrences are the sharpest lesson in this entry, because
+the guard existed and was too narrow. Round 99 recorded PH and wrote T287a for
+it -- and T287a pins ONE PAIR of paragraphs. One round later the identical
+mistake happened one paragraph away (PR) and T287a could not see it. A guard
+written against an instance does not defend the class; T295a now takes the
+load-bearing tokens of the whole interface and requires each in both pages.
+
+PS is the same entry seen from a different side: a claim's PRECONDITION is part
+of where it holds. "A consumer that stops early gets 141" was observed on a
+large file and written down without the size, so it is false on the three-record
+fixture anyone would verify it on.
 
 The 2026-09-08 occurrence is the clearest form yet. Round 98 corrected the
 English paragraph on what an encrypted column leaks, and corrected the Chinese

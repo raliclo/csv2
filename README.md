@@ -65,7 +65,7 @@ The input suffix declares the format:
 | Suffix | Headers | Rules |
 |---|---:|---|
 | `.csv` | 1 | RFC 4180; quoted commas and newlines are supported |
-| `.csv2` | 2 | English and Traditional Chinese headers; one record per line; `\\n` and `\\r` escapes |
+| `.csv2` | 2 | English and Traditional Chinese headers; RFC 4180 quoting as for `.csv` -- quoted commas and doubled quotes both work -- EXCEPT that a record is one line, so a newline inside a field is written as the escape rather than quoted, as is a carriage return |
 | `.md` | recovered | A Markdown table; use `--md-table N` for a selected table |
 | other (`.txt`, `.log`, …) or none | 0 | One column per line; bytes are preserved verbatim. `--json` calls this `"format":"lines"` |
 
@@ -174,7 +174,15 @@ error. There is deliberately no `total` in `--json`'s meta: that number is only
 known when an index is, so the field would come and go, and a caller not
 finding it could not tell an empty file from a run without an index.
 
-**`-count` takes no companions and refuses them by name.** It is a whole-file
+**`-o` must name a regular file.** `-o /dev/null` is refused, and the refusal
+says why: `-o` writes a temp file beside the destination and renames it, which a
+device node cannot be. To discard output, redirect `-so` instead.
+
+**`-count` takes no companions and refuses them by name.** A companion here is
+anything that would change WHAT is produced — a verb, an output shape, a
+destination, a search. Flags that only change how the same count is arrived at
+or reported — `--no-index`, `--headers`, `-debug` — are not companions and still
+work. It is a whole-file
 count and does nothing else, so combining it with a verb, an output shape or a
 destination is refused: the refusal lists exactly the flags that were typed.
 Until 2026-09-08 those flags were accepted and DISCARDED at exit 0 —
@@ -318,22 +326,29 @@ script gated on `matched > 0` reports "no match" while a hit line is sitting in
 the stream, and `.record` fed back to `-get` is refused, because no verb accepts
 a header address.
 
-**A consumer that stops early gets exit 141, not 1.** `csv2 -r --json -i big.csv
-| head -1` leaves csv2 killed by SIGPIPE with stderr empty — distinguishable
-from a failure, which is 1 with an error object. Check for 141 before treating a
-short read as broken.
+**A consumer that stops early gets exit 141, not 1 — once the output is large
+enough to block.** `csv2 -r --json -i big.csv | head -1` leaves csv2 killed by
+SIGPIPE with stderr empty, distinguishable from a failure, which is 1 with an
+error object. On a file small enough that everything fits in the pipe buffer,
+csv2 finishes before `head` closes and the status is 0. So handle 0 and 141 as
+"the consumer stopped early" and 1 as failure; do not treat 141 as guaranteed.
+Until 2026-09-08 this said it unconditionally, which is false on a three-record
+fixture — the size of file anyone verifies a claim on.
 
 **Under `--json` a truncated run IS structurally detectable**, unlike the CSV
-output described under Errors. A fault found part-way through leaves valid
-record lines on stdout and **no closing metadata line**. Requiring that line is
-the cheapest completeness check a consumer can make.
+output described under Errors. A fault found part-way through leaves the record
+lines already written on stdout and **no closing metadata line**. Requiring that
+line is the cheapest completeness check a consumer can make, and it holds
+whether or not any record lines got out: on a small file the fault is found
+before the buffer flushes, so stdout is empty — which also has no closing
+metadata line, and is caught by the same check.
 
 `-md` emits Markdown and requires `-t`. `--md-style` selects the layout, and the
 three names are about PADDING only — none of them changes a value:
 
 | `--md-style` | What it does |
 |---|---|
-| `preserve` (default) | Keeps each untouched row's original spacing. The rows you edited are re-emitted compactly, so it means "preserve the rows you did not touch", not "preserve the source layout" |
+| `preserve` (default) | Keeps each untouched row's original spacing. **On CSV input there is no original spacing to keep, so this behaves exactly as `compact`** — if you are rendering a CSV into a document for a person to read, ask for `pretty`. The rows you edited are re-emitted compactly, so it means "preserve the rows you did not touch", not "preserve the source layout" |
 | `compact` | `\|zstd\|1.5.6\|BSD\|` — no padding anywhere |
 | `pretty` | Re-aligns every column to a common width across the whole table |
 
@@ -449,6 +464,12 @@ Until 2026-09-07 this section said stdout remains empty "so failures can be
 handled safely in a pipeline", which contradicted the streaming guarantee four
 sections away. The promise was the false one.
 
+**csv2 stops at the FIRST fault.** A file with two bad records reports the
+first and says nothing about the second, so cleaning a colleague's file is one
+round trip per fault. There is no mode that lists them all: reporting a second
+fault would mean deciding what the first one meant, and a wrong guess there is
+how a repair tool corrupts a file. Expect to iterate.
+
 Errors found BEFORE reading starts — an unusable flag combination, a missing
 file, a suffix conflict — do leave stdout empty, and they are most of them.
 
@@ -469,6 +490,12 @@ and fifth, one sentence before promising that `code` values are stable across
 versions — which is what makes a closed list load-bearing. A three-way switch
 with `default: unknown` falls through on any file with duplicate column names.
 The count was wrong rather than the codes; each individual entry has held.
+
+The removed sentence is described here rather than quoted: reproducing a
+withdrawn promise verbatim leaves it on the page for anyone skimming, and the
+case that pins its removal then catches itself on the quotation — which is how
+the first version of T295a failed. The Chinese page kept that promise one round
+longer than this one, which is PR.
 
 The split between `invalid-input` and `conflicting-options` follows where the
 check happens rather than a rule you can predict — `--physical --json` reports
@@ -562,6 +589,18 @@ cell of every existing record. On a `.csv` NAME is one title; on a `.csv2` it is
 both, comma-separated, and omitting the Traditional Chinese half leaves that
 header cell empty and emits a warning. NAME is always split on commas, so a
 title that contains one cannot be expressed.
+
+**N may be one past the last column, and that appends.** On a two-column file
+`-add-column 3` is valid and puts the new column at the end; `-add-column 4` is
+refused, and the refusal states the rule — "this file has 2 columns, so the
+highest position is 3, which appends". This is the opposite of `-insert`, which
+refuses one-past-the-end and sends you to `-append`, so the inference from the
+neighbouring verb is exactly wrong.
+
+**Two `-insert`s at the same N resolve in the order they were given**, so
+`-insert 1 A -insert 1 B` puts A first and B second. Nothing is dropped and
+nothing is refused; a script assembling a command line from parts gets a defined
+answer rather than a surprise.
 
 `-delete -col` may be repeated to remove several columns in one run.
 
@@ -1026,6 +1065,7 @@ re-reading them.
 | Not offered | What to do instead |
 |---|---|
 | column projection (`-cols`) | `csv2 -r --json -i f.csv \| jq -r 'select(.record) \| .fields.license'`. The `select(.record)` is not optional: without it the two meta lines arrive as `null`s in your column. Or `-get` per cell, with `csv2 -count -i f.csv` for the loop's upper bound. Both go through `--json`, which REFUSES a file holding non-UTF-8 bytes that `-get` reads fine |
+| an exact whole-cell search | `-contains` is a SUBSTRING match, so `-contains MIT --search-column license` also finds `MIT-0` and `NON-MIT` — scoping the column does not make the match exact. `-update-where` IS exact ("no data cell equals"), so both semantics exist and only one of them searches. For an exact count: `csv2 -r --json -i f.csv \| jq -r 'select(.record) \| select(.fields.license == "MIT") \| .record' \| wc -l` |
 | case-insensitive matching | nothing does — `-contains mit` finds no `MIT`, **and prints nothing at exit 0**, which is indistinguishable from "no such data". Fold the case yourself: `csv2 -r --json -i f.csv \| jq -r 'select(.record) as $r \| $r.fields\|to_entries[] \| select(.value\|ascii_downcase\|contains("mit")) \| "\\($r.record)\\t\\(.key)\\t\\(.value)"'` |
 | a search that ignores which column it is in | `-contains` matches a substring in EVERY column, so `-contains MIT` also finds `transMITter` — see the last example below. Use `--search-column license` to scope it, or `--search-row`/`--search-cell`. Until 2026-09-07 this row said scoping was not offered at all, and warned that counting would be "silently wrong", 260 lines below the section documenting the flag that fixes it |
 | skipping `#` comment lines | nothing does, and deliberately: a `#` is data and `#id` is a legal column name, so skipping one would mean guessing which lines are data. The refusal names the `#` on any ONE-FIELD line, wherever it is — but the trigger is the field count, so `#comment,x` in a two-column file is data at exit 0. Read the file under a suffix-less name to get every line verbatim |

@@ -537,3 +537,96 @@ A round that reports "it was all fine" without having tried to break anything is
 worse than no round: it produces confidence without evidence.
 
 一個「什麼都沒試著弄壞、就回報一切都好」的回合，比不跑更糟：它產生的是沒有證據的信心。
+
+---
+
+## What 100 rounds produced, and the one thing to keep
+
+Rounds 1–100 ran between 2026-08-16 and 2026-09-08. The suite went from a few
+hundred cases to 1345. The defect record in
+[`todo/known-defects.md`](./todo/known-defects.md) runs from A to PZ.
+
+**The single most useful number: in the last eleven rounds, category 4 — "the
+TOOL is wrong" — was empty nine times.** That is not a sign the rounds stopped
+being worth running. It is what a mature program looks like from outside: the
+code is right and the page describing it is where the failures move to. Rounds
+90 through 100 found one crash (OF/OG, round 95), one verb that reported success
+while doing nothing (OP, round 97), one installer claiming a verification it had
+not performed (OK, round 96), and one measurement harness publishing the wrong
+code path (OW/OX, round 98). Everything else was documentation.
+
+**And documentation defects are not the small ones.** OW would have made a
+reader size a container at 64 MiB for a job that needs 177. PT would have put a
+plausible wrong licence count into a real report. The tester in round 100 read a
+2.8× speedup off a search that matched nothing, at exit 0.
+
+### The one thing to keep, if only one thing is kept
+
+**Rounds 97, 98 and 99 each introduced a defect that the NEXT round found.**
+
+| Round | Fixed | Introduced | Found by |
+|---|---|---|---|
+| 97 | OU — the `#` refusal is not only "at the top" | it "fires wherever the line is", which over-claims: the predicate is ONE FIELD | round 100 (PG) |
+| 98 | OY — ciphertext is base64, so an empty cell is not distinguishable | corrected the English paragraph only | round 99 (PH) |
+| 99 | PI — the code set is not three | removed the stability promise from English only (PR); wrote the 141 claim without its precondition (PS) | round 100 |
+
+Every one of those was written while the correct information was on screen, by
+someone who had just spent an hour understanding it. **A correction is a change
+like any other, and it is made at the moment of highest confidence — which is
+exactly when nothing is checked.** The three shapes it took here:
+
+1. **Over-claiming.** The old sentence was too narrow, so the new one was made
+   broad, and the broad version is false. Fixing "at the top" to "wherever the
+   line is" skipped over the actual predicate.
+2. **Half the pair.** Two files say the same thing; one gets corrected. This
+   happened twice in three rounds, and the second time a test written for the
+   first occurrence could not see it, because it pinned an instance rather than
+   the class.
+3. **Dropping the precondition.** A claim observed on one input is written
+   without the condition that made it true, so it is false on the input anyone
+   would verify it on.
+
+The countermeasure is not "be careful". It is: **after fixing a documentation
+defect, run the two greps that catch shapes 2 and 3** — does the other file say
+the same thing, and does the new sentence hold on the smallest input you can
+build? Both take under a minute, and each of the four defects above would have
+been caught by one of them.
+
+## 一百個回合產出了什麼，以及只留一件事的話該留哪一件
+
+第 1–100 回合跑在 2026-08-16 至 2026-09-08 之間。測試從數百個案例長到 1345 個，
+[`todo/known-defects.md`](./todo/known-defects.md) 的缺陷編號從 A 排到 PZ。
+
+**最有用的一個數字：最後十一個回合裡，第 4 類（「工具錯了」）有九次是空的。** 那不代表這些回合
+不值得再跑。那是一個成熟的程式從外面看起來的樣子：程式是對的，於是失敗全都搬到描述它的那一頁去了。
+第 90 到 100 回合找到一次當機（OF／OG，第 95 回合）、一個「回報成功卻什麼都沒做」的動詞（OP，
+第 97 回合）、一個「宣稱做過一次它沒做的驗證」的安裝器（OK，第 96 回合），以及一份「發表了錯誤
+程式路徑」的量測 harness（OW／OX，第 98 回合）。其餘全是文件。
+
+**而文件缺陷不是小的那一種。** OW 會讓一個讀者為一件需要 177 MiB 的工作把容器開在 64 MiB；PT 會把
+一個看起來合理的錯誤授權計數放進一份真實報表；第 100 回合的受測者從一次什麼都沒命中的搜尋上，讀出
+了 2.8 倍的加速比，rc=0。
+
+### 只留一件事的話，留這一件
+
+**第 97、98、99 三個回合，每一個都帶進了一個「被下一個回合找到」的缺陷。**
+
+| 回合 | 修好了 | 帶進了 | 被誰找到 |
+|---|---|---|---|
+| 97 | OU——`#` 的拒絕不只在「檔案開頭」 | 改成「不論在哪裡都會觸發」，那過度概括了：真正的述詞是「恰好一個欄位」 | 第 100 回合（PG） |
+| 98 | OY——密文是 base64，所以空儲存格分辨不出來 | 只修了英文那一段 | 第 99 回合（PH） |
+| 99 | PI——code 不只三個 | 只從英文版移除了「跨版本穩定」的承諾（PR）；把 141 那個宣稱寫成無條件的（PS） | 第 100 回合 |
+
+那每一次，正確的資訊都**就在螢幕上**，而寫下它的人剛剛花了一小時去理解它。**一次更正與任何其他改動
+沒有兩樣，而它發生在信心最高的那一刻——那也正好是什麼都沒有被檢查的時刻。** 它在這裡採取的三種形狀：
+
+1. **過度概括。** 舊句子太窄，於是新句子被寫寬，而寬的那個版本是假的。把「在開頭」改成「不論在哪裡」，
+   跳過了真正的述詞。
+2. **只做了一半的那一對。** 兩份檔案說同一件事，只有一份被更正。這在三個回合裡發生了兩次，而第二次
+   時，為第一次寫下的測試看不到它——因為它釘住的是一個**實例**，不是那個**類別**。
+3. **拿掉前提。** 一個在某種輸入上觀察到的宣稱，被寫成沒有那個「讓它為真的條件」，於是它在
+   「任何人會拿來驗證它的那種輸入」上是假的。
+
+對策不是「小心一點」。是：**修完一個文件缺陷之後，跑兩次 grep 去接住第 2、3 種形狀**——另一份檔案有
+沒有說同一件事，以及這個新句子在你做得出來的**最小**輸入上還成不成立。兩件都不到一分鐘，而上面那
+四個缺陷，每一個都會被其中之一接住。

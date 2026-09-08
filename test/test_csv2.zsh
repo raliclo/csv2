@@ -17045,6 +17045,197 @@ else
 fi
 
 echo
+echo "--- T288: -add-column appends at width+1, and -insert does not / T288：-add-column 在 width+1 會附加，而 -insert 不會 ---"
+# PU. The rule is in the program's own refusal -- "the highest position is 3,
+# which appends" -- and nowhere on the page, while the NEIGHBOURING verb refuses
+# one-past-the-end and sends you to -append. So the inference a reader makes
+# from the verb next door is exactly wrong.
+# PU。這條規則寫在程式自己的拒絕訊息裡——「the highest position is 3, which appends」——而那一頁上
+# 沒有；同時**旁邊那個動詞**拒絕「最後一個的下一個」並要人改用 `-append`。於是讀者從隔壁動詞推論
+# 出來的結果，恰好是反的。
+_t288=$TMP/t288
+mkdir -p "$_t288"
+printf 'pkg,license\nzlib,MIT\nzstd,BSD\n' > "$_t288/f.csv"
+"$CSV2" -add-column 3 'note' -i "$_t288/f.csv" -o "$_t288/a.csv" 2>/dev/null
+_t288_hdr=$(LC_ALL=C head -1 "$_t288/a.csv" 2>/dev/null)
+_t288_far=$("$CSV2" -add-column 4 'x' -i "$_t288/f.csv" -o "$_t288/b.csv" 2>&1 >/dev/null)
+if [[ $_t288_hdr == 'pkg,license,note' && $_t288_far == *'highest position is 3, which appends'* ]]; then
+    ok "T288a -add-column at width+1 appends and width+2 is refused with the rule / -add-column 在 width+1 會附加，width+2 被拒絕並說出規則"
+else
+    bad "T288a hdr=[$_t288_hdr] far=[${_t288_far%%$'\n'*}] / 實得如上"
+fi
+
+# Two inserts at the same N resolve in argument order. Defined behaviour, and a
+# script assembling a command line from parts reaches it easily.
+# 同一個 N 上的兩個 insert 依參數順序解析。那是有定義的行為，而一支由片段組出命令列的腳本很容易
+# 就會走到那裡。
+"$CSV2" -insert 1 'a,1' -insert 1 'b,2' -i "$_t288/f.csv" -o "$_t288/c.csv" 2>/dev/null
+_t288_two=$("$CSV2" -r -i "$_t288/c.csv" 2>/dev/null | LC_ALL=C head -2 | tr '\n' '|')
+if [[ $_t288_two == 'a,1|b,2|' ]]; then
+    ok "T288b two -inserts at the same N resolve in argument order / 同一個 N 上的兩個 -insert 依參數順序解析"
+else
+    bad "T288b [$_t288_two] / 實得如上"
+fi
+
+echo
+echo "--- T289: -o must be a regular file / T289：-o 必須是一般檔案 ---"
+# PX. The refusal says why -- -o writes a temp file beside the destination and
+# renames it -- and only the refusal said it.
+# PX。那則拒絕說出了原因——`-o` 會在目的地旁邊寫一個暫存檔再改名——而先前只有那則拒絕說得出來。
+_t289=$("$CSV2" -r -i "$_t288/f.csv" -o /dev/null 2>&1 >/dev/null); _t289_rc=$?
+if (( _t289_rc != 0 )) && [[ $_t289 == *'is not a regular file'* ]]; then
+    ok "T289a -o onto a device node is refused, naming the reason / -o 指向裝置節點被拒絕並說出原因"
+else
+    bad "T289a rc=$_t289_rc [${_t289%%$'\n'*}] / 實得如上"
+fi
+
+echo
+echo "--- T290: a .csv2 quotes like a .csv / T290：.csv2 的引號規則與 .csv 相同 ---"
+# PY. The Formats table granted "quoted commas and newlines" to .csv and
+# described .csv2 only as escapes, so a reader cleaning a colleague's file --
+# the first thing anyone does -- had to test to learn the one fact that step
+# depended on.
+# PY。格式表把「引號內的逗號與換行」記在 `.csv` 那一列，而 `.csv2` 那一列只寫跳脫，於是一個要清理
+# 同事檔案的讀者（那是任何人做的第一件事）必須實測，才能知道那一步唯一承重的事實。
+_t290=$TMP/t290
+mkdir -p "$_t290"
+printf 'a,b\n甲,乙\n"x,y",2\n"he said ""hi""",3\n' > "$_t290/q.csv2"
+_t290_1=$("$CSV2" -get 1:1 -i "$_t290/q.csv2" 2>/dev/null)
+_t290_2=$("$CSV2" -get 2:1 -i "$_t290/q.csv2" 2>/dev/null)
+if [[ $_t290_1 == 'x,y' && $_t290_2 == 'he said "hi"' ]]; then
+    ok "T290a a .csv2 takes quoted commas and doubled quotes / .csv2 接受引號內的逗號與成對的雙引號"
+else
+    bad "T290a first=[$_t290_1] second=[$_t290_2] / 實得如上"
+fi
+
+echo
+echo "--- T291: -contains is a substring match even when scoped / T291：-contains 即使限定了欄位仍是子字串比對 ---"
+# PT. This is the one most likely to reach a real report unnoticed: the obvious
+# way to count licences produces a plausible WRONG number. The limits table
+# listed case-insensitivity and column scoping and omitted exact matching, so a
+# reader who read the whole table believes --search-column is the constraint
+# they wanted.
+# PT。這是最可能悄悄進到一份真實報表的那一條：計算授權數量最直覺的做法，會產生一個**看起來合理的
+# 錯誤數字**。那張限制表列了「不分大小寫」與「限定欄位」，卻漏了「精確比對」，於是一個讀完整張表的
+# 人，會以為 `--search-column` 就是他要的那個限定。
+_t291=$TMP/t291
+mkdir -p "$_t291"
+printf 'pkg,license\nzlib,MIT\nfoo,MIT-0\nbar,NON-MIT\nbaz,BSD\n' > "$_t291/f.csv"
+_t291_sub=$("$CSV2" -contains MIT --search-column license --json -i "$_t291/f.csv" 2>/dev/null | LC_ALL=C tail -1)
+if [[ $_t291_sub == *'"matched":3'* ]]; then
+    ok "T291a a scoped -contains still matches MIT-0 and NON-MIT / 限定欄位的 -contains 仍然會命中 MIT-0 與 NON-MIT"
+else
+    bad "T291a [$_t291_sub] / 實得如上"
+fi
+
+echo
+echo "--- T292: --md-style preserve is compact on CSV input / T292：--md-style preserve 在 CSV 輸入上等同 compact ---"
+# PZ. Said once and easy to miss; the tester handed a human an unaligned table
+# at rc=0 with no warning.
+# PZ。只說過一次而且很容易被略過；受測者因此在 rc=0、沒有任何警告的情況下，交給人類讀者一張沒有
+# 對齊的表。
+_t292_p=$("$CSV2" -r -t -md --md-style preserve -i "$_t291/f.csv" 2>/dev/null | LC_ALL=C head -1)
+_t292_c=$("$CSV2" -r -t -md --md-style compact -i "$_t291/f.csv" 2>/dev/null | LC_ALL=C head -1)
+_t292_y=$("$CSV2" -r -t -md --md-style pretty -i "$_t291/f.csv" 2>/dev/null | LC_ALL=C head -1)
+if [[ $_t292_p == $_t292_c && $_t292_p != $_t292_y ]]; then
+    ok "T292a preserve equals compact on CSV input, and pretty differs / CSV 輸入上 preserve 等同 compact，而 pretty 不同"
+else
+    bad "T292a preserve=[$_t292_p] compact=[$_t292_c] pretty=[$_t292_y] / 實得如上"
+fi
+
+echo
+echo "--- T293: csv2 stops at the first fault / T293：csv2 停在第一個錯誤 ---"
+# PV. Cleaning a colleague's file is one round trip per fault, and the page
+# never said so. Two faults, one message.
+# PV。清理一份同事給的檔案是「一個錯誤一趟」，而那一頁從未說出這件事。兩個錯誤，一則訊息。
+_t293=$TMP/t293
+mkdir -p "$_t293"
+printf 'a,b\n1\n2,3,4\n' > "$_t293/multi.csv"
+_t293_n=$("$CSV2" -r -i "$_t293/multi.csv" 2>&1 >/dev/null | LC_ALL=C grep -c 'record 1 ')
+_t293_m=$("$CSV2" -r -i "$_t293/multi.csv" 2>&1 >/dev/null | LC_ALL=C grep -c 'record 2 ')
+if (( _t293_n >= 1 && _t293_m == 0 )); then
+    ok "T293a two faults produce one message, about the first / 兩個錯誤只產生一則訊息，講的是第一個"
+else
+    bad "T293a first=$_t293_n second=$_t293_m / 實得如上"
+fi
+
+echo
+echo "--- T294: the SIGPIPE claim is size-dependent / T294：SIGPIPE 那個宣稱與大小有關 ---"
+# PS. Round 99 wrote "a consumer that stops early gets exit 141" without its
+# precondition. On a three-record fixture -- the size anyone verifies a claim on
+# -- the status is 0, because csv2 finishes before `head` closes. That is the
+# same species as the closed enumeration it replaced: an observation with the
+# condition that makes it true removed.
+#
+# Both sizes are asserted, which is the only form that catches a future edit
+# dropping the qualifier again.
+#
+# PS。第 99 回合把「一個提早停止的消費者拿到的是 141」寫成了無條件的。在一個三筆的 fixture 上——
+# 那正是任何人拿來驗證宣稱的大小——狀態是 0，因為 csv2 在 `head` 關閉之前就跑完了。那與它所取代的
+# 那個封閉列舉是同一個物種：一個被拿掉了「讓它為真的條件」的觀察。
+#
+# 這裡兩種大小都斷言了，而那是唯一能抓住「未來某次編輯又把限定詞拿掉」的形式。
+_t294=$TMP/t294
+mkdir -p "$_t294"
+printf 'a,b\n1,2\n3,4\n' > "$_t294/small.csv"
+"$CSV2" -r --json -i "$_t294/small.csv" 2>/dev/null | head -1 >/dev/null
+_t294_small=(${pipestatus})
+if [[ ${_t294_small[1]} == 0 ]]; then
+    ok "T294a on a small file the early-stopping consumer leaves 0, not 141 / 小檔上提早停止的消費者留下 0，不是 141"
+else
+    bad "T294a pipestatus=[${_t294_small[*]}] / 實得如上"
+fi
+
+# And the page must carry the qualifier, in both languages. A grep is the only
+# thing standing between a future edit and the unconditional sentence coming
+# back.
+# 而那一頁必須帶著限定詞，兩種語言都要。一次 grep，是「未來某次編輯讓那句無條件的話回來」與現在
+# 之間唯一的東西。
+if LC_ALL=C grep -q 'once the output is large' "$ROOT/README.md" \
+   && LC_ALL=C grep -q '前提是輸出大到會塞住' "$ROOT/README.zh-TW.md"; then
+    ok "T294b both pages state the precondition for 141 / 兩份文件都寫出了 141 的前提"
+else
+    bad "T294b en=$(LC_ALL=C grep -c 'once the output is large' "$ROOT/README.md") zh=$(LC_ALL=C grep -c '前提是輸出大到會塞住' "$ROOT/README.zh-TW.md") / 實得如上"
+fi
+
+echo
+echo "--- T295: the two pages agree as a CLASS, not one pair at a time / T295：兩份文件的一致性是一個「類別」，不是一次一對 ---"
+# PR. Round 99 recorded PH -- the Chinese page keeping a claim the English one
+# had corrected -- and wrote T287a for it. One round later the same mistake
+# happened one paragraph away: the English page dropped "the code values are
+# stable across versions" and the Chinese page kept it. T287a could not catch
+# that, because it pins ONE PAIR rather than the property.
+#
+# So this case takes the load-bearing tokens of the machine interface and
+# requires each to be present in BOTH pages. It cannot prove the prose agrees;
+# it does catch a correction applied to one file and not the other, which is
+# what has now happened twice.
+#
+# PR。第 99 回合記下了 PH——中文版留著英文版已經更正的一個宣稱——並為它寫了 T287a。**下一個回合**，
+# 同一個錯誤在隔壁一段又發生了一次：英文版拿掉了「code 的值跨版本穩定」，而中文版留著。T287a 抓不到
+# 它，因為它釘住的是**一對**，而不是那個性質。
+#
+# 因此這個案例取機器介面上那些**承重的**詞，要求每一個都同時出現在**兩份**文件裡。它證明不了散文
+# 一致；但它抓得到「一次更正只套用到其中一個檔案」——而那件事現在已經發生兩次了。
+_t295_tokens=(base64 ambiguous-match unknown-flag header_row json-ascii)
+_t295_bad=()
+for _tok in $_t295_tokens; do
+    LC_ALL=C grep -q -- "$_tok" "$ROOT/README.md"       || _t295_bad+=("en:$_tok")
+    LC_ALL=C grep -q -- "$_tok" "$ROOT/README.zh-TW.md" || _t295_bad+=("zh:$_tok")
+done
+# And a promise removed from one page must not survive on the other. This is the
+# reverse direction, which the token list cannot express.
+# 而一個從某一頁移除的承諾，不得在另一頁存活下來。這是反方向，而詞彙清單表達不出它。
+if LC_ALL=C grep -q '在版本之間是穩定的' "$ROOT/README.zh-TW.md"; then
+    _t295_bad+=("zh kept the stability promise the en page dropped")
+fi
+if (( ${#_t295_bad} == 0 )); then
+    ok "T295a every load-bearing token of the machine interface is in both pages / 機器介面上每一個承重的詞都在兩份文件裡"
+else
+    bad "T295a ${_t295_bad[*]} / 實得如上"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
