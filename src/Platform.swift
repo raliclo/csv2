@@ -896,23 +896,31 @@ enum Platform {
         // GetFileAttributesW 回答得了檔案與目錄；而一個裝置沒有屬性、會回報
         // INVALID_FILE_ATTRIBUTES，因此型別改以「不要求任何存取權」開啟的 handle 去問——那在一個
         // 「讀或寫都不會成功」的裝置上仍然開得起來。QA。
-        let attrs: DWORD = path.withCString(encodedAs: UTF16.self) { GetFileAttributesW($0) }
-        if attrs != INVALID_FILE_ATTRIBUTES {
-            if attrs & DWORD(FILE_ATTRIBUTE_DIRECTORY) != 0 { return .directory }
-            return .regular
-        }
+        // GetFileType on a handle, not GetFileAttributesW, because attributes
+        // answer "regular file" for `NUL`: the first version asked them first
+        // and so still called a device a regular file -- the crash was gone but
+        // the refusal was the temp-file one ("cannot create temporary file
+        // beside \\.\NUL"), not the documented "not a regular file ... Use
+        // -so". The handle is opened with NO access rights, which succeeds on a
+        // device that a read or a write would not, and with BACKUP_SEMANTICS so
+        // a directory opens too.
+        // 用 handle 上的 GetFileType，而不是 GetFileAttributesW——因為屬性會把 `NUL` 回答成
+        // 「一般檔案」：第一版先問屬性，於是仍然把一個裝置當成一般檔案，當機是沒了，但那則拒絕
+        // 變成暫存檔那一則（「cannot create temporary file beside \\.\NUL」），而不是文件記載的
+        // 「不是一般檔案……請用 -so」。這個 handle 以「不要求任何存取權」開啟——那在一個讀或寫都
+        // 不會成功的裝置上仍然開得起來——並帶上 BACKUP_SEMANTICS，讓目錄也開得起來。
         let h: HANDLE = path.withCString(encodedAs: UTF16.self) { wpath in
             CreateFileW(wpath, 0,
                         DWORD(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE),
-                        nil, DWORD(OPEN_EXISTING), DWORD(FILE_ATTRIBUTE_NORMAL), nil)
+                        nil, DWORD(OPEN_EXISTING), DWORD(FILE_FLAG_BACKUP_SEMANTICS), nil)
         }
         guard h != INVALID_HANDLE_VALUE else { return nil }
         defer { CloseHandle(h) }
-        switch GetFileType(h) {
-        case DWORD(FILE_TYPE_DISK): return .regular
-        case DWORD(FILE_TYPE_PIPE): return .other
-        default: return .other
-        }
+        guard GetFileType(h) == DWORD(FILE_TYPE_DISK) else { return .other }
+        let attrs: DWORD = path.withCString(encodedAs: UTF16.self) { GetFileAttributesW($0) }
+        if attrs != INVALID_FILE_ATTRIBUTES,
+           attrs & DWORD(FILE_ATTRIBUTE_DIRECTORY) != 0 { return .directory }
+        return .regular
         #else
         var st = stat()
         guard stat(path, &st) == 0 else { return nil }
