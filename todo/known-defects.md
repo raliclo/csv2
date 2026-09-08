@@ -11863,3 +11863,189 @@ Python `str.splitlines()` 分行的消費者——那是很平常的寫法——
    `-mid a,b` 以外**的每一個動詞都等於檔案總筆數。那句話住在 `-contains` 那一節，離 `-head` 的
    說明約 200 行，而且緊鄰著「為什麼刻意沒有 `total`」那一段。一支把 `records` 讀成筆數的腳本，
    六次會對五次。
+
+---
+
+# 第 100 回合（2026-09-08，一個真的要交差的人）—— 這一系列最後一回合
+
+前 99 回合每一次都是「章節取向」。最後一回合換一個從未用過的形狀：**給一份真實的、七步的工作**
+——清理一份髒 CSV、做出互相吻合的報表與計數、去識別 email 但保留可比對性、可復原地改一格再復原、
+加一欄並同時交給 JSON 消費端與一份已有其他表格的 Markdown 文件、對 20 萬筆做效能決策並驗證它有效，
+最後寫出「README 沒給、但交接時必須說」的五句話。
+
+**第 4 類是空的。** 九個結束狀態、每一則拒絕與它的 `code`、兩列標頭上的 `:hmac:` 標記、
+`--json-ascii` 的分行保證、索引加速、`--dry-run` 的逐位元相同、失敗編輯的備份清理、`--md-table`
+的文件行號、索引過期的靜默、串流截斷的陷阱——受測者測過的每一個被記載的宣稱，程式都是對的。
+
+**而受測者自己回報了三次「我以為成功了、其實沒有」，第一次正是這棵樹的全部主題：**
+
+> 我搜尋 `user042@example.com`，而那些 email 是 `user42@example.com`。零命中。csv2 以 0 結束、
+> 什麼都沒印，而我從一次**什麼都沒找到的搜尋**上讀出了 2.8 倍的加速比，並且準備把它寫下來。
+
+救他的是回頭重讀 `-debug` 那一行 `parallel: 200000 records, 0 matched`——那行字在他下結論之前就在
+螢幕上了。
+
+## PQ. 中文版那個自我指涉的註記，描述的是一個不再存在的矛盾
+
+**狀態：待修（文件）。這一條是第 99 回合我自己加進去的。**
+
+第 99 回合修 PH 時，我在中文的加密段落**後面**加了一段斜體註記：「英文版在 2026-09-08 改對了，而
+這一段在同一個 commit 裡被漏掉，於是兩份文件在一個與安全有關的宣稱上互相矛盾了一天。」
+
+而它正上方那一段**已經在同一次編輯裡修好了**。於是這個註記緊接在一段正確的文字後面，宣稱它是錯的。
+**一個讀者照著它做的事，是去不信任一段正確的段落。**
+
+歷史註記在這棵樹上是有價值的（「這一頁直到 X 日為止說的是 Y」），但它必須說**那一段先前**是什麼，
+而不是說**它現在**是矛盾的。我寫的時態是錯的。
+
+A historical note must say what the paragraph USED to say. This one says the
+paragraph IS missing the correction, sitting directly beneath the corrected
+text, so a reader acting on it distrusts a correct paragraph.
+
+## PR. 中文版仍然承諾「`code` 的值跨版本穩定」，而英文版已經移除
+
+**狀態：待修（文件）。這一條是第 99 回合我自己留下的，而它是 PH 的形狀，晚一個回合。**
+
+```console
+$ grep -c 'stable across versions' README.md
+0
+$ sed -n '382p' README.zh-TW.md
+或把這兩個 code 當成同一類；`code` 這些值本身在版本之間是穩定的。
+```
+
+第 99 回合修 PI 時，我把英文那句「the `code` values themselves are stable across versions」拿掉了
+——因為正是那句話讓封閉清單變成承重的——而中文版那句還在。於是一個讀中文頁的腳本作者會寫一個封閉的
+switch，讀英文頁的會寫一個 default 分支。
+
+**而我在同一個回合裡，才剛為 PH 寫下 T287a。** 那個案例釘住的是**加密那一對**，不是「兩頁必須一致」
+這個**類別**。一個只釘住一個實例的守衛，擋不住同一個錯誤搬到隔壁段落。
+
+I removed the stability promise from the English page in round 99 and left it in
+the Chinese one -- in the same round in which I recorded PH (the same defect,
+one paragraph away) and wrote T287a for it. That case pins ONE pair, not the
+class, so the same mistake moved next door unobstructed.
+
+## PS. 兩個無條件的宣稱，其實與緩衝區大小有關
+
+**狀態：待修（文件）。「141」那一句是第 99 回合我自己寫的。**
+
+```console
+$ printf 'a,b\n1,2\n3,4\n' > small.csv
+$ csv2 -r --json -i small.csv | head -1 >/dev/null
+$ print $pipestatus
+0 0                                   <- 不是 141
+
+$ printf 'a,b\n1,2\nx,y,z\n' > bad.csv
+$ csv2 -r --json -i bad.csv > o; echo $?
+1
+$ wc -c < o
+0                                     <- 不是「非空」
+```
+
+兩句都在大檔上為真、在小檔上為假，因為輸出還沒離開緩衝區。我在第 99 回合寫「一個提早停止的消費者
+拿到的是 141」時，寫成了無條件的。
+
+**而這與它所取代的那個缺陷是同一個物種。** PI 的問題是「一個沒有說出例外的封閉列舉」；PS 的問題是
+「一個沒有說出前提的承諾」。兩者都是**在一個為真的觀察上，去掉了讓它為真的那個條件**。一個拿小
+fixture 去驗證的仔細讀者，會得到相反的結果，並得出「這一頁在說謊」的結論——而說謊的是緩衝區。
+
+Both are true on a large file and false on a small one, because the output has
+not left the buffer. I wrote the 141 sentence unconditionally in round 99. It is
+the same species as the closed enumeration it replaced: a promise with its
+precondition removed.
+
+## PT. 沒有「精確整格」的搜尋，而那張限制表沒有列出這一條
+
+**狀態：待修（文件）。這是這一回合裡最可能悄悄進到一份真實報表的東西。**
+
+第 2 步要的是「哪些套件用了我在意的授權，只看授權那一欄，而且計數要與清單吻合」。最直覺的做法是
+`-contains MIT --search-column license`——而 `-contains` 是**子字串**比對，所以一個值為 `MIT-0` 或
+`NON-MIT` 的儲存格也會命中。
+
+「何時該停用」那張表列出了「不分大小寫」與「不管在哪一欄」，卻**沒有列出「精確整格比對」**。於是
+一個讀完整張表的人，會以為 `--search-column` 就是他要的那個限定。
+
+`-update-where` **是**精確比對的（它的訊息是「no data cell equals」），所以這個工具裡兩種語意都有，
+只是只有一種能拿來搜尋，而那一頁沒有把它們對照起來。
+
+`-contains` is substring, so `-contains MIT --search-column license` also matches
+`MIT-0` and `NON-MIT`. The limits table lists case-insensitivity and column
+scoping and omits exact whole-cell matching, so a reader who read the whole table
+believes `--search-column` is the constraint they wanted. `-update-where` IS
+exact -- both semantics exist and the page never contrasts them.
+
+## PU. `-add-column N` 在 `width+1` 是合法的並且會附加，而那一頁沒說
+
+**狀態：待修（文件）。**
+
+```console
+$ printf 'pkg,license\nzlib,MIT\n' > f.csv
+$ csv2 -add-column 3 'note' -i f.csv -o a.csv        # 兩欄檔案，位置 3
+$ head -1 a.csv
+pkg,license,note                                     rc=0
+
+$ csv2 -add-column 4 'x' -i f.csv -o b.csv
+csv2: -add-column 4: this file has 2 columns, so the highest position is 3, which appends
+```
+
+**程式自己的錯誤訊息裡就寫著那一頁漏掉的規則。** 而旁邊的 `-insert` 明講它**不能**這樣做、並要人改用
+`-append`——因此最自然的推論恰好是反的。
+
+## PV. csv2 一次只報一個錯，而清理一份髒檔案因此是 N 趟
+
+**狀態：待修（文件）。**
+
+一個含兩處欄數錯誤的檔案，只會得到**第一處**的訊息（兩行，那是同一則訊息的雙語）。要清乾淨一份
+同事給的檔案，本質上是「修一處、再跑一次」重複 N 次。這一頁從未說出這件事，也沒有提供一個
+「一次列出全部」的模式。對「把一份髒 CSV 弄到可讀」這個最常見的入門任務，那是它最先撞到的牆。
+
+## PW. 同一個 N 上的多個 `-insert` 依「參數順序」解析
+
+**狀態：待修（文件）。**
+
+```console
+$ csv2 -insert 1 'a,1' -insert 1 'b,2' -i f.csv -o c.csv
+$ csv2 -r -i c.csv | head -3
+a,1
+b,2
+zlib,MIT
+```
+
+行為是明確且合理的，只是沒有被記載——而「兩個插入指向同一個位置」是一支腳本組出命令列時很容易產生
+的情況。
+
+## PX. `-o` 必須是一般檔案，而只有錯誤訊息說得出來
+
+**狀態：待修（文件）。**
+
+```console
+$ csv2 -r -i f.csv -o /dev/null
+csv2: -o /dev/null is not a regular file; -o writes a temp file beside the destination and renames it
+```
+
+那則訊息很好，還說出了**為什麼**。但一個想「把輸出丟掉」的人，會先撞上它才知道。
+
+## PY. `.csv2` 支援 RFC 4180 的引號，而格式表讀起來像是不支援
+
+**狀態：待修（文件）。**
+
+格式表把「引號內的逗號與換行」記在 `.csv` 那一列，而 `.csv2` 那一列只寫「每行一筆；`\n` 與 `\r`
+以跳脫表示」。實測：
+
+```console
+$ printf 'a,b\n甲,乙\n"x,y",2\n' > q.csv2
+$ csv2 -get 1:1 -i q.csv2
+x,y
+```
+
+它**支援**引號內的逗號與成對的雙引號，只禁止**原始的換行**。受測者說這是第 1 步唯一承重的事實，
+而他是靠實測才知道的。
+
+## PZ. 兩處易漏
+
+**狀態：待修（文件）。**
+
+1. **`--md-style preserve` 在 CSV 輸入上的行為等同 `compact`。** 這一頁說過一次，而它很容易被略過
+   ——受測者因此交給人類讀者一張沒有對齊的表，rc=0、沒有任何警告。
+2. **`-count` 的「同伴」沒有定義。** 第 97 回合寫的是「`-count` 不接受同伴」，而「同伴」只能從
+   「哪些不是同伴」的例子（`--no-index`、`--headers`、`-debug`）反推。
