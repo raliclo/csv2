@@ -515,3 +515,39 @@ The guest harness exports only totals -- no per-case lines at all, not even T1. 
 the four nodes a case that silently stops running is visible only as a moved total, which is a
 proxy rather than a measurement. The script belongs to the parent project's tree, so this is a
 suggestion to report there, not something to change from here.
+
+## 出貨流程只有一半是腳本 / Half the release is scripted
+
+**加入於 2026-09-08，出完 v0.1.0 之後。**
+
+`release.zsh` 負責「一個節點」那一段，而且做得夠嚴：拒絕不乾淨的工作區、拒絕
+「`--version` 與 HEAD 不符」的執行檔、指名檢查 `zstd`，最後解開封存、執行解開後的執行檔、
+再讓它讀一個 CSV。
+
+**其餘七步這次全是手動的：**
+
+1. `git tag -a` 並推 tag
+2. 用 `multiscp` 把封存從三個節點各自收回（它不支援多來源下載，所以是一個檔一次）
+3. 收回後重新比對 sha256（傳輸會說「transfer complete」，那是宣稱不是驗證）
+4. `gh release create` 與 release notes
+5. 發布後從**公開 URL** 重新下載並再驗一次
+6. 把三個 sha256 抄進 `Formula/csv2.rb`
+7. 把其中一個 sha256 抄進 `scoop/csv2.json`
+
+**為什麼這是待辦而不是「就這樣也行」**：這次出貨唯一的錯誤——formula 與 README 裡的 brew 指令
+少了 `brew trust`——就落在手動那一半。它之所以被抓到，只是因為我去跑了那兩行；沒有任何東西會
+回報它。而第 6、7 步是**抄一個 64 字元的十六進位字串**，抄錯了同樣沒有人會說話。
+
+一支 `publish.zsh` 應該做完 1–7，而且要沿用 `release.zsh` 的態度：sha256 從封存**現算**、不從
+別處抄；formula 與 manifest 的 URL 與 hash **產生**而非手填；發布後那一次公開 URL 的重新驗證是
+流程的一部分，不是額外的好習慣。
+
+Half the release is scripted. `release.zsh` covers one node and is strict about
+it; the other seven steps -- tag, collect from three nodes, re-checksum after
+transfer, create the release, re-verify from the public URL, and copy three
+sha256s into the formula and the manifest -- were done by hand for v0.1.0. The
+only mistake in that release (the brew instructions were missing `brew trust`)
+lived in the manual half, and steps 6 and 7 are transcribing a 64-character hex
+string, which nothing reports getting wrong. A `publish.zsh` should compute the
+hashes from the archives rather than copy them, and treat the post-publish
+re-download as part of the procedure.
