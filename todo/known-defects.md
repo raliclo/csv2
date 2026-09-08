@@ -12054,8 +12054,8 @@ x,y
 
 ## QA. Windows：`-o` 或 `-log` 指向 `NUL` 時，csv2 **當機**而不是拒絕
 
-**狀態：待修。這是第 95 回合以來第一個第 4 類缺陷，而它是被第 100 回合新增的 T289a 在
-「那個回合沒有測到的節點」上抓到的。**
+**狀態：已修（2026-09-08），由 T289a 釘住。這是第 95 回合以來第一個第 4 類缺陷，而它是被第 100 回合
+新增的 T289a 在「那個回合沒有測到的節點」上抓到的——而 T289a 是為了一個**文件**缺口而加的。**
 
 macOS 與 Linux 上，`-o /dev/null` 會得到一則有記載的拒絕。Windows 上：
 
@@ -12085,17 +12085,47 @@ $ # stderr：0 位元組
 
 `-count -o NUL` 會得到第 97 回合那道 `-count` 拒絕（rc=1），所以 `validate()` 最前面那一段確實跑到了。
 
-### 尚未確立的事
+### 那個 trap 是 `resolved()`
 
-**我還不知道是哪一個呼叫 trap。** SIGILL 在 Swift 上通常是一次 runtime trap（`fatalError`、強制解包、
-前提條件），而不是記憶體毀損。兩個懷疑對象都還沒有被證明：
+`URL(fileURLWithPath:).resolvingSymlinksInPath()` 在一個 Windows 裝置名字上會 trap。每一項觀察都只
+指向這一個呼叫：
 
-- `Platform.appendWrite` 用的是 `FileHandle.write(_:)`——Foundation 那個**非拋出**的舊 API，寫入失敗
-  時會 `fatalError`。它符合 `-log` 那一半。
-- `resolved()`／`sameFile()` 會對路徑呼叫 `URL(fileURLWithPath:).resolvingSymlinksInPath()`，而
-  `-o` 的那幾道「是不是同一個檔案」比對會用到它。
+- `-o` 與 `-i` 的「是不是同一個檔案」比對在 `validate()` 的**前段**，早於「不是一般檔案」那則拒絕、
+  也早於「目錄不存在」那則——那正是 `-o nodir/NUL` 死掉、而 `-o nodir/out.csv` 抵達了後者的原因。
+- `-log NUL` 經由 `refuseLogAliases` 走到**同一個**比對，而它在 log 被開啟之前執行——那正是
+  `-log g.log` 從未建立 `g.log` 的原因。
+- `-i nosuch.csv -o NUL` 死在輸入被開啟之前。
 
-**這一段刻意留著「還不知道」。** 這棵樹上一次把推測寫成結論的代價，記在 mistakes.md 第 1 條。
+**我第一次的夾擊指錯了函式。** 我把它夾到 `Platform.fileKind`，據此改寫了那個函式，推上去，
+而在節點上崩潰**原封不動**。那次改動留著——它現在讓那則拒絕說得出正確內容——但它沒有修好任何東西。
+夾擊的邏輯本身是對的（`-o NUL -so` 走到前面的拒絕、`-o nodir/NUL` 走不到後面的），錯的是我漏看了
+「同一性比對排在那兩者之間」。**一個正確的推理，套在一份不完整的順序上。**
+
+### 修法，以及它在 Windows 上花掉的三次建置
+
+`Platform.normalisedPath` 改用 `GetFullPathNameW`；`fileKind` 改用「以零存取權開啟的 handle 上的
+`GetFileType`」，因為 `GetFileAttributesW` 對 `NUL` **是有答案的**，而且答的是「不是目錄」——於是
+只問屬性的版本仍然把裝置當成一般檔案，當機沒了，但拒絕變成了暫存檔那一則。
+
+過程中有三個「只在 Windows 上出現」的建置失敗，而 macOS 每一次都毫無怨言地編譯完成：
+
+1. `#endif` 收得太早，`let fmt = UInt32(st.st_mode)` 落在條件之外，指向一個 Windows 上不存在的變數。
+2. Windows 分支被放進 `main.swift`，而那個檔案**沒有** import WinSDK——`Platform.swift` 才有。
+3. `String(decodingCString:)` 已 deprecated，而這棵樹以 `-warnings-as-errors` 建置。
+
+第 2 個尤其值得記：`Platform.swift` 的檔頭寫著它是「唯一一個知道這是哪個作業系統的檔案」，理由是
+「在每個呼叫點旁邊各放 `#if canImport(...)` 正是移植腐化的方式……漏掉一處只會在那個平台上、幾個月後
+才變成建置錯誤」。**那段文字預言了我當天犯的錯。**
+
+The trapping call was `resolved()` --
+`URL(fileURLWithPath:).resolvingSymlinksInPath()` on a Windows device name.
+My first bracketing named `fileKind` instead; I rewrote that function on the
+strength of it, pushed, and the crash was untouched on the node. The bracketing
+logic was sound and the ordering I applied it to was incomplete: the identity
+comparison sits between the two refusals I had used as bounds. The fix cost
+three Windows-only build failures that macOS compiled without complaint, the
+second of which was putting the Windows branch in main.swift -- a file whose
+sibling's header already says why that goes wrong.
 
 ### 為什麼這一條重要
 
