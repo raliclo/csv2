@@ -870,7 +870,6 @@ enum Platform {
         #else
         var st = stat()
         guard stat(path, &st) == 0 else { return nil }
-        #endif
         // The numbers rather than the names: on Windows `S_IFMT` is ambiguous
         // -- the CRT exposes both it and `_S_IFMT` -- and Swift refuses to
         // choose. The values are the same everywhere csv2 builds (0o170000,
@@ -885,6 +884,7 @@ enum Platform {
         if fmt == 0o040000 { return .directory }
         if fmt == 0o010000 { return .fifo }
         return .other
+        #endif
     }
 
     /// Can a new file be created in this directory? The question `-o` really
