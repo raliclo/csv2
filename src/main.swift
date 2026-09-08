@@ -181,7 +181,57 @@ func errorCode(_ message: String) -> String {
 /// /private/tmp 變 /tmp），因此它的結果不能拿去和「打出來的路徑」比較；append 快路徑就是
 /// 那樣被弄斷的（DT）。
 func resolved(_ path: String) -> String {
-    URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+    #if canImport(ucrt)
+    // Windows normalises through GetFullPathNameW instead of Foundation's URL.
+    //
+    // `resolvingSymlinksInPath()` TRAPPED on a device name: `csv2 -o NUL` and
+    // `csv2 -log NUL` both exited 132 -- SIGILL -- with an empty stderr, where
+    // macOS and Linux give the documented refusal. Every observation fits this
+    // call and only this call: the `-o` vs `-i` identity comparison runs at the
+    // top of validate, BEFORE the "not a regular file" refusal and before the
+    // "directory does not exist" one, which is why `-o nodir/NUL` died while
+    // `-o nodir/out.csv` reached the second; `-log NUL` reaches the same
+    // comparison through refuseLogAliases, which runs before the log is opened,
+    // which is why `-log g.log` never created g.log; and `-i nosuch.csv -o NUL`
+    // died before the input was ever opened.
+    //
+    // An earlier fix rewrote `fileKind` for Windows on a bracketing that named
+    // the wrong function. That change is kept -- it classifies a device
+    // correctly, which is what makes the refusal below say the right thing --
+    // but it was not the crash.
+    //
+    // GetFullPathNameW does not follow symlinks. It does not need to: this
+    // function normalises spelling, and `sameFile` asks the filesystem for
+    // identity separately and treats that as the authority. QA.
+    //
+    // Windows 改以 GetFullPathNameW 正規化，而不是 Foundation 的 URL。
+    //
+    // `resolvingSymlinksInPath()` 在一個裝置名字上會 **trap**：`csv2 -o NUL` 與 `csv2 -log NUL`
+    // 都以 132（SIGILL）結束、stderr 全空，而 macOS 與 Linux 上得到的是那則有記載的拒絕。
+    // 每一項觀察都只指向這一個呼叫：`-o` 與 `-i` 的同一性比對在 validate 的前段，**早於**
+    // 「不是一般檔案」那則拒絕、也早於「目錄不存在」那則——那正是 `-o nodir/NUL` 死掉、而
+    // `-o nodir/out.csv` 抵達了後者的原因；`-log NUL` 經由 refuseLogAliases 走到同一個比對，
+    // 而它在 log 被開啟之前執行——那正是 `-log g.log` 從未建立 g.log 的原因；而
+    // `-i nosuch.csv -o NUL` 死在輸入被開啟之前。
+    //
+    // 先前有一次修正，依據一個「指錯函式」的夾擊結果改寫了 Windows 的 `fileKind`。那個改動留著
+    // ——它能正確分類一個裝置，而那正是底下那則拒絕說得出正確內容的原因——但它不是崩潰的成因。
+    //
+    // GetFullPathNameW 不跟隨 symlink。它不需要：這個函式做的是「拼法正規化」，而 `sameFile`
+    // 會另外向檔案系統詢問「身分」，並以那個答案為準。QA。
+    let n: DWORD = path.withCString(encodedAs: UTF16.self) { GetFullPathNameW($0, 0, nil, nil) }
+    guard n > 0 else { return path }
+    var buf = [UInt16](repeating: 0, count: Int(n))
+    let written: DWORD = path.withCString(encodedAs: UTF16.self) { wpath in
+        buf.withUnsafeMutableBufferPointer { out in
+            GetFullPathNameW(wpath, n, out.baseAddress, nil)
+        }
+    }
+    guard written > 0, written < n else { return path }
+    return String(decodingCString: buf, as: UTF16.self)
+    #else
+    return URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+    #endif
 }
 
 /// Whether two paths name one file, decided by resolving both. Both are
