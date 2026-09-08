@@ -12049,3 +12049,69 @@ x,y
    ——受測者因此交給人類讀者一張沒有對齊的表，rc=0、沒有任何警告。
 2. **`-count` 的「同伴」沒有定義。** 第 97 回合寫的是「`-count` 不接受同伴」，而「同伴」只能從
    「哪些不是同伴」的例子（`--no-index`、`--headers`、`-debug`）反推。
+
+---
+
+## QA. Windows：`-o` 或 `-log` 指向 `NUL` 時，csv2 **當機**而不是拒絕
+
+**狀態：待修。這是第 95 回合以來第一個第 4 類缺陷，而它是被第 100 回合新增的 T289a 在
+「那個回合沒有測到的節點」上抓到的。**
+
+macOS 與 Linux 上，`-o /dev/null` 會得到一則有記載的拒絕。Windows 上：
+
+```console
+$ csv2 -r -t -i t289.csv -o NUL
+$ echo $?
+132                     <- 128+4，SIGILL
+$ # stderr：0 位元組
+```
+
+`/dev/null` 也一樣（MSYS 會把它改寫成 `NUL` 再交給原生程式）。
+
+### 已確立的事實
+
+| 目的地 | rc | 備註 |
+|---|---:|---|
+| 一般檔案 | 0 | 正常 |
+| 一個目錄 | 1 | 訊息良好，指名原因與出路 |
+| `NUL`、`nul`、`sub/NUL` | **132** | stderr 全空 |
+| `NUL.txt`、`AUX`、`PRN`、`COM1` | 0 | 不觸發 |
+| `-so > /dev/null`（文件建議的做法） | 0 | 正常 |
+| `-log NUL` | **132** | 同樣的形狀 |
+
+**崩潰早於「開啟 log」那一步。** `csv2 -r -t -i f.csv -o NUL -log g.log` 之下，`g.log`
+**根本沒有被建立**——而 log 是在 `validate()` 之前開的。因此崩潰發生在參數解析之後、開 log 之前或
+之中，這也解釋了為什麼連 `-debug` 的 INFO 那一行都沒有印出來。
+
+`-count -o NUL` 會得到第 97 回合那道 `-count` 拒絕（rc=1），所以 `validate()` 最前面那一段確實跑到了。
+
+### 尚未確立的事
+
+**我還不知道是哪一個呼叫 trap。** SIGILL 在 Swift 上通常是一次 runtime trap（`fatalError`、強制解包、
+前提條件），而不是記憶體毀損。兩個懷疑對象都還沒有被證明：
+
+- `Platform.appendWrite` 用的是 `FileHandle.write(_:)`——Foundation 那個**非拋出**的舊 API，寫入失敗
+  時會 `fatalError`。它符合 `-log` 那一半。
+- `resolved()`／`sameFile()` 會對路徑呼叫 `URL(fileURLWithPath:).resolvingSymlinksInPath()`，而
+  `-o` 的那幾道「是不是同一個檔案」比對會用到它。
+
+**這一段刻意留著「還不知道」。** 這棵樹上一次把推測寫成結論的代價，記在 mistakes.md 第 1 條。
+
+### 為什麼這一條重要
+
+一個帶著**空 stderr** 的當機，是這個工具明確拒絕的那一種失敗：它既沒有說出原因，也沒有說出出路，
+而 rc=132 在大多數腳本裡與「被訊號殺死」無法區分。而觸發它的，是一個完全合理的意圖——「把輸出丟掉」
+——而那一頁對那個意圖的答案（`-so`）是好的，只是使用者要先撞上這個才會去讀它。
+
+On Windows, `-o NUL` (and `/dev/null`, which MSYS rewrites to it) exits 132 --
+SIGILL -- with an empty stderr, where macOS and Linux give the documented
+refusal. `-log NUL` does the same. The crash precedes the opening of the log
+file: with `-log g.log` alongside, `g.log` is never created, which also explains
+why not even the `-debug` INFO line appears. A directory destination is still
+refused correctly, and `NUL.txt`, `AUX`, `PRN` and `COM1` do not trigger it.
+
+WHICH call traps is not yet established. Two candidates are untested:
+`Platform.appendWrite`, which uses the non-throwing `FileHandle.write(_:)` that
+fatalErrors on failure, and `resolved()`/`sameFile()`, which run
+`resolvingSymlinksInPath()` over the destination. This entry deliberately
+records that as unknown rather than guessing.
