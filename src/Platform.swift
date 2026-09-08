@@ -818,9 +818,23 @@ enum Platform {
     /// node, after macOS had compiled the same file without complaint. A
     /// conditional branch is only ever checked by the platform it is for.
     ///
-    /// GetFullPathNameW does not follow symlinks and does not need to: the
-    /// caller normalises spelling here and asks the filesystem for identity
-    /// separately, treating that as the authority. QA.
+    /// Symlinks ARE followed, through GetFinalPathNameByHandleW.
+    ///
+    /// The first version used GetFullPathNameW alone and said in this comment
+    /// that following symlinks was unnecessary because `sameFile` asks the
+    /// filesystem for identity separately. That was wrong, and the Windows node
+    /// said so with SEVEN failures: `resolved()` also decides WHERE TO WRITE,
+    /// so an `--in-place` edit through a symlink replaced the link with a
+    /// regular file instead of writing to its target. Identity was never the
+    /// only caller.
+    ///
+    /// It is the round-100 lesson happening inside the round-100 fix: a
+    /// correction is written at the moment of highest confidence, and the
+    /// sentence justifying it claimed more than had been checked.
+    ///
+    /// GetFinalPathNameByHandleW needs an open handle, so a path that does not
+    /// exist yet -- every `-o` destination -- falls back to GetFullPathNameW,
+    /// which is right for it: there is no link to follow. QA. 
     ///
     /// 一個「拼法已正規化」的路徑，供 Windows 使用。
     ///
@@ -833,6 +847,43 @@ enum Platform {
     /// 檔案系統詢問身分、以那個答案為準。QA。
     static func normalisedPath(_ path: String) -> String {
         #if canImport(ucrt)
+        // An existing path is resolved through a handle, which follows links.
+        // BACKUP_SEMANTICS so a directory opens; no access rights so a device
+        // opens without a read or a write being attempted.
+        // 已存在的路徑經由 handle 解析，那會跟隨連結。BACKUP_SEMANTICS 讓目錄也開得起來；
+        // 不要求任何存取權，讓裝置也開得起來，而不必真的去讀或寫。
+        let h: HANDLE = path.withCString(encodedAs: UTF16.self) { wpath in
+            CreateFileW(wpath, 0,
+                        DWORD(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE),
+                        nil, DWORD(OPEN_EXISTING), DWORD(FILE_FLAG_BACKUP_SEMANTICS), nil)
+        }
+        if h != INVALID_HANDLE_VALUE {
+            defer { CloseHandle(h) }
+            let need = GetFinalPathNameByHandleW(h, nil, 0, DWORD(FILE_NAME_NORMALIZED))
+            if need > 0 {
+                var fbuf = [UInt16](repeating: 0, count: Int(need))
+                let got = fbuf.withUnsafeMutableBufferPointer { out in
+                    GetFinalPathNameByHandleW(h, out.baseAddress, need, DWORD(FILE_NAME_NORMALIZED))
+                }
+                if got > 0, got < need {
+                    var out = String(decoding: fbuf[0..<Int(got)], as: UTF16.self)
+                    // Strip the extended-length prefix so the result compares
+                    // against paths the caller typed. `\\?\UNC\srv\share`
+                    // becomes `\\srv\share`, its ordinary spelling.
+                    // 去掉延伸長度前綴，讓結果能與呼叫端打出來的路徑比較。
+                    // `\\?\UNC\srv\share` 會變回它一般的拼法 `\\srv\share`。
+                    if out.hasPrefix("\\\\?\\UNC\\") {
+                        out = "\\\\" + out.dropFirst(8)
+                    } else if out.hasPrefix("\\\\?\\") {
+                        out = String(out.dropFirst(4))
+                    }
+                    return out
+                }
+            }
+        }
+        // Not openable -- a destination that does not exist yet. Normalise the
+        // spelling; there is no link to follow.
+        // 開不起來——一個還不存在的目的地。把拼法正規化即可；沒有連結需要跟隨。
         let n: DWORD = path.withCString(encodedAs: UTF16.self) { GetFullPathNameW($0, 0, nil, nil) }
         guard n > 0 else { return path }
         var buf = [UInt16](repeating: 0, count: Int(n))
