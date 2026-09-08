@@ -1,0 +1,33 @@
+{
+    "version": "0.1.0",
+    "description": "Fail-loudly CSV parser and editor: names the record and field, never repairs",
+    "homepage": "https://github.com/raliclo/csv2",
+    "license": "MIT",
+    "notes": [
+        "Installed as csv2.exe. Verify with:  csv2 --version",
+        "The archive is .tar.zst; Scoop unpacks it with the zstd it ships.",
+        "Only 64bit is published: an archive is built on the machine that built the binary,",
+        "and only that arrangement lets the version inside it be checked by running it."
+    ],
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/raliclo/csv2/releases/download/v0.1.0/csv2-0.1.0-windows-x86_64.tar.zst",
+            "hash": "af82c194123403ddd7e6ad788c4c141b1b44c6f9d7c923c165ccc6c97cd015b5",
+            "extract_dir": "csv2-0.1.0-windows-x86_64"
+        }
+    },
+    "bin": "csv2.exe",
+    "checkver": {
+        "github": "https://github.com/raliclo/csv2"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/raliclo/csv2/releases/download/v$version/csv2-$version-windows-x86_64.tar.zst"
+            }
+        },
+        "hash": {
+            "url": "$url.sha256"
+        }
+    }
+}
