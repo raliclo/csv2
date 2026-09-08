@@ -12145,3 +12145,58 @@ WHICH call traps is not yet established. Two candidates are untested:
 fatalErrors on failure, and `resolved()`/`sameFile()`, which run
 `resolvingSymlinksInPath()` over the destination. This entry deliberately
 records that as unknown rather than guessing.
+
+## QB. 修 QA 時把 Windows 的 symlink 處理弄壞了（七個案例）
+
+**狀態：已修（2026-09-08），由既有的 T129b／T129c／T130a1／T130b／T229b／T229d／T229e 抓到並釘住。
+這一條是我在修 QA 的過程中造成的，而它曾經存在於已推送的 commit（240fc30、a799de4）裡。**
+
+修 QA 時，我把 Windows 的 `resolved()` 改成只用 `GetFullPathNameW`，並在註解裡寫下理由：
+
+> *GetFullPathNameW does not follow symlinks. It does not need to: this function normalises spelling,
+> and `sameFile` asks the filesystem for identity separately and treats that as the authority.*
+
+**那句話是假的，而它是我寫的。** `resolved()` 不只用來判斷「兩個路徑是不是同一個檔案」，它也用來決定
+**寫到哪裡**。Windows 節點用七個失敗說出這件事：
+
+```
+FAIL  T129b  the symlink was replaced by a regular file
+FAIL  T129c  and the edit landed on the file it points at (got 'x', want …)
+FAIL  T130a1 the symlink was replaced by a regular file
+FAIL  T130b  and the data landed in the file it points at (got '9', want '1')
+FAIL  T229b  backup is not a regular file
+FAIL  T229d  the edit still reaches the symlink target (got 'old', want 'new')
+FAIL  T229e  the input symlink was replaced
+```
+
+也就是說：一次經由 symlink 的 `--in-place` 編輯，會把**那個連結**換成一般檔案，而不是寫進它指向的
+目標；而 `--backup` 備份的是連結而不是檔案。
+
+**修法**：已存在的路徑改由 `GetFinalPathNameByHandleW` 解析（它會跟隨連結），並在 handle 開不起來時
+——每一個還不存在的 `-o` 目的地——退回 `GetFullPathNameW`，那對它是正確的，因為沒有連結需要跟隨。
+回傳值的 `\\?\` 前綴會被去掉，讓結果能與呼叫端打出來的路徑比較。
+
+### 為什麼把它寫在這裡
+
+它已經修好、四節點全綠，而且**抓到它的測試全部是既有的**——沒有補任何新案例。那正是它必須被寫下來
+的理由：一個「已經修好、沒有留下新測試」的缺陷，在樹上完全看不見，而下一個動 `resolved()` 的人會
+需要知道「那裡曾經有人踩過，而踩的方式是相信了一句自己寫的註解」。
+
+**它的形狀是第 100 回合剛歸納出來的那一條，發生在第 100 回合自己的修正裡**：一次更正寫於信心最高的
+時刻，而它的理由宣稱的比被檢查過的更多。`blind-test-flow.md` 結尾那一節開的藥方是兩次 grep——其中
+第二次是「這個新句子在你做得出來的最小輸入上還成不成立」。我沒有跑那一次。
+
+Fixing QA broke Windows symlink handling in seven cases, and the break shipped
+in two pushed commits. I changed `resolved()` to use GetFullPathNameW alone and
+wrote a comment saying following symlinks was unnecessary because `sameFile`
+asks for identity separately. `resolved()` also decides WHERE TO WRITE: an
+`--in-place` edit through a symlink replaced the link with a regular file
+instead of writing to its target, and `--backup` backed up the link. Now
+resolved through GetFinalPathNameByHandleW, which follows links, with
+GetFullPathNameW as the fallback for a path that cannot be opened -- every `-o`
+destination that does not exist yet -- where there is no link to follow.
+
+Recorded although it is fixed and every case that caught it already existed:
+a defect that leaves no new test behind is invisible in the tree, and the next
+person to touch `resolved()` needs to know someone was here and got it wrong by
+believing a comment they had just written themselves.

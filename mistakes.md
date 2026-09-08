@@ -478,7 +478,7 @@ skill 說「摘要樣式是附加的，失敗掃描是強制的」。**把整個
 
 ## 3. 一條規則只套用到它成立範圍的一部分
 
-**16 次 / 7 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
+**17 次 / 7 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
 2026-09-08），單日最多 5 次（2026-09-03）。
 
 *數字的權威來源是 `mistakes_counter.csv2`；這一行是它的副本。副本會漂，而那本身是第 1 類——
@@ -500,6 +500,7 @@ skill 說「摘要樣式是附加的，失敗掃描是強制的」。**把整個
 | 2026-09-08 | **PH** | 第 98 回合修正了「密文是 base64、所以空儲存格分辨不出來」——改了英文那一段，也改了中文的**量測表格** | **中文的加密段落**。兩份檔案在同一個 commit 裡都開著，而那一段被留在原地，繼續說著英文段落正在道歉的那件事 |
 | 2026-09-08 | **PR** | 第 99 回合把「`code` 跨版本穩定」那句承諾從**英文版**移除——因為正是它讓封閉清單變成承重的 | **中文版**。而這是在我**同一個回合裡**才剛記下 PH（同一個錯，隔壁一段）並為它寫了 T287a 之後 |
 | 2026-09-08 | **PS** | 第 99 回合把「早退的消費者拿到 141」寫進兩份文件 | **它的前提**。那句話在大檔上為真、小檔上為假，而我是在一個大檔上觀察到它的。一個宣稱的**邊界**也是它成立範圍的一部分 |
+| 2026-09-08 | **QB** | 修 QA 時把 Windows 的 `resolved()` 改成只做「拼法正規化」，並在註解裡說「不必跟隨 symlink，因為 `sameFile` 會另外問身分」 | **`resolved()` 也決定「寫到哪裡」**。七個 Windows 案例：經由 symlink 的 `--in-place` 會換掉那個連結，而不是寫進它的目標 |
 
 ### 為什麼它不會報錯
 
@@ -781,6 +782,13 @@ it -- and T287a pins ONE PAIR of paragraphs. One round later the identical
 mistake happened one paragraph away (PR) and T287a could not see it. A guard
 written against an instance does not defend the class; T295a now takes the
 load-bearing tokens of the whole interface and requires each in both pages.
+
+QB is the same day's third, and the one that shipped: the comment justifying
+the change was written by the same hand in the same minute, and it asserted a
+property of `resolved()`'s callers that had not been looked at. `blind-test-flow`
+had just gained a section prescribing two greps after any correction, the second
+being "does the new sentence hold on the smallest input you can build". That
+grep was not run.
 
 PS is the same entry seen from a different side: a claim's PRECONDITION is part
 of where it holds. "A consumer that stops early gets 141" was observed on a

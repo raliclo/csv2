@@ -46,7 +46,9 @@ guest 比對吞掉 csv2 的結束狀態（已修——csv2 單獨執行、檢查
 > | **Windows 的 scoop shim** | ❌ **未做**——`install.zsh` 的非註解行裡一次也沒有 `scoop` |
 > | 以執行來驗證，而非檢查檔案存在 | ✅ 以 `--version` 驗證 |
 >
-> 真正的 Homebrew formula 另外被「`raliclo/csv2` 尚未公開」擋住，那不是這裡做得完的。
+> 真正的 Homebrew formula 先前記著「被『`raliclo/csv2` 尚未公開』擋住」。**2026-09-08 實測時
+> 那個 repo 已經是公開的、不帶憑證也抓得到**（`git ls-remote https://github.com/raliclo/csv2`
+> 回傳 HEAD），所以那個阻礙不在了。剩下的是真正的工作：一個有版本的、可下載的產物。
 >
 > **這段狀態是因為一次盤點才寫的**：先前這一條看起來像「整條未開始」，而它其實只差一件。
 > 一個「未關閉」的項目與一個「幾乎做完」的項目，在標題上長得一模一樣。
@@ -57,13 +59,23 @@ guest 比對吞掉 csv2 的結束狀態（已修——csv2 單獨執行、檢查
 > stocktake read this as "not started" when only one part remained: an open item and an
 > almost-finished one look identical from the heading.
 
-**Status (corrected 2026-08-20): the drop-in half is DONE, and so is the local
-Windows half. What remains -- a Homebrew tap and a public scoop manifest -- is
-one blockage wearing two names: this repository is private, and both need a URL
-the installing machine can fetch.
-/ 狀態（2026-08-20 更正）：drop-in 那一半、以及 Windows 的「本機」那一半**都已完成**。
-剩下的——Homebrew tap 與一份公開的 scoop manifest——是同一個阻礙的兩個名字：本 repo 尚未
-公開，而兩者都需要一個「安裝端抓得到」的 URL。**
+**Status (corrected 2026-09-08): the drop-in half is DONE, and so is the local
+Windows half. What remains -- a Homebrew tap and a public scoop manifest -- was
+recorded as one blockage wearing two names, "this repository is private". THAT
+IS NO LONGER TRUE: on 2026-09-08 `git ls-remote https://github.com/raliclo/csv2`
+returned HEAD with no credentials at all. What both still need is a URL the
+installing machine can fetch, and that is now ordinary work -- a tag, a
+downloadable artefact, a sha256 -- not a blockage.
+/ 狀態（2026-09-08 更正）：drop-in 那一半、以及 Windows 的「本機」那一半**都已完成**。
+剩下的——Homebrew tap 與一份公開的 scoop manifest——先前被記成同一個阻礙的兩個名字：「本 repo
+尚未公開」。**那已經不成立**：2026-09-08 時 `git ls-remote https://github.com/raliclo/csv2`
+在完全不帶憑證的情況下回傳了 HEAD。兩者仍然需要一個「安裝端抓得到」的 URL，但那現在是**普通的
+工作**——一個 tag、一份可下載的產物、一個 sha256——而不是一個阻礙。**
+
+*這一段是第三次因為過期而被更正（2026-08-19、2026-08-20、2026-09-08），而前兩次的更正就寫在下面。
+一個寫進檔案裡的「阻礙」，會與它所描述的世界反向漂移，而沒有任何東西會回報它——那正是
+`todo/known-defects.md` 開頭要求「缺陷清單不要放在指令檔裡」的同一條理由。下次要寫阻礙時，
+連同「怎麼一行指令驗證它還成不成立」一起寫。*
 
 This line was corrected once already, on 2026-08-19, and it went stale again
 within a day: "no Windows build exists" survived a round in which the Windows
@@ -90,7 +102,7 @@ running `csv2 --version` in a fresh shell and comparing.
 | Part | State |
 |---|---|
 | drop-in `install.zsh` | **done** — `$(brew --prefix)/bin`, `/usr/local/bin` where the guest's PATH already has it, `~/.local/bin` fallback, `--uninstall`, `--dry-run`, verified by running / **已完成** |
-| Homebrew tap + formula | blocked: `raliclo/csv2` is private / 被擋住：repo 尚未公開 |
+| Homebrew tap + formula | **no longer blocked** — the repo is public and fetchable anonymously as of 2026-09-08; what remains is a tagged, downloadable artefact with a sha256 / **阻礙已解除**——2026-09-08 起該 repo 公開且匿名抓得到；剩下的是一個有 tag、可下載、附 sha256 的產物 |
 | Windows scoop shim (the local half) | **done, and by not creating one** — `install.zsh` writes to `%LOCALAPPDATA%\csv2\csv2.exe`, the path the machine's existing shim already names; measured 2026-08-20: `command -v csv2` resolves through `~/scoop/shims/csv2.shim` to the build just made, and the suite runs there with no failures, skipping only what MSYS2 cannot offer / **已完成，而且是靠「不建立 shim」完成的**——`install.zsh` 寫到該機器既有 shim 本來就指著的位置；2026-08-20 實測如上。**一份公開的 scoop manifest（讓別人 `scoop install csv2`）與 Homebrew tap 被同一件事擋著：repo 尚未公開**——`plan/plan.md` 第 7 階段講的是那一半，這一列講的是本機這一半 |
 
 `install.zsh` puts the built `csv2` binary where the platform's package manager

@@ -2900,14 +2900,24 @@ CC 修好之後我在 README 寫下「錯誤裡的紀錄號是可以直接餵回
 - [ ] prebuilt 收成、`artifacts.csv` 與 `version.txt` 的登記
 - [x] `install.zsh` 的 drop-in 部分 —— `$(brew --prefix)/bin`、退回 `~/.local/bin`、
   `--uninstall`、`--dry-run`，並以「在全新 shell 中執行 `csv2 --version` 並比對版本」
-  驗證。它從來就沒有被「repo 尚未公開」擋住，那個阻礙只屬於下面兩項
-- [ ] Homebrew tap 與 formula —— 被「`raliclo/csv2` 尚未公開」擋住：formula 需要一個
-  「執行 `brew install` 的那台機器抓得到」的來源 URL
+  驗證。它從來就沒有被「repo 尚未公開」擋住——那個阻礙只屬於下面兩項，而它本身也已在 2026-09-08 解除
+- [ ] Homebrew tap 與 formula —— **那個阻礙已經沒了。** 這一項先前寫著「被『`raliclo/csv2`
+  尚未公開』擋住」，而 2026-09-08 實測時那個 repo 已經是公開的，且不帶任何憑證抓得到：
+
+  ```console
+  $ git ls-remote https://github.com/raliclo/csv2 HEAD
+  4e25ee2cd30d8add0ad050b1de6ab80841a7e719	HEAD
+  ```
+
+  一個寫在計畫裡的阻礙，會與它所描述的世界反向漂移，而沒有任何東西會回報它——這與
+  `todo/known-defects.md` 開頭那段「缺陷清單不要放在指令檔裡」是同一條教訓。剩下的是真正的
+  工作：formula 需要一個 tag 或 release 的 tarball URL 加上 sha256，而目前還沒有 tag
 - [ ] Windows 的 scoop shim —— **那個阻礙已經沒了**（2026-08-19 起有 Windows build 且測試
   通過），但剩下的部分不是我們的：**建立 shim 是 scoop 的事**。`install.zsh` 現在裝到
   `%LOCALAPPDATA%\csv2\csv2.exe`——也就是既有 shim 已經指著的位置——因此 shell 解析得到
   新的建置，而這支腳本不必往 scoop 自己的目錄裡寫東西。真正的 scoop **manifest**（讓別人
-  `scoop install csv2`）仍然被「repo 尚未公開」擋住，與 Homebrew formula 是同一個阻礙
+  `scoop install csv2`）先前也被記成「被 repo 尚未公開擋住」——**那同樣已經不成立**（見上一項）。
+  它與 Homebrew formula 剩下的是同一件真正的工作：一個可供下載的、有版本的產物
 
 ### 為什麼是這個順序
 
