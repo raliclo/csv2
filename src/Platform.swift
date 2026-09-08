@@ -811,8 +811,66 @@ enum Platform {
     /// stopped it rather than what usually stops things.
     /// 一個 errno 的文字，供「必須說出真正阻止了它的東西、而不是通常會阻止東西的那個」的訊息使用。
     static func fileKind(path: String) -> FileKind? {
+        #if canImport(ucrt)
+        // Windows answers through the native API rather than the CRT's stat.
+        //
+        // `stat("NUL")` TRAPPED: `csv2 -o NUL` exited 132 -- SIGILL -- with an
+        // empty stderr, where macOS and Linux give the documented "not a
+        // regular file, use -so" refusal. The trap was bracketed to this
+        // function on 2026-09-08: `-o NUL -so` still reported the exclusivity
+        // refusal that precedes this call, and `-o nodir/NUL` died before the
+        // "directory does not exist" refusal that follows it, while
+        // `-o nodir/out.csv` reached that refusal normally. So the crash sat
+        // between them, and this is the only call in that window that depends
+        // on the name.
+        //
+        // A crash with an empty stderr is the failure this tool exists to
+        // refuse: it names neither the cause nor the way out, and 132 is
+        // indistinguishable in most scripts from being killed by a signal. The
+        // caller's intent -- discard the output -- is ordinary, and the page's
+        // answer to it (`-so`) is good; they just have to survive this first.
+        //
+        // GetFileAttributesW answers for files and directories; a device has no
+        // attributes and reports INVALID_FILE_ATTRIBUTES, so the type is asked
+        // for through a handle opened without any access rights, which succeeds
+        // on a device that a read or a write would not. QA.
+        //
+        // Windows 這一支改用原生 API 回答，而不是 CRT 的 stat。
+        //
+        // `stat("NUL")` 會 **trap**：`csv2 -o NUL` 以 132（SIGILL）結束、stderr 全空，而 macOS 與
+        // Linux 上得到的是那則有記載的「不是一般檔案，請用 -so」拒絕。2026-09-08 把那次 trap 夾到了
+        // 這個函式：`-o NUL -so` 仍然回報了「在這個呼叫之前」的互斥拒絕，而 `-o nodir/NUL` 死在
+        // 「在這個呼叫之後」的「目錄不存在」拒絕之前——同時 `-o nodir/out.csv` 正常抵達了那則拒絕。
+        // 於是崩潰就落在兩者之間，而那個區間裡唯一與「名字」有關的呼叫就是這一個。
+        //
+        // 一個帶著空 stderr 的當機，正是這個工具存在要拒絕的那種失敗：它既沒說原因、也沒說出路，
+        // 而 132 在大多數腳本裡與「被訊號殺死」無法區分。呼叫端的意圖——把輸出丟掉——很平常，而
+        // 這一頁對它的答案（`-so`）也很好；他們只是得先活過這一關。
+        //
+        // GetFileAttributesW 回答得了檔案與目錄；而一個裝置沒有屬性、會回報
+        // INVALID_FILE_ATTRIBUTES，因此型別改以「不要求任何存取權」開啟的 handle 去問——那在一個
+        // 「讀或寫都不會成功」的裝置上仍然開得起來。QA。
+        let attrs: DWORD = path.withCString(encodedAs: UTF16.self) { GetFileAttributesW($0) }
+        if attrs != INVALID_FILE_ATTRIBUTES {
+            if attrs & DWORD(FILE_ATTRIBUTE_DIRECTORY) != 0 { return .directory }
+            return .regular
+        }
+        let h: HANDLE = path.withCString(encodedAs: UTF16.self) { wpath in
+            CreateFileW(wpath, 0,
+                        DWORD(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE),
+                        nil, DWORD(OPEN_EXISTING), DWORD(FILE_ATTRIBUTE_NORMAL), nil)
+        }
+        guard h != INVALID_HANDLE_VALUE else { return nil }
+        defer { CloseHandle(h) }
+        switch GetFileType(h) {
+        case DWORD(FILE_TYPE_DISK): return .regular
+        case DWORD(FILE_TYPE_PIPE): return .other
+        default: return .other
+        }
+        #else
         var st = stat()
         guard stat(path, &st) == 0 else { return nil }
+        #endif
         // The numbers rather than the names: on Windows `S_IFMT` is ambiguous
         // -- the CRT exposes both it and `_S_IFMT` -- and Swift refuses to
         // choose. The values are the same everywhere csv2 builds (0o170000,
@@ -825,9 +883,7 @@ enum Platform {
         let fmt = UInt32(st.st_mode) & 0o170000
         if fmt == 0o100000 { return .regular }
         if fmt == 0o040000 { return .directory }
-        #if !canImport(ucrt)
         if fmt == 0o010000 { return .fifo }
-        #endif
         return .other
     }
 
