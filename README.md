@@ -79,9 +79,11 @@ suffix declares a format too, and is checked against the input's header count.
 suspect.** A `#`, a JSON object, an XML declaration, a Markdown table's rows
 and its `|---|` separator all come back as their own bytes -- which is what
 makes a document containing a table editable line by line. A `.csv` or `.csv2`
-holding a `|---|` row IS refused, because there the suffix claims otherwise
-and a one-column file that looks like Markdown is `-md` output under the wrong
-name.
+holding a separator row **that is the line's only field** IS refused, because
+there the suffix claims otherwise and a one-column file that looks like Markdown
+is `-md` output under the wrong name. `|---|,2` in a two-column file is data at
+exit 0 — the same one-field predicate as the `#` rule below, and the refusal
+says so: "is a Markdown separator row **and has one field**".
 
 **A blank line is a record there too**, so `-insert N ''` and `-append ''` put
 a real empty line in -- prose is mostly blank lines, and a document you cannot
@@ -274,8 +276,57 @@ with `--headers 0`. `0` does not mean the width is unfixed: a `.csv` read with
 to size rows only when it is non-zero. Until 2026-09-07 this said 0 meant "not
 fixed", which is false on exactly the run that reports it.
 
-`--json-ascii` escapes non-ASCII characters. `-md` and `--json` are mutually
-exclusive and say so; there is no single run that emits both.
+`--json-ascii` escapes non-ASCII characters, **and that is a framing guarantee,
+not a cosmetic one.** Plain `--json` emits U+0085, U+2028 and U+2029 as their
+own bytes. That is legal JSON and legal JSON Lines — the record separator is
+`\n`, and `jq` or `while IFS= read -r` are unaffected — but a consumer that
+splits on Unicode line boundaries, which is what Python's `str.splitlines()`
+does, sees a record break in the middle of a string and gets unparseable
+fragments. `--json-ascii` escapes all three and costs nothing.
+
+`-md` and `--json` are mutually exclusive and say so; there is no single run
+that emits both.
+
+**`meta.format` is `csv`, `csv2` or `lines`, and a Markdown table reports
+`csv`.** A `.md` input is translated to CSV before any reader sees it, so a
+consumer cannot tell a Markdown table from a CSV by this field; use the path if
+you need to know.
+
+**`meta.records` is how far the record numbering got, which equals the file's
+total for every verb except `-head` and `-mid a,b`**, where the reader stops
+early. It is not a record count, and there is deliberately no `total` — see
+`-count`.
+
+**A zero-record read is two metadata lines and nothing between them.** A
+header-only `.csv`, or an empty file read as `.lines`, produces exactly that. A
+consumer that slices "lines 2 to n-1" — which the framing above invites —
+selects the closing metadata line on such a file and fails on it. Select
+structurally instead: a record line is the one WITHOUT a `meta` key.
+
+**`-t` is accepted and has no effect under `--json`**: the header is already in
+the meta line, so there is nothing for it to add. It is inert rather than
+refused, unlike `-rownum`, which would have to invent a key.
+
+**Under `--filter`, `--json` emits the record shape** — `record`, `line`,
+`fields` — the same as `-r`, with no field naming which cell matched. The
+locating report is where that lives.
+
+**`--include-headers` adds a sixth key and two zeroes.** A hit in a header row
+emits `record: 0`, an extra `header_row` of `"0"` (or `"0a"`/`"0b"` for a
+`.csv2`), and does NOT increment `matched`, which counts data records. So a
+script gated on `matched > 0` reports "no match" while a hit line is sitting in
+the stream, and `.record` fed back to `-get` is refused, because no verb accepts
+a header address.
+
+**A consumer that stops early gets exit 141, not 1.** `csv2 -r --json -i big.csv
+| head -1` leaves csv2 killed by SIGPIPE with stderr empty — distinguishable
+from a failure, which is 1 with an error object. Check for 141 before treating a
+short read as broken.
+
+**Under `--json` a truncated run IS structurally detectable**, unlike the CSV
+output described under Errors. A fault found part-way through leaves valid
+record lines on stdout and **no closing metadata line**. Requiring that line is
+the cheapest completeness check a consumer can make.
 
 `-md` emits Markdown and requires `-t`. `--md-style` selects the layout, and the
 three names are about PADDING only — none of them changes a value:
@@ -402,19 +453,28 @@ Errors found BEFORE reading starts — an unusable flag combination, a missing
 file, a suffix conflict — do leave stdout empty, and they are most of them.
 
 Under `--json` a refusal is one object on stderr with `code`, `message` and
-`message_zh`. There are three codes:
+`message_zh`. **The set of codes is not closed — give your consumer a default
+branch.** These are the ones observed:
 
 | `code` | Raised by |
 |---|---|
 | `not-found` | the input, output or key file could not be opened |
+| `unknown-flag` | a flag this version does not recognise |
+| `ambiguous-match` | two columns share a name, so an address cannot be resolved |
 | `invalid-input` | a value or address the file cannot satisfy, and some flag conflicts |
 | `conflicting-options` | other flag conflicts |
 
-The split between the last two follows where the check happens rather than a
-rule you can predict — `--physical --json` reports `invalid-input` while
-`-md --json` reports `conflicting-options`, and both are flag conflicts. Branch
-on the exit status, or treat those two codes as one class; the `code` values
-themselves are stable across versions.
+Until 2026-09-08 this said "there are three codes", listing the first, fourth
+and fifth, one sentence before promising that `code` values are stable across
+versions — which is what makes a closed list load-bearing. A three-way switch
+with `default: unknown` falls through on any file with duplicate column names.
+The count was wrong rather than the codes; each individual entry has held.
+
+The split between `invalid-input` and `conflicting-options` follows where the
+check happens rather than a rule you can predict — `--physical --json` reports
+`invalid-input` while `-md --json` reports `conflicting-options`, and both are
+flag conflicts. Branch on the exit status, or treat those two codes as one
+class.
 
 `-get` refuses `--json` as well, and that refusal REPLACES the error you were
 about to get, so an out-of-range record under `-get --json` is reported as the
@@ -432,12 +492,22 @@ csv2：vs-sqlite.csv2 的副檔名宣告了 2 列標頭，但 --headers 說 1 �
 
 **A `#` line is data, not a comment.** CSV has no comment syntax, and a
 column named `#id` is legal, so skipping such a line would mean guessing which
-lines are data. A `#` line is refused by naming the `#` rather than by counting
-fields, because the count is two steps from the cause. It fires wherever the
-line is: a `#` in the MIDDLE of a file is refused too, with a message naming the
-record and the line. This paragraph said "at the top" until 2026-09-08, which
-invited the reader to assume a mid-file `#` was fine — an assumption that would
-surface only after half the file had been read.
+lines are data. **The trigger is the field count, and the `#` only chooses the
+message.** A line holding exactly ONE field, anywhere in the file, is refused by
+naming the `#` rather than by counting fields, because for that line the count
+is two steps from the cause; a `#` in the MIDDLE gets that message too, naming
+the record and the line. A `#` line with the file's own field count is DATA:
+`#comment,x` in a two-column file is record content at exit 0, and `#x,y,z` in a
+two-column file is an ordinary field-count error that never mentions the `#`. A
+header starting with `#` is a legal column name — which is what makes `#id`
+legal, two sentences above.
+
+Two earlier versions of this paragraph were wrong in opposite directions. It
+said "at the top" until 2026-09-08, inviting the reader to assume a mid-file `#`
+was fine; the correction said it "fires wherever the line is", which claims more
+than the program keeps. The test written with that correction passed because its
+fixture happened to be a one-field line — a case that agreed with the code and
+not with the sentence it was there to defend.
 To read such a file as lines without touching it, pipe it in:
 `csv2 -si --headers 0 < FILE`. Reading it under a name with no `.csv`/`.csv2`
 suffix does the same, and removing the line makes it a CSV. Note that
@@ -584,13 +654,19 @@ aside first. A FAILED edit removes the backup it had just taken, since the
 input is unchanged and a leftover `.bak` would block every later use; before
 2026-09-08 one failure burned that single use permanently.
 
-**An edit cannot take `--json` at all**, so an edit's refusal is never a JSON
-error object: adding `--json` to an edit replaces whatever would have been
-reported with `conflicting-options`, which is a refusal about the flags rather
-than about the edit. JSON error objects — one object on stderr with a stable
-`code`, `message`, and `message_zh`, exit status 1 — are for READS. Until
-2026-09-07 this paragraph promised them here, and the table below repeated the
-promise.
+**An edit cannot take `--json` at all**, so you cannot get an edit's OWN error
+as a JSON object: adding `--json` to an edit replaces whatever would have been
+reported with `conflicting-options`, a refusal about the flags rather than about
+the edit. What you do get is still one parseable object on stderr with `code`,
+`message` and `message_zh`, exit status 1 — `csv2 -update 1:license X --json -i
+f.csv --in-place` emits exactly that. So a consumer can parse every refusal this
+tool produces; what it cannot do is learn from JSON why the EDIT would have
+failed, because the run never reached the edit.
+
+Until 2026-09-07 this paragraph promised the edit's own error here. The 09-07
+correction over-shot: it said an edit's refusal is "never a JSON error object"
+and the table below said it is "available only as text on stderr", which told a
+script author not to parse at all and cost them a working code path.
 
 An edit whose destination is Markdown MUST pass BOTH `-md` and `-t`, and
 neither is optional — `-t` is required for the same reason it is when reading,
@@ -952,7 +1028,7 @@ re-reading them.
 | column projection (`-cols`) | `csv2 -r --json -i f.csv \| jq -r 'select(.record) \| .fields.license'`. The `select(.record)` is not optional: without it the two meta lines arrive as `null`s in your column. Or `-get` per cell, with `csv2 -count -i f.csv` for the loop's upper bound. Both go through `--json`, which REFUSES a file holding non-UTF-8 bytes that `-get` reads fine |
 | case-insensitive matching | nothing does — `-contains mit` finds no `MIT`, **and prints nothing at exit 0**, which is indistinguishable from "no such data". Fold the case yourself: `csv2 -r --json -i f.csv \| jq -r 'select(.record) as $r \| $r.fields\|to_entries[] \| select(.value\|ascii_downcase\|contains("mit")) \| "\\($r.record)\\t\\(.key)\\t\\(.value)"'` |
 | a search that ignores which column it is in | `-contains` matches a substring in EVERY column, so `-contains MIT` also finds `transMITter` — see the last example below. Use `--search-column license` to scope it, or `--search-row`/`--search-cell`. Until 2026-09-07 this row said scoping was not offered at all, and warned that counting would be "silently wrong", 260 lines below the section documenting the flag that fixes it |
-| skipping `#` comment lines | nothing does, and deliberately: a `#` is data and `#id` is a legal column name, so skipping one would mean guessing which lines are data. The refusal names the `#`, and it fires wherever the line is — a `#` in the MIDDLE is refused too, naming the record and the line. Read the file under a suffix-less name to get every line verbatim |
+| skipping `#` comment lines | nothing does, and deliberately: a `#` is data and `#id` is a legal column name, so skipping one would mean guessing which lines are data. The refusal names the `#` on any ONE-FIELD line, wherever it is — but the trigger is the field count, so `#comment,x` in a two-column file is data at exit 0. Read the file under a suffix-less name to get every line verbatim |
 | a header-only read | `csv2 -head 1 --json -i f.csv \| head -1 \| jq -r '.meta.header[]'` — the meta line carries `header`; no verb returns the names alone. On a `.lines` input there is no `header` key at all |
 | converting between `.csv` and `.csv2` | refused on purpose. To do it by hand, `.csv` → `.csv2`: `csv2 -r -t -i p.csv -o work` (the `-t` is required — without it the header row is dropped silently), then `csv2 -insert 2 '套件,版本,授權' -i work --in-place`, then **rename it**: `mv work out.csv2`. The rename is the step that converts; reading the suffix-less path back gives you `.lines`, which is what it already was. Reverse: `csv2 -r -t -i p.csv2 -o work`, `csv2 -delete 2 -i work --in-place`, `mv work out.csv`. csv2 will not invent a header row it was not given |
 | safe concurrent writers, EXCEPT append against append | serialise them yourself; two writers silently lose one edit — the file stays VALID, and the surviving version is whichever run renamed its temp file last, so the loss is a missing edit rather than damage you would notice. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one finishing SECOND warns it could not update the index |
@@ -961,10 +1037,13 @@ One thing this table used to say and no longer does: **editing a Markdown
 table** is supported, and it is in the examples below.
 
 It also used to say that **telling refusals apart programmatically** is done
-with the `--json` error object. That is true for reads and false for edits,
-which cannot take `--json` at all — so an edit's refusal is available only as
-text on stderr. That row was removed rather than corrected, because it named a
-capability the reader most wants exactly where it does not exist.
+with the `--json` error object, and that row was removed on 2026-09-07 on the
+grounds that an edit's refusal is "available only as text on stderr". That
+reason was wrong: an edit given `--json` emits one parseable object with
+`conflicting-options`. Every refusal this tool produces is machine-readable.
+What an edit cannot give you is the edit's OWN error as JSON, because `--json`
+is refused before the edit runs — a narrower and much less alarming fact than
+the row's removal implied.
 
 ## Examples
 

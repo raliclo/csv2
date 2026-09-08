@@ -16777,6 +16777,274 @@ else
 fi
 
 echo
+echo "--- T280: the refusal predicate is ONE FIELD, not the '#' / T280：拒絕的述詞是「恰好一個欄位」，不是那個 '#' ---"
+# PG. Round 97 rewrote the paragraph to say the '#' refusal "fires wherever the
+# line is". It does -- for a one-field line. The trigger is the field count and
+# the '#' only selects which message that line gets. T272a passed against the
+# broad sentence because its fixture happened to be the narrow case: a test that
+# agreed with the code and not with the sentence it was there to defend.
+#
+# Both halves are asserted here, which is what T272a was missing.
+#
+# PG。第 97 回合把那一段改寫成「不論那一行在哪裡都會觸發」。它確實會——**對一個單欄位的行而言**。
+# 觸發條件是欄數，而 `#` 只是選擇了那一行會拿到哪一則訊息。T272a 之所以在那句寬宣稱之下通過，是
+# 因為它的 fixture 剛好是那個窄的情況：一個與程式一致、卻與它本該保護的句子不一致的測試。
+#
+# 這裡把兩半都斷言了，而那正是 T272a 缺的東西。
+_t280=$TMP/t280
+mkdir -p "$_t280"
+printf 'a,b\n1,2\n#comment,x\n3,4\n' > "$_t280/two.csv"
+_t280_out=$("$CSV2" -r -i "$_t280/two.csv" 2>"$_t280/err"); _t280_rc=$?
+if (( _t280_rc == 0 )) && [[ $_t280_out == *'#comment,x'* ]] && [[ ! -s "$_t280/err" ]]; then
+    ok "T280a a '#' line with the file's field count is DATA / 欄數與檔案相符的 '#' 行是資料"
+else
+    bad "T280a rc=$_t280_rc out=[${_t280_out//$'\n'/|}] err=[$(head -1 "$_t280/err")] / 實得如上"
+fi
+
+printf '#a,b\n1,2\n' > "$_t280/hdr.csv"
+_t280_meta=$("$CSV2" -r --json -i "$_t280/hdr.csv" 2>/dev/null | head -1)
+if [[ $_t280_meta == *'"header":["#a","b"]'* ]]; then
+    ok "T280b a header starting with '#' is a legal column name / 以 '#' 開頭的標頭是合法欄名"
+else
+    bad "T280b meta=[${_t280_meta:0:100}] / 實得如上"
+fi
+
+# A '#' line with the WRONG field count gets the ordinary field-count error and
+# never mentions the '#'. This is the case that shows the '#' is not the trigger:
+# if it were, this message would name it.
+# 一個欄數**不對**的 `#` 行，拿到的是普通的欄數錯誤，而且從頭到尾不會提到 `#`。這個案例正是「`#`
+# 不是觸發條件」的證明：如果它是，這則訊息就會指名它。
+printf 'a,b\n1,2\n#x,y,z\n' > "$_t280/three.csv"
+"$CSV2" -r -i "$_t280/three.csv" >/dev/null 2>"$_t280/e3"; _t280_rc3=$?
+if (( _t280_rc3 != 0 )) && [[ "$(<"$_t280/e3")" == *'has 3 fields'* ]] && [[ "$(<"$_t280/e3")" != *"starts with '#'"* ]]; then
+    ok "T280c a wrong-width '#' line is a field-count error that never names the '#' / 欄數不對的 '#' 行是欄數錯誤，不會指名 '#'"
+else
+    bad "T280c rc=$_t280_rc3 err=[$(head -1 "$_t280/e3")] / 實得如上"
+fi
+
+# The Markdown separator claim has the identical predicate, and the message says
+# so in its own words: "and has one field".
+# Markdown 分隔列那條的述詞一模一樣，而那則訊息自己就說了：「and has one field」。
+printf 'a,b\n|---|,2\n' > "$_t280/md2.csv"
+printf 'a\n|---|\n' > "$_t280/md1.csv"
+_t280_md2rc=0; "$CSV2" -r -i "$_t280/md2.csv" >/dev/null 2>&1 || _t280_md2rc=$?
+"$CSV2" -r -i "$_t280/md1.csv" >/dev/null 2>"$_t280/emd"; _t280_md1rc=$?
+if (( _t280_md2rc == 0 && _t280_md1rc != 0 )) && [[ "$(<"$_t280/emd")" == *'has one field'* ]]; then
+    ok "T280d a separator row is refused only when it is the line's only field / 分隔列只有在它是該行唯一欄位時才被拒絕"
+else
+    bad "T280d two-col rc=$_t280_md2rc one-col rc=$_t280_md1rc err=[$(head -1 "$_t280/emd")] / 實得如上"
+fi
+
+echo
+echo "--- T281: the --json error codes are not a closed set of three / T281：--json 的錯誤碼不是「三個」這樣一個封閉集合 ---"
+# PI. The page said "There are three codes" one sentence before promising that
+# code values are stable across versions, which is what makes a closed list
+# load-bearing. Five are reachable. The fix was not to write "five" -- that is
+# the same mistake one size larger -- but to say the set is open and to list
+# what has been seen; this case pins the five and the sentence that opens it.
+# PI。這一頁先寫「共有三個 code」，下一句就承諾 code 的值跨版本穩定——正是那句話讓封閉清單變成
+# 承重的。實際上有五個到得了。修法不是把「三」改成「五」（那是同一個錯換個大小），而是說明這個
+# 集合是開放的、並列出已見過的；這個案例釘住那五個，以及那句「開放」的話。
+_t281=$TMP/t281
+mkdir -p "$_t281"
+printf 'pkg,license\nzlib,MIT\n' > "$_t281/f.csv"
+printf 'pkg,pkg\n1,2\n' > "$_t281/dup.csv"
+_t281_code() { print -r -- "$1" | LC_ALL=C grep -o '"code":"[a-z-]*"' | head -1 }
+_t281_got=(
+    "$(_t281_code "$("$CSV2" --nope --json -i "$_t281/f.csv" 2>&1)")"
+    "$(_t281_code "$("$CSV2" -r --json -i "$_t281/nosuch.csv" 2>&1)")"
+    "$(_t281_code "$("$CSV2" -r --json -i "$_t281/dup.csv" 2>&1)")"
+    "$(_t281_code "$("$CSV2" -md -t --json -i "$_t281/f.csv" 2>&1)")"
+    "$(_t281_code "$("$CSV2" -r --physical --json -i "$_t281/f.csv" 2>&1)")"
+)
+_t281_want=('"code":"unknown-flag"' '"code":"not-found"' '"code":"ambiguous-match"'
+            '"code":"conflicting-options"' '"code":"invalid-input"')
+if [[ "${_t281_got[*]}" == "${_t281_want[*]}" ]]; then
+    ok "T281a five distinct codes are reachable under --json / --json 底下有五個不同的 code 到得了"
+else
+    bad "T281a got=[${_t281_got[*]}] / 實得如上"
+fi
+
+# Every one of them must appear in BOTH pages' code table, and the page must not
+# claim a closed count. A grep for the old sentence is the cheapest way to catch
+# a future edit that re-closes it.
+# 那五個每一個都必須出現在**兩份**文件的 code 表裡，而那一頁不得再宣稱一個封閉的數量。用 grep 找
+# 那句舊話，是抓住「未來某次編輯把它重新封閉起來」最便宜的方式。
+_t281_missing=()
+for _c in unknown-flag not-found ambiguous-match conflicting-options invalid-input; do
+    LC_ALL=C grep -q -- "$_c" "$ROOT/README.md"       || _t281_missing+=("en:$_c")
+    LC_ALL=C grep -q -- "$_c" "$ROOT/README.zh-TW.md" || _t281_missing+=("zh:$_c")
+done
+# Asserted POSITIVELY -- the pages must SAY the set is open -- rather than by
+# forbidding the old sentence. The first version of this case forbade "共有三個
+# code" and then FAILED, because the corrected paragraph quotes that very phrase
+# in its own note about what it used to say. A scan that catches its own
+# needle has happened twice before in this file; the durable form is to require
+# the new claim rather than to ban the old words.
+# 這裡用**正向**斷言——那兩頁必須**說出**這個集合是開放的——而不是去禁止那句舊話。這個案例的第一版
+# 禁止了「共有三個 code」，然後**失敗了**：因為修正後的段落，在它自己那句「先前寫的是什麼」的註記
+# 裡引用了那個字串。「掃描抓到自己的針」在這個檔案裡已經發生過兩次；耐久的形式是要求**新**宣稱
+# 存在，而不是禁止**舊**的字眼。
+if (( ${#_t281_missing} == 0 )) && LC_ALL=C grep -q 'The set of codes is not closed' "$ROOT/README.md" \
+   && LC_ALL=C grep -q '這組 code 不是封閉的' "$ROOT/README.zh-TW.md"; then
+    ok "T281b both pages list all five and both say the set is open / 兩份文件都列出五個，而且都說明這個集合是開放的"
+else
+    bad "T281b missing=[${_t281_missing[*]:-none}] open-en=$(LC_ALL=C grep -c 'The set of codes is not closed' "$ROOT/README.md") open-zh=$(LC_ALL=C grep -c '這組 code 不是封閉的' "$ROOT/README.zh-TW.md") / 實得如上"
+fi
+
+echo
+echo "--- T282: an edit's refusal IS a parseable object / T282：一次編輯的拒絕就是一個可解析的物件 ---"
+# PJ. Three sentences said it never is, and one of them removed a whole row of
+# the limits table on that reasoning. The narrow true fact -- you cannot get the
+# EDIT's own error as JSON, because --json is refused before the edit runs -- is
+# worth stating; "do not bother parsing" is not.
+# PJ。有三句話說它「絕不是」，而其中一句還據此把「何時該停用」那張表的一整列移除了。那個窄的、
+# 為真的事實——你拿不到「編輯自己的錯誤」的 JSON，因為 `--json` 在編輯執行之前就被拒絕了——值得
+# 寫出來；「不必費事去解析」不值得。
+_t282=$TMP/t282
+mkdir -p "$_t282"
+printf 'a,b\n1,2\n' > "$_t282/e.csv"
+_t282_before=$(cksum < "$_t282/e.csv")
+_t282_err=$("$CSV2" -update 1:a X --json -i "$_t282/e.csv" --in-place 2>&1 >/dev/null); _t282_rc=$?
+if (( _t282_rc != 0 )) && [[ $_t282_err == '{"error":{"code":"conflicting-options"'* ]] \
+   && [[ $_t282_before == $(cksum < "$_t282/e.csv") ]]; then
+    ok "T282a an edit given --json emits one JSON object and does not edit / 帶 --json 的編輯輸出一個 JSON 物件，而且不會編輯"
+else
+    bad "T282a rc=$_t282_rc err=[${_t282_err:0:80}] / 實得如上"
+fi
+
+echo
+echo "--- T283: --include-headers adds a sixth key and two zeroes / T283：--include-headers 多出第六個鍵與兩個 0 ---"
+# PK. The cell-hit shape is enumerated exhaustively on the page and header_row
+# was not in the list; `record` is 0, which no verb accepts; and `matched` stays
+# 0 while a hit line is in the stream, so a script gated on `matched > 0`
+# reports "no match" with the match in front of it.
+# PK。那一頁把 cell-hit 的形狀逐一列舉過，而 `header_row` 不在清單裡；`record` 是 0，而沒有任何動詞
+# 接受它；`matched` 在串流裡明明有一行命中時仍然是 0，於是一支以 `matched > 0` 當閘門的腳本，會在
+# 命中就擺在眼前時回報「沒有命中」。
+_t283=$TMP/t283
+mkdir -p "$_t283"
+printf 'pkg,license\nzlib,MIT\n' > "$_t283/h.csv"
+_t283_all=$("$CSV2" -contains pkg --include-headers --json -i "$_t283/h.csv" 2>/dev/null)
+_t283_hit=$(print -r -- "$_t283_all" | LC_ALL=C sed -n '2p')
+_t283_tail=$(print -r -- "$_t283_all" | LC_ALL=C tail -1)
+if [[ $_t283_hit == *'"record":0'* && $_t283_hit == *'"header_row":"0"'* \
+   && $_t283_tail == *'"matched":0'* ]]; then
+    ok "T283a a header hit carries record 0 and header_row, and leaves matched at 0 / 標頭命中帶 record 0 與 header_row，且 matched 維持 0"
+else
+    bad "T283a hit=[${_t283_hit:0:90}] tail=[$_t283_tail] / 實得如上"
+fi
+
+echo
+echo "--- T284: an early-stopping consumer gets 141, not 1 / T284：提早停止的消費者拿到 141，不是 1 ---"
+# PL. "Every failure exits 1" plus "check the exit status" leads straight to
+# treating a normal early exit as a failure. grep for 141 and SIGPIPE returned
+# zero hits in both pages.
+# PL。「每一種失敗都以 1 結束」再加上「要檢查結束狀態」，會直接把一次**正常**的早退當成失敗。
+# 在兩份文件裡 grep `141` 與 `SIGPIPE`，命中數都是 0。
+_t284=$TMP/t284
+mkdir -p "$_t284"
+{
+    print -r -- 'a,b'
+    _i=1
+    while (( _i <= 60000 )); do print -r -- "r$_i,v$_i"; (( _i++ )); done
+} > "$_t284/big.csv"
+"$CSV2" -r --json -i "$_t284/big.csv" 2>"$_t284/err" | head -1 >/dev/null
+_t284_ps=($pipestatus)
+if [[ ${_t284_ps[1]} == 141 ]] && [[ ! -s "$_t284/err" ]]; then
+    ok "T284a a consumer that stops early leaves 141 and an empty stderr / 提早停止的消費者留下 141 與空的 stderr"
+else
+    bad "T284a pipestatus=[${_t284_ps[*]}] err=[$(head -1 "$_t284/err")] / 實得如上"
+fi
+
+echo
+echo "--- T285: a truncated --json run has no closing meta line / T285：被截斷的 --json 執行沒有結尾那行 meta ---"
+# PM. The Errors section says a truncated CSV carries "no marker of any kind",
+# which is true, and leaves the reader believing the same of JSON. JSON has one,
+# and it is the cheapest completeness check a consumer can make.
+# PM。「錯誤」那一節說被截斷的 CSV「沒有任何標記」——那是對的——並讓讀者以為 JSON 也一樣。JSON 有，
+# 而且那是一個消費端能做的最便宜的完整性檢查。
+_t285=$TMP/t285
+mkdir -p "$_t285"
+{
+    print -r -- 'a,b'
+    _i=1
+    while (( _i <= 40000 )); do print -r -- "r$_i,v$_i"; (( _i++ )); done
+    print -r -- 'x,y,z'
+} > "$_t285/bad.csv"
+"$CSV2" -r --json -i "$_t285/bad.csv" > "$_t285/o" 2>/dev/null; _t285_rc=$?
+_t285_last=$(LC_ALL=C tail -1 "$_t285/o")
+_t285_good=$("$CSV2" -r --json -i "$_t284/big.csv" 2>/dev/null | LC_ALL=C tail -1)
+if (( _t285_rc != 0 )) && [[ $_t285_last != *'"meta"'* ]] && [[ $_t285_good == *'"meta"'* ]] \
+   && [[ -s "$_t285/o" ]]; then
+    ok "T285a truncation omits the closing meta line that a whole run always has / 截斷會少掉那行結尾 meta，而完整的執行一定有"
+else
+    bad "T285a rc=$_t285_rc last=[${_t285_last:0:60}] good=[${_t285_good:0:60}] / 實得如上"
+fi
+
+echo
+echo "--- T286: format, framing and the small --json gaps / T286：format、分行，以及 --json 的幾個小缺口 ---"
+# PN, PO, PP. A .md reports format "csv", so meta.format cannot distinguish it;
+# U+2028 is emitted raw under --json and escaped under --json-ascii, which is a
+# framing guarantee rather than a cosmetic one; -t is inert; a zero-record read
+# is exactly two lines.
+# PN、PO、PP。一個 `.md` 回報的 format 是 "csv"，因此 `meta.format` 分辨不出它；U+2028 在 `--json`
+# 底下原樣輸出、在 `--json-ascii` 底下被跳脫，那是一個**分行**保證而不是外觀選項；`-t` 是無效的；
+# 一次零筆紀錄的讀取恰好是兩行。
+_t286=$TMP/t286
+mkdir -p "$_t286"
+printf '| a | b |\n|---|---|\n| 1 | 2 |\n' > "$_t286/t.md"
+_t286_md=$("$CSV2" -r --json -i "$_t286/t.md" 2>/dev/null | head -1)
+if [[ $_t286_md == *'"format":"csv"'* ]]; then
+    ok "T286a a Markdown table reports format csv, so meta.format cannot tell them apart / Markdown 表回報的 format 是 csv，因此 meta.format 分辨不出來"
+else
+    bad "T286a [${_t286_md:0:80}] / 實得如上"
+fi
+
+# U+2028 written as bytes so this file needs no literal separator in it.
+# U+2028 以位元組寫出，這樣這個檔案裡就不必放一個字面上的分隔字元。
+printf 'k,v\nsep,a\xe2\x80\xa8b\n' > "$_t286/sep.csv"
+_t286_raw=$("$CSV2" -r --json -i "$_t286/sep.csv" 2>/dev/null | LC_ALL=C od -An -c | LC_ALL=C grep -c '342 200 250')
+_t286_esc=$("$CSV2" -r --json --json-ascii -i "$_t286/sep.csv" 2>/dev/null | LC_ALL=C od -An -c | LC_ALL=C grep -c '342 200 250')
+if (( _t286_raw >= 1 && _t286_esc == 0 )); then
+    ok "T286b --json emits U+2028 raw and --json-ascii escapes it / --json 原樣輸出 U+2028，而 --json-ascii 會跳脫它"
+else
+    bad "T286b raw=$_t286_raw ascii=$_t286_esc / 實得如上"
+fi
+
+printf 'a,b\n1,2\n' > "$_t286/f.csv"
+printf 'a,b\n' > "$_t286/hdronly.csv"
+_t286_t=$("$CSV2" -r -t --json -i "$_t286/f.csv" 2>/dev/null | wc -l | tr -d ' ')
+_t286_no=$("$CSV2" -r --json -i "$_t286/f.csv" 2>/dev/null | wc -l | tr -d ' ')
+_t286_zero=$("$CSV2" -r --json -i "$_t286/hdronly.csv" 2>/dev/null | wc -l | tr -d ' ')
+if [[ $_t286_t == $_t286_no && $_t286_zero == 2 ]]; then
+    ok "T286c -t is inert under --json, and a zero-record read is exactly two lines / -t 在 --json 下無效，而零筆紀錄的讀取恰好兩行"
+else
+    bad "T286c with-t=$_t286_t without=$_t286_no zero-record=$_t286_zero / 實得如上"
+fi
+
+echo
+echo "--- T287: the two pages agree on what an encrypted column leaks / T287：兩份文件對「加密欄位洩漏什麼」的說法一致 ---"
+# PH. Round 98 corrected the English paragraph and the Chinese measurement
+# tables in one commit, with both files open, and left the Chinese encryption
+# paragraph saying the exact thing the English one now apologises for. The two
+# pages contradicted each other on a security-relevant claim for a day.
+#
+# Checked as a property of the PAIR, because either page alone reads fine.
+#
+# PH。第 98 回合在同一個 commit 裡、兩份檔案都開著的情況下，修了英文那一段與中文的量測表格，卻把
+# 中文的加密段落留在原地——說著英文段落現在正在道歉的那件事。兩份文件在一個與安全有關的宣稱上互相
+# 矛盾了一天。
+#
+# 這裡檢查的是**那一對**的性質，因為單看任一頁都讀得通。
+if LC_ALL=C grep -q 'base64' "$ROOT/README.md" && LC_ALL=C grep -q 'base64' "$ROOT/README.zh-TW.md" \
+   && ! LC_ALL=C grep -q '空儲存格也分辨得出來' "$ROOT/README.zh-TW.md"; then
+    ok "T287a both pages say the ciphertext is base64 and neither claims an empty cell is distinguishable / 兩份文件都說密文是 base64，且都不再宣稱空儲存格分辨得出來"
+else
+    bad "T287a en=$(LC_ALL=C grep -c base64 "$ROOT/README.md") zh=$(LC_ALL=C grep -c base64 "$ROOT/README.zh-TW.md") stale=$(LC_ALL=C grep -c '空儲存格也分辨得出來' "$ROOT/README.zh-TW.md") / 實得如上"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

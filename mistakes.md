@@ -478,7 +478,11 @@ skill 說「摘要樣式是附加的，失敗掃描是強制的」。**把整個
 
 ## 3. 一條規則只套用到它成立範圍的一部分
 
-**11 次 / 5 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06），單日最多 5 次。
+**14 次 / 7 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
+2026-09-08），單日最多 5 次（2026-09-03）。
+
+*數字的權威來源是 `mistakes_counter.csv2`；這一行是它的副本。副本會漂，而那本身是第 1 類——
+2026-09-08 第 1 條的這一行就被抓到落後了八次。*
 
 | 日期 | 案例 | 規則被套用到哪裡 | 沒有被套用到哪裡 |
 |---|---|---|---|
@@ -493,6 +497,7 @@ skill 說「摘要樣式是附加的，失敗掃描是強制的」。**把整個
 | 2026-09-03 | **`comm`** | 「不要依賴外部工具的存在」，而且同一個檔案裡有一個 `only_in_first()` 就是為此而寫的 | 我在它下方八百行處寫了第二份實作，用的正是那段註解說「這裡沒有」的工具 |
 | 2026-09-04 | **`errnoText`** | 「errno 要轉成文字」，而 `Platform.errorText()` 早就存在、有 Windows 分支、被六個地方呼叫 | 我在同一個檔案裡、相隔七十行，寫了第二份實作，而它在 Windows 上編不過 |
 | 2026-09-06 | **LJ** | 第 12 階段把 `--headers 0` 映射成 `.lines`——`.md` 那條路改了、stdin 那條路改了 | **無後綴檔案那條路沒改**，而正確的寫法在同一個檔案裡、相距五十行 |
+| 2026-09-08 | **PH** | 第 98 回合修正了「密文是 base64、所以空儲存格分辨不出來」——改了英文那一段，也改了中文的**量測表格** | **中文的加密段落**。兩份檔案在同一個 commit 裡都開著，而那一段被留在原地，繼續說著英文段落正在道歉的那件事 |
 
 ### 為什麼它不會報錯
 
@@ -749,7 +754,8 @@ stale together and gets fixed one at a time.
 
 ## 3. A rule applied to only part of where it holds
 
-Seven times over three days. The part it WAS applied to is correct, so nothing reports the
+Fourteen times over seven days -- `mistakes_counter.csv2` is the authority; this
+sentence said "seven times over three days" until 2026-09-08. The part it WAS applied to is correct, so nothing reports the
 rest: tests pass, the compiler is silent, the fix looks done. With KV the correct usage sat a
 few lines away in the same function; with LC the rule was written as a comment directly above
 the line that broke it, saying "a number written here is a second place to forget".
@@ -766,6 +772,14 @@ is true again.
 
 Still missing: the general form. Three of the seven were a second site of the same rule in
 ordinary code, which no check covers.
+
+The 2026-09-08 occurrence is the clearest form yet. Round 98 corrected the
+English paragraph on what an encrypted column leaks, and corrected the Chinese
+measurement tables, in one commit with both files open -- and left the Chinese
+encryption paragraph asserting the very thing the English one now apologises
+for. Either page reads fine alone; only the PAIR is wrong, which is why the
+test that pins it (T287a) asserts a property of the pair.
+
 
 ## 4. Saying it would be done, and nothing tracking that it was not
 
