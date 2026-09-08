@@ -22,3 +22,8 @@ test/.test_csv2.*
 # 日後的執行相比的量測，不值得做。
 verifications/.measure.*
 src/BuildInfo.swift
+
+# Release archives are attached to a GitHub release, not committed:
+# they are derived from a commit and re-derivable from it.
+# 發行封存掛在 GitHub release 上，不提交進來：它們是由一個 commit 衍生的，也可以再從它衍生一次。
+dist/
