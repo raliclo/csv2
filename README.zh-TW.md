@@ -13,7 +13,41 @@ English documentation: [README.md](README.md)。
 公開 Swift module surface 已提供，並已在 macOS、aarch64 Linux、WSL 與 Windows
 透過獨立 module／client 檢查完成驗證。
 
-## 建置與安裝
+## 安裝發行版
+
+每個版本發布三份封存，各屬於一個「既建得出、也驗得了自己」的平台——每一份都在它的執行檔被建置的
+那台機器上打包，而打包腳本的結尾是**解開封存、執行解開後的執行檔、並讓它讀一個 CSV**。
+
+```sh
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.0/csv2-0.1.0-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.0/csv2-0.1.0-macos-arm64.tar.zst.sha256
+sha256sum -c csv2-0.1.0-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.1.0-macos-arm64.tar.zst -c | tar -x
+./csv2-0.1.0-macos-arm64/csv2 --version
+```
+
+另外兩個把 `macos-arm64` 換成 `linux-x86_64` 或 `windows-x86_64`。**aarch64 Linux 有測試但不出貨**：
+測試它的那個映像沒有 zstd，因此在那裡做不出封存；而在別處做一份，等於出貨一個「這條迴路裡沒有任何
+機器執行得了、也就檢查不了」的執行檔。
+
+用 Homebrew——這個 repo 就是它自己的 tap，不需要第二個：
+
+```sh
+brew tap raliclo/csv2 https://github.com/raliclo/csv2
+brew trust raliclo/csv2
+brew install raliclo/csv2/csv2
+```
+
+**`brew trust` 那一行不是可省的。** Homebrew 6 會拒絕載入一個未受信任的第三方 tap 的 formula，
+而那則拒絕出現在 `brew install`，不是 `brew tap`。
+
+用 Scoop：
+
+```powershell
+scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.json
+```
+
+## 從原始碼建置與安裝
 
 需求：Swift 6，並將警告視為錯誤。建置使用純 Swift 原始檔、Foundation 與
 Dispatch，不使用 SwiftPM 或 SwiftNIO。

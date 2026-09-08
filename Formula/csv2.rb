@@ -3,7 +3,13 @@
 # This repository doubles as its own tap, so no second repository is needed:
 #
 #   brew tap raliclo/csv2 https://github.com/raliclo/csv2
+#   brew trust raliclo/csv2
 #   brew install raliclo/csv2/csv2
+#
+# The `brew trust` line is NOT optional and is not decoration: Homebrew 6
+# refuses to load a formula from a third-party tap until the tap is trusted,
+# with "Refusing to load formula ... from untrusted tap". This comment said two
+# lines until 2026-09-08, when running them produced exactly that refusal.
 #
 # The archives are .tar.zst. Homebrew unpacks those natively; nothing extra is
 # required of the person installing.
@@ -13,7 +19,12 @@
 # 這個 repo 同時就是它自己的 tap，因此不需要第二個 repo：
 #
 #   brew tap raliclo/csv2 https://github.com/raliclo/csv2
+#   brew trust raliclo/csv2
 #   brew install raliclo/csv2/csv2
+#
+# `brew trust` 那一行**不是可省的**，也不是裝飾：Homebrew 6 在第三方 tap 被信任之前，會拒絕
+# 載入它的 formula，訊息是「Refusing to load formula … from untrusted tap」。這段註解直到
+# 2026-09-08 為止只有兩行——而那天實際跑過它們，得到的正是那則拒絕。
 #
 # 封存是 .tar.zst，Homebrew 原生解得開，安裝者不必額外準備任何東西。
 class Csv2 < Formula

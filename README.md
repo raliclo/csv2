@@ -15,7 +15,45 @@ suite.
 The public Swift module surface is available and has been verified on macOS,
 aarch64 Linux, WSL, and Windows through the standalone module/client check.
 
-## Build and install
+## Install a release
+
+Three archives are published per version, one per platform that can both build
+and verify its own — each was packed on the machine that built the binary, and
+the packaging script ends by extracting the archive, running the extracted
+binary and having it read a CSV.
+
+```sh
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.0/csv2-0.1.0-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.0/csv2-0.1.0-macos-arm64.tar.zst.sha256
+sha256sum -c csv2-0.1.0-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.1.0-macos-arm64.tar.zst -c | tar -x
+./csv2-0.1.0-macos-arm64/csv2 --version
+```
+
+Substitute `linux-x86_64` or `windows-x86_64` for the other two. **aarch64 Linux
+is tested but not shipped**: the image that tests it has no zstd, so no archive
+can be made there, and making one elsewhere would ship a binary nothing in the
+loop could run to check it.
+
+With Homebrew — this repository is its own tap, so there is no second one:
+
+```sh
+brew tap raliclo/csv2 https://github.com/raliclo/csv2
+brew trust raliclo/csv2
+brew install raliclo/csv2/csv2
+```
+
+**The `brew trust` line is not optional.** Homebrew 6 refuses to load a formula
+from an untrusted third-party tap, and the refusal arrives at `brew install`,
+not at `brew tap`.
+
+With Scoop:
+
+```powershell
+scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.json
+```
+
+## Build and install from source
 
 Requirements: Swift 6 with warnings treated as errors. The build uses plain
 Swift source files, Foundation, and Dispatch; it does not use SwiftPM or

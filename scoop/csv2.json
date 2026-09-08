@@ -6,6 +6,11 @@
     "notes": [
         "Installed as csv2.exe. Verify with:  csv2 --version",
         "The archive is .tar.zst; Scoop unpacks it with the zstd it ships.",
+        "Verified on 2026-09-08 by hand on a Windows node: the URL downloads, the hash",
+        "matches, extract_dir is the directory the archive really contains, and the",
+        "extracted csv2.exe runs and reads a CSV. `scoop install` itself was NOT run,",
+        "because that machine carries a hand-placed csv2 shim scoop does not manage and",
+        "installing would have collided with it.",
         "Only 64bit is published: an archive is built on the machine that built the binary,",
         "and only that arrangement lets the version inside it be checked by running it."
     ],
