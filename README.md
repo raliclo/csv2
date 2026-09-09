@@ -998,31 +998,51 @@ storage, corpus size, and host conditions are included. The macOS and Windows
 runs used 200,000 records (25.4 MiB); the Linux guest run used 20,000 records
 (2.48 MiB), so compare only like-for-like rows.
 
-All four columns were measured on 2026-09-08 with the same binary. Each figure
-is one `measure.zsh` run, which is itself best-of-N per row, and each column is
-the file named beside it — `measure_output.txt`,
-`measure_output_macos_ssd.txt`, `measure_output_windows.txt`,
-`measure_output_linux.txt`. The two macOS columns were interleaved rather than
-run back to back.
+Each figure is one `measure.zsh` run, which is itself best-of-N per row, and
+each column is the file named beside it. Nothing else on this page is measured
+across machines the way these are, so the file names are given rather than
+implied:
 
-| Measurement | macOS arm64<br>sparse image | macOS arm64<br>local SSD | Windows x86_64 | Linux aarch64 guest |
-|---|---:|---:|---:|---:|
-| Whole-file search, single-threaded | 551,000 µs | 546,000 µs | 1,806,000 µs | 62,000 µs |
-| Whole-file search, parallel | 213,000 µs | 201,000 µs | 774,000 µs | 71,000 µs |
-| Small durable edit | 37,300 µs | 7,800 µs | 66,300 µs | 9,000 µs |
-| Full-file rewrite | 1,232,000 µs | 601,000 µs | 1,887,000 µs | 150,000 µs |
+| Column | File | Measured |
+|---|---|---|
+| macOS arm64, sparse image | `measure_output.txt` | 2026-09-10, `c0ea3c5` |
+| macOS arm64, local SSD | `measure_output_macos_ssd.txt` | 2026-09-10, `c0ea3c5` |
+| WSL2 x86_64 | `measure_output_linux_x86_64.txt` | 2026-09-10, `62d1e1c` |
+| Windows x86_64 | `measure_output_windows.txt` | 2026-09-10, `62d1e1c` |
+| Linux aarch64 guest | `measure_output_linux.txt` | 2026-09-08, one commit older |
+
+`c0ea3c5..62d1e1c` touches `verifications/measure.zsh` and nothing under `src/`,
+so the four 2026-09-10 columns ran the same csv2. The guest column is older and
+says so.
+
+| Measurement | macOS arm64<br>sparse image | macOS arm64<br>local SSD | WSL2<br>x86_64 | Windows<br>x86_64 | Linux aarch64<br>guest |
+|---|---:|---:|---:|---:|---:|
+| Whole-file search, single-threaded | 544,000 µs | 534,000 µs | 1,179,000 µs | 1,822,000 µs | 62,000 µs |
+| Whole-file search, parallel | 205,000 µs | 201,000 µs | 456,000 µs | 820,000 µs | 71,000 µs |
+| Small durable edit | 56,800 µs | 7,800 µs | 11,200 µs | 74,600 µs | 9,000 µs |
+| Full-file rewrite | 1,258,000 µs | 587,000 µs | 1,323,000 µs | 2,131,000 µs | 150,000 µs |
+
+**WSL2 has a column because it is a machine in this project's test loop, and
+until 2026-09-10 it did not have one.** That is how its measurement came to
+overwrite the guest's: `measure.zsh` named output files by `uname -s`, both
+nodes are Linux, and a run with nowhere of its own to go went somewhere else.
+The file is now named with the architecture, and the script refuses to write
+over a file whose recorded `host` names a different machine.
 
 **The two macOS columns are the same machine, the same binary and the same
 minute.** Only the filesystem holding the corpus differs. The two read rows do
-not notice it — 1% — and the two write rows differ by 4.8× and 2.0×. Until
+not notice it — 2% — and the two write rows differ by 7.3× and 2.1×. Until
 2026-09-08 this table had one macOS column and never said where the corpus was,
 which made a storage effect look like a property of csv2.
 
-**The write rows move between runs; the read rows do not.** Across six
-interleaved runs the sparse image gave 35,800–44,100 µs for the small edit and
+**The write rows move between runs; the read rows do not.** Across seven runs
+the sparse image gave 35,800–56,800 µs for the small edit and
 1,201,000–1,322,000 µs for the rewrite, the SSD 5,800–7,800 µs and
-601,000–619,000 µs. Both read rows stayed inside 2%. A single write figure from
-either medium is worth about as much as its range says it is.
+587,000–619,000 µs. Both read rows stayed inside 2%. The small-edit ratio
+between the two media was 4.8× on 2026-09-08 and 7.3× on 2026-09-10 — the same
+two filesystems, a fortnight apart. A single write figure from either medium is
+worth about as much as its range says it is, and the range is wider than the
+first measurement suggested.
 
 **The guest's parallel row is SLOWER than its single-threaded row, and that is
 the real result.** On a 2.48 MiB corpus the boundary-finding pass and the worker
@@ -1047,9 +1067,11 @@ sparse image measures that sparse image.
 
 The parallel-search measurement uses the same 10,000,000 data records in a
 1,307,777,815-byte `.csv` file and a 1,307,777,833-byte `.csv2` file. Every
-record matches `needle`. Measured 2026-09-08 on macOS arm64 (sparse image), 10
-workers, 4 MiB chunks, best of three interleaved rounds; elapsed and peak RSS
-are taken from the same run.
+record matches `needle`. Measured 2026-09-10 at `c0ea3c5` on macOS arm64 (sparse
+image), 10 workers, 4 MiB chunks, best of three interleaved rounds; elapsed and
+peak RSS are taken from the same run. The source is
+[`verifications/measure_parallel_rss_output.txt`](verifications/measure_parallel_rss_output.txt),
+and every figure below is checked against it by the test suite.
 
 **A `.csv` needs an `.index` to be searched in parallel at all**, so the `.csv`
 rows below have one. The last row is the same file without it, and it is there
@@ -1058,17 +1080,19 @@ this table used to be.
 
 | Format | Index | `CSV2_PARALLEL_MAX_BYTES` | Elapsed | Throughput | Peak RSS |
 |---|---|---:|---:|---:|---:|
-| `.csv` | yes | default 1 GiB | 9.636 s | 129.4 MiB/s | 52.05 MiB |
-| `.csv2` | not needed | default 1 GiB | 36.980 s | 33.7 MiB/s | 52.19 MiB |
-| `.csv` | yes | 8 MiB | 34.259 s | 36.4 MiB/s | 51.56 MiB |
-| `.csv2` | not needed | 8 MiB | 38.166 s | 32.7 MiB/s | 49.03 MiB |
-| `.csv` | **none — single-threaded** | — | 31.150 s | 40.0 MiB/s | **9.44 MiB** |
+| `.csv` | yes | default 1 GiB | 9.781 s | 127.5 MiB/s | 52.89 MiB |
+| `.csv2` | not needed | default 1 GiB | 32.814 s | 38.0 MiB/s | 52.12 MiB |
+| `.csv` | yes | 8 MiB | 39.601 s | 31.5 MiB/s | 51.28 MiB |
+| `.csv2` | not needed | 8 MiB | 34.552 s | 36.1 MiB/s | 52.59 MiB |
+| `.csv` | **none — single-threaded** | — | 30.492 s | 40.9 MiB/s | **9.28 MiB** |
 
 **Until 2026-09-08 the two `.csv` rows of this table were that last row.** The
 harness never built the index, and setting `CSV2_PARALLEL_MIN_BYTES=1` did not
 help because the obstacle was never the size threshold. The published figures
-were 34.886 s at 9.28 MiB — which is, to within noise, the single-threaded row
-above. A table headed "parallel" was reporting the scan path's time and the scan
+were 34.886 s at **9.28 MiB** — and the last row above, re-measured on
+2026-09-10 with today's code, is **9.28 MiB**. The old table's memory figure is
+the scan path's memory, to the second decimal, two weeks and one rewrite of the
+harness later. A table headed "parallel" was reporting the scan path's time and the scan
 path's memory for half its rows, and the `CSV2_PARALLEL_MAX_BYTES` column, whose
 whole purpose is to show what that knob costs, was measured where the knob
 cannot do anything: there are no chunks in flight on the single-threaded path.
@@ -1077,12 +1101,17 @@ Anyone who sized a container from 9.28 MiB was sizing it for a scan.
 Two things the corrected table says that the old one could not:
 
 - **Build the index.** 31.150 s to 9.636 s on the same file, same search.
-- **The cap costs time here and saves no memory.** 9.636 s to 34.259 s, and peak
-  RSS barely moves. With every record matching, the peak is dominated by the
-  output side rather than by chunks in flight, so capping the chunks throttles
-  the search without touching what is actually large. On a corpus where few
-  records match, the same knob is what keeps memory bounded — which is why this
-  is a measurement of one workload and not a rule.
+- **The cap costs time here and saves no memory.** 9.781 s to 39.601 s on the
+  indexed `.csv`, and peak RSS barely moves. With every record matching, the
+  peak is dominated by the output side rather than by chunks in flight, so
+  capping the chunks throttles the search without touching what is actually
+  large. On a corpus where few records match, the same knob is what keeps
+  memory bounded — which is why this is a measurement of one workload and not a
+  rule.
+- **And the cost is not uniform.** The same cap slows the unindexed `.csv2` by
+  5% (32.814 s to 34.552 s) and the indexed `.csv` by 4×. Between two
+  best-of-three runs a fortnight apart, the capped `.csv` row moved from
+  34.259 s to 39.601 s — 16% — so read the ratio, not the second decimal.
 
 This is a measurement, not a performance guarantee; compare only runs with
 the same binary, record count, host, storage and search conditions. It is

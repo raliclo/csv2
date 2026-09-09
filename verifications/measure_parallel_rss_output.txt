@@ -1,7 +1,7 @@
 # csv2 parallel RSS measurement
-date    : 2026-09-07T21:05:54Z
+date    : 2026-09-09T19:37:10Z
 host    : Darwin arm64
-binary  : csv2 0.1.0 (4f49422)
+binary  : csv2 0.1.0 (v0.1.0-5-gc0ea3c5)
 csv corpus bytes : 1307777815
 csv2 corpus bytes: 1307777833
 corpus records   : 10000000
@@ -10,27 +10,27 @@ workers      : 10
 chunk bytes  : default
 
 ## default max (best of 3, interleaved / 交錯執行三輪取最小值)
-csv elapsed_seconds: 9.636
-csv throughput_mib_per_sec: 129.4
-csv peak_rss_bytes: 54575104
-csv2 elapsed_seconds: 36.980
-csv2 throughput_mib_per_sec: 33.7
-csv2 peak_rss_bytes: 54722560
+csv elapsed_seconds: 9.781
+csv throughput_mib_per_sec: 127.5
+csv peak_rss_bytes: 55459840
+csv2 elapsed_seconds: 32.814
+csv2 throughput_mib_per_sec: 38.0
+csv2 peak_rss_bytes: 54657024
 
 ## 8 MiB max (best of 3, interleaved / 交錯執行三輪取最小值)
-csv elapsed_seconds: 34.259
-csv throughput_mib_per_sec: 36.4
-csv peak_rss_bytes: 54067200
-csv2: 2026-09-08T05:12:10.272+08:00 DEBUG parallel: holding 2 chunk(s) in flight instead of 10; the last batch held about 4194304 bytes per chunk and CSV2_PARALLEL_MAX_BYTES is 8388608
-csv2 elapsed_seconds: 38.166
-csv2 throughput_mib_per_sec: 32.7
-csv2 peak_rss_bytes: 51412992
-csv2: 2026-09-08T05:12:48.369+08:00 DEBUG parallel: holding 2 chunk(s) in flight instead of 10; the last batch held about 4194304 bytes per chunk and CSV2_PARALLEL_MAX_BYTES is 8388608
+csv elapsed_seconds: 39.601
+csv throughput_mib_per_sec: 31.5
+csv peak_rss_bytes: 53772288
+csv2: 2026-09-10T03:41:26.836+08:00 DEBUG parallel: holding 2 chunk(s) in flight instead of 10; the last batch held about 4194304 bytes per chunk and CSV2_PARALLEL_MAX_BYTES is 8388608
+csv2 elapsed_seconds: 34.552
+csv2 throughput_mib_per_sec: 36.1
+csv2 peak_rss_bytes: 55148544
+csv2: 2026-09-10T03:44:29.433+08:00 DEBUG parallel: holding 2 chunk(s) in flight instead of 10; the last batch held about 4194304 bytes per chunk and CSV2_PARALLEL_MAX_BYTES is 8388608
 
 ## csv with NO index -- the single-threaded fallback / 沒有索引的 csv——單執行緒後備路徑 (best of 3)
-csv-noindex elapsed_seconds: 31.150
-csv-noindex throughput_mib_per_sec: 40.0
-csv-noindex peak_rss_bytes: 9895936
+csv-noindex elapsed_seconds: 30.492
+csv-noindex throughput_mib_per_sec: 40.9
+csv-noindex peak_rss_bytes: 9732096
 
 Each CSV and CSV2 pair used the same data records and command; only format and CSV2_PARALLEL_MAX_BYTES differed.
 每一組 CSV 與 CSV2 使用相同資料列與指令；差異只有格式與 CSV2_PARALLEL_MAX_BYTES。

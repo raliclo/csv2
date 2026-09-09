@@ -16719,7 +16719,15 @@ _t279_from() {  # $1=檔案 $2=列 -> 微秒 / file, row -> microseconds
 }
 # The four columns of the README table, in the order they appear.
 # README 表格的四欄，依它們出現的順序。
-_t279_files=(measure_output measure_output_macos_ssd measure_output_windows measure_output_linux)
+# Five columns since 2026-09-10, in the order the table prints them. WSL2 was
+# added because it is a machine in this loop and had no column -- which is how
+# its measurement came to overwrite the guest's file. Adding the column without
+# adding it here made this case fail by comparing README column 3 (WSL) against
+# measure_output_windows.txt: the table's SHAPE changed and the check said so.
+# 自 2026-09-10 起是五欄，順序與表格印出的一致。WSL2 之所以被加進來，是因為它是這個迴路裡的一台
+# 機器卻沒有欄位——而那正是它的量測會覆蓋 guest 檔案的緣由。加了欄位卻沒有加在這裡，會讓這個案例
+# 拿 README 第 3 欄（WSL）去對 measure_output_windows.txt 而失敗：表格的**形狀**變了，而檢查說了出來。
+_t279_files=(measure_output measure_output_macos_ssd measure_output_linux_x86_64 measure_output_windows measure_output_linux)
 _t279_rows=(single parallel edit rewrite)
 _t279_labels=("Whole-file search, single-threaded" "Whole-file search, parallel" "Small durable edit" "Full-file rewrite")
 _t279_bad=()
@@ -16729,7 +16737,7 @@ for _i in 1 2 3 4; do
         _t279_bad+=("row '${_t279_labels[$_i]}' is not in README.md")
         continue
     fi
-    for _c in 1 2 3 4; do
+    for _c in 1 2 3 4 5; do
         _want=$(_t279_from ${_t279_files[$_c]} ${_t279_rows[$_i]})
         # zsh DROPS the empty fields that a leading and trailing `|` produce, so
         # field 1 is the label and the data columns are 2..5 -- not 3..6. The
@@ -16753,7 +16761,7 @@ for _i in 1 2 3 4; do
     done
 done
 if (( ${#_t279_bad} == 0 )); then
-    ok "T279a all sixteen published figures equal the four source files / 十六個發表的數字全部等於那四份來源檔"
+    ok "T279a all ${#_t279_rows}x${#_t279_files} published figures equal the files they name / 表格中 ${#_t279_rows}x${#_t279_files} 個發表的數字，全部等於它們指名的來源檔"
 else
     bad "T279a ${#_t279_bad} mismatch(es): ${_t279_bad[1]}${_t279_bad[2]:+ ; ${_t279_bad[2]}} / 不一致如上"
 fi
@@ -16765,7 +16773,7 @@ fi
 # 與英文表在同一個 commit 裡各自被修正——而沒有任何東西檢查過它們是否一致。
 _t279_zh_bad=0
 for _i in 1 2 3 4; do
-    for _c in 1 2 3 4; do
+    for _c in 1 2 3 4 5; do
         _want=$(_t279_from ${_t279_files[$_c]} ${_t279_rows[$_i]})
         LC_ALL=C grep -qF "$_want µs" "$ROOT/README.zh-TW.md" || _t279_zh_bad=$((_t279_zh_bad + 1))
     done
