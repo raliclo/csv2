@@ -31,9 +31,16 @@ zstd -d csv2-0.1.0-macos-arm64.tar.zst -c | tar -x
 ```
 
 Substitute `linux-x86_64` or `windows-x86_64` for the other two. **aarch64 Linux
-is tested but not shipped**: the image that tests it has no zstd, so no archive
-can be made there, and making one elsewhere would ship a binary nothing in the
-loop could run to check it.
+is tested and its archive is not published yet** — it simply has not been built
+on that machine.
+
+Until 2026-09-09 this paragraph gave a reason: that the image testing it has no
+zstd. That was false; it has `/usr/bin/zstd`. The file I read was Buildroot's own
+upstream example defconfig rather than the configuration this project feeds to
+Buildroot, which sets `BR2_PACKAGE_ZSTD=y` and says above it why. Every step of
+the reasoning after that was sound and inherited a false premise, which is a
+reminder worth more than the paragraph it replaced: ask the machine, not the file
+that describes it.
 
 With Homebrew — this repository is its own tap, so there is no second one:
 

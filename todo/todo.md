@@ -516,6 +516,54 @@ the four nodes a case that silently stops running is visible only as a moved tot
 proxy rather than a measurement. The script belongs to the parent project's tree, so this is a
 suggestion to report there, not something to change from here.
 
+## aarch64 Linux 的封存還沒補上，而我先前寫的理由是假的
+
+**2026-09-09。**
+
+v0.1.0 出了三個平台。aarch64 Linux 有測試（1333/0/5）而沒有封存——**原因只是還沒在那台機器上跑
+`release.zsh`**，沒有別的。
+
+而我先前在這裡、在 `plan.md`、在 tag 訊息、在 release notes、以及在送給母專案 session 的一個請求裡，
+都寫了另一個理由：「那個映像沒有 zstd」。**那是假的。** guest 裡有 `/usr/bin/zstd`，205848 bytes。
+
+錯在第一步：我讀了 `sos/buildroot/configs/aarch64_efi_defconfig`——那是 **buildroot 上游自帶的範例**，
+`git log` 顯示它最後一次改動是上游的 commit——而這個專案實際餵給 buildroot 的是
+`sos/linux_kernal_vm_interactive/build/buildroot-multissh.config`，它的第 297 行就是
+`BR2_PACKAGE_ZSTD=y`，而第 260 行是一段**解釋為什麼需要它**的註解。
+
+**後面每一步推論都成立，而且每一步都忠實地繼承了那個假前提**：defconfig 裡沒有 → rootfs 裡沒有 →
+guest 裡包不出來 → 只能出三個平台 → 去請別人加一行設定。一條推理鏈不會因為它自己是對的就變成真的。
+
+### 要記住的那一句
+
+**去問那台機器，不要問描述它的檔案。** 那台 guest 當時開著。`command -v zstd` 一行，比讀完那份
+24 行的 defconfig 還快。
+
+同一個形狀當天出現了第二次、小一號：我估 rootfs 成本時用的是**手邊 Debian 的** zstd（1 MiB），
+而 guest 裡實際是 205 KB。
+
+### 已修與改不了的
+
+- release notes：**已更正**，明說先前那個理由是錯的、錯在哪。
+- `git tag -a v0.1.0` 的訊息：**改不了**。tag 已推送，重打會動到別人可能已經抓過的東西，那比留著
+  一句被更正過的話更糟。
+- 送出去的那個請求：已致歉並說明。
+
+### 待辦
+
+新 VM 重建完成後，在 guest 裡跑 `./release.zsh`，把 aarch64 的封存掛到 v0.1.0 上。那時
+`release.zsh` 自己的第三道拒絕會檢查 `zstd` 在不在——**而那正是這次我用「讀檔案」代替「執行」的
+那一道**。
+
+The aarch64 archive is simply not built yet. The reason I gave everywhere else --
+that the image has no zstd -- was false: it has `/usr/bin/zstd`, 205848 bytes. I
+read Buildroot's own upstream example defconfig and used it to answer a question
+about OUR image; the configuration this project actually feeds to Buildroot sets
+`BR2_PACKAGE_ZSTD=y` and carries a comment above it explaining why. Every step
+after that first one was sound and faithfully inherited a false premise. The
+lesson is one sentence: ask the machine, not the file that describes it. It was
+booted at the time.
+
 ## 出貨流程只有一半是腳本 / Half the release is scripted
 
 **加入於 2026-09-08，出完 v0.1.0 之後。**
