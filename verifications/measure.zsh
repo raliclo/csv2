@@ -75,12 +75,53 @@ fi
 # 名字底下發表出去。2026-09-08 因為節點拒絕 pull 才發現：擋在那與「發表一個錯誤欄位」之間的，
 # 只有 git 注意到有一個未暫存的變更。
 if [[ -z ${MEASURE_OUTPUT:-} ]]; then
+    # The OS is not enough: there are TWO Linux nodes in this project -- the
+    # aarch64 guest and WSL2 on x86_64 -- and naming by `uname -s` alone put
+    # them on the same file. On 2026-09-10 a WSL run wrote `host: Linux x86_64`
+    # and 200,000 records over measure_output_linux.txt, which holds the guest's
+    # 20,000-record run and backs the "Linux aarch64 guest" column of the
+    # README. Nothing failed; the file simply started describing another
+    # machine.
+    #
+    # That was my own fix (PF) applied to part of where it holds: it separated
+    # operating systems and stopped at the first axis that looked sufficient.
+    #
+    # 只看作業系統是不夠的：這個專案有**兩個** Linux 節點——aarch64 guest 與 x86_64 的 WSL2
+    # ——而只用 `uname -s` 命名會讓它們共用同一個檔案。2026-09-10 一次 WSL 的執行，把
+    # `host: Linux x86_64`、200,000 筆的數字寫進了 measure_output_linux.txt，而那個檔案裝的是
+    # guest 的 20,000 筆執行、也是 README「Linux aarch64 guest」那一欄的來源。沒有任何東西失敗；
+    # 那個檔案只是開始描述另一台機器。
+    #
+    # 那是我自己的修正（PF）只套用到它成立範圍的一部分：它分開了作業系統，然後停在第一個
+    # 看起來足夠的軸上。
     case $(uname -s) in
         Darwin)        MEASURE_OUTPUT=$HERE/measure_output.txt ;;
-        Linux)         MEASURE_OUTPUT=$HERE/measure_output_linux.txt ;;
+        Linux)
+            case $(uname -m) in
+                aarch64|arm64) MEASURE_OUTPUT=$HERE/measure_output_linux.txt ;;
+                *)             MEASURE_OUTPUT=$HERE/measure_output_linux_$(uname -m).txt ;;
+            esac ;;
         MSYS*|MINGW*|CYGWIN*|Windows*) MEASURE_OUTPUT=$HERE/measure_output_windows.txt ;;
-        *)             MEASURE_OUTPUT=$HERE/measure_output_$(uname -s).txt ;;
+        *)             MEASURE_OUTPUT=$HERE/measure_output_$(uname -s)_$(uname -m).txt ;;
     esac
+fi
+
+# And a guard for the class rather than this instance: every output file records
+# a `host` line, so an existing file can say which machine it belongs to. If it
+# names a different one, stop -- whatever naming scheme comes next, this catches
+# the collision it fails to prevent.
+# 而這是一道給**類別**而不是給這個實例的守衛：每一份輸出檔都會記下一行 `host`，因此一個既有的
+# 檔案說得出它屬於哪台機器。如果它指的是另一台，就停下來——不論之後採用什麼命名方式，這一道都
+# 接得住它沒能防住的碰撞。
+if [[ -r $MEASURE_OUTPUT ]]; then
+    _existing_host=$(LC_ALL=C sed -n 's/^host *: *//p' "$MEASURE_OUTPUT" | head -1)
+    _this_host="$(uname -s) $(uname -m)"
+    if [[ -n $_existing_host && $_existing_host != $_this_host ]]; then
+        print -u2 -- "$MEASURE_OUTPUT holds a run from [$_existing_host] and this is [$_this_host]; refusing to overwrite one machine's record with another's"
+        print -u2 -- "$MEASURE_OUTPUT 裝的是 [$_existing_host] 的執行結果，而這裡是 [$_this_host]；拒絕用一台機器的紀錄覆蓋另一台的"
+        print -u2 -- "set MEASURE_OUTPUT to say where this run should go / 請以 MEASURE_OUTPUT 指定這次執行該寫到哪裡"
+        exit 1
+    fi
 fi
 OUT=$MEASURE_OUTPUT
 TMP=$(mktemp -d "$HERE/.measure.XXXXXX")
