@@ -93,7 +93,19 @@ fi
 #    不是靠讀檔案——因為「檔案在那裡」正是這個專案一再發現毫無價值的那種檢查。
 HEAD_SHORT=$(git rev-parse --short HEAD)
 REPORTED=$("$BIN" --version)
-if [[ $REPORTED != *"($HEAD_SHORT"* ]]; then
+# The hash ANYWHERE in the string, not immediately after `(`. Once v0.1.0 was
+# tagged, `git describe` started answering `v0.1.0-4-g3515258` instead of a bare
+# short hash, so `--version` reports `(v0.1.0-4-g3515258)` and a check looking
+# for `(3515258` matches nothing. This script would then have refused EVERY
+# build from the first tag onwards -- and the first tag is exactly when a
+# release script starts being used. Found by reading the version string after a
+# rebuild, not by the script failing, because nothing had run it since.
+# 在字串的**任何位置**找那個雜湊，而不是「緊接在 `(` 之後」。v0.1.0 被打上 tag 之後，
+# `git describe` 開始回答 `v0.1.0-4-g3515258` 而不是純短雜湊，於是 `--version` 印的是
+# `(v0.1.0-4-g3515258)`，而一個去找 `(3515258` 的檢查什麼都匹配不到。那會讓這支腳本從**第一個
+# tag 之後**拒絕每一次建置——而第一個 tag 正好就是一支發行腳本開始被使用的時刻。這是重建之後
+# 讀版本字串時發現的，不是靠腳本失敗發現的，因為在那之後沒有人再執行過它。
+if [[ $REPORTED != *"$HEAD_SHORT"* ]]; then
     print -u2 -- "the binary reports [$REPORTED] but HEAD is $HEAD_SHORT; rebuild before releasing"
     print -u2 -- "執行檔回報 [$REPORTED]，而 HEAD 是 $HEAD_SHORT；發行前請重新建置"
     exit 1

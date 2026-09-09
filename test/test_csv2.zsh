@@ -17236,6 +17236,120 @@ else
 fi
 
 echo
+echo "--- T296: the parallel table equals the file it names / T296：平行那張表等於它指名的那個檔案 ---"
+# T279 pinned the read/write table to its four source files, and the parallel
+# table -- the one that had HALF ITS ROWS MEASURING THE WRONG CODE PATH for
+# three weeks (OW) -- had no equivalent. It named
+# verifications/measure_parallel_rss_output.txt as its source and nothing
+# checked that they agreed. A table that drifts from its source is exactly the
+# defect this suite already guards against once; the guard was written for one
+# table and not for the class.
+#
+# Same reason T279 exists, same intended cost: when a node re-measures, this
+# fails until the table is brought up to date. That is the trade -- the
+# alternative is a page quoting numbers no file supports, which round 98 found
+# it doing.
+#
+# T279 把讀寫那張表釘在它的四份來源檔上，而平行那張表——那張**有一半的列量了錯誤的程式路徑**
+# 長達三個星期的表（OW）——沒有對應的守衛。它指名 verifications/measure_parallel_rss_output.txt
+# 是它的來源，而沒有任何東西檢查兩者是否一致。一張與來源漂開的表，正是這份測試已經防過一次的
+# 缺陷；只是那個守衛是為**一張表**寫的，不是為那個**類別**。
+#
+# 與 T279 同樣的理由、同樣刻意付出的代價：某個節點重新量測之後，這個案例會失敗，直到表格被更新
+# 為止。另一個選擇是一頁引用著沒有任何檔案支持的數字——而第 98 回合發現它正在那樣做。
+_t296_src=$ROOT/verifications/measure_parallel_rss_output.txt
+if [[ ! -r $_t296_src ]]; then
+    bad "T296a $_t296_src is missing; the table it backs cannot be checked / 找不到那份來源檔，它支撐的表格無法檢查"
+else
+    # Rows in the order the table lists them: format, then cap. The no-index
+    # row is last and is the one that proves the others are on the parallel
+    # path -- its RSS is a fifth of theirs.
+    # 依表格列出的順序：先格式、再 cap。無索引那一列在最後，而它正是「其他各列確實在平行路徑上」
+    # 的證據——它的 RSS 只有其他列的五分之一。
+    _t296_bad=()
+    # Field 3, not 2: the line is `csv elapsed_seconds: 9.636`, so $1 is the
+    # format, $2 is the key with its colon, and $3 is the number. The first
+    # version took $2 and this case FAILED on its first run with
+    # "the source says elapsed_seconds: s" -- which is the shape working: it
+    # printed what it had actually extracted instead of comparing something
+    # empty against something empty and passing.
+    # 第 3 欄，不是第 2 欄：那一行是 `csv elapsed_seconds: 9.636`，$1 是格式、$2 是帶冒號的鍵、
+    # $3 才是數值。第一版取了 $2，而這個案例在**第一次執行就失敗**，訊息是
+    # 「the source says elapsed_seconds: s」——那正是它該有的樣子：它把實際抓到的東西原樣印出來，
+    # 而不是拿一個空的去比另一個空的然後通過。
+    _t296_num() {   # $1 = key prefix, $2 = which occurrence (1-based)
+        LC_ALL=C grep "^$1 " "$_t296_src" | LC_ALL=C sed -n "${2}p" | LC_ALL=C awk '{print $3}'
+    }
+    # elapsed seconds, as the table prints them
+    # 經過秒數，依表格印出的形式
+    _t296_want=(
+        "$(_t296_num 'csv elapsed_seconds:' 1)"
+        "$(_t296_num 'csv2 elapsed_seconds:' 1)"
+        "$(_t296_num 'csv elapsed_seconds:' 2)"
+        "$(_t296_num 'csv2 elapsed_seconds:' 2)"
+        "$(_t296_num 'csv-noindex elapsed_seconds:' 1)"
+    )
+    _t296_i=1
+    for _v in $_t296_want; do
+        if [[ -z $_v ]]; then
+            _t296_bad+=("row $_t296_i has no elapsed_seconds in the source file")
+        elif ! LC_ALL=C grep -qF "| $_v s |" "$ROOT/README.md"; then
+            _t296_bad+=("row $_t296_i: the source says $_v s and README.md has no such cell")
+        fi
+        _t296_i=$((_t296_i + 1))
+    done
+    # Peak RSS is the number OW was wrong about -- 9.28 MiB published for a
+    # parallel search that was really a scan. Checked in MiB to one or two
+    # decimals, the way the table prints it.
+    # 峰值 RSS 正是 OW 弄錯的那個數字——為一次「其實是掃描」的平行搜尋公布了 9.28 MiB。
+    # 以表格印出的形式（MiB，一到兩位小數）比對。
+    # Separated with `#`, not `:`, because the key itself ends in a colon:
+    # `${_k%:*}` on 'csv peak_rss_bytes:1' strips ':1' AND leaves
+    # 'csv peak_rss_bytes' without its colon, so the grep matched nothing and
+    # this case reported "missing from the source file" about a line that was
+    # right there. Verified in a shell before re-running the suite -- ten
+    # minutes per attempt is too long a loop to debug a one-character mistake
+    # in.
+    # 用 `#` 而不是 `:` 當分隔符，因為那個鍵本身就以冒號結尾：`${_k%:*}` 對
+    # 'csv peak_rss_bytes:1' 會砍掉 ':1'，**同時**讓 'csv peak_rss_bytes' 少了它的冒號，於是
+    # grep 什麼都沒匹配到，而這個案例對著一行就在眼前的資料回報「missing from the source
+    # file」。這次先在殼層驗過才重跑整套——一次十分鐘的迴圈，太長，不適合用來 debug 一個
+    # 差一個字元的錯。
+    for _k in 'csv peak_rss_bytes:#1' 'csv2 peak_rss_bytes:#1' 'csv peak_rss_bytes:#2' 'csv2 peak_rss_bytes:#2' 'csv-noindex peak_rss_bytes:#1'; do
+        _key=${_k%#*}; _nth=${_k##*#}
+        _bytes=$(LC_ALL=C grep "^$_key " "$_t296_src" | LC_ALL=C sed -n "${_nth}p" | LC_ALL=C awk '{print $3}')
+        if [[ -z $_bytes ]]; then
+            _t296_bad+=("$_key #$_nth missing from the source file")
+            continue
+        fi
+        _mib=$(printf '%.2f' $(( _bytes / 1048576.0 )))
+        LC_ALL=C grep -qF "$_mib MiB" "$ROOT/README.md" || _t296_bad+=("$_key #$_nth: source $_bytes bytes = $_mib MiB, not in README.md")
+    done
+    if (( ${#_t296_bad} == 0 )); then
+        ok "T296a every elapsed time and peak RSS in the parallel table comes from the file it names / 平行表裡每一個時間與峰值 RSS 都來自它指名的那個檔案"
+    else
+        bad "T296a ${#_t296_bad} mismatch(es): ${_t296_bad[1]} / 不一致如上"
+    fi
+fi
+
+# The no-index row is not decoration: it is the evidence that the four rows
+# above it are on a different code path, and the whole of OW was that nobody
+# could tell. Its RSS must be far below theirs -- an order of magnitude, not a
+# few percent -- or the table has quietly gone back to measuring one path twice.
+# 無索引那一列不是裝飾：它是「上面四列在另一條程式路徑上」的證據，而 OW 的全部內容就是
+# 「沒有人分辨得出來」。它的 RSS 必須遠低於那四列——是一個數量級，不是幾個百分點——否則那張表
+# 已經悄悄變回「把同一條路徑量了兩次」。
+if [[ -r $_t296_src ]]; then
+    _t296_par=$(LC_ALL=C grep '^csv peak_rss_bytes:' "$_t296_src" | LC_ALL=C sed -n '1p' | LC_ALL=C awk '{print $3}')
+    _t296_ni=$(LC_ALL=C grep '^csv-noindex peak_rss_bytes:' "$_t296_src" | LC_ALL=C awk '{print $3}')
+    if [[ -n $_t296_par && -n $_t296_ni ]] && (( _t296_par > _t296_ni * 3 )); then
+        ok "T296b the no-index row's RSS is far below the parallel rows', which is what says they are different paths / 無索引那一列的 RSS 遠低於平行各列，那正是「它們是不同路徑」的證據"
+    else
+        bad "T296b parallel=$_t296_par no-index=$_t296_ni — not the order-of-magnitude gap that distinguishes the paths / 兩者沒有拉開到足以分辨路徑的差距"
+    fi
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
