@@ -1068,13 +1068,46 @@ the rewrite reported success. It did report success.
 
 ## 7. 相信一段自己剛寫下的說明，因為它讀起來像已經查證過的結論
 
-**3 次 / 2 天**（2026-09-08、2026-09-10 兩次）。
+**4 次 / 2 天**（2026-09-08、2026-09-10 三次）。
 
 | 日期 | 那段文字 | 它被當成前提之後 |
 |---|---|---|
 | 2026-09-08 | 「跟隨 symlink 沒有必要，因為 `sameFile` 另外問身分」 | 七個 Windows 案例壞掉，而且在兩個已推送的 commit 裡出去了（QB） |
 | 2026-09-10 | 「在字串的**任何位置**找那個雜湊」，附一整段解釋它為何正確 | 在一個 tag 上拒絕——那是發行腳本唯一要服務的 commit（QC） |
 | 2026-09-10 | 「看**索引**，不看工作區……一份 clone 拿到什麼」 | 修正沒有進到 commit，而守衛通過了（第 1 條第二十一次） |
+
+### 第四次：對象不是一段說明，是一行我剛剛動過的程式碼
+
+同一個機制，另一張臉。修 QF 時我改了 T2 的一行——把 `awk -F','` 換成 csv2 自己的 `--json` 欄數。
+幾小時後才發現：**那一行比對的兩個檔案，是上一行剛剛斷言過「逐位元相同」的那兩個。** 它不可能
+失敗。
+
+我當時在看「它用什麼工具」，而不是「它在比什麼」。而**動過那一行的人，最不會再去問它在比什麼**
+——因為剛看過、剛想過、而且它照樣通過。
+
+**把一個空洞測試「算兩邊的方式」改對，並不會讓它不再空洞。**
+
+它與前三次的差別只在對象：那三次是「一段自己剛寫下的說明」，這一次是「一行自己剛動過的程式碼」。
+共同的機制是同一個——**最近性會抽掉懷疑**。別人寫的那一行會引發「這在比什麼」；自己五分鐘前
+動過的不會。
+
+### 因此矯正措施多一句
+
+**一次讓測試仍然通過的編輯，對那個測試什麼都沒有證明。** 動過一個測試之後，把它弄壞一次——
+那與「守衛必須先證明它會咬」是同一條規則，只是套用在編輯上而不是套用在新寫的守衛上。
+
+QG 的改寫就是這樣做的：新的 T2 在被寫下之前，先把兩欄對調、確認 `-get 1:built_utc` 會回傳那個
+commit 字串。
+
+The fourth has a different subject and the same mechanism: not a note just written, but a LINE
+just edited. Fixing QF changed T2's `awk -F','` to csv2's own field count, and hours later it
+turned out that line compared two files the line above had just asserted were byte-identical --
+it could not fail. I was looking at what tool it used, not at what it compared, and the person
+who just edited a line is the least likely to ask what it compares: freshly read, freshly
+thought about, and still passing. Correcting how a vacuous test computes its two sides does not
+stop it being vacuous. So the corrective gains a clause: an edit that leaves a test passing has
+proven nothing about that test. After touching a test, break it once -- the same rule as "a
+guard must be shown to bite", applied to edits rather than to new guards.
 
 ### 為什麼它不會報錯
 
