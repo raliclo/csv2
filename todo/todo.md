@@ -43,7 +43,7 @@ guest 比對吞掉 csv2 的結束狀態（已修——csv2 單獨執行、檢查
 > | 問 `brew`，絕不寫死 | ✅ `install.zsh` 裡 `brew --prefix` 出現 3 次 |
 > | 明說「這不是 Homebrew 安裝」 | ✅ |
 > | 沒有 brew 時退回 `~/.local/bin` | ✅ |
-> | **Windows 的 scoop shim** | ❌ **未做**——`install.zsh` 的非註解行裡一次也沒有 `scoop` |
+> | **Windows 的 scoop shim** | ✅ 2026-09-10 完成——`target_dir()` 現在讀 `csv2.shim`，在節點上雙向實測 |
 > | 以執行來驗證，而非檢查檔案存在 | ✅ 以 `--version` 驗證 |
 >
 > 真正的 Homebrew formula 先前記著「被『`raliclo/csv2` 尚未公開』擋住」。**2026-09-08 實測時
@@ -58,6 +58,40 @@ guest 比對吞掉 csv2 的結束狀態（已修——csv2 單獨執行、檢查
 > formula is separately blocked on the repository being private. Written down because a
 > stocktake read this as "not started" when only one part remained: an open item and an
 > almost-finished one look identical from the heading.
+
+> **2026-09-10：Windows 的 shim 那一項完成了，而它揭示的是一個假設而不是一個缺口。**
+>
+> `install.zsh` 的 Windows 分支原本無條件印出 `%LOCALAPPDATA%/csv2`，附一段註解說明「那台機器上的
+> shim 指的正是那個目錄」。**它確實是**——在節點上量測，`csv2.shim` 的內容是
+> `path = "C:\Users\lowei\AppData\Local\csv2\csv2.exe"`。但那是一個關於**某一台機器**的事實，
+> 而它上面六行的 macOS 分支並沒有對 Homebrew 做等價的假設：那裡跑的是 `brew --prefix`。
+>
+> 現在它**問 shim**。兩個方向都在節點上實測過：
+>
+> | 測試 | 結果 |
+> |---|---|
+> | 真實的 shim | `/c/Users/lowei/AppData/Local/csv2`（與寫死的值相同——所以這一半什麼都沒證明） |
+> | 一個指向 `FAKEDIR` 的假 shim 放在 PATH 前面 | `/c/Users/lowei/FAKEDIR` ✅ **它真的在讀** |
+>
+> 第一次的「假 shim」測試沒有咬——**而錯的是測試**：我寫的是 `PATH=x cmd`，那只作用於 `cmd`
+> 那一個命令，而 `command -v` 是稍後在函式裡執行的。改成先 `export` 再呼叫才測到。**一個
+> 「沒咬」的結果，第一件要懷疑的是測試本身。**
+>
+> **仍未處理，且刻意不猜**：一個由 scoop **自己管理**的 csv2。那個節點上 `scoop prefix csv2`
+> 回答「Could not find app path」——那裡的 shim 是手放的——所以那條分支在這裡無法被執行，而
+> 一個沒被測過的拒絕比一個誠實的缺口更糟。真的遇到時要決定的是：寫進 scoop 的 app 目錄會與
+> scoop 的 hash 驗證與升級衝突，所以正確的行為多半是**拒絕並要求用 `scoop update csv2`**。
+>
+> The Windows shim item is done. The branch used to print `%LOCALAPPDATA%/csv2` unconditionally
+> with a comment saying the shim on that machine names that directory. It does -- measured --
+> but that is a fact about one machine, and the macOS branch six lines up runs `brew --prefix`
+> rather than assuming the equivalent. It now asks the shim, verified in both directions on the
+> node: the real shim gives the same answer the hardcoded value did, which proves nothing on its
+> own, and a fake shim naming FAKEDIR is followed to FAKEDIR, which does. The first attempt at
+> that second half did not bite, and the TEST was wrong: `PATH=x cmd` applies to that one
+> command, while `command -v` runs later inside the function. A check that does not bite is
+> first of all a suspect check. Still unhandled and deliberately not guessed at: a csv2 that
+> scoop itself manages, which cannot be exercised on that node.
 
 **Status (corrected 2026-09-08): the drop-in half is DONE, and so is the local
 Windows half. What remains -- a Homebrew tap and a public scoop manifest -- was
