@@ -274,6 +274,53 @@ perl 或 python），而它只約束了那一個案例、沒有約束別的，�
 是一則關於那個應用的附註。** 它現在在這裡，因為這是一份會在動手**之前**被讀到的檔案，而不是動手
 當中。
 
+## Splitting CSV on commas, here of all places / 在這裡，切 CSV 的逗號
+
+**Every comma-split in a `.zsh` in this tree must carry a `# CSV-SPLIT-OK:`
+marker with a reason.** T301 enforces it. There are four such lines: two are
+T64a and T65c, which exist to PROVE `cut -d,` returns the wrong value, and two
+build T301's own probe.
+
+This is not a ban, because two of the cases must keep doing it. It is a
+requirement to say why -- so that deliberate and casual look different in the
+file, which they did not before.
+
+**The rule existed from the beginning; nothing enforced it until 2026-09-10.**
+Defect M removed twelve `cut -d, -fN` from the suite in August and left `cell()`
+behind, but no check -- and seven came back. One of them counted fields with
+`awk -F','` on `TARGET_PACKAGES.csv`, the fixture this tree uses to show that a
+comma inside quotes is DATA, and it PASSED: both sides counted the same wrong
+way, so two wrong numbers agreed. QF.
+
+Use `cell()`, `header_cell()` or `column()` in the suite; all three address
+through csv2 and none of them splits anything.
+
+**What is NOT enforced: documents.** `todo/known-defects.md` quotes comma-splits
+inside reproductions of defects that were ABOUT comma-splitting, and no check
+distinguishes those from a fresh one. Said here so nobody believes that half is
+covered -- a rule people think is guarded and is not is worse than one they know
+is not.
+
+## 在這裡，切 CSV 的逗號
+
+**這棵樹裡任何 `.zsh` 中的逗號切割，都必須帶著一個 `# CSV-SPLIT-OK:` 標記與理由。**
+由 T301 執行。目前有四行：兩行是 T64a 與 T65c——它們存在的理由就是**證明** `cut -d,` 會給出
+錯的值——另外兩行是在建構 T301 自己的探針。
+
+這不是禁止，因為其中兩個案例非這樣做不可。它要求的是**說出理由**——讓「刻意」與「順手」在檔案
+裡看得出差別，而在此之前看不出來。
+
+**這條規則從一開始就在，而直到 2026-09-10 才有東西在執行它。** 缺陷 M 在八月從測試裡移除了十二處
+`cut -d, -fN` 並留下 `cell()`，卻沒有留下檢查——於是回來了七處。其中一處用 `awk -F','` 去數
+`TARGET_PACKAGES.csv` 的欄數（正是這棵樹用來示範「引號內的逗號是資料」的那個 fixture），而且
+**通過了**：兩邊用同一種錯的方式數，兩個錯的數字彼此相等。QF。
+
+測試裡請用 `cell()`、`header_cell()` 或 `column()`；三者都經由 csv2 定址，都不切任何東西。
+
+**沒有被執行的那一半：文件。** `todo/known-defects.md` 在一些重現裡引用了逗號切割，而那些缺陷
+**本身就是關於逗號切割的**；沒有任何檢查能把它們與一次新寫的區分開。這裡講出來，是為了不讓任何
+人以為那一半被涵蓋了——**一條被以為有守衛、實際沒有的規則，比一條大家知道沒有守衛的規則更糟。**
+
 ## Shell scripts here: `zstat`, never `stat(1)` / 這裡的 shell 腳本：用 `zstat`，不用 `stat(1)`
 
 A rule for this tree since 2026-08-26, and it was aimed at two real lines:

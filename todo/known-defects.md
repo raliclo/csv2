@@ -12393,3 +12393,65 @@ proves something ADJACENT to the question. Neither README mentions the script, s
 finds it themselves and then meets this. Fixed with `git update-index --chmod=+x`, and T300
 now requires every tracked `.zsh` to be executable in the index, because the rule held for
 thirteen of fourteen files and nothing named the fourteenth.
+
+## QF. 這個專案存在所要消滅的作法，在它自己的測試裡有七處，而沒有任何東西在執行那條規則
+
+**2026-09-10 發現。已修。** 起因是另一個 session 用同一個形狀去查它自己那棵樹，回報「合規，
+但沒有任何東西在執行」——於是我用同樣的方式查了這裡，而這裡連合規都不是。
+
+`M`（2026-08 記錄）修掉了測試裡十二處 `cut -d, -fN`，並建立了 `cell()`。**但沒有留下任何守衛**，
+於是同樣的形狀又長回來七處：
+
+| 位置 | 寫法 | 是不是刻意的 |
+|---|---|---|
+| T2（else 分支） | `awk -F',' '{print NF}'` 數 `TARGET_PACKAGES.csv` 的欄數 | **不是** |
+| T15c | `cut -d, -f1` 取標頭第一欄 | **不是** |
+| T99a×4、T206b | `cut -d, -f1` 取每筆的第一欄 | 不是，但 fixture 很小 |
+| T64a、T65c | `cut -d, -f6` | **是**——這兩個案例存在的理由就是示範它會給出錯的值 |
+
+### T2 那一處最值得看
+
+```zsh
+a=$("$CSV2" -r -i "$PKG" | awk -F',' '{print NF}' | sort -u | tr '\n' ' ')
+b=$("$CSV2" -r -i "$TMP/t1.csv" | awk -F',' '{print NF}' | sort -u | tr '\n' ' ')
+assert_eq "$a" "$b" "T2 field types are not moved between columns"
+```
+
+`$PKG` 就是 `TARGET_PACKAGES.csv`——**這棵樹用來示範「引號內的逗號是資料」的那個 fixture 本身**。
+`awk -F','` 在它上面數出來的欄數是錯的。而這個斷言仍然通過，因為**兩邊用同一種錯的方式數**，
+兩個錯的數字彼此相等。
+
+**它不是「會失敗的測試」，是一個用被禁的工具、拿兩個錯值互相比較、然後通過的測試。**
+
+而同一個檔案第 2569 行的註解寫著：
+
+> Counted by csv2, not by `awk -F,` -- the field count of a CSV file is exactly
+> what comma-splitting gets wrong.
+
+**規則寫在那裡，違規在同一個檔案的前面兩千行。**
+
+### 為什麼沒有東西發現
+
+因為沒有守衛。`M` 修了實例、沒有留下檢查——這正是 `mistakes.md` 第 3 條：修好一處（或十二處），
+而規則成立的範圍包含「之後才寫的東西」，那一半沒有任何東西在看。
+
+### 修法
+
+`column()`（比照既有的 `header_cell()`）以 `-count` 加 `-get r:c` 取一整欄，全程只用 csv2 的定址。
+T15c 改用既有的 `header_cell()`。T2 改用 csv2 自己在 `--json` 中繼行裡回報的 `fields`——那是一個
+真正的解析器數出來的欄數。
+
+T64a／T65c 保留 `cut -d,`，因為它們的全部作用就是證明它是錯的；那兩行加上 `# CSV-SPLIT-OK:` 標記
+並寫出理由。**T301 要求每一行逗號切割都帶著那個標記**，於是「刻意」與「順手」從此在檔案裡看得出
+差別——而下一次有人順手寫一行時，它會叫。
+
+The practice this project exists to eliminate had seven sites in its own suite, and nothing was
+enforcing the rule. Defect M fixed twelve of them in August and left `cell()` behind but no
+guard, so the shape grew back. The worst is T2, which counted fields with `awk -F','` on
+TARGET_PACKAGES.csv -- the very fixture this tree uses to show that a comma inside quotes is
+data -- and PASSED, because both sides counted the same wrong way and two wrong numbers agreed.
+Not a failing test: a test using the banned tool to compare two wrong values. The rule was
+written in a comment two thousand lines further down the same file. Fixed with a `column()`
+helper alongside the existing `header_cell()`, and T301 now requires every comma-splitting line
+to carry a `# CSV-SPLIT-OK:` marker with a reason, so the two deliberate demonstrations stay
+and the next casual one is reported.

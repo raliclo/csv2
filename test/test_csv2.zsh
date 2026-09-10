@@ -499,6 +499,31 @@ header_cell() {  # header_cell <file> <column-number>
     rm -f "$TMP/.cell.$$.csv" "$TMP/.cell.$$.csv.index"
 }
 
+# Every DATA record's cell in one column, via csv2's own addressing. The
+# alternative that keeps reappearing is `csv2 -r -i f | cut -d, -f1`, which is
+# the practice this project exists to eliminate: it is right until a fixture
+# grows a quoted comma, and then it is wrong without saying so. Defect M
+# removed twelve of those in August and left cell() behind but no guard, and
+# five came back. QF.
+# 以 csv2 自己的定址取出「每一筆資料紀錄在某一欄的那一格」。一再回來的替代寫法是
+# `csv2 -r -i f | cut -d, -f1`——那正是這個專案存在所要消滅的作法：它會一直對，直到某個 fixture
+# 長出一個引號內的逗號，然後它就錯了，而且不出聲。缺陷 M 在八月移除了十二處、留下了 cell()，
+# 卻沒有留下守衛，於是回來了五處。QF。
+#
+# `tr -d ' '`: -count's output is padded on some platforms, and zsh expands
+# braces AFTER command substitution, so `{1..$(...)}` with a space in it is not
+# a range -- it is left literal and split into two malformed words, and the
+# loop runs twice against nonsense without failing.
+# `tr -d ' '`：-count 的輸出在某些平台上會補空白，而 zsh 的花括號展開發生在命令替換**之後**，
+# 因此含有空白的 `{1..$(...)}` 不是一個範圍——它會被原樣留下並切成兩個畸形的詞，迴圈跑兩輪、
+# 位址都是壞的，而且不會失敗。
+column() {   # column <file> <column-number-or-name>
+    local f=$1 c=$2 r n
+    n=$("$CSV2" -count -i "$f" 2>/dev/null | tr -d ' ')
+    [[ $n == <-> ]] || return 1
+    for r in {1..$n}; do "$CSV2" -get "$r:$c" -i "$f" 2>/dev/null; done
+}
+
 assert_fails() {
     local desc="$1"; shift; [[ "$1" == "--" ]] && shift
     local out
@@ -574,8 +599,18 @@ if [[ -f "$F/artifacts.csv" ]]; then
 else
     # Same property on the fixture we do have: every cell of every record
     # comes back in the column it went in.
-    a=$("$CSV2" -r -i "$PKG" | awk -F',' '{print NF}' | sort -u | tr '\n' ' ')
-    b=$("$CSV2" -r -i "$TMP/t1.csv" | awk -F',' '{print NF}' | sort -u | tr '\n' ' ')
+    # The field count comes from csv2's own --json metadata, not from
+    # `awk -F','`. $PKG is TARGET_PACKAGES.csv -- the fixture this tree uses to
+    # show that a comma inside quotes is DATA -- so comma-splitting counts it
+    # wrong. This assertion passed anyway, because both sides counted the same
+    # wrong way and two wrong numbers agreed: not a failing test, a test using
+    # the banned tool to compare two wrong values. QF.
+    # 欄數取自 csv2 自己的 --json 中繼資料，不是 `awk -F','`。$PKG 就是 TARGET_PACKAGES.csv——
+    # 這棵樹用來示範「引號內的逗號是資料」的那個 fixture——所以逗號切割在它上面數出來是錯的。
+    # 而這個斷言照樣通過，因為兩邊用同一種錯的方式數，兩個錯的數字彼此相等：那不是一個會失敗的
+    # 測試，是一個「用被禁的工具拿兩個錯值互相比較」的測試。QF。
+    a=$("$CSV2" -r --json -i "$PKG" 2>/dev/null | head -1 | grep -o '"fields":[0-9]*' | cut -d: -f2)
+    b=$("$CSV2" -r --json -i "$TMP/t1.csv" 2>/dev/null | head -1 | grep -o '"fields":[0-9]*' | cut -d: -f2)
     assert_eq "$a" "$b" "T2 field types are not moved between columns / 欄位型別不被搬錯"
 fi
 
@@ -809,7 +844,13 @@ assert_eq "$c" "0" "T15b the rownum column is never searched / rownum 欄不參�
 # 開了 -rownum 之後，pkg_name 的位址是 1、實體欄位是 2。盲測第 16 回合發現這件事在任何地方
 # 都沒有被記載——工具做的是對的，卻從未說明哪一套編號適用於何處；於是任何「依位置」讀取
 # 輸出的東西，看到的每一欄都往右移了一格，而它手上的每一個位址仍指向原本那一欄。
-first_col=$("$CSV2" -head 1 -t -rownum -i "$PKG" 2>/dev/null | head -1 | cut -d, -f1)
+# header_cell(), not `cut -d, -f1`. The header row of this fixture happens to
+# carry no quoted comma, so the split was right -- which is the whole problem
+# with it: correct by accident, and silent when the accident ends. QF.
+# 用 header_cell()，不用 `cut -d, -f1`。這個 fixture 的標頭列剛好沒有引號內的逗號，所以那次切割
+# 是對的——而那正是它的問題所在：偶然地正確，而在那個偶然結束時不出聲。QF。
+"$CSV2" -head 1 -t -rownum -i "$PKG" -o "$TMP/t15c_rownum.csv" 2>/dev/null
+first_col=$(header_cell "$TMP/t15c_rownum.csv" 1)
 assert_eq "$first_col" "rownum" \
     "T15c with -rownum the FIRST physical column is rownum / 開了 -rownum 之後，第一個實體欄位是 rownum"
 addr_col=$("$CSV2" -contains "busybox" -rownum -i "$PKG" 2>/dev/null | head -1 | cut -f2)
@@ -2600,7 +2641,7 @@ echo
 echo "--- T64: the cell accessor is necessary / 取格存取子是必要的 ---"
 
 by_csv2=$(cell "$PKG" 1 6)
-by_cut=$("$CSV2" -mid 1,1 -i "$PKG" 2>/dev/null | cut -d, -f6)
+by_cut=$("$CSV2" -mid 1,1 -i "$PKG" 2>/dev/null | cut -d, -f6)   # CSV-SPLIT-OK: this case exists to prove cut -d, returns the WRONG value / 本案例存在的理由就是證明 cut -d, 會給出錯的值
 if [[ "$by_csv2" != "$by_cut" ]]; then
     ok "T64a cut -d, -f6 and csv2 disagree on the fixture, which is why cell() exists / cut -d, -f6 與 csv2 在 fixture 上結果不同，這正是 cell() 存在的理由"
 else
@@ -2673,7 +2714,7 @@ fi
 
 # The trap: same reflex, CSV output, silent fragment at rc=0.
 # 陷阱：同一個反射動作、CSV 輸出、rc=0 下的靜默碎片。
-trap_got=$("$CSV2" -contains 'CORRECTED' --filter -i "$PKG" 2>/dev/null | head -1 | cut -d, -f6)
+trap_got=$("$CSV2" -contains 'CORRECTED' --filter -i "$PKG" 2>/dev/null | head -1 | cut -d, -f6)   # CSV-SPLIT-OK: measures the truncation cut -d, causes on --filter output / 量的正是 cut -d, 在 --filter 輸出上造成的截斷
 if (( ${#trap_got} < ${#want} )); then
     ok "T65c while cut -d, -f6 on --filter output truncates (${#trap_got} of ${#want} bytes), which is why the README now says not to / 而對 --filter 輸出下 cut -d, -f6 會截斷，這正是 README 現在明說不要這樣做的原因"
 else
@@ -4751,14 +4792,14 @@ cp "$TMP/t99.csv" "$TMP/t99_seq.csv"
 
 "$CSV2" -insert 2 'A,10' -insert 4 'B,20' -insert 5 'C,30' \
     -i "$TMP/t99_batch.csv" --in-place 2>/dev/null
-assert_eq "$("$CSV2" -r -i "$TMP/t99_batch.csv" 2>/dev/null | cut -d, -f1 | tr '\n' ' ')" \
+assert_eq "$(column "$TMP/t99_batch.csv" 1 | tr '\n' ' ')" \
           "r1 A r2 r3 B r4 C r5 " \
     "T99a three -insert flags in one run all count against the input / 一次執行裡的三個 -insert，數的都是輸入"
 
 for spec in '2:A,10' '4:B,20' '5:C,30'; do
     "$CSV2" -insert ${spec%%:*} "${spec#*:}" -i "$TMP/t99_seq.csv" --in-place 2>/dev/null
 done
-assert_eq "$("$CSV2" -r -i "$TMP/t99_seq.csv" 2>/dev/null | cut -d, -f1 | tr '\n' ' ')" \
+assert_eq "$(column "$TMP/t99_seq.csv" 1 | tr '\n' ' ')" \
           "r1 A r2 B C r3 r4 r5 " \
     "T99b while three separate runs each count against the file that run was given / 而三次獨立執行，各自對它拿到的那個檔案計數"
 
@@ -4783,13 +4824,13 @@ assert_same "$TMP/t99_r.csv" "$TMP/t99.csv" \
 # 同一個位址上的兩筆保持參數順序；-insert 與 -append 可併用。
 cp "$TMP/t99.csv" "$TMP/t99_same.csv"
 "$CSV2" -insert 3 'X,1' -insert 3 'Y,2' -i "$TMP/t99_same.csv" --in-place 2>/dev/null
-assert_eq "$("$CSV2" -r -i "$TMP/t99_same.csv" 2>/dev/null | cut -d, -f1 | tr '\n' ' ')" \
+assert_eq "$(column "$TMP/t99_same.csv" 1 | tr '\n' ' ')" \
           "r1 r2 X Y r3 r4 r5 " \
     "T99f two inserts at the same N keep the order they were written / 同一個 N 的兩次插入，保持寫下的順序"
 
 cp "$TMP/t99.csv" "$TMP/t99_mix.csv"
 "$CSV2" -insert 2 'X,1' -append 'Z,9' -i "$TMP/t99_mix.csv" --in-place 2>/dev/null
-assert_eq "$("$CSV2" -r -i "$TMP/t99_mix.csv" 2>/dev/null | cut -d, -f1 | tr '\n' ' ')" \
+assert_eq "$(column "$TMP/t99_mix.csv" 1 | tr '\n' ' ')" \
           "r1 X r2 r3 r4 r5 Z " \
     "T99g and -insert composes with -append in one run / 而 -insert 與 -append 可在同一次執行裡併用"
 
@@ -11844,7 +11885,8 @@ assert_eq "$("$CSV2" -r -i "$TMP/t206.csv" | tr '\n' ' ')" "r1,1 NEW,9 r3,3 r4,4
     "T206a -insert and -delete mix in one run, both against the arriving file / -insert 與 -delete 可在一次執行裡混用，且都是對「送達時的檔案」計數"
 # Contiguous afterwards: the deleted record leaves no gap.
 # 之後是連續的：被刪掉的那一筆不會留下缺口。
-assert_eq "$("$CSV2" -r -t -rownum -i "$TMP/t206.csv" | tail -n +2 | cut -d, -f1 | tr '\n' ' ')" "1 2 3 4 5 " \
+"$CSV2" -r -t -rownum -i "$TMP/t206.csv" > "$TMP/t206_rn.csv" 2>/dev/null
+assert_eq "$(column "$TMP/t206_rn.csv" 1 | tr '\n' ' ')" "1 2 3 4 5 " \
     "T206b a delete renumbers what follows it, with no gap / 一次刪除會把它後面的重新編號，且沒有缺口"
 
 # The cheap count, and what makes it cheap.
@@ -17718,6 +17760,92 @@ else
     else
         bad "T300b a 100644 entry went unreported / 一筆 100644 沒有被回報"
     fi
+fi
+
+echo
+echo "--- T301: nothing splits CSV on commas without saying why / T301：沒有東西在切 CSV 的逗號時不說理由 ---"
+# The founding rule of this project, and until 2026-09-10 nothing enforced it.
+# Defect M removed twelve `cut -d, -fN` from this suite in August and left
+# cell() behind -- but no check, so seven came back. One of them, T2, counted
+# fields with `awk -F','` on TARGET_PACKAGES.csv, the very fixture this tree
+# uses to show that a comma inside quotes is DATA, and PASSED: both sides
+# counted the same wrong way, so two wrong numbers agreed. QF.
+# 這個專案的立身之本，而直到 2026-09-10 都沒有任何東西在執行它。缺陷 M 在八月從這份測試裡移除了
+# 十二處 `cut -d, -fN` 並留下 cell()——但沒有留下檢查，於是回來了七處。其中 T2 用 `awk -F','` 去數
+# TARGET_PACKAGES.csv 的欄數（正是這棵樹用來示範「引號內的逗號是資料」的那個 fixture），而且
+# 通過了：兩邊用同一種錯的方式數，兩個錯的數字彼此相等。QF。
+#
+# Two of the sites MUST stay: T64a and T65c exist to prove `cut -d,` returns
+# the wrong value. So this does not ban the shape, it requires a REASON beside
+# it -- a `# CSV-SPLIT-OK:` marker. Deliberate and casual then look different
+# in the file, which they did not before.
+# 其中兩處**必須留著**：T64a 與 T65c 存在的理由就是證明 `cut -d,` 會給出錯的值。所以這裡不是禁止
+# 那個形狀，而是要求它旁邊有一個**理由**——一個 `# CSV-SPLIT-OK:` 標記。於是「刻意」與「順手」在
+# 檔案裡看得出差別，而在此之前看不出來。
+#
+# The marker name is ASSEMBLED, like T218b's probe: this case reads the suite
+# itself, and a literal here would be an unexplained marker on a line that
+# splits nothing.
+# 標記名稱是**組出來的**，理由與 T218b 的探針相同：這個案例會讀測試檔自己，而寫在這裡的字面值
+# 會變成「一行什麼都沒切、卻掛著一個沒有理由的標記」。
+_t301_mark="CSV-SPLIT"$'-'"OK"
+# INVOCATION, not mention -- the same discriminator T249d needed. `ok "T64a
+# cut -d, -f6 and csv2 disagree ..."` is a MESSAGE about the rule and must not
+# be flagged; a real split is preceded by a pipe, a `$(`, a `;` or `&&`, or
+# starts its line. The first version of this pattern had no such anchor and
+# reported the assertion message of the very case that demonstrates the rule.
+# **呼叫**而不是**提及**——與 T249d 需要的是同一個判別式。`ok "T64a cut -d, -f6 and csv2
+# disagree …"` 是一段**關於這條規則的訊息**，絕不能被標記；而真正的切割前面會有一個管線、
+# 一個 `$(`、一個 `;` 或 `&&`，或者它就在行首。這個樣式的第一版沒有這個錨點，於是它回報了
+# 「示範這條規則的那個案例」自己的斷言訊息。
+_t301_cmd='(^|[|;&(]|\$\()[[:space:]]*'
+_t301_re="${_t301_cmd}cut[[:space:]]+-d'?,|${_t301_cmd}awk[[:space:]]+-F'?,|IFS=,[[:space:]]+read"
+_t301_files=($ROOT/**/*.zsh(N))
+if (( ${#_t301_files} < 4 )); then
+    bad "T301a the glob found ${#_t301_files} .zsh files, so nothing was scanned / glob 只找到 ${#_t301_files} 個 .zsh 檔，等於什麼都沒掃"
+else
+    # Comment lines are excluded: this rule is discussed at length in this file
+    # and in the scripts, and a check that flagged its own explanation would be
+    # turned off -- and then the rule is back to unenforced, which is worse
+    # than before because somebody now believes it is guarded. T218a, T249d.
+    # 註解行被排除：這條規則在這個檔案與各腳本裡被大量討論，而一個會標記自己說明文字的檢查會被
+    # 關掉——然後那條規則就回到「沒有執行」的狀態，那比一開始更糟，因為現在有人以為它被守著。
+    # T218a、T249d。
+    _t301_hits=$(LC_ALL=C grep -nE "$_t301_re" $_t301_files 2>/dev/null \
+                 | LC_ALL=C grep -vE '^[^:]*:[0-9]+:[[:space:]]*#' \
+                 | LC_ALL=C grep -v -- "$_t301_mark" || true)
+    if [[ -z $_t301_hits ]]; then
+        ok "T301a every comma-split in this tree carries a reason / 這棵樹裡每一處逗號切割都帶著理由"
+    else
+        bad "T301a comma-split without a $_t301_mark marker at: $(print -r -- "$_t301_hits" | head -2 | tr '\n' ' ') / 缺少標記的逗號切割如上"
+    fi
+
+    # It must bite, and it must NOT bite the marked line -- a check that
+    # reported both would be indistinguishable from one that reported neither.
+    # 它必須會咬，而且**不能**咬那行有標記的——一個兩者都回報的檢查，與一個兩者都不回報的檢查，
+    # 分不出差別。
+    # These two build the probe; they split nothing. T218b hid its literal by
+    # assembling it, which works but leaves the reader wondering why. The
+    # marker is better here: the line stays readable and says why it is exempt.
+    # 這兩行是在**建構**探針，它們沒有切任何東西。T218b 是靠「把字面值組出來」來閃避，那可行，
+    # 但會讓讀者不明白為什麼要這樣寫。這裡用標記更好：那一行保持可讀，而且自己說出它為何豁免。
+    print -r -- "x=\$(f | cut -d, -f6)" > "$TMP/t301probe.zsh"   # CSV-SPLIT-OK: builds the probe text, splits nothing / 這是在建構探針文字，沒有切任何東西
+    print -r -- "y=\$(g | cut -d, -f6)   # $_t301_mark: deliberate" >> "$TMP/t301probe.zsh"   # CSV-SPLIT-OK: same / 同上
+    print -r -- "# a comment about cut -d, must not be flagged" >> "$TMP/t301probe.zsh"
+    _t301_probe=$(LC_ALL=C grep -nE "$_t301_re" "$TMP/t301probe.zsh" 2>/dev/null \
+                  | LC_ALL=C grep -vE '^[^:]*:[0-9]+:[[:space:]]*#' \
+                  | LC_ALL=C grep -v -- "$_t301_mark" || true)
+    # `1:` at the START. grep -n on a SINGLE file prints `LINE:text` with no
+    # filename, so the first version looked for `:1:` and never matched -- the
+    # check failed while the thing it checks was working.
+    # 開頭是 `1:`。對**單一檔案**下 grep -n 印的是 `行號:內容`、沒有檔名，所以第一版去找 `:1:`
+    # 永遠匹配不到——那個檢查失敗了，而它要檢查的東西其實是好的。
+    if [[ $(print -r -- "$_t301_probe" | LC_ALL=C grep -c .) == 1 && $_t301_probe == "1:"* ]]; then
+        ok "T301b and it reports the bare split, not the marked one nor the comment / 而它只回報那行沒標記的，不回報有標記的、也不回報註解"
+    else
+        bad "T301b the probe should have reported line 1 only, got [$_t301_probe] / 探針應該只回報第 1 行，實得如上"
+    fi
+    rm -f "$TMP/t301probe.zsh"
 fi
 
 echo
