@@ -18248,6 +18248,49 @@ else
 fi
 
 echo
+echo "--- T305: -append honours --headers 0 on a .md, like every other verb / T305：.md 上的 -append 與其他動詞一樣遵守 --headers 0 ---"
+# `-append` refused a .md under `--headers 0` while `-insert` accepted the same
+# file with the same flag in the same run, and `-o` accepted it too. The
+# divergence was the --in-place append FAST PATH, which resolved the format
+# itself -- extension first -- so the override was never consulted and the file
+# was parsed as CSV until the first comma in prose. QJ, reported by the
+# linuxcs-87 session.
+# `-append` 在 `--headers 0` 之下拒絕了一個 `.md`，而 `-insert` 在同一次執行、同一個旗標下接受了
+# 同一個檔案，`-o` 也接受了。分歧出在 `--in-place` 的**追加快路徑**：它自己解析格式、而且先試
+# 副檔名，於是那個覆寫從來沒有被看到，那個檔案被當成 CSV 解析，直到散文裡的第一個逗號。QJ，
+# 由 linuxcs-87 那個 session 回報。
+#
+# The fixture's comma is INSIDE prose, which is the whole point: a `.md` read
+# as prose has no fields, and a comma is a character like any other.
+# fixture 裡那個逗號在**散文之中**，而那正是重點：一個被當成散文讀的 `.md` 沒有欄位，逗號只是
+# 一個與其他字元無異的字元。
+printf 'line one\n- `-Z build-std=core,alloc`.\nline three\n' > "$TMP/t305.md"
+cp "$TMP/t305.md" "$TMP/t305.orig"
+assert_succeeds "T305a -append accepts a .md under --headers 0 / -append 在 --headers 0 之下接受 .md" \
+    "$CSV2" --headers 0 -append 'TESTLINE' -i "$TMP/t305.md" --in-place
+assert_eq "$(tail -1 "$TMP/t305.md")" "TESTLINE" \
+    "T305b and the line is there / 而那一行在那裡"
+# The lines that were already there must be untouched. An append that rewrote
+# the prose would pass T305b.
+# 本來就在那裡的那幾行必須原封不動。一次「把散文重寫過」的追加會通過 T305b。
+head -3 "$TMP/t305.md" > "$TMP/t305.head"
+assert_same "$TMP/t305.head" "$TMP/t305.orig" \
+    "T305c and the three lines before it are byte-identical / 而它前面那三行逐位元相同"
+# The pairing that revealed it: the same file, the same flag, a different verb.
+# 揭發它的那個配對：同一個檔案、同一個旗標、不同的動詞。
+assert_succeeds "T305d -insert accepts the same file with the same flag / -insert 在同一個旗標下接受同一個檔案" \
+    "$CSV2" --headers 0 -insert 2 'INSERTED' -i "$TMP/t305.md" --in-place
+# And the fast path must still exist for the files it is for. Declining .md
+# would be a fix that quietly removed an optimisation everywhere.
+# 而快路徑對它本來服務的那些檔案必須仍然存在。一個「對 .md 退讓」的修法，如果順手把最佳化在所有
+# 地方都拿掉了，那是另一種壞。
+printf 'k,v\na,1\n' > "$TMP/t305.csv"
+assert_succeeds "T305e a plain .csv append still works / 一般 .csv 的追加仍然有效" \
+    "$CSV2" -append 'b,2' -i "$TMP/t305.csv" --in-place
+assert_eq "$("$CSV2" -count -i "$TMP/t305.csv" | tr -d ' ')" "2" \
+    "T305f and it appended exactly one record / 而它剛好追加了一筆"
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

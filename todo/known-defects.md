@@ -12770,3 +12770,70 @@ from a constant written inside it rather than from the binary. The constant was 
 v0.1.0, so it could only be wrong at the moment it mattered. Fixed by taking the version from
 `--version` and requiring it to look like one, refusing to overwrite an archive that already
 exists in dist/, and re-downloading the clobbered file from the public URL.
+
+## QJ. `-append` 不遵守 `--headers 0`，而 `-insert` 遵守——因為快路徑自己算了一次格式
+
+**2026-09-10 由另一個 session 回報，經親手重現。已修。**
+
+### 重現
+
+```console
+$ printf 'line one\n- `-Z build-std=core,alloc`.\nline three\n' > r.md
+
+$ csv2 --headers 0 -append 'TESTLINE' -i r.md --in-place
+csv2: record 2 (line 2) has 2 fields but the header has 1; csv2 will not pad or truncate to fit
+$ echo $?
+1
+
+$ csv2 --headers 0 -insert 2 'INSERTED' -i r.md --in-place
+$ echo $?
+0                                   ← 同一個檔案、同一個旗標，這個成功
+
+$ csv2 --headers 0 -append 'TESTLINE' -i r.md -o out.md
+$ echo $?
+0                                   ← 不走 --in-place，也成功
+```
+
+那一行散文只是含一個半形逗號（`core,alloc`）。**它失敗得安全**：退出碼 1、檔案逐位元未變。所以
+這是「不該拒絕時拒絕」，不是「寫壞」。
+
+### 成因
+
+`openInput()`（`src/main.swift`）有一條明確的規則：
+
+```swift
+if path.lowercased().hasSuffix(".md"), o.headersOverride == 0 {
+    return InputPlan(format: .lines, headerRows: 0, ...)   // 當散文，逐行讀
+}
+```
+
+而 `runAppendFast()`（`src/Run.swift`）**自己又算了一次**：
+
+```swift
+guard let fmt = Format.from(path: path) ?? (o.headersOverride.map { ... }) ?? ...
+```
+
+`Format.from(path:)` 先試副檔名，所以 `.md` 一定命中，而 `--headers 0` 只在「副檔名給不出格式」時
+才被看到。於是快路徑用 CSV 的方式解析那個 `.md`，在第一個逗號上翻車。
+
+**這是 `mistakes.md` 第 3 條**：同一條規則有兩份實作，而第二份少了一個情況。快路徑是後來加的。
+
+### 修法：讓快路徑**退讓**，不是給它第三份副本
+
+`canUseAppendFastPath()` 現在對 `.md` 輸入回傳 false，交給正常的編輯路徑——那條路徑本來就正確
+（上面 `-o` 那次證明了）。
+
+**不在快路徑裡複製那條 `.md` 規則**，因為那會是同一條規則的第三份副本，而這一整條缺陷就是第二份
+造成的。而且 `.md` 表格在被解析之前會先被**翻譯**，快路徑無論如何都處理不了那種情況——它能安全
+處理的是「逐位元組追加」，而那對一張需要翻譯的表沒有意義。
+
+代價是 `.md` 追加不再走 O(1) 快路徑。那是這棵樹裡的文件檔，不是 GB 級的資料。
+
+`-append` refused a `.md` under `--headers 0` while `-insert` accepted the same file with the same
+flag, and `-o` accepted it too -- so the divergence was the `--in-place` append FAST PATH.
+`openInput()` carries an explicit rule that a `.md` with `--headers 0` is prose read line by line;
+`runAppendFast()` resolves the format itself, trying the extension first, so the override was
+never consulted and the file was parsed as CSV until the first comma in prose. Entry 3: one rule,
+two implementations, the second missing a case. Fixed by having the fast path DECLINE `.md`
+rather than by giving it a third copy of the rule -- and a `.md` table is translated before
+parsing anyway, which a byte-wise append cannot do. It failed safely: exit 1, file byte-identical.

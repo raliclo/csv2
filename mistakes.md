@@ -600,7 +600,7 @@ skill 說「摘要樣式是附加的，失敗掃描是強制的」。**把整個
 
 ## 3. 一條規則只套用到它成立範圍的一部分
 
-**20 次 / 8 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
+**21 次 / 8 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
 2026-09-08、2026-09-10），單日最多 5 次（2026-09-03）。
 
 *數字的權威來源是 `mistakes_counter.csv2`；這一行是它的副本。副本會漂，而那本身是第 1 類——
@@ -734,6 +734,36 @@ The scope where a rule holds includes what gets written after it, and nothing wa
 half: counting existing duplicates cannot find the one not yet typed. The shape already had a
 name -- PE in `todo/known-defects.md`, with the reproduction -- and I rewrote it from memory
 instead of reading the record.
+
+### 第二十一次：快路徑自己算了一次格式，而正常路徑那條規則它沒有
+
+`openInput()` 帶著一條明確的規則：**一個 `.md` 加上 `--headers 0` 是「散文、逐行讀」**。而
+`runAppendFast()` 自己又算了一次格式，先試副檔名——於是 `.md` 一定命中，那個覆寫從來沒被看到。
+
+結果是：同一個檔案、同一個旗標、同一次執行，`-insert` 成功而 `-append` 拒絕，理由是散文裡的一個
+逗號。
+
+```
+csv2 --headers 0 -append 'X' -i r.md --in-place   → record 2 has 2 fields but the header has 1
+csv2 --headers 0 -insert 2 'X' -i r.md --in-place  → 成功
+csv2 --headers 0 -append 'X' -i r.md -o out.md     → 成功
+```
+
+**三個結果把範圍縮到只剩一個東西**：`--in-place` 的追加**快路徑**。而快路徑是後來加的——這一條
+的形狀從來都是這個：規則先存在，第二份實作後來長出來，而它少了一個情況。
+
+**修法是讓快路徑退讓，不是給它第三份副本。** 一份新的副本會是同一個機制的下一個實例；而
+`.md` 表格在被解析之前先被翻譯，逐位元組追加本來就服務不了它。
+
+**這一次是別人找到的。** 我沒有在找它，而它已經在那裡一段時間了。
+
+The twenty-first: `openInput()` carries the rule that a `.md` with `--headers 0` is prose read
+line by line; the append FAST PATH resolves the format itself, extension first, so the override
+was never seen. Same file, same flag, same run: `-insert` accepted it and `-append` refused over
+a comma in prose, while `-o` accepted it too -- three results narrowing it to one thing. The fast
+path was added later, which is always this entry's shape: the rule exists, a second
+implementation grows beside it, and it is short a case. Fixed by having the fast path decline
+rather than by writing a third copy. Found by someone else; I was not looking for it.
 
 ### 第二十次：守衛找了四種形狀裡的三種，而漏掉的正是這棵樹存在的那一種
 

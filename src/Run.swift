@@ -2701,6 +2701,26 @@ func runEdit(_ o: Options) throws {
 /// 從 26 秒變成毫秒級。`artifacts.csv` 每次建置追加一列，正是這個形狀。
 func canUseAppendFastPath(_ o: Options) -> Bool {
     guard o.edits.count >= 1, o.input != nil else { return false }
+    // DECLINE a .md. openInput() carries the rule that a `.md` with
+    // `--headers 0` is prose read line by line, and that a `.md` table is
+    // TRANSLATED before any parser sees it. This path resolves the format
+    // itself, extension first, so the override was never consulted and a
+    // comma in prose made `-append` refuse a file `-insert` accepted with the
+    // same flag on the same run. QJ.
+    //
+    // 對 `.md` **退讓**。openInput() 帶著這條規則：一個 `.md` 加上 `--headers 0` 是「散文、逐行
+    // 讀」，而一張 `.md` 表格在任何解析器看到它之前會先被**翻譯**。這條路徑自己解析格式、而且
+    // 先試副檔名，於是那個覆寫從來沒有被看到——一個散文裡的逗號，讓 `-append` 拒絕了一個
+    // `-insert` 在同一次執行、同一個旗標下接受的檔案。QJ。
+    //
+    // Declining rather than copying the rule here: a third implementation of
+    // one rule is what produced this, and byte-wise appending cannot serve a
+    // format that is translated before it is parsed. The ordinary edit path
+    // handles both correctly.
+    // 這裡選擇**退讓**而不是把那條規則抄過來：同一條規則的第三份實作正是造成這個缺陷的東西，
+    // 而「逐位元組追加」也服務不了一個「被解析之前先被翻譯」的格式。正常的編輯路徑兩者都處理
+    // 得正確。
+    if let p = o.input, p.lowercased().hasSuffix(".md") { return false }
     guard o.encryptCols == nil, o.decryptCols == nil, o.hashCols == nil else { return false }
     // What decides this is whether the run is an in-place append, and o.inPlace
     // answers that directly. Comparing the two PATHS was the same mistake DP
