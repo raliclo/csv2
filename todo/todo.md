@@ -519,8 +519,8 @@ suggestion to report there, not something to change from here.
 ## ~~待確認：`run_csv2_test.zsh` 免疫於那個通道問題嗎~~ 已確認免疫
 
 **2026-09-10 開啟，同日結案。** VM 回來後在同一個 commit 上走了這條路徑：12 組呼叫 host 與
-guest 逐位元相同，套件在 guest 內的統計行完整回來（1336 PASS / 1 FAIL / 6 SKIP，而那個 FAIL
-是真的、讀得懂、已修）。**零截斷。** 理由與這兩組證據已經寫進 `run_csv2_test.zsh` 的檔頭註解。
+guest 逐位元相同，套件在 guest 內的統計行**完整回來**——四位數的 PASS、一個 FAIL、六個 SKIP，
+每一行都讀得懂，而那個 FAIL 是真的（T69b 的略過計數），已修。**零截斷。** 理由與這兩組證據已經寫進 `run_csv2_test.zsh` 的檔頭註解。
 
 另外，擁有那台 VM 的 session 同日量了 multiscp：一個 2 MiB 隨機檔兩端 sha256 相同——**所以缺陷
 在「命令輸出的回傳路徑」，不是整條連線。** 那 408 行仍然一條都不記成 csv2 的缺陷。

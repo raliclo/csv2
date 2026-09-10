@@ -535,7 +535,7 @@ skill 說「摘要樣式是附加的，失敗掃描是強制的」。**把整個
 
 ## 3. 一條規則只套用到它成立範圍的一部分
 
-**18 次 / 8 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
+**19 次 / 8 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
 2026-09-08、2026-09-10），單日最多 5 次（2026-09-03）。
 
 *數字的權威來源是 `mistakes_counter.csv2`；這一行是它的副本。副本會漂，而那本身是第 1 類——
@@ -669,6 +669,44 @@ The scope where a rule holds includes what gets written after it, and nothing wa
 half: counting existing duplicates cannot find the one not yet typed. The shape already had a
 name -- PE in `todo/known-defects.md`, with the reproduction -- and I rewrote it from memory
 instead of reading the record.
+
+### 第十九次：修好了一種形式，而範圍還有第三種——而那一次的修正比缺陷更糟
+
+`release.zsh` 檢查「執行檔回報的 build id 與這個 checkout 相符」。它到今天為止錯了三次，每一次
+都是去**列舉** `git describe` 可能回答的形式：
+
+| 版本 | 寫法 | 它涵蓋不到的 |
+|---|---|---|
+| 1 | 拿 `(SHORTHASH` 比相等 | tag 出現後的 `v0.1.0-4-g3515258` |
+| 2 | 「雜湊出現在任何位置」 | **tag 上的 `v0.1.0`——裡面沒有雜湊** |
+| 3 | 「那個 id 出現在任何位置」 | 什麼都涵蓋得到，但**它放行了不該放行的** |
+
+第 2 版讓它在 `v0.1.0` 上拒絕——**那是一支發行腳本存在所要服務的唯一那個 commit**——訊息還說
+「發行前請重新建置」，而重建產生的是同一個字串。
+
+**第 3 版是我今天寫的，而它比它取代的缺陷更糟。** `v0.1.0` 是 `v0.1.0-13-g1750de3` 的子字串，
+所以一個晚了十三個 commit 的執行檔會被當成那次 release 出貨。原本的缺陷只是拒絕了一個好的建置；
+我的修正會放行一個壞的。
+
+**它是靠測「拒絕」那個方向抓到的。** 三個版本的「通過」方向看起來都是對的——那個方向從第 1 版
+起就一直對。一道守衛的價值全部在它拒絕的那一側，而那一側不會有人主動去看。
+
+正確的寫法不是第四種列舉，是**錨定**：版本字串的格式是 `csv2 <版本> (<id>)`，所以比對結尾
+`*"($EXPECTED_ID)"`。T299 把它釘住，而且是從 `release.zsh` 裡**取出**那個運算式來測的——抄一份
+就是第四個會忘記更新的地方。
+
+The nineteenth is the same check corrected twice and still not covering its range -- and the
+correction I wrote today was worse than the defect. Version 1 compared equality against
+`(SHORTHASH` and broke when v0.1.0 made describe answer `v0.1.0-4-g3515258`. Version 2 looked
+for the hash anywhere and still assumed one was there, so it refused AT a tag, where describe
+answers `v0.1.0` and nothing else -- the one commit a release script exists for -- advising a
+rebuild that produces the identical string. Version 3, mine, looked for the id anywhere:
+`v0.1.0` is a substring of `v0.1.0-13-g1750de3`, so a binary thirteen commits later would have
+shipped as the release. The original defect refused a good build; my fix would have passed a
+bad one. It was caught by testing the REFUSAL direction -- the passing direction had looked
+right in all three versions, which is the half of a guard nobody re-reads. The answer was not
+a fourth enumeration but an anchor, and T299 pins it by extracting the expression from
+release.zsh rather than keeping a fourth copy of it.
 
 ### 最危險的形式：兩個方向相反的錯誤互相抵銷
 

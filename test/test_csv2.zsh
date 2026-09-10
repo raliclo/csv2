@@ -17543,6 +17543,70 @@ T298AWK
 fi
 
 echo
+echo "--- T299: release.zsh's version check accepts only the exact build id / T299：release.zsh 的版本檢查只接受完全相符的 build id ---"
+# This check has been wrong three times, each time by enumerating the shapes
+# `git describe` can answer with instead of anchoring the comparison:
+#   1. equality against `(SHORTHASH` -- broke the moment v0.1.0 was tagged and
+#      describe started answering `v0.1.0-4-g3515258`
+#   2. "the hash appears anywhere" -- still assumed a hash was in there, and at
+#      a TAGGED commit describe answers `v0.1.0` with no hash, so it refused at
+#      the one commit a release script exists to serve
+#   3. "the id appears anywhere" -- WORSE than the bug it replaced: `v0.1.0` is
+#      a substring of `v0.1.0-13-g1750de3`, so a binary thirteen commits later
+#      would have shipped as the release
+# QC. The third was caught by testing the REFUSAL direction; the passing
+# direction had looked right in all three versions.
+# 這道檢查錯了三次，每一次都是去列舉 `git describe` 可能回答的形式，而不是錨定那個比對：
+#   1. 拿 `(SHORTHASH` 比相等——v0.1.0 一被打上、describe 開始回答 `v0.1.0-4-g3515258` 就壞了
+#   2. 「雜湊出現在任何位置」——仍然假設那裡面有雜湊，而在 tag 所指的 commit 上 describe 回答的
+#      是 `v0.1.0`、沒有雜湊，於是它在「一支發行腳本存在所要服務的唯一那個 commit」上拒絕
+#   3. 「那個 id 出現在任何位置」——比它取代的缺陷更糟：`v0.1.0` 是 `v0.1.0-13-g1750de3` 的
+#      子字串，於是一個晚了十三個 commit 的執行檔會被當成那次 release 出貨
+# QC。第三次是靠測「拒絕」那個方向抓到的；三個版本的「通過」方向看起來都是對的。
+#
+# The expression is EXTRACTED from release.zsh rather than copied here. A copy
+# would be the fourth place to forget, and this family of mistakes is entry 3
+# in mistakes.md: a rule applied to only part of where it holds.
+# 那個運算式是從 release.zsh **取出來**的，不是抄在這裡。抄一份就是第四個會忘記更新的地方，
+# 而這一族錯誤正是 mistakes.md 的第 3 條：一條規則只套用到它成立範圍的一部分。
+if [[ ! -r $ROOT/release.zsh ]]; then
+    T299_SKIPPED=1
+    skipt "T299 release.zsh's version check accepts only the exact build id / release.zsh 的版本檢查只接受完全相符的 build id (no release.zsh in this tree / 這棵樹裡沒有 release.zsh)"
+else
+    _t299_line=$(LC_ALL=C grep -m1 'if \[\[ \$REPORTED != ' "$ROOT/release.zsh" || true)
+    _t299_expr=${${_t299_line#*\[\[ }%% ]]*}
+    # Self-validating: if the extraction did not get the real comparison, the
+    # cases below would all "pass" against nonsense. KF.
+    # 自我驗證：如果抽出來的不是那個真正的比對，底下每一個案例都會對著一段無意義的文字「通過」。KF。
+    if [[ $_t299_expr != *'$REPORTED'* || $_t299_expr != *'$EXPECTED_ID'* ]]; then
+        bad "T299a could not extract the comparison from release.zsh, got [$_t299_expr] / 無法從 release.zsh 取出那個比對，取到的是如上"
+    else
+        _t299_bad=()
+        # want=1 means the comparison is TRUE, i.e. release.zsh refuses.
+        # want=1 表示那個比對為真，也就是 release.zsh 會拒絕。
+        for _t299_case in \
+            'csv2 0.1.0 (v0.1.0)|0' \
+            'csv2 0.1.0 (v0.1.0-13-g1750de3)|1' \
+            'csv2 0.1.0 (8d5600e)|1' \
+            'csv2 0.1.0 (v0.1.0-dirty)|1' \
+            'csv2 0.1.0 (v0.1.00)|1' ; do
+            REPORTED=${_t299_case%|*}
+            _t299_want=${_t299_case##*|}
+            EXPECTED_ID=v0.1.0
+            if eval "[[ $_t299_expr ]]"; then _t299_got=1; else _t299_got=0; fi
+            [[ $_t299_got == $_t299_want ]] || \
+                _t299_bad+=("[$REPORTED] against v0.1.0: refuses=$_t299_got, wanted $_t299_want")
+        done
+        unset REPORTED EXPECTED_ID
+        if (( ${#_t299_bad} == 0 )); then
+            ok "T299a the check passes the exact id and refuses the four near misses / 這道檢查放行完全相符的 id，並拒絕那四個「差一點」"
+        else
+            bad "T299a ${#_t299_bad} wrong: ${_t299_bad[1]} / 判斷錯誤如上"
+        fi
+    fi
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -17705,6 +17769,7 @@ fi
 # T298 在「是 payload 而不是 checkout」的樹裡會略過，而那同樣不是「平台叫什麼名字」的性質：
 # 同一台 guest，如果 payload 帶了 mistakes.md，它就不會略過。
 (( ${T298_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T299_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode

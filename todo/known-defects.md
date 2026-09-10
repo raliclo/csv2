@@ -12200,3 +12200,132 @@ Recorded although it is fixed and every case that caught it already existed:
 a defect that leaves no new test behind is invisible in the tree, and the next
 person to touch `resolved()` needs to know someone was here and got it wrong by
 believing a comment they had just written themselves.
+
+## QC. `release.zsh` 在唯一必須成功的那個 commit 上拒絕：一個 tag 上
+
+**2026-09-10 發現，動手做 aarch64 封存之前。已修。**
+
+`release.zsh` 檢查「執行檔回報的 build id 與 HEAD 相符」。它找的是短雜湊：
+
+```zsh
+HEAD_SHORT=$(git rev-parse --short HEAD)
+if [[ $REPORTED != *"$HEAD_SHORT"* ]]; then ... exit 1
+```
+
+而執行檔裡的 build id 來自 `git describe --always --dirty`。**在一個 tag 所指的 commit 上，
+`describe` 回答的是 tag 名稱，不含任何雜湊。**
+
+### 重現
+
+```
+$ git worktree add --detach /tmp/wt v0.1.0 && cd /tmp/wt
+$ ./compile_csv2.zsh && ./release/csv2 --version
+csv2 0.1.0 (v0.1.0)
+$ ./release.zsh
+the binary reports [csv2 0.1.0 (v0.1.0)] but HEAD is 8d5600e; rebuild before releasing
+執行檔回報 [csv2 0.1.0 (v0.1.0)]，而 HEAD 是 8d5600e；發行前請重新建置
+rc=1
+```
+
+**重建不會有任何幫助**——重建產生的是同一個字串。那則訊息把讀者送去一個做了也不會改變結果的
+動作，而那比不給建議更糟。
+
+### 為什麼它是這一族的第三次
+
+這道檢查**已經因為同一個理由被修過一次**。原本它比對相等；tag 出現後 `describe` 開始回答
+`v0.1.0-4-g3515258`，於是它拒絕了 tag 之後的每一次建置，改成了「包含」。**而「包含」仍然
+假設那個字串裡有雜湊。** 在 tag 上沒有。修一次、修的是它的一種形式，不是它成立的範圍——
+`mistakes.md` 第 3 條。
+
+### 修法
+
+不要重新推導 build id，**問產生它的那個運算式**：
+
+```zsh
+EXPECTED_ID=$(git describe --always --dirty)
+[[ $REPORTED == *"$EXPECTED_ID"* ]] || refuse
+```
+
+`compile_csv2.zsh` 與 `compile_csv2_linux.zsh` 用的就是這一行。同一個來源，因此兩者在形式上
+不可能再分歧。
+
+**但「包含」是錯的，而且錯得比原本的缺陷更糟。** 上面那個 `*"$EXPECTED_ID"*` 是這個修正的
+第一版，它在測「拒絕」那個方向時被抓到：
+
+```
+EXPECTED_ID = v0.1.0
+REPORTED    = csv2 0.1.0 (v0.1.0-13-g1750de3)
+[[ $REPORTED == *"$EXPECTED_ID"* ]]  → 真
+```
+
+一個晚了十三個 commit 的執行檔**含有** `v0.1.0` 這個子字串，於是會被當成那次 release 出貨。
+原本的缺陷只是拒絕了一個好的建置；這一版會放行一個壞的。
+
+正確的是**錨定**——版本字串的格式是 `csv2 <版本> (<id>)`，所以比對結尾：
+
+```zsh
+EXPECTED_ID=$(git describe --always --dirty)
+[[ $REPORTED != *"($EXPECTED_ID)" ]] && refuse
+```
+
+四種形式實測：`(v0.1.0)` 通過；`(v0.1.0-13-g1750de3)`、`(8d5600e)`、`(v0.1.0-dirty)` 全部拒絕。
+
+**這道檢查至今錯了三次，三次都是同一個動作**：去列舉那個字串「可能長什麼樣」，而不是去問它、
+或錨定它。T299 現在把這件事釘住——而且它是從 `release.zsh` 裡**取出那個運算式**來測的，不是
+抄一份，因為抄一份就是第四個會忘記更新的地方。
+
+`release.zsh` refused at a tag -- the one commit it exists to serve. It looked for the short
+hash inside the reported build id, and `git describe` answers with the TAG NAME and no hash at
+a tagged commit. Its advice, "rebuild before releasing", leads to the identical string. The
+same check had already been corrected once for the same reason, from equality to containment,
+and containment still assumed a hash was in there. The first attempt at the fix compared
+CONTAINMENT against `git describe`'s answer and was worse than the bug: at v0.1.0 the expected
+id is `v0.1.0`, which `csv2 0.1.0 (v0.1.0-13-g1750de3)` contains, so a binary thirteen commits
+later would have shipped as the release. The original defect only refused a good build; that
+one would have passed a bad one. It is anchored now -- the string ends with `(<id>)` -- and
+all four forms were exercised. Three wrong versions of one check, each one enumerating the
+shapes that string can take instead of anchoring it, which is why T299 pins it by EXTRACTING
+the expression from release.zsh rather than copying it.
+
+## QD. 內嵌的 build id 不可重現：同一份原始碼，兩次建置給出不同的版本字串
+
+**2026-09-10 發現。未修——這需要一個決定，不是一個 patch。**
+
+`--version` 印的 build id 來自 `git describe --always --dirty`，而 `describe` 的答案取決於
+**建置當下有沒有 tag**，不取決於原始碼。
+
+v0.1.0 已發布的三份封存裡，執行檔回報：
+
+```
+$ zstd -dqc dist/csv2-0.1.0-macos-arm64.tar.zst | tar -x && ./csv2-0.1.0-macos-arm64/csv2 --version
+csv2 0.1.0 (8d5600e)
+```
+
+純短雜湊——因為它們是在 `v0.1.0` 這個 tag **被打之前**建的。而今天在**同一個 commit**
+（8d5600e）上建置，得到的是 `csv2 0.1.0 (v0.1.0)`。
+
+### 後果
+
+1. **aarch64 那份補建的封存，版本字串會與另外三份不同**，即使原始碼一模一樣。這不是能靠
+   重建解決的——那個差異來自 tag 的存在，而 tag 不會消失。
+2. 更一般地：**一個內嵌的 build id 若不能從原始碼重現，它就不能用來回答「這個執行檔是從哪裡
+   來的」**，而那是它存在的唯一理由。
+
+### 兩個選項，尚未決定
+
+- **改用 `git rev-parse --short HEAD`**：永遠可重現，但失去了「這是一個 release 建置」這個
+  一眼可見的資訊。
+- **兩者都印**：`csv2 0.1.0 (v0.1.0 / 8d5600e)`。可重現的部分與可讀的部分並存，代價是版本行
+  變長，而且既有的三份封存仍然只有前者。
+
+**這條先寫下來、不先修。** 它會改變一個對外可見的字串，而已經有三份封存帶著舊的形式出去了。
+
+The embedded build id is not reproducible: `git describe` answers according to whether a tag
+existed when the build ran, not according to the source. The three published v0.1.0 archives
+report `csv2 0.1.0 (8d5600e)` because they were built before the tag was cut; building the
+same commit today gives `csv2 0.1.0 (v0.1.0)`. So an aarch64 archive added now cannot carry
+the same version string as its three siblings, and no rebuild fixes that. More generally, a
+build id that cannot be reproduced from the source cannot answer the one question it exists to
+answer. Two options -- a bare short hash, always reproducible but silent about being a release
+build, or printing both -- and neither is chosen here, because this changes an outward-facing
+string and three archives already carry the old form.

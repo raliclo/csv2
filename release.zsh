@@ -98,23 +98,48 @@ fi
 #    there" is the check this project keeps finding to be worthless.
 # 3. 執行檔必須回報「目前 checkout 的那個 commit」。`--version` 是靠**執行它**問出來的，
 #    不是靠讀檔案——因為「檔案在那裡」正是這個專案一再發現毫無價值的那種檢查。
-HEAD_SHORT=$(git rev-parse --short HEAD)
 REPORTED=$("$BIN" --version)
-# The hash ANYWHERE in the string, not immediately after `(`. Once v0.1.0 was
-# tagged, `git describe` started answering `v0.1.0-4-g3515258` instead of a bare
-# short hash, so `--version` reports `(v0.1.0-4-g3515258)` and a check looking
-# for `(3515258` matches nothing. This script would then have refused EVERY
-# build from the first tag onwards -- and the first tag is exactly when a
-# release script starts being used. Found by reading the version string after a
-# rebuild, not by the script failing, because nothing had run it since.
-# 在字串的**任何位置**找那個雜湊，而不是「緊接在 `(` 之後」。v0.1.0 被打上 tag 之後，
-# `git describe` 開始回答 `v0.1.0-4-g3515258` 而不是純短雜湊，於是 `--version` 印的是
-# `(v0.1.0-4-g3515258)`，而一個去找 `(3515258` 的檢查什麼都匹配不到。那會讓這支腳本從**第一個
-# tag 之後**拒絕每一次建置——而第一個 tag 正好就是一支發行腳本開始被使用的時刻。這是重建之後
-# 讀版本字串時發現的，不是靠腳本失敗發現的，因為在那之後沒有人再執行過它。
-if [[ $REPORTED != *"$HEAD_SHORT"* ]]; then
-    print -u2 -- "the binary reports [$REPORTED] but HEAD is $HEAD_SHORT; rebuild before releasing"
-    print -u2 -- "執行檔回報 [$REPORTED]，而 HEAD 是 $HEAD_SHORT；發行前請重新建置"
+# Ask the expression that PRODUCED the id, do not derive a second answer.
+# compile_csv2.zsh and compile_csv2_linux.zsh both embed
+# `git describe --always --dirty`, so comparing against the same call cannot
+# disagree with them about form.
+#
+# 問「產生那個 id 的運算式」，不要自己推導出第二個答案。compile_csv2.zsh 與
+# compile_csv2_linux.zsh 內嵌的都是 `git describe --always --dirty`，因此拿同一次呼叫去比，
+# 不可能與它們在形式上分歧。
+#
+# This check has now been wrong twice, both times by enumerating the forms that
+# string can take instead of asking for it. First it compared for equality
+# against `(SHORTHASH`, and v0.1.0 made `describe` answer
+# `v0.1.0-4-g3515258` -- it would have refused every build from the first tag
+# onwards, which is exactly when a release script starts being used. That was
+# corrected to "the hash appears anywhere in the string", which still assumed a
+# hash was in there. AT A TAGGED COMMIT `describe` answers `v0.1.0` and nothing
+# else, so on 2026-09-10 this refused at v0.1.0 -- the one commit it exists to
+# serve -- advising "rebuild before releasing", which produces the identical
+# string. QC.
+#
+# 這道檢查現在已經錯了兩次，兩次都是去**列舉**那個字串可能的形式，而不是去問它。第一次它拿
+# `(SHORTHASH` 比相等，而 v0.1.0 讓 `describe` 開始回答 `v0.1.0-4-g3515258`——那會讓它從第一個
+# tag 起拒絕每一次建置，而第一個 tag 正好就是一支發行腳本開始被使用的時刻。那次改成了「雜湊
+# 出現在字串的任何位置」，而它**仍然假設那裡面有一個雜湊**。在一個 tag 所指的 commit 上，
+# `describe` 回答的就只是 `v0.1.0`，因此 2026-09-10 它在 v0.1.0 上拒絕了——那是它存在所要服務的
+# 唯一那個 commit——並建議「發行前請重新建置」，而重建產生的是同一個字串。QC。
+EXPECTED_ID=$(git describe --always --dirty)
+# ANCHORED, not "contains". The first attempt at this fix compared containment
+# and let a WORSE thing through than the bug it replaced: at v0.1.0 the expected
+# id is `v0.1.0`, and `csv2 0.1.0 (v0.1.0-13-g1750de3)` contains that string --
+# so a binary built thirteen commits later would have shipped as the release.
+# Caught by testing the refusal direction, which is the direction a guard is
+# for; the passing direction had already looked right.
+#
+# 用**錨定**，不用「包含」。這個修正的第一版比的是包含，而它放行的東西比它取代的缺陷更糟：
+# 在 v0.1.0 上，預期的 id 是 `v0.1.0`，而 `csv2 0.1.0 (v0.1.0-13-g1750de3)` **含有**那個字串
+# ——於是一個晚了十三個 commit 的執行檔會被當成那次 release 出貨。它是靠測「拒絕」那個方向
+# 抓到的，而那正是一道守衛存在的方向；「通過」那個方向早就看起來是對的。
+if [[ $REPORTED != *"($EXPECTED_ID)" ]]; then
+    print -u2 -- "the binary reports [$REPORTED] but this checkout is [$EXPECTED_ID]; rebuild before releasing"
+    print -u2 -- "執行檔回報 [$REPORTED]，而這個 checkout 是 [$EXPECTED_ID]；發行前請重新建置"
     exit 1
 fi
 
