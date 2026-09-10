@@ -12570,3 +12570,42 @@ the omission: the pattern was written from the four lines of the rule and stoppe
 which is entry 3 with an arbitrary boundary. Worse is how it surfaced -- another session
 pointed ITS guard at this tree. Mine, on its own tree, aimed at the shape this project cares
 about most, reported clean.
+
+### 同日追加：還有第五種，而它不在那條規則裡
+
+`zsh` 自己的 `${(s:,:)line}` 直接以逗號切割。**那條四行的規則沒有列它**，因為那條規則是為可攜的
+shell 寫的——而這個專案只用 zsh，所以它反而是這裡最可能被伸手去拿的那一種。目前的實例數是**零**，
+而那正是「第一個違規不會被發現」的那個狀態。
+
+也就是說這個樣式**短過兩次**：第一次是照著規則寫、停在第三行；第二次是規則本身沒有列全，而我
+把「那條規則列了什麼」當成了「有哪些形狀」。**第二次比較難，因為「把規則讀得更仔細」並不會找到它。**
+
+T301b 也跟著改：從「數命中行數」改成**逐一具名**——一個數字說不出少了哪一種，它只會說
+「應為 5、實得 4」，而這個樣式的歷史正好就是一連串「少了哪一種」。現在九種形狀各自具名，另外兩行
+（有標記的、註解）必須**不**被抓到。把舊的窄樣式放回去驗證，它失敗六項並逐一指名。
+
+A fifth shape, and it is not in the rule at all: zsh's own `${(s:,:)line}`. The four-line rule
+is written for portable shell; this project is zsh only, so that form is the one most likely to
+be reached for here. Zero instances today, which is the state in which the first one goes
+unnoticed. So the pattern was short twice -- once by stopping at three of the rule's four, and
+once by treating "what the rule lists" as "what the shapes are", which reading the rule more
+carefully would not have caught. T301b changed with it, from counting hits to NAMING each
+shape: a count cannot say which one is missing. Verified by putting the old narrow pattern
+back, which fails six of the nine and names each.
+
+### 而這一段本身遲到了一個 commit
+
+寫入它的那次編輯**失敗了**（錨點字串沒對上），而同一條命令裡的 `git add -A && git commit` 照樣
+執行，於是 `95e56ce` 的訊息描述了這一段——而樹裡沒有它。程式碼的修正確實進去了（T301 與 T301b，
+測試也通過），缺的只有這份紀錄。
+
+**這是同一天內第二次「commit 訊息說了樹裡沒有的東西」**（第一次是 QE 的模式位元）。兩次的成因
+一模一樣：**一條把「編輯」與「提交」串在同一行的命令，而編輯失敗不會阻止提交。** 兩次都是靠
+「事後去看那個東西在不在」發現的，不是靠命令失敗。
+
+This section arrived one commit late: the edit that wrote it FAILED on a stale anchor, while the
+`git add -A && git commit` chained after it on the same line ran anyway, so 95e56ce's message
+describes text the tree did not contain. The code fix was in; only the record was missing. That
+is the second time in one day -- QE's mode bit was the first -- and both have the same cause: a
+single command line chaining an edit to a commit, where a failed edit does not stop the commit.
+Both were found by going to look at the thing afterwards, not by a command failing.
