@@ -12340,3 +12340,52 @@ build id that cannot be reproduced from the source cannot answer the one questio
 answer. Two options -- a bare short hash, always reproducible but silent about being a release
 build, or printing both -- and neither is chosen here, because this changes an outward-facing
 string and three archives already carry the old form.
+
+## QE. `compile_csv2_linux.zsh` 在 repo 裡沒有執行位元，而它是 Linux 唯一的建置腳本
+
+**2026-09-10 發現，在 guest 內做出貨預演時。已修。**
+
+```
+$ git ls-files -s '*.zsh' | awk '$1 != "100755"'
+100644 compile_csv2_linux.zsh
+```
+
+十四支追蹤中的 `.zsh`，十三支是 `100755`，這一支是 `100644`。因此在任何一份新 clone 上：
+
+```
+$ cd /workspace/csv2 && ./compile_csv2_linux.zsh
+zsh:1: permission denied: ./compile_csv2_linux.zsh
+$ echo $?
+126
+```
+
+**126 不是 127。** 那個差別是「找不到」與「找到了但不能執行」，而讀到 126 的人第一個念頭通常是
+路徑打錯了。
+
+### 為什麼一直沒有被發現
+
+唯一會自動執行它的地方，是母專案的 `run_csv2_test.zsh`：
+
+```zsh
+guest_run "zsh $GUEST_CSV2/compile_csv2_linux.zsh > /tmp/csv2build.log 2>&1" BUILD 1800
+```
+
+**它把腳本交給直譯器，於是模式位元根本不參與。** 那條路徑在 guest 上跑過很多次、每次都成功，
+而它證明不了「一個人打 `./compile_csv2_linux.zsh` 會發生什麼」——那是**相鄰的一件事**，不是同一件。
+
+兩份 README 都沒有提到這支腳本，所以 Linux 使用者是靠自己找到它的；找到之後撞上的就是這個。
+
+### 修法
+
+`git update-index --chmod=+x compile_csv2_linux.zsh`。並加上 T300：**每一支被追蹤的 `.zsh`
+在索引裡都必須是 `100755`**——這一條對十四支裡的十三支成立，而沒有任何東西指出第十四支。
+那是 `mistakes.md` 第 3 條。
+
+Thirteen of the fourteen tracked `.zsh` files are 100755; `compile_csv2_linux.zsh` was 100644,
+so `./compile_csv2_linux.zsh` on any fresh clone exits 126 -- found, not executable, which
+reads like a typo. It survived because the only automated caller, run_csv2_test.zsh, invokes
+it as `zsh <path>`, where the mode bit takes no part: that path succeeded many times and
+proves something ADJACENT to the question. Neither README mentions the script, so a Linux user
+finds it themselves and then meets this. Fixed with `git update-index --chmod=+x`, and T300
+now requires every tracked `.zsh` to be executable in the index, because the rule held for
+thirteen of fourteen files and nothing named the fourteenth.

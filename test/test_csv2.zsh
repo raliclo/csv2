@@ -17607,6 +17607,55 @@ else
 fi
 
 echo
+echo "--- T300: every tracked .zsh is executable in the index / T300：每一支被追蹤的 .zsh 在索引裡都可執行 ---"
+# compile_csv2_linux.zsh was 100644 while the other thirteen were 100755, so
+# `./compile_csv2_linux.zsh` on a fresh clone exits 126 -- found, not
+# executable, which reads like a typo rather than a repository property. It
+# survived because the only automated caller invokes it as `zsh <path>`, where
+# the mode bit takes no part: that path succeeded many times and proved
+# something ADJACENT to the question. QE.
+# compile_csv2_linux.zsh 是 100644，而另外十三支是 100755，於是在一份新 clone 上
+# `./compile_csv2_linux.zsh` 以 126 結束——找得到、不能執行，而那讀起來像打錯字，不像是這個
+# repo 的性質。它活下來，是因為唯一會自動呼叫它的地方用的是 `zsh <path>`，那裡模式位元根本不
+# 參與：那條路徑成功過很多次，而它證明的是與被問的問題**相鄰**的一件事。QE。
+#
+# The INDEX, not the working tree. A checkout on a filesystem without
+# permission bits -- or a file chmod'd locally -- would answer a different
+# question from "what does a clone get".
+# 看**索引**，不看工作區。一個位於沒有權限位元的檔案系統上的 checkout——或一個在本機被 chmod
+# 過的檔案——回答的是與「一份 clone 拿到什麼」不同的問題。
+if ! command -v git >/dev/null 2>&1 || [[ ! -d $ROOT/.git && ! -f $ROOT/.git ]]; then
+    T300_SKIPPED=1
+    skipt "T300 every tracked .zsh is executable in the index / 每一支被追蹤的 .zsh 在索引裡都可執行 (not a git checkout here / 這裡不是一個 git checkout)"
+else
+    _t300_all=$(git -C "$ROOT" ls-files -s '*.zsh' 2>/dev/null || true)
+    _t300_n=$(print -r -- "$_t300_all" | LC_ALL=C grep -c . || true)
+    # Zero files means the query failed, not that the tree is clean. T218a.
+    # 零個檔案代表那個查詢失敗了，不代表樹是乾淨的。T218a。
+    if (( _t300_n < 4 )); then
+        bad "T300a git ls-files returned $_t300_n .zsh entries, so nothing was checked / git ls-files 只回傳 $_t300_n 筆 .zsh，等於什麼都沒檢查"
+    else
+        _t300_bad=$(print -r -- "$_t300_all" | LC_ALL=C awk '$1 != "100755" {print $1, $4}')
+        if [[ -z $_t300_bad ]]; then
+            ok "T300a all $_t300_n tracked .zsh files are 100755 / 全部 $_t300_n 支被追蹤的 .zsh 都是 100755"
+        else
+            bad "T300a not executable in the index: $(print -r -- "$_t300_bad" | tr '\n' ' ') / 索引裡不可執行的如上"
+        fi
+    fi
+    # The comparison must bite. Feeding it a line in ls-files' own format with a
+    # non-executable mode is the smallest input that answers "would it notice".
+    # 這個比對必須會咬。餵它一行「ls-files 自己的格式、但模式不可執行」的資料，是能回答
+    # 「它會不會察覺」的最小輸入。
+    _t300_probe=$(print -r -- "100644 0000000000000000000000000000000000000000 0	probe.zsh" \
+                  | LC_ALL=C awk '$1 != "100755" {print $1, $4}')
+    if [[ -n $_t300_probe ]]; then
+        ok "T300b and a 100644 entry is reported when there is one / 而真的有一筆 100644 時，它會被回報"
+    else
+        bad "T300b a 100644 entry went unreported / 一筆 100644 沒有被回報"
+    fi
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -17770,6 +17819,7 @@ fi
 # 同一台 guest，如果 payload 帶了 mistakes.md，它就不會略過。
 (( ${T298_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T299_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T300_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode

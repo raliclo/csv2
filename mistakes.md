@@ -24,7 +24,7 @@ judgement the owning session is best placed to make.
 
 ## 1. 測試碰到的不是被測物（環境、工具，或 fixture 弄丟了那個屬性）
 
-**19 次 / 10 天**（2026-08-20、2026-08-27、2026-08-29、2026-09-02、2026-09-03、2026-09-06、
+**20 次 / 10 天**（2026-08-20、2026-08-27、2026-08-29、2026-09-02、2026-09-03、2026-09-06、
 2026-09-07、2026-09-08、2026-09-09、2026-09-10），單日最多 3 次（2026-08-27）。
 
 *這一行直到 2026-09-08 為止寫的是「9 次 / 6 天」，而 `mistakes_counter.csv2` 當時已經是 17 次 / 8 天。
@@ -57,6 +57,39 @@ T218a 是為了強制 zstat 規則而寫的——那條規則本身正是為了�
 每一次都回報通過。
 
 skill 裡有一模一樣的先例：「這一次發生在為了防它而寫的腳本裡」。
+
+### 第二十次：唯一會執行它的地方，繞過了正要被測的那個性質
+
+`compile_csv2_linux.zsh` 在 repo 裡是 `100644`，而另外十三支 `.zsh` 都是 `100755`。所以在一份
+新 clone 上：
+
+```
+$ ./compile_csv2_linux.zsh
+zsh:1: permission denied
+$ echo $?
+126
+```
+
+它從來沒有被發現，因為唯一會自動執行它的地方是母專案的 `run_csv2_test.zsh`，而那裡寫的是
+
+```zsh
+guest_run "zsh $GUEST_CSV2/compile_csv2_linux.zsh > /tmp/csv2build.log 2>&1"
+```
+
+**`zsh <path>` 把腳本交給直譯器，於是模式位元根本不參與。** 那條路徑在 guest 上成功過很多次，
+而它證明的是「這個腳本的內容能跑」——與「一個人打 `./compile_csv2_linux.zsh` 會發生什麼」是
+**相鄰**的兩件事。這一條的形狀從來都是這個：量到的東西挨著被問的東西，而不是就是它。
+
+而它現形的方式也正好說明了一件事：**是我在做出貨預演時打了 `./` 才撞到的。** 那個預演的全部
+理由就是「不要在真的要出貨時第一次跑它」，而它在第一分鐘就付清了自己的成本。
+
+The twentieth: the only thing that ever ran `compile_csv2_linux.zsh` invoked it as
+`zsh <path>`, where the mode bit takes no part, so a 100644 file in a tree of 100755 ones went
+unseen for as long as it existed. That caller succeeded many times and proved the script's
+CONTENTS run -- adjacent to, not the same as, what a person typing `./compile_csv2_linux.zsh`
+gets, which is 126. It surfaced during a release rehearsal whose entire purpose was not to run
+the procedure for the first time during an actual release; it paid for itself in the first
+minute.
 
 ### 第十九次：測試假設了「一個完整的 checkout」，而 guest 拿到的是 payload 子集
 
