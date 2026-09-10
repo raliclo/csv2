@@ -50,6 +50,18 @@ class Csv2 < Formula
       url "https://github.com/raliclo/csv2/releases/download/v0.1.0/csv2-0.1.0-linux-x86_64.tar.zst"
       sha256 "b944339433d2092175e6fc1dc2f123cad41b32750ad7a5346c85226010c5f55a"
     end
+    # aarch64 arrives in v0.1.1. It was absent from v0.1.0 not because it was
+    # untested -- T47 compares twelve invocations byte for byte against macOS
+    # on every run -- but because an archive built after the tag was cut would
+    # have reported a different version string from its three siblings, which
+    # is QD. All four of v0.1.1's archives were built at the tag.
+    # aarch64 從 v0.1.1 開始有。它在 v0.1.0 缺席，不是因為沒有測試——T47 每一次執行都拿十二組
+    # 呼叫與 macOS 逐位元比對——而是因為一份「在 tag 打完之後才建的」封存，會回報與它三個手足
+    # 不同的版本字串，那就是 QD。v0.1.1 的四份封存全部是在 tag 上建的。
+    on_arm do
+      url "https://github.com/raliclo/csv2/releases/download/v0.1.0/csv2-0.1.0-linux-aarch64.tar.zst"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+    end
   end
 
   def install
