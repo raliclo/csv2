@@ -1205,6 +1205,55 @@ guard must be shown to bite", applied to edits rather than to new guards.
 這與 `blind-test-flow.md` 結尾那一節的第二問是同一句話——「這個新句子在你做得出來的最小輸入上
 還成不成立」。那一節寫在第 100 回合，而三天之內它被違反了三次。
 
+### 唯一可靠地破解它的，是一個不是自己的來源
+
+2026-09-10 這棵樹拿到六件東西，**沒有一件是自己回頭看找到的**：
+
+| 東西 | 誰指出的 |
+|---|---|
+| QF：測試套件裡七處逗號切割 | 另一個 session 說「我那棵樹合規，但沒有東西在執行」 |
+| QG：一個不可能失敗的測試 | 同一個 session 講出「不要讓一個比對同時宣稱一致與正確」 |
+| QH：T301 漏掉四種形狀裡的第三、第五種 | 對方把**他們的**守衛指向這裡 |
+| 第 7 條的第四張臉（對象是一行剛動過的程式碼） | 對方把它說成「一個修正會製造它自己的盲點」 |
+| 第 4 條的機械檢查（`&&` 而不是換行） | 對方回報同一個形狀 |
+| 這一整節 | 對方問「該記在哪一棵樹」 |
+
+而同一天，**我自己回頭核對 24 個 commit 的那一次，唯一報出的問題是我的檢查樣式寫錯了**——樹是對的。
+自我核對找到的是零。
+
+### 為什麼「更仔細」不是解法
+
+**自己造的樣本會繼承自己的盲點。** 一個守衛的樣式與它的正控組，出自同一份不完整的理解，所以兩邊
+自然對得上——對方寫守衛時就撞到了這個：他們造的正控組一路通過，直到把守衛指向**別人真的寫出來
+的程式碼**才現形。
+
+這與第 7 條前面幾次是同一個機制的極限情形：那幾次是「相信自己五分鐘前寫的一句話」，這一次是
+「相信自己整個理解的邊界」。**而後者沒有一個「再讀一遍」版本的解法**，因為要讀的那份東西就是
+產生盲點的那份。
+
+### 因此矯正措施的第二半
+
+**把你的檢查指向不是你寫的程式碼，或者請一個不是你的來源指出你漏了什麼。**
+
+具體的兩個形式，兩個今天都發生過：
+
+1. **把守衛指向別人的樹**——它會找到你的樣式漏掉的形狀，因為那棵樹不是照你的樣式長的。
+2. **把發現交出去，而不是自己修**——對方會問一個你不會問的問題（「那一半你驗了嗎」）。
+
+這一節本身也遵守它：它是在對方問「這個結構該記在哪一棵樹」之後才被寫下來的。**我沒有想到要記。**
+
+The only thing that reliably breaks this is a source that is not you. Six things arrived in this
+tree on 2026-09-10 and not one came from looking back over its own work: two defects named by
+another session's observations, one found by pointing THEIR guard at this repository, two
+mechanisms they articulated, and this section, which exists because they asked where it should
+be recorded. On the same day, a self-audit of twenty-four commits reported exactly one problem
+and it was the audit's own pattern; the tree was right. Reading more carefully is not the
+answer, because a guard's pattern and its own control group come from one incomplete
+understanding and therefore agree: they hit that too, and what exposed it was pointing the guard
+at code somebody else had actually written. So the corrective gains a second half -- aim your
+check at code you did not write, or hand the finding to someone who is not you, who asks the
+question you would not have asked.
+
 ### 為什麼這裡沒有守衛
 
 問題發生在**下判斷之前**，不在任何一個產物上。沒有東西可以掃描——那段文字在被寫下的當下是
