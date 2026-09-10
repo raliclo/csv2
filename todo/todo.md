@@ -614,6 +614,40 @@ The route is: run release.zsh in the guest returning ONE line of sha256, pull th
 multiscp, recompute on the host and compare -- two independent channels having to agree,
 because the command-output channel truncates.
 
+### 2026-09-10：那條路徑已經預演過一次，端到端
+
+不是等到出貨才第一次跑。在 guest 內走完了整條路，產物丟棄：
+
+```
+guest  ./compile_csv2_linux.zsh          build_rc=0
+       ./release/csv2 --version          csv2 0.1.0 (v0.1.0-18-ge204ad8)   ← 與 HEAD 相符
+       ./release.zsh                     release_rc=0
+       sha256                            266117c5be1ee2b5…005637db          ← 只回傳這一行
+host   multiscp 拉回                      321,620 bytes
+       openssl dgst -sha256              266117c5be1ee2b5…005637db          ← 獨立算出同一個
+       封存內容                            csv2/ LICENSE README.md README.zh-TW.md
+       那個執行檔                          ELF 64-bit LSB pie, ARM aarch64
+```
+
+**三個到 v0.1.1 才會第一次揭曉的問題，現在有答案了：**
+
+1. `release.zsh` 結尾那段「解開封存、執行它、再讀一個 CSV」**從來沒有在 aarch64 上跑過**——現在跑過了，通過。
+2. 「只回傳一行 sha256」在那條會截斷的通道上穩不穩——穩；而且就算它被截斷，第 3 步也會發現。
+3. multiscp 拉回來的封存兩端對不對得上——對得上。
+
+**而它在第一分鐘就付清了自己的成本**：`./compile_csv2_linux.zsh` 回傳 126——那個檔案在 repo 裡
+從來沒有執行位元（QE）。接著它又抓到第二件事：那個修正並不在聲稱修好它的 commit 裡，而守衛
+通過了（`mistakes.md` 第 1 條第二十、二十一次）。**兩件都只會在「有人打 `./`」時出現，而在此之前
+沒有任何自動化路徑會那樣打。**
+
+Rehearsed end to end on 2026-09-10, product discarded. All three questions that would otherwise
+have first been answered during a release are now answered: release.zsh's extract-run-read tail
+had never executed on aarch64 and does; the one-line-sha256 shape holds on the truncating
+channel, and step 3 would catch it if it did not; multiscp's copy matches. It paid for itself
+in the first minute -- `./compile_csv2_linux.zsh` exited 126, the file having never carried an
+executable bit (QE) -- and then caught a second thing, that the fix was not in the commit that
+claimed it while the guard passed anyway.
+
 ## 出貨流程只有一半是腳本 / Half the release is scripted
 
 **加入於 2026-09-08，出完 v0.1.0 之後。2026-09-10 由 `publish.zsh` 做掉了第 1、3–7 步；
