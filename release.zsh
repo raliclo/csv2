@@ -18,8 +18,15 @@ setopt no_unset pipe_fail errexit
 # plausible name. Say where it stopped.
 # 一支安靜死掉的發行腳本，會留下一份名字看起來很合理的半成品封存。要說出它停在哪裡。
 TRAPZERR() {
-    print -u2 -- "release.zsh failed at line $LINENO; nothing in dist/ should be trusted"
-    print -u2 -- "release.zsh 在第 $LINENO 行失敗；dist/ 裡的東西一律不可信"
+# No line number: `$LINENO` inside a trap function reports the line within THAT
+# FUNCTION, not the line that failed. On 2026-09-10 this printed "stopped at
+# line 2" for a failure a hundred lines away. A message naming the wrong line is
+# worse than one naming none -- it sends the reader somewhere and they believe it.
+# 不報行號：`$LINENO` 在 trap 函式內回報的是**那個函式**裡的行號，不是失敗的那一行。
+# 2026-09-10 它為一個相隔上百行的失敗印出「停在第 2 行」。一則指名錯行號的訊息，比不指名
+# 更糟——它把讀者送去某個地方，而他們會相信它。
+    print -u2 -- "release.zsh: a command failed; nothing in dist/ should be trusted"
+    print -u2 -- "release.zsh：某個命令失敗；dist/ 裡的東西一律不可信"
 }
 
 HERE=${0:A:h}

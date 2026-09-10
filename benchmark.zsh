@@ -26,8 +26,16 @@ emulate -L zsh
 setopt no_unset pipe_fail
 
 TRAPZERR() {
-    print -u2 -- "benchmark.zsh stopped at line $LINENO; the numbers above it may be incomplete"
-    print -u2 -- "benchmark.zsh 停在第 $LINENO 行；在它之前的數字可能不完整"
+    # This script does NOT set errexit, so it did not stop -- an earlier version
+    # of this message said "stopped at line N" and both halves were false: the
+    # run carried on, and the line was the trap function's own. TRAPZERR fires on
+    # any non-zero return regardless of errexit, so the honest thing to say is
+    # that something failed and the numbers may not be comparable.
+    # 這支腳本**沒有**設 errexit，所以它並沒有停——這則訊息的前一版寫著「停在第 N 行」，而兩半都是
+    # 假的：那次執行繼續跑了，而那個行號是 trap 函式自己的。TRAPZERR 在任何非零返回時都會觸發，
+    # 與 errexit 無關，因此誠實的說法是「有東西失敗了，這些數字可能不能拿來比較」。
+    print -u2 -- "benchmark.zsh: a command failed; the run continues but the numbers may not be comparable"
+    print -u2 -- "benchmark.zsh：某個命令失敗；這次執行會繼續，但這些數字可能不能拿來比較"
 }
 
 HERE=${0:A:h}

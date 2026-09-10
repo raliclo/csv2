@@ -501,8 +501,8 @@ skill 說「摘要樣式是附加的，失敗掃描是強制的」。**把整個
 
 ## 3. 一條規則只套用到它成立範圍的一部分
 
-**17 次 / 7 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
-2026-09-08），單日最多 5 次（2026-09-03）。
+**18 次 / 8 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
+2026-09-08、2026-09-10），單日最多 5 次（2026-09-03）。
 
 *數字的權威來源是 `mistakes_counter.csv2`；這一行是它的副本。副本會漂，而那本身是第 1 類——
 2026-09-08 第 1 條的這一行就被抓到落後了八次。*
@@ -608,6 +608,34 @@ sum_of() { shasum -a 256 "$1" | cut -d" " -f1 }
 **判準：一道新守衛在被相信之前，必須對一個「不是你為它設計的」違規失敗一次。** 最好的來源是那個真的
 發生過的違規——這次它就在 git 歷史裡，我只要把它貼回去。
 
+### 第十八次：那條規則已經有名字、有紀錄、有修正，而我又寫了一次
+
+2026-09-10 寫 `publish.zsh` 時，我寫下：
+
+```zsh
+inner=$(zstd -dq -c -- "$a" | tar -tf - | grep -E "^$stem/csv2(\.exe)?$" | head -1)
+[[ -n $inner ]] || { print -u2 -- "$base 裡面沒有 $stem/csv2"; exit 1 }
+```
+
+底下那一行是我特地為「封存裡沒有它宣稱的執行檔」寫的拒絕。它永遠不會執行。在 `errexit`
+與 `pipe_fail` 之下，一個找不到東西的 `grep` 回傳 1、命令替換繼承它，於是那個**賦值**先把
+腳本殺掉——在拒絕來得及說明之前。
+
+這個形狀有名字：`todo/known-defects.md` 的 **PE**，`measure_parallel_rss.zsh` 裡的同一個
+寫法，已經診斷過、已經修好、已經連同重現步驟寫下來。我沒有查那份紀錄，我憑記憶重寫了一支
+腳本裡的同一段邏輯。
+
+**它與這一條的其餘十七次是同一件事，只是方向反過來。** 前面那些是「修好一處，樹裡還有第二處
+沒修」；這一次是「修好之後，新寫的程式碼又長出一處」。規則成立的範圍包含**之後才寫的東西**，
+而那一半沒有任何東西在看。`grep -c` 找得到既有的重複，找不到還沒被寫出來的那一個。
+
+The eighteenth is the same entry inverted. The other seventeen were "fixed one site, a second
+site in the tree still has it". This one was "fixed it, then grew a fresh site in new code".
+The scope where a rule holds includes what gets written after it, and nothing watches that
+half: counting existing duplicates cannot find the one not yet typed. The shape already had a
+name -- PE in `todo/known-defects.md`, with the reproduction -- and I rewrote it from memory
+instead of reading the record.
+
 ### 最危險的形式：兩個方向相反的錯誤互相抵銷
 
 2026-09-03 一天之內出現了一對：**LC** 讓預期略過數多了一，而同一天加入的 **T240** 有跳過
@@ -668,7 +696,8 @@ T241b 用一個真的含有「未計數旗標」的檔案證明那個掃描會�
 
 ## 4. 說了要做，然後沒有做，而沒有任何東西會回報
 
-**5 次 / 2 天**（2026-09-02、2026-09-03），全部在同一次盤點中被發現。
+**8 次 / 3 天**（2026-09-02、2026-09-03、2026-09-07）。前五次全部在同一次盤點中被發現；
+第 6–8 次不是。
 
 被說出口、然後沒有做的：
 
@@ -778,11 +807,135 @@ stale together and gets fixed one at a time.
 
 ---
 
+## 5. 一則診斷訊息宣稱了它不可能知道的事
+
+**4 次 / 3 天**（2026-08-31、2026-09-08、2026-09-10），單日最多 2 次（2026-09-10）。
+
+四支腳本的 `TRAPZERR` 都寫著：
+
+```zsh
+TRAPZERR() {
+    print -u2 -- "publish.zsh stopped at line $LINENO"
+}
+```
+
+`$LINENO` 在函式內回報的是**那個函式**裡的行號。2026-09-10 `publish.zsh` 為一個發生在第 151
+行的失敗印出「停在第 2 行」——第 2 行是 `TRAPZERR` 內的第二行。我照著那個行號去看，那裡是一則
+`print`。
+
+### 為什麼它不會報錯
+
+`zsh -n` 過。腳本以非零結束，而那**正確**。訊息印出來了，格式完好，內容具體到帶一個行號。
+一則診斷訊息唯一的讀者檢驗方式，是拿它去對照原始碼——而那正是我做的，然後我開始懷疑錯的東西。
+
+**一則只在出錯時才會執行的訊息，是這棵樹裡唯一從來不被測試碰到的程式碼。** 它被讀到的時刻，
+也正好是讀者最沒有能力懷疑它的時候：你之所以在讀它，是因為你已經不知道發生了什麼事。
+
+### `benchmark.zsh` 那一份在同一句話裡說了兩個假話
+
+它寫「benchmark.zsh stopped at line $LINENO」。行號是假的（同上），而**「stopped」也是假的**：
+那支腳本沒有設 `errexit`。`TRAPZERR` 在任何非零返回時都會觸發，與 `errexit` 無關——所以它會
+印出「停止了」，然後繼續跑完，並印出一整張數字表。一個讀者若看到那則訊息，會以為表格是截斷的；
+實際上表格是完整的，而其中某一列可能是錯的。那是更糟的一種。
+
+### 矯正措施
+
+**一則診斷訊息只能說出它有辦法知道的事。** 要指出「失敗在哪裡」，就讓每一步自己說——腳本在
+做每一件事之前先印出它要做什麼——而不要靠一個 trap 事後推斷。trap 唯一有資格說的是「有東西
+失敗了」。宣稱「停止了」之前，先確認它真的會停。
+
+### 現行防範：T297
+
+T297a 掃描每一支 `.zsh`，找出在函式內讀取 `$LINENO` 的位置；註解行排除，理由與 T218a 相同
+（那四支腳本的說明文字都必然要引用它）。T297b 用一個確實這樣做的探針證明它會咬。
+
+**用掃描而不是寫成一條規則，是因為那個分布。** 依 skill 的判準，四次／三天屬於「知道之後仍
+再犯」那一格——但這裡更精確的說法是：它不是被決定的，是被**複製**的。第一份寫於 2026-08-31，
+其餘三份都是從它抄過去的。下一支腳本一樣會抄。規則擋不住一個靠複製繁殖的東西，掃描可以。
+
+只擋住 `$LINENO` 這一個具體形狀。一般形式——「診斷訊息宣稱了它不可能知道的事」——還沒有機械
+檢查，而且我還想不出它該長什麼樣子。
+
+Four times over three days: every `TRAPZERR` in this tree printed a line number taken from
+`$LINENO` inside the handler, which is the handler's own line and not the failing one. A
+failure at line 151 was reported as "line 2". Nothing catches this: `zsh -n` passes, the exit
+status is correctly non-zero, and the message is well-formed and specific. An error message is
+the one piece of code a test suite never reaches, and it is read at the moment its reader is
+least equipped to doubt it. The `benchmark.zsh` copy made two false claims in one sentence: it
+said "stopped", and that script does not set `errexit` -- TRAPZERR fires on any non-zero return
+regardless, so it announced a stop and then ran to completion, printing a full table of numbers
+one row of which may be wrong. T297a scans for `$LINENO` read inside a function and T297b
+proves the scan bites. It is a scan rather than a rule because the idiom spread by being
+copied, and the next script will copy it too.
+
+---
+
+## 6. 用字串切割解析一個有結構的格式，於是安靜地拿到一個看起來合理的錯值
+
+**1 次 / 1 天**（2026-09-10）。
+
+`publish.zsh` 要把套件檔裡的版本號換掉，所以它得先讀出「這個檔案目前宣告的版本」。我寫的是
+「第一個引號之後、到下一個引號為止」：
+
+```zsh
+old=${${line#*\"}%%\"*}
+```
+
+在 Homebrew 的 `  version "0.1.0"` 上，它得到 `0.1.0`。**對的。**
+
+在 scoop 的 `    "version": "0.1.0",` 上，它得到 `: `。因為那一行的第一個引號在 `version`
+前面，於是「第一個引號之後到下一個引號」是 `version` 本身；我為此加了一個 fallback，而那個
+fallback 拿到的是 `: `。
+
+接著那個值被拿去做全域替換。38 行的 JSON，22 行被改成類似 `"version"0.1.1"0.1.0",` 的東西。
+
+### 為什麼它不會報錯
+
+**每一步都成功了。** 切割成功（`: ` 是一個合法的字串）、替換成功（22 行，比 3 行還多，看起來
+更像有做事）、寫檔成功、函式回傳 0。若我當時只檢查「改寫有沒有回報成功」，我會得到一個肯定的
+答覆，然後把一個壞掉的 scoop manifest 發布出去。
+
+**而這棵樹存在的理由，就是 `cut -d,` 會安靜地給出半個欄位。** 我對 JSON 做了完全同一件事。
+全域 `CLAUDE.md` 上那一整頁講的就是這個，而它寫的是 CSV，於是我沒有把它讀成一條關於**格式**
+的規則。
+
+### 矯正措施
+
+**沒有解析器可用時，不要切字串——比對一個能自我驗證的樣式。** 現在的寫法是「提到 `version`
+的那一行上的第一個 `X.Y.Z` token」：
+
+```zsh
+[[ $line == (#b)*([0-9]##.[0-9]##.[0-9]##)* ]] && old=$match[1]
+```
+
+它抽出來的東西**如果不是一個版本號，它就抽不出東西**。`: ` 沒有機會出現。
+
+**而真正救回這一次的不是那個樣式，是做法：改寫先在一份複本上跑，然後檢查產物。** 不是檢查
+「改寫有沒有回報成功」——它回報了成功。是 `grep '0\.1\.0'` 那份複本，然後看到了那 22 行。
+
+`rewrite_version` 現在把這一步內建了：它寫到暫存檔、檢查產物裡不再有其他版本號 token，然後
+才 `mv`。那擋得住這一個具體形狀的後果，擋不住「切錯欄位」本身。
+
+Splitting strings to read a field out of a structured format. `${${line#*"}%%"*}` gives
+`0.1.0` on Homebrew's `version "0.1.0"` and `: ` on scoop's `"version": "0.1.0",` -- a legal
+string, no error -- and that value was then used for a global replace, mangling 22 of a
+38-line JSON file. Every step succeeded: the split, the replace (22 lines, which looks more
+productive than 3), the write, the return code. This tree exists because `cut -d,` silently
+returns half a field; I did the same thing to JSON, and did not read that page as a rule about
+FORMATS because it is written about CSV. The fix is a self-validating pattern -- the first
+`X.Y.Z` token on a line mentioning version, which cannot yield `: ` -- but what actually
+caught it was the method: rewrite a COPY, then grep the PRODUCT, rather than checking whether
+the rewrite reported success. It did report success.
+
+---
+
 ## 3. A rule applied to only part of where it holds
 
-Fourteen times over seven days -- `mistakes_counter.csv2` is the authority; this
-sentence said "seven times over three days" until 2026-09-08. The part it WAS applied to is correct, so nothing reports the
-rest: tests pass, the compiler is silent, the fix looks done. With KV the correct usage sat a
+The count is in `mistakes_counter.csv2` and is deliberately not repeated here. This sentence
+carried a number twice and was wrong both times -- "seven times over three days" until
+2026-09-08, then "fourteen times over seven days" until 2026-09-10 -- each correction leaving
+a fresh copy to go stale. T298 now checks the copies that remain. The part a rule WAS applied
+to is correct, so nothing reports the rest: tests pass, the compiler is silent, the fix looks done. With KV the correct usage sat a
 few lines away in the same function; with LC the rule was written as a comment directly above
 the line that broke it, saying "a number written here is a second place to forget".
 

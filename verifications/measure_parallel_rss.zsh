@@ -60,8 +60,15 @@ fi
 # errexit 會讓這支腳本在失敗的地方結束，而直到 2026-09-08 為止，它結束時什麼都不印。一支
 # 安靜死掉的量測腳本，比大聲當掉的更糟：它會留下一個看起來很合理的半成品檔案。
 TRAPZERR() {
-    print -u2 -- "measure_parallel_rss.zsh failed at line $LINENO; $MEASURE_OUTPUT is incomplete"
-    print -u2 -- "measure_parallel_rss.zsh 在第 $LINENO 行失敗；$MEASURE_OUTPUT 並不完整"
+# No line number: `$LINENO` inside a trap function reports the line within THAT
+# FUNCTION, not the line that failed. On 2026-09-10 this printed "stopped at
+# line 2" for a failure a hundred lines away. A message naming the wrong line is
+# worse than one naming none -- it sends the reader somewhere and they believe it.
+# 不報行號：`$LINENO` 在 trap 函式內回報的是**那個函式**裡的行號，不是失敗的那一行。
+# 2026-09-10 它為一個相隔上百行的失敗印出「停在第 2 行」。一則指名錯行號的訊息，比不指名
+# 更糟——它把讀者送去某個地方，而他們會相信它。
+    print -u2 -- "measure_parallel_rss.zsh: a command failed; $MEASURE_OUTPUT is incomplete"
+    print -u2 -- "measure_parallel_rss.zsh：某個命令失敗；$MEASURE_OUTPUT 並不完整"
 }
 
 TMP=$(mktemp -d "$HERE/.measure-rss.XXXXXX")

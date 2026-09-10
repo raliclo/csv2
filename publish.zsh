@@ -26,9 +26,16 @@
 emulate -L zsh
 setopt no_unset pipe_fail errexit
 
+# No line number: `$LINENO` inside a trap function reports the line within THAT
+# FUNCTION, not the line that failed. On 2026-09-10 this printed "stopped at
+# line 2" for a failure a hundred lines away. A message naming the wrong line is
+# worse than one naming none -- it sends the reader somewhere and they believe it.
+# 不報行號：`$LINENO` 在 trap 函式內回報的是**那個函式**裡的行號，不是失敗的那一行。
+# 2026-09-10 它為一個相隔上百行的失敗印出「停在第 2 行」。一則指名錯行號的訊息，比不指名
+# 更糟——它把讀者送去某個地方，而他們會相信它。
 TRAPZERR() {
-    print -u2 -- "publish.zsh stopped at line $LINENO"
-    print -u2 -- "publish.zsh 停在第 $LINENO 行"
+    print -u2 -- "publish.zsh: a command failed and errexit stopped the run; the last line above says how far it got"
+    print -u2 -- "publish.zsh：某個命令失敗，errexit 中止了這次執行；上面最後一行說明它走到哪裡"
     print -u2 -- "if the release was already created, its assets and the package files may disagree; check before retrying"
     print -u2 -- "若 release 已經建立，它的 asset 與套件檔可能不一致；重試前請先確認"
 }
@@ -133,7 +140,15 @@ for a in $ARCHIVES; do
     # It must also still be an archive that unpacks to the binary it claims.
     # 它也必須仍然是一份「解得開、而且裡面有它所宣稱的執行檔」的封存。
     stem=${base%.tar.zst}
-    inner=$(zstd -dq -c -- "$a" | tar -tf - | grep -E "^$stem/csv2(\.exe)?$" | head -1)
+    # `|| true`: with errexit and pipe_fail, a grep that finds nothing returns 1,
+    # the command substitution inherits it, and the assignment kills the script
+    # BEFORE the refusal below can say what was wrong. That is PE exactly --
+    # already recorded, already fixed once in measure_parallel_rss.zsh, and
+    # written again here from memory.
+    # `|| true`：在 errexit 與 pipe_fail 之下，一個找不到東西的 grep 回傳 1，命令替換繼承它，
+    # 而那個賦值會在底下那道拒絕來得及說明之前就殺掉腳本。那正是 PE——已經記錄過、已經在
+    # measure_parallel_rss.zsh 修過一次，而我在這裡又憑記憶寫了一遍。
+    inner=$(zstd -dq -c -- "$a" | tar -tf - | grep -E "^$stem/csv2(\.exe)?$" | head -1 || true)
     [[ -n $inner ]] || {
         print -u2 -- "$base does not contain $stem/csv2 or $stem/csv2.exe"
         print -u2 -- "$base 裡面沒有 $stem/csv2 或 $stem/csv2.exe"
@@ -207,28 +222,129 @@ fi
 # ---------------------------------------------------------------------
 base_url=https://github.com/$REPO/releases/download/$TAG
 
+# In zsh, not python3. T249c refuses an unguarded python3 anywhere in this
+# tree: this repository has no Python dependency, and a script that quietly
+# acquires one works here and fails on a node that has no python3 -- with an
+# error about an interpreter, at the step that publishes.
+# 用 zsh，不用 python3。T249c 會拒絕這棵樹裡任何未加保護的 python3：本 repo 沒有 Python
+# 依賴，而一支悄悄取得該依賴的腳本會「在這裡能跑、在沒有 python3 的節點上失敗」——訊息講的是
+# 直譯器，而失敗的時機是正在發布的那一步。
+#
+# The python3 version this replaced also had a defect that had never run: it
+# counted every url containing the platform suffix, and scoop/csv2.json has a
+# SECOND one in its autoupdate block -- a template carrying a literal $version.
+# It would have found two and refused. Lines carrying $version are templates
+# and are deliberately left alone.
+# 被它取代的那個 python3 版本還帶著一個從來沒有執行過的缺陷：它會數「每一個含有該平台後綴的
+# url」，而 scoop/csv2.json 的 autoupdate 區塊裡有**第二個**——一個帶著字面 $version 的模板。
+# 它會數到兩個然後拒絕。含有 $version 的行是模板，這裡刻意不動它們。
+# The url and the hash are not the only things carrying a version. scoop's
+# extract_dir must equal the directory inside the archive or the install puts
+# the binary nowhere; the Formula's `version` and its `assert_match "csv2 X"`
+# are two more. Rewriting only the pair leaves four stale sites in two files --
+# found on 2026-09-10 by rewriting a copy and grepping it for the old number,
+# which is the check the read-back at the end now also performs.
+# 帶著版本號的不只 url 與 hash。scoop 的 extract_dir 必須等於封存內的目錄名，否則安裝會把
+# 執行檔放到不存在的地方；Formula 的 `version` 與它的 `assert_match "csv2 X"` 是另外兩個。
+# 只改 url/hash 那一對，會在兩個檔案裡留下四個過期的位置——2026-09-10 是靠「改寫一份複本、
+# 再 grep 舊版本號」發現的，而那正是結尾的讀回來檢查現在也會做的事。
+rewrite_version() {   # $1 = file
+    setopt local_options extended_glob
+    local file=$1 line old=""
+    # The version this file currently declares, taken as the first X.Y.Z token
+    # on a line that mentions "version". An earlier attempt read "the first
+    # quoted word after the first quote", which on scoop's `"version": "0.1.0",`
+    # yielded `: ` -- and then replaced `: ` throughout, mangling 22 of the
+    # file's 38 lines. It was caught because the rewrite was tried on a COPY
+    # first; on the real file it would have run during a publish.
+    # 這個檔案目前宣告的版本，取自「提到 version 的那一行上的第一個 X.Y.Z token」。先前的寫法是
+    # 「第一個引號之後的第一個帶引號字詞」，而它在 scoop 的 `"version": "0.1.0",` 上得到的是
+    # `: `——接著把整個檔案裡的 `: ` 都替換掉，38 行裡弄爛了 22 行。它被抓到，是因為改寫先在
+    # **一份複本**上試過；在真的檔案上，它會發生在一次發布的當中。
+    while IFS= read -r line; do
+        [[ $line == *version* ]] || continue
+        [[ $line == (#b)*([0-9]##.[0-9]##.[0-9]##)* ]] || continue
+        old=$match[1]
+        break
+    done < $file
+    [[ -n $old ]] || {
+        print -u2 -- "${file:t}: no version line, so a stale one could not be found either"
+        print -u2 -- "${file:t}：找不到版本行，因此也無從發現過期的版本號"
+        return 1
+    }
+    [[ $old == $VERSION ]] && return 0
+    local tmpf=$file.rewriting.$$
+    integer n=0
+    : > $tmpf
+    while IFS= read -r line || [[ -n $line ]]; do
+        if [[ $line == *$old* ]]; then
+            line=${line//$old/$VERSION}
+            n+=1
+        fi
+        print -r -- "$line" >> $tmpf
+    done < $file
+    # Check the RESULT before adopting it. The mangling described above left a
+    # file that was still readable and still contained the new version; only a
+    # look at the whole product showed it. `|| true` because a grep that finds
+    # nothing returns 1 and would kill the script under errexit -- PE.
+    # 在採用之前先檢查**產物**。上面那次破壞留下的檔案仍然讀得動、也仍然含有新版本號；只有看
+    # 整份產物才看得出來。`|| true` 是因為找不到東西的 grep 回傳 1，在 errexit 之下會殺掉腳本——PE。
+    local left
+    left=$(LC_ALL=C grep -oE '[0-9]+\.[0-9]+\.[0-9]+' $tmpf | LC_ALL=C sort -u \
+           | LC_ALL=C grep -vxF -- "$VERSION" || true)
+    if (( n == 0 )) || [[ -n $left ]]; then
+        rm -f $tmpf
+        print -u2 -- "${file:t}: rewriting $old -> $VERSION changed $n line(s) and left ${left//$'\n'/ }; not adopted"
+        print -u2 -- "${file:t}：把 $old 改成 $VERSION 動了 $n 行，卻留下 ${left//$'\n'/ }；不採用"
+        return 1
+    fi
+    mv -- $tmpf $file
+    say "    ${file:t}: $old -> $VERSION on $n line(s)"
+}
+
 rewrite_pair() {   # $1 = file, $2 = archive basename, $3 = its sha256
+    setopt local_options extended_glob
     local file=$1 base=$2 h=$3
     local url=$base_url/$base
-    python3 - "$file" "$url" "$h" "$base" <<'PY'
-import io, re, sys
-path, url, h, base = sys.argv[1:5]
-s = io.open(path, encoding='utf-8').read()
-# The archive's platform suffix identifies which url/sha256 pair to replace:
-# csv2-0.1.1-macos-arm64.tar.zst -> macos-arm64
-plat = re.sub(r'^csv2-[^-]+-', '', base).removesuffix('.tar.zst')
-n_url = len(re.findall(r'https://github\.com/\S*' + re.escape(plat) + r'\.tar\.zst', s))
-if n_url != 1:
-    sys.exit(f"{path}: expected exactly one url for {plat}, found {n_url}")
-s = re.sub(r'https://github\.com/\S*' + re.escape(plat) + r'\.tar\.zst', url, s)
-# The hash is the 64-hex string nearest after that url, whatever quotes it wears.
-i = s.index(url)
-m = re.compile(r'\b[0-9a-f]{64}\b').search(s, i)
-if not m:
-    sys.exit(f"{path}: no sha256 after the {plat} url")
-s = s[:m.start()] + h + s[m.end():]
-io.open(path, 'w', encoding='utf-8').write(s)
-PY
+    local plat=${${base#csv2-$VERSION-}%.tar.zst}
+    [[ -n $plat && $plat != $base ]] || {
+        print -u2 -- "cannot read a platform out of $base"
+        print -u2 -- "無法從 $base 讀出平台名稱"
+        return 1
+    }
+    local tmpf=$file.rewriting.$$
+    local line pre post
+    integer n_url=0 n_hash=0 pending=0
+    : > $tmpf
+    while IFS= read -r line || [[ -n $line ]]; do
+        if [[ $line == *https://github.com/*${plat}.tar.zst* && $line != *'$version'* ]]; then
+            # Exactly one url per line in both files, so cutting at the first
+            # https:// and the first .tar.zst rebuilds it without a regex.
+            # 兩個檔案裡每一行都只有一個 url，因此在第一個 https:// 與第一個 .tar.zst 處切開
+            # 就能重建它，不需要正規式。
+            pre=${line%%https://*}
+            post=${line#*.tar.zst}
+            line=$pre$url$post
+            n_url+=1
+            pending=1
+        elif (( pending )) && [[ $line == *\"[0-9a-f](#c64)\"* ]]; then
+            # The hash is quoted in both formats, and requiring the quotes is
+            # what stops a longer hex run from being partly overwritten.
+            # 兩種格式裡 hash 都帶引號，而「要求引號」正是避免一段更長的十六進位字串被改掉
+            # 前 64 個字元的那道限制。
+            line=${line/\"[0-9a-f](#c64)\"/\"$h\"}
+            n_hash+=1
+            pending=0
+        fi
+        print -r -- "$line" >> $tmpf
+    done < $file
+    if (( n_url != 1 || n_hash != 1 )); then
+        rm -f $tmpf
+        print -u2 -- "${file:t}: expected one url and one sha256 for $plat, rewrote $n_url and $n_hash"
+        print -u2 -- "${file:t}：$plat 應該只有一個 url 與一個 sha256，實際改寫了 $n_url 與 $n_hash"
+        return 1
+    fi
+    mv -- $tmpf $file
 }
 
 for a in $ARCHIVES; do
@@ -249,7 +365,10 @@ for a in $ARCHIVES; do
         continue
     }
     would "rewrite ${target:t} for $base"
-    (( DO_PUBLISH )) && rewrite_pair "$target" "$base" "${HASH[$base]}"
+    if (( DO_PUBLISH )); then
+        rewrite_version "$target"
+        rewrite_pair "$target" "$base" "${HASH[$base]}"
+    fi
 done
 
 if (( DO_PUBLISH )); then
@@ -268,6 +387,28 @@ if (( DO_PUBLISH )); then
             }
             say "    ${f:t}: $base and its hash agree"
         done
+    done
+    # And no OTHER version may remain anywhere in either file. This is what
+    # would have caught extract_dir and assert_match; the pair check above
+    # cannot, because both were already correct about the pair.
+    # 而兩個檔案裡的任何地方都不可以再留著**別的**版本號。這正是會抓到 extract_dir 與
+    # assert_match 的那道檢查；上面那個「成對」的檢查抓不到，因為它們兩個對「那一對」而言
+    # 本來就是正確的。
+    for f in $HERE/Formula/csv2.rb $HERE/scoop/csv2.json; do
+        [[ -r $f ]] || continue
+        # Every distinct X.Y.Z token in the file, minus the one being
+        # published. Comparing tokens rather than lines is what makes a line
+        # carrying BOTH the new version and a stale one still fail.
+        # 檔案裡每一個相異的 X.Y.Z token，扣掉正在發布的那一個。比對 token 而不是比對「行」，
+        # 是「一行同時含有新版本與一個過期版本」時仍然會失敗的原因。
+        _stale=$(LC_ALL=C grep -oE '[0-9]+\.[0-9]+\.[0-9]+' "$f" \
+                 | LC_ALL=C sort -u | LC_ALL=C grep -vxF -- "$VERSION" || true)
+        [[ -z $_stale ]] || {
+            print -u2 -- "${f:t} still carries version(s) other than $VERSION: ${_stale//$'\n'/ }"
+            print -u2 -- "${f:t} 裡還留著不是 $VERSION 的版本號：${_stale//$'\n'/ }"
+            exit 1
+        }
+        say "    ${f:t}: no version other than $VERSION remains"
     done
 fi
 

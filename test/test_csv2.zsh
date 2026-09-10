@@ -17358,6 +17358,168 @@ if [[ -r $_t296_src ]]; then
 fi
 
 echo
+echo "--- T297: no script claims a line number it cannot know / T297：沒有腳本宣稱一個它不可能知道的行號 ---"
+# `$LINENO` inside a function reports the line within THAT FUNCTION. In a
+# TRAPZERR handler -- which is where every use of it in this tree was -- that
+# means the message names a line in the handler and not the line that failed.
+# On 2026-09-10 publish.zsh printed "stopped at line 2" for a failure a hundred
+# lines away, and the same idiom was in release.zsh, benchmark.zsh and
+# measure_parallel_rss.zsh: written on 2026-08-31, 2026-09-08 and 2026-09-10,
+# so it spread by being copied rather than by being decided.
+# `$LINENO` 在函式內回報的是**那個函式**裡的行號。而這棵樹上每一處用到它的地方都在 TRAPZERR
+# 處理器裡——也就是說，那則訊息指名的是處理器裡的一行，不是失敗的那一行。2026-09-10
+# publish.zsh 為一個相隔上百行的失敗印出「停在第 2 行」，而同一個慣用法也在 release.zsh、
+# benchmark.zsh 與 measure_parallel_rss.zsh 裡：分別寫於 2026-08-31、2026-09-08、2026-09-10，
+# 所以它是靠複製散開的，不是靠決定。
+#
+# This is scanned rather than written down as a rule because that distribution
+# -- four copies across three days -- is the one the skill says a rule cannot
+# hold: the next script will copy it too.
+# 這裡用掃描而不是寫成一條規則，因為那個分布（四份、跨三天）正是 skill 說「規則擋不住」的
+# 那一格：下一支腳本一樣會把它複製過去。
+#
+# Comment lines are excluded. The comments above and in all four scripts
+# explain the defect and necessarily quote it; a check that flagged its own
+# explanation would be unusable. That is T218a's lesson, not a new one.
+# 註解行被排除。上面這段、以及那四支腳本裡的說明都必然要引用它；一個會標記自己說明文字的檢查
+# 是不能用的。那是 T218a 的教訓，不是新的。
+cat > "$TMP/t297scan.awk" <<'T297AWK'
+/^[[:space:]]*#/ { next }
+/^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*\(\)[[:space:]]*\{/ { inf = 1; depth = 1; next }
+inf {
+    if ($0 ~ /\$\{?LINENO/) print FILENAME ":" FNR
+    n = gsub(/\{/, "&"); m = gsub(/\}/, "&")
+    depth += n - m
+    if (depth <= 0) inf = 0
+}
+T297AWK
+_t297_files=($ROOT/**/*.zsh(N))
+# Zero files means the glob failed, not that the tree is clean -- T218a again.
+# 零個檔案代表 glob 失敗，不代表樹是乾淨的——又是 T218a 那一條。
+if (( ${#_t297_files} < 4 )); then
+    bad "T297a the glob found ${#_t297_files} .zsh files, so nothing was scanned / glob 只找到 ${#_t297_files} 個 .zsh 檔，等於什麼都沒掃"
+    _t297_files=()
+fi
+_t297_hits=$(awk -f "$TMP/t297scan.awk" $_t297_files 2>/dev/null)
+if [[ -z $_t297_hits ]]; then
+    ok "T297a no .zsh here reads \$LINENO inside a function / 這裡沒有任何 .zsh 在函式內讀取 \$LINENO"
+else
+    bad "T297a \$LINENO read inside a function at: $(print -r -- "$_t297_hits" | head -3 | tr '\n' ' ') / 有地方在函式內讀取了 \$LINENO"
+fi
+
+# The check must bite. An empty result proves nothing until an intentional
+# break has been shown to produce a non-empty one -- KF.
+# 這個檢查必須會咬。在「故意弄壞會產生非空結果」被證明之前，一個空結果什麼都證明不了——KF。
+# The probe's text is ASSEMBLED, the same reason T218b assembles its own: this
+# scan reads the suite too, and a literal here would be a string rather than a
+# use, but only after someone had spent time finding that out.
+# 探針的文字是**組出來的**，與 T218b 組它自己的理由相同：這道掃描連測試檔也讀，而寫在這裡的
+# 字面值是一個字串而不是一次使用——但那要有人花時間查過才知道。
+_t297_var='LINENO'
+{ print -r -- 'probe() {'
+  print -r -- "    print -r -- \"here: \$$_t297_var\""
+  print -r -- '}' } > "$TMP/t297probe.zsh"
+_t297_probe=$(awk -f "$TMP/t297scan.awk" "$TMP/t297probe.zsh" 2>/dev/null)
+if [[ -n $_t297_probe ]]; then
+    ok "T297b and the scan catches it when a function does read \$LINENO / 而當某個函式真的讀了 \$LINENO 時，這道掃描抓得到"
+else
+    bad "T297b the scan found nothing in a function that reads \$LINENO / 這道掃描在一個確實於函式內讀取 \$LINENO 的檔案裡什麼也沒找到"
+fi
+rm -f "$TMP/t297probe.zsh" "$TMP/t297scan.awk"
+
+echo
+echo "--- T298: mistakes.md's counts match the counter / T298：mistakes.md 的次數與計數器一致 ---"
+# mistakes.md opens each entry with `**N 次 / M 天**`, and `mistakes_counter.csv2`
+# is the authority for those numbers. A copy of a number is a second place to
+# forget, and this one has been forgotten repeatedly: on 2026-09-10 entry 3 said
+# 17/7 and entry 4 said 5/2 while the counter said 18/8 and 8/3. Entry 3's
+# English paragraph had ALREADY been corrected once for the same reason and
+# carried a sentence saying so -- and was stale again by the time it was read.
+# mistakes.md 每一條的開頭都有 `**N 次 / M 天**`，而權威來源是 `mistakes_counter.csv2`。
+# 一個數字的副本就是「第二個會忘記更新的地方」，而這個副本被忘記過不只一次：2026-09-10
+# 第 3 條寫 17/7、第 4 條寫 5/2，而計數器是 18/8 與 8/3。第 3 條的英文段落**已經因為同一個
+# 理由被更正過一次**，還留著一句話說明它被更正過——而被讀到時它又已經過期了。
+#
+# The check reads the counter through csv2, because three of its columns carry
+# commas inside quotes and this suite is the one place allowed to call csv2 for
+# maintenance work.
+# 這個檢查透過 csv2 讀計數器，因為它有三欄含引號內的逗號；而這份測試是本專案裡唯一可以為了
+# 維護目的呼叫 csv2 的地方。
+_t298_md=$ROOT/mistakes.md
+_t298_counter=$ROOT/mistakes_counter.csv2
+if [[ ! -r $_t298_md || ! -r $_t298_counter ]]; then
+    bad "T298 mistakes.md or mistakes_counter.csv2 is missing / 找不到 mistakes.md 或 mistakes_counter.csv2"
+else
+    # The prose line must be within 4 lines of its heading. Without that, the
+    # English `## 3.` heading further down would adopt whatever `**N ...` line
+    # came next and compare the wrong entry.
+    # 那一行必須在標題後 4 行之內。少了這個限制，底下英文版的 `## 3.` 標題會認領它後面任何一行
+    # `**N …`，於是比對到錯的條目。
+    cat > "$TMP/t298.awk" <<'T298AWK'
+/^## [0-9]+\./ { split($2, a, "."); id = a[1]; since = 0; next }
+id != "" { since++; if (since > 4) { id = ""; next } }
+id != "" && /^\*\*[0-9]/ {
+    line = $0
+    gsub(/[^0-9 ]/, " ", line)
+    n = split(line, f, " ")
+    if (n >= 2) print id "|" f[1] "|" f[2]
+    id = ""
+}
+T298AWK
+    typeset -A _t298_seen
+    _t298_bad=()
+    for _row in ${(f)"$(LC_ALL=C awk -f "$TMP/t298.awk" "$_t298_md")"}; do
+        _id=${_row%%|*}; _rest=${_row#*|}
+        _md_total=${_rest%%|*}; _md_days=${_rest##*|}
+        _c_total=$($CSV2 -get $_id:3 -i "$_t298_counter" 2>/dev/null)
+        _c_days=$($CSV2 -get $_id:6 -i "$_t298_counter" 2>/dev/null)
+        if [[ -z $_c_total ]]; then
+            _t298_bad+=("entry $_id is in mistakes.md but not in the counter")
+        elif [[ $_md_total != $_c_total || $_md_days != $_c_days ]]; then
+            _t298_bad+=("entry $_id: mistakes.md says $_md_total/$_md_days, the counter says $_c_total/$_c_days")
+        fi
+        _t298_seen[$_id]=1
+    done
+    # The other direction. An entry added to the counter and never written up
+    # would otherwise pass by not being looked at -- that is entry 3's own
+    # lesson about verifying correspondence rather than a total.
+    # 另一個方向。一個「加進了計數器卻沒有寫進 mistakes.md」的條目，否則會因為沒有被看到而通過
+    # ——那正是第 3 條自己關於「驗證對應關係而非總和」的教訓。
+    _t298_n=$($CSV2 -r --json -i "$_t298_counter" 2>/dev/null | LC_ALL=C tail -1 \
+              | LC_ALL=C grep -o '"records":[0-9]*' | LC_ALL=C cut -d: -f2)
+    if [[ -z $_t298_n ]] || (( _t298_n < 1 )); then
+        _t298_bad+=("could not read the counter's record count")
+    else
+        for _id in {1..$_t298_n}; do
+            (( ${+_t298_seen[$_id]} )) || _t298_bad+=("entry $_id is in the counter but has no '**N 次 / M 天**' line in mistakes.md")
+        done
+    fi
+    if (( ${#_t298_bad} == 0 )); then
+        ok "T298a all $_t298_n entries' counts agree with mistakes_counter.csv2 / 全部 $_t298_n 條的次數都與計數器一致"
+    else
+        bad "T298a ${#_t298_bad} mismatch(es): ${_t298_bad[1]} / 不一致如上"
+    fi
+
+    # And the comparison must bite. A doctored copy with one number changed has
+    # to be reported, or a passing T298a says only that the awk found nothing.
+    # 而這個比對必須會咬。一份被動過手腳、改掉一個數字的複本必須被回報，否則 T298a 的通過只
+    # 說明了「awk 什麼都沒找到」。
+    # awk, not `sed '0,/re/s//../'`: that address form is GNU-only and this
+    # suite runs on a BSD sed too, where it is a syntax error -- entry 1.
+    # 用 awk，不用 `sed '0,/re/s//../'`：那個位址形式是 GNU 專屬的，而這份測試也在 BSD sed 上
+    # 執行，在那裡它是語法錯誤——第 1 條。
+    LC_ALL=C awk '!seen && /^\*\*[0-9]/ { sub(/^\*\*[0-9]+/, "**999999"); seen = 1 } { print }' \
+        "$_t298_md" > "$TMP/t298bad.md"
+    _t298_probe=$(LC_ALL=C awk -f "$TMP/t298.awk" "$TMP/t298bad.md" | LC_ALL=C grep '^1|999999|' || true)
+    if [[ -n $_t298_probe ]]; then
+        ok "T298b and a changed number in mistakes.md is seen by the same reader / 而 mistakes.md 裡一個被改掉的數字，同一個讀取器看得到"
+    else
+        bad "T298b the reader did not see a number changed to 999999 / 讀取器沒有看到那個被改成 999999 的數字"
+    fi
+    rm -f "$TMP/t298.awk" "$TMP/t298bad.md"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
