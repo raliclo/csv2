@@ -12293,7 +12293,15 @@ the expression from release.zsh rather than copying it.
 
 ## QD. 內嵌的 build id 不可重現：同一份原始碼，兩次建置給出不同的版本字串
 
-**2026-09-10 發現。未修——這需要一個決定，不是一個 patch。**
+**2026-09-10 發現，同日已修。** 它需要的是一個決定而不是一個 patch，而那個決定在同一天下了
+（「兩者都印」，見底下）。
+
+*這一行在修好之後仍然說著「未修」，直到有人問「還有什麼待辦」時逐條盤點才發現。一個標題底下的
+狀態行，與它底下那些不斷追加的段落是反向漂移的：段落記錄了發生的事，狀態行記錄了寫下它時的
+判斷，而沒有任何東西會把後者拉回來。* This status line went on saying "not fixed" after it was
+fixed, and was caught only by a stocktake. A status line under a heading drifts away from the
+sections appended below it: the sections record what happened, the line records what was
+believed when it was written, and nothing pulls the second forward.
 
 `--version` 印的 build id 來自 `git describe --always --dirty`，而 `describe` 的答案取決於
 **建置當下有沒有 tag**，不取決於原始碼。

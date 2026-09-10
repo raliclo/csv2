@@ -36,7 +36,33 @@ guest 比對吞掉 csv2 的結束狀態（已修——csv2 單獨執行、檢查
 
 ## 1. Install into the package manager's bin directory / 安裝到套件管理員的 bin 目錄
 
-> **狀態（2026-09-05 逐項實測）：五件裡四件已完成，只剩 Windows 的 scoop shim。**
+> **狀態（2026-09-10 逐項重測）：五件全部完成。剩下的不是「做」，是「跑一次」。**
+>
+> Windows 的 scoop shim 於 2026-09-10 完成（`target_dir()` 改為讀 `csv2.shim`，在節點上雙向實測）。
+> 而先前記著的那個阻礙——「兩者都還需要一個安裝端抓得到的 URL」——在 v0.1.1 出貨後不存在了：
+> `Formula/csv2.rb` 有三個 v0.1.1 的 url 與 hash，`scoop/csv2.json` 有一個，全部由 `publish.zsh`
+> 從封存產生、讀回確認，並在發布後從公開 URL 重新下載比對過。
+>
+> **仍然沒做的只有一件，而它正是這個專案自己的判準：實際跑一次安裝。**
+> `brew install raliclo/csv2/csv2` 上一次實跑是 2026-09-08 的 v0.1.0（那一次找出了缺少
+> `brew trust`——**那是靠跑它找到的，不是靠讀它**）。v0.1.1 的兩份套件檔尚未被任何一次真正的
+> 安裝執行過。`scoop install csv2` 則從未跑過：那台機器上有一個 scoop 不管理的手放 shim，
+> 安裝會與它相撞。
+>
+> **這件事需要動到使用者機器上的 Homebrew／scoop 狀態，所以留給人決定，不由測試代跑。**
+>
+> Status re-measured 2026-09-10: all five parts are done, and what remains is not building
+> something but RUNNING it. The Windows shim landed today; the blockage recorded here -- both
+> halves needing a URL the installing machine can fetch -- ended when v0.1.1 shipped. What has
+> not happened is an actual install from the published v0.1.1 files. `brew install` was last run
+> for real against v0.1.0 on 2026-09-08, which is how the missing `brew trust` was found: by
+> running it, not by reading it. `scoop install` has never been run, because that machine
+> carries a hand-placed shim scoop does not manage. Both change state on the user's machine, so
+> the decision is theirs rather than a test's.
+>
+> ---
+>
+> **以下為 2026-09-05 那次盤點的原文，保留。**
 >
 > | 這一條宣稱的 | 現況 |
 > |---|---|
