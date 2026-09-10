@@ -17463,6 +17463,12 @@ _t298_counter=$ROOT/mistakes_counter.csv2
 # `plan/plan.md` 在每一個 checkout 裡、不在任何 payload 裡，因此用它來區分兩種情況——有它卻
 # 沒有 mistakes.md 是壞掉的樹，要失敗；兩者都沒有是 payload，略過並說出理由。
 if [[ ! -r $_t298_md && ! -r $_t298_counter && ! -r $ROOT/plan/plan.md ]]; then
+    # Recorded for T69b, like every other conditional skip here. Without it the
+    # guest reported "expected 5 SKIP(s), the suite produced 6" -- which is the
+    # count doing its job on the first run after this case learned to skip.
+    # 記錄給 T69b，與這裡每一個有條件的略過相同。少了它，guest 回報的是「預期 5 個 SKIP，
+    # 實際 6 個」——那是這個計數在「本案例學會略過之後的第一次執行」上盡了它的職責。
+    T298_SKIPPED=1
     skipt "T298 mistakes.md's counts match the counter / mistakes.md 的次數與計數器一致 (this tree is a payload, not a checkout: no mistakes.md and no plan/ / 這棵樹是 payload 而不是 checkout：沒有 mistakes.md，也沒有 plan/)"
 elif [[ ! -r $_t298_md || ! -r $_t298_counter ]]; then
     bad "T298 mistakes.md or mistakes_counter.csv2 is missing from a tree that has plan/plan.md / 一棵有 plan/plan.md 的樹裡卻找不到 mistakes.md 或 mistakes_counter.csv2"
@@ -17693,6 +17699,12 @@ fi
 (( ${T204_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T166E_XSKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T212_SKIPPED:-0} )) && (( want_skip += 1 ))
+# T298 skips in a tree that is a payload rather than a checkout, which is not a
+# property of the platform's name either: the same guest would NOT skip it if
+# the payload carried mistakes.md.
+# T298 在「是 payload 而不是 checkout」的樹裡會略過，而那同樣不是「平台叫什麼名字」的性質：
+# 同一台 guest，如果 payload 帶了 mistakes.md，它就不會略過。
+(( ${T298_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode

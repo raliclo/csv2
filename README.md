@@ -1009,7 +1009,7 @@ implied:
 | macOS arm64, local SSD | `measure_output_macos_ssd.txt` | 2026-09-10, `c0ea3c5` |
 | WSL2 x86_64 | `measure_output_linux_x86_64.txt` | 2026-09-10, `62d1e1c` |
 | Windows x86_64 | `measure_output_windows.txt` | 2026-09-10, `62d1e1c` |
-| Linux aarch64 guest | `measure_output_linux.txt` | 2026-09-08, one commit older |
+| Linux aarch64 guest | `measure_output_linux.txt` | 2026-09-10, `35a951c` |
 
 `c0ea3c5..62d1e1c` touches `verifications/measure.zsh` and nothing under `src/`,
 so the four 2026-09-10 columns ran the same csv2. The guest column is older and
@@ -1018,9 +1018,9 @@ says so.
 | Measurement | macOS arm64<br>sparse image | macOS arm64<br>local SSD | WSL2<br>x86_64 | Windows<br>x86_64 | Linux aarch64<br>guest |
 |---|---:|---:|---:|---:|---:|
 | Whole-file search, single-threaded | 544,000 µs | 534,000 µs | 1,179,000 µs | 1,822,000 µs | 62,000 µs |
-| Whole-file search, parallel | 205,000 µs | 201,000 µs | 456,000 µs | 820,000 µs | 71,000 µs |
-| Small durable edit | 56,800 µs | 7,800 µs | 11,200 µs | 74,600 µs | 9,000 µs |
-| Full-file rewrite | 1,258,000 µs | 587,000 µs | 1,323,000 µs | 2,131,000 µs | 150,000 µs |
+| Whole-file search, parallel | 205,000 µs | 201,000 µs | 456,000 µs | 820,000 µs | 70,000 µs |
+| Small durable edit | 56,800 µs | 7,800 µs | 11,200 µs | 74,600 µs | 13,800 µs |
+| Full-file rewrite | 1,258,000 µs | 587,000 µs | 1,323,000 µs | 2,131,000 µs | 155,000 µs |
 
 **WSL2 has a column because it is a machine in this project's test loop, and
 until 2026-09-10 it did not have one.** That is how its measurement came to
@@ -1043,6 +1043,13 @@ between the two media was 4.8× on 2026-09-08 and 7.3× on 2026-09-10 — the sa
 two filesystems, a fortnight apart. A single write figure from either medium is
 worth about as much as its range says it is, and the range is wider than the
 first measurement suggested.
+
+**The guest says the same thing on a different machine and a different
+filesystem.** The same source was measured there three times -- 2026-09-07 and
+twice on 2026-09-10 -- giving 9,000, 11,600 and 13,800 µs for the small edit
+and 150,000-155,000 µs for the rewrite, while both read rows came back inside
+1,000 µs of each other every time. Two machines that share no hardware agree on
+which rows are stable, which is a stronger claim than either could make alone.
 
 **The guest's parallel row is SLOWER than its single-threaded row, and that is
 the real result.** On a 2.48 MiB corpus the boundary-finding pass and the worker
