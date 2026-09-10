@@ -615,7 +615,36 @@ longer true; the same stocktake found LB still saying an answer had not arrived 
 had. A todo list and a defect list both drift away from the program they describe, nothing
 reports the drift, and the only thing that catches it is measuring again.
 
-## guest 那個節點無法確認任何個別案例 / The guest node cannot confirm any individual case
+## ~~guest 那個節點無法確認任何個別案例~~ 已修（2026-09-10）
+
+### 2026-09-10：修好了，而這一條的前半在被修之前就已經過期
+
+**動手前先讀了現況**，發現這一節寫的「report 完全沒有逐案例行，連 `T1` 都沒有一行」**已經不成立**
+——`run_csv2_test.zsh` 後來補上了 `grep -E '^(FAIL|SKIP)'` 與總案例數。照著這一節去修，會產生一個
+「看起來成功而什麼都沒改變」的 commit。
+
+**真正還缺的只有一件**：一個**通過**的案例無法被指名確認。要回答「T249 在 guest 裡跑過嗎」，
+只能跨兩份報告做算術。
+
+而資料一直都在：csv2 的測試套件把每一個案例寫進 `test/test_csv2.log`，那在 repo 裡、也就是在
+workspace 映像裡。缺的是「在每次執行的複本被刪掉之前把它取出來」。
+
+**修法（母專案 `a2da14c`，第 6c 步）**：關機之後用 `debugfs` 從**映像**裡 dump——與 payload 進去時
+同一支工具、同一個方向，不碰那條會截斷的主控台通道。
+
+驗證不是問 `stat`，是問那個檔案一件**自洽**的事：逐案例的行數必須等於摘要行說的總數，因為兩者
+出自同一次執行。實測 `1360 + 0 + 10 = 1370`，而一次「只取到一半」的 dump 在 `stat` 眼中是成功。
+
+實測結果：不需要 e2fsck 重播；`T249a`–`T249d2` 在取出的 log 裡全部具名為 PASS。
+
+Fixed, and the first half of this entry had gone stale before it was fixed: the report gained
+FAIL/SKIP case names and a total after this was written, so following it would have produced a
+commit that looked successful and changed nothing. What was actually missing was confirming a
+PASSING case by name. The data was always in the workspace image; step 6c dumps
+`/csv2/test/test_csv2.log` with debugfs after shutdown -- same tool and direction as the
+payload, never the truncating console -- and verifies it by a self-consistency the file carries
+(case lines against the summary's own total) rather than by `stat`, which calls a half-taken
+dump a success.
 
 `sos/test_submodules/run_csv2_test.zsh` 匯出的 report 與 console log **完全沒有逐案例行**——
 連 `T1` 都沒有一行。2026-09-06 為了確認 T249 是否在 guest 內執行而查，才發現這件事。
