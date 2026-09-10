@@ -12455,3 +12455,58 @@ written in a comment two thousand lines further down the same file. Fixed with a
 helper alongside the existing `header_cell()`, and T301 now requires every comma-splitting line
 to carry a `# CSV-SPLIT-OK:` marker with a reason, so the two deliberate demonstrations stay
 and the next casual one is reported.
+
+## QG. T2 的 else 分支不可能失敗，因為它比對的是 T1 剛證明逐位元相同的那兩個檔案
+
+**2026-09-10 發現，在修 QF 之後、由另一個 session 的一句話帶出來的。已修。**
+
+修 QF 時我把 T2 的欄數改成由 csv2 的 `--json` 中繼資料來數，取代了 `awk -F','`。**那修對了工具，
+沒有看形狀。** 形狀是這樣的：
+
+```zsh
+# T1
+"$CSV2" -r -t -i "$PKG" -o "$TMP/t1.csv"
+assert_same "$PKG" "$TMP/t1.csv"          # ← 斷言兩者逐位元相同
+
+# T2 的 else 分支
+a=$(... -i "$PKG" ... )
+b=$(... -i "$TMP/t1.csv" ... )
+assert_eq "$a" "$b" "T2 field types are not moved between columns"
+```
+
+**T2 比對的兩個檔案，是 T1 上一行剛剛證明逐位元相同的那兩個。** 任何性質在它們身上都會相等。
+那個分支只有在 T1 已經失敗時才可能失敗，也就是說它從來沒有貢獻過任何資訊。
+
+而它是**常態路徑**：`$F/artifacts.csv` 在母專案裡，這棵樹上通常不存在，所以走的一直是 else。
+
+### 它與 QF 的關係
+
+QF 那一處（`awk -F','`）錯在**工具**：用被禁的方式數，兩邊得到同樣的錯值。QG 錯在**形狀**：
+就算工具換對了，兩邊仍然是同一份資料。**我修好了前者、留下了後者，而且沒有察覺**——因為修完之後
+它照樣通過，而那正是它一直以來的行為。
+
+一個同儕 session 說出了那個一般形式：**不要讓一個比對同時宣稱「一致」與「正確」。** 那句話讓這
+一處立刻現形。
+
+### 修法
+
+T2 現在自己造一個 fixture，重演 2026-08-15 那次真實事故的形狀——一個時間戳欄與一個 commit 欄，
+其中一格的值帶著引號內的逗號——round-trip 之後**逐格依欄名定址**斷言：
+
+```zsh
+cell "$TMP/t2rt.csv2" 2 built_utc   # 必須仍是那個時間戳，不是 commit 字串
+```
+
+那與「兩個檔案相不相同」無關：即使某天 round-trip 不再逐位元相同（例如引號正規化改了），
+這個斷言仍然在問它宣稱要問的那件事——**值有沒有換欄**。
+
+T2's else branch could not fail: it compared a property of `$PKG` and `$TMP/t1.csv`, which the
+line above it had just asserted were BYTE-IDENTICAL. Any property of two identical files
+agrees, so the branch never contributed information -- and it is the normal path here, since
+`artifacts.csv` lives in the parent project. Fixing QF corrected the TOOL it counted with and
+left the SHAPE, without noticing, because it went on passing exactly as before. A peer session
+stated the general form -- do not let one comparison claim both agreement and correctness --
+and this surfaced immediately. T2 now builds its own fixture reproducing the 2026-08-15
+incident (a timestamp column and a commit column, one cell carrying a quoted comma), round-trips
+it, and asserts cell by cell BY COLUMN NAME, which stays meaningful even if the round-trip ever
+stops being byte-identical.

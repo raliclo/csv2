@@ -597,21 +597,51 @@ if [[ -f "$F/artifacts.csv" ]]; then
     bad_ts=$("$CSV2" -contains "" -i "$TMP/t2.csv" 2>/dev/null | true)
     assert_same "$F/artifacts.csv" "$TMP/t2.csv" "T2 field types are not moved between columns / 欄位型別不被搬錯"
 else
-    # Same property on the fixture we do have: every cell of every record
-    # comes back in the column it went in.
-    # The field count comes from csv2's own --json metadata, not from
-    # `awk -F','`. $PKG is TARGET_PACKAGES.csv -- the fixture this tree uses to
-    # show that a comma inside quotes is DATA -- so comma-splitting counts it
-    # wrong. This assertion passed anyway, because both sides counted the same
-    # wrong way and two wrong numbers agreed: not a failing test, a test using
-    # the banned tool to compare two wrong values. QF.
-    # 欄數取自 csv2 自己的 --json 中繼資料，不是 `awk -F','`。$PKG 就是 TARGET_PACKAGES.csv——
-    # 這棵樹用來示範「引號內的逗號是資料」的那個 fixture——所以逗號切割在它上面數出來是錯的。
-    # 而這個斷言照樣通過，因為兩邊用同一種錯的方式數，兩個錯的數字彼此相等：那不是一個會失敗的
-    # 測試，是一個「用被禁的工具拿兩個錯值互相比較」的測試。QF。
-    a=$("$CSV2" -r --json -i "$PKG" 2>/dev/null | head -1 | grep -o '"fields":[0-9]*' | cut -d: -f2)
-    b=$("$CSV2" -r --json -i "$TMP/t1.csv" 2>/dev/null | head -1 | grep -o '"fields":[0-9]*' | cut -d: -f2)
-    assert_eq "$a" "$b" "T2 field types are not moved between columns / 欄位型別不被搬錯"
+    # NOT a comparison between $PKG and $TMP/t1.csv. T1, the line above, just
+    # asserted those two are BYTE-IDENTICAL -- so any property of them agrees
+    # and this branch could not fail. It never contributed information, and it
+    # is the NORMAL path here, because artifacts.csv lives in the parent
+    # project. Fixing QF corrected the TOOL it counted with (`awk -F','`, used
+    # on the very fixture that shows a quoted comma is data) and left the
+    # SHAPE, without noticing, because it went on passing exactly as before.
+    # QG.
+    # **不是**拿 $PKG 與 $TMP/t1.csv 相比。上面那一行（T1）剛剛斷言了這兩個檔案**逐位元相同**
+    # ——因此它們的任何性質都會相等，這個分支不可能失敗。它從來沒有貢獻過任何資訊，而且它是
+    # 這裡的**常態路徑**，因為 artifacts.csv 在母專案裡。修 QF 時我改對了它用的**工具**
+    # （`awk -F','`，而且是用在「證明引號內逗號是資料」的那個 fixture 上），卻留下了**形狀**，
+    # 而且沒有察覺——因為它照樣通過，一如既往。QG。
+    #
+    # The general form, named by a peer session: do not let one comparison
+    # claim both AGREEMENT and CORRECTNESS. Byte-identity is T1's claim. This
+    # case asks a different question -- did any value change column -- and asks
+    # it BY ADDRESS, so it stays meaningful even if the round-trip ever stops
+    # being byte-identical.
+    # 一般形式（由一個同儕 session 講出來）：**不要讓一個比對同時宣稱「一致」與「正確」。**
+    # 逐位元相同是 T1 的主張。這個案例問的是另一件事——有沒有任何值換了欄——而且是**依位址**
+    # 問的，因此即使 round-trip 某天不再逐位元相同，它仍然在問它宣稱要問的那件事。
+    #
+    # The fixture reproduces the 2026-08-15 incident: a commit string went into
+    # built_utc, a timestamp column, and nothing raised an error. One cell
+    # carries a quoted comma so the round-trip is not trivial.
+    # 這個 fixture 重演 2026-08-15 那次事故：一個 commit 字串被寫進 built_utc 這個時間戳欄位，
+    # 而沒有任何東西報錯。其中一格帶著引號內的逗號，讓 round-trip 不是一件輕鬆的事。
+    {
+      printf 'pkg,built_utc,commit\n'
+      printf '套件,建置時間,提交\n'
+      printf 'zlib,2026-08-15T03:04:05Z,8d5600e\n'
+      printf 'busybox,"2026-08-15T03:04:06Z, retried",c0ea3c5\n'
+    } > "$TMP/t2src.csv2"
+    "$CSV2" -r -t -i "$TMP/t2src.csv2" -o "$TMP/t2rt.csv2" 2>/dev/null
+    t2_ok=1
+    [[ $(cell "$TMP/t2rt.csv2" 1 built_utc) == '2026-08-15T03:04:05Z' ]] || t2_ok=0
+    [[ $(cell "$TMP/t2rt.csv2" 1 commit)    == '8d5600e' ]]              || t2_ok=0
+    [[ $(cell "$TMP/t2rt.csv2" 2 built_utc) == '2026-08-15T03:04:06Z, retried' ]] || t2_ok=0
+    [[ $(cell "$TMP/t2rt.csv2" 2 commit)    == 'c0ea3c5' ]]              || t2_ok=0
+    if (( t2_ok )); then
+        ok "T2 field types are not moved between columns / 欄位型別不被搬錯"
+    else
+        bad "T2 a value changed column across a round-trip: built_utc=[$(cell "$TMP/t2rt.csv2" 2 built_utc)] commit=[$(cell "$TMP/t2rt.csv2" 2 commit)] / 有值在 round-trip 中換了欄"
+    fi
 fi
 
 # T3 — a ragged record is an error. Never pad, never truncate.
