@@ -1066,6 +1066,55 @@ the rewrite reported success. It did report success.
 
 ---
 
+## 7. 相信一段自己剛寫下的說明，因為它讀起來像已經查證過的結論
+
+**3 次 / 2 天**（2026-09-08、2026-09-10 兩次）。
+
+| 日期 | 那段文字 | 它被當成前提之後 |
+|---|---|---|
+| 2026-09-08 | 「跟隨 symlink 沒有必要，因為 `sameFile` 另外問身分」 | 七個 Windows 案例壞掉，而且在兩個已推送的 commit 裡出去了（QB） |
+| 2026-09-10 | 「在字串的**任何位置**找那個雜湊」，附一整段解釋它為何正確 | 在一個 tag 上拒絕——那是發行腳本唯一要服務的 commit（QC） |
+| 2026-09-10 | 「看**索引**，不看工作區……一份 clone 拿到什麼」 | 修正沒有進到 commit，而守衛通過了（第 1 條第二十一次） |
+
+### 為什麼它不會報錯
+
+**因為它讀起來完全像是查證過的。** 一段解釋「為什麼這樣是對的」的文字，一旦寫成中英雙語、附上
+理由與反例，就取得了結論的形狀。而它與「引用別人的說法」的差別，正是那一層自然的懷疑：別人的
+說法會引發「這是哪來的」；自己五分鐘前寫的不會。
+
+第三個例子最尖銳，因為那句話**當場自相矛盾**——「一份 clone 拿到什麼」的答案是 commit，而同一
+句話說的是索引。它仍然被寫了下來、附了理由，並在幾分鐘後被拿來當作選擇的依據。
+
+### 矯正措施
+
+**一段在同一次編輯裡寫下的說明，不是證據——它是那次編輯的一部分。**
+
+實務上的判準只有一句：**如果一段註解在說「為什麼不必做 X」，就先做一次 X，看看差在哪。**
+上表三個實例裡有兩個，只要跑一次「做得出來的最小輸入」就會當場推翻：QB 只需要一次經由 symlink
+的 `--in-place`；T300 只需要在 `git add -A` 之後再看一次索引。
+
+這與 `blind-test-flow.md` 結尾那一節的第二問是同一句話——「這個新句子在你做得出來的最小輸入上
+還成不成立」。那一節寫在第 100 回合，而三天之內它被違反了三次。
+
+### 為什麼這裡沒有守衛
+
+問題發生在**下判斷之前**，不在任何一個產物上。沒有東西可以掃描——那段文字在被寫下的當下是
+無害的，危險的是「下一步把它當成前提」。這一條目前只能靠那個習慣擋。
+
+Believing a note one has just written, because it has the shape of a checked conclusion. Three
+times over two days: a comment saying following symlinks was unnecessary (QB, seven Windows
+cases, shipped in two pushed commits); a reasoned paragraph explaining why looking for the hash
+ANYWHERE in the version string was right, which still assumed a hash was in there (QC, refused
+at a tag); and a comment reading "the INDEX, not the working tree ... what a clone gets", which
+contradicts itself in its own sentence and was acted on minutes later. The difference from
+quoting someone else is one layer of natural doubt: another person's claim prompts "where is
+that from", and one's own from five minutes ago does not. There is nothing to scan -- the text
+is harmless when written; the danger is the next step treating it as a premise. The one
+operational rule: when a comment says why X is unnecessary, do X once and see. Two of the three
+would have fallen to a single smallest-input run.
+
+---
+
 ## 3. A rule applied to only part of where it holds
 
 The count is in `mistakes_counter.csv2` and is deliberately not repeated here. This sentence
