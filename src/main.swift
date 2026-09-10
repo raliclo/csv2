@@ -130,6 +130,9 @@ struct Options {
     /// `-get r:c`——與 `-update r:c VAL` 對稱的讀取。不放進 `edits`，因為它不寫入任何
     /// 東西；它是一種「恰好一格」的選取。
     var getCell: (Int, String)?
+    /// The claim a printed address carried, and which record it was about.
+    /// 一個印出來的位址所帶的宣稱，以及它講的是哪一筆紀錄。
+    var locationClaim: (record: Int, column: String, claims: [LocationClaim], flag: String)?
 
     var edits: [EditVerb] = []
     var cellModifier = false
@@ -609,7 +612,9 @@ func parseArgs(_ argv: [String]) throws -> Options {
             o.contains = needle
         case "search-cell":
             try once("--search-cell")
-            let (record, column) = try parseCellAddress(try needData(arg), flag: "--search-cell")
+            var claims: [LocationClaim] = []
+            let (record, column) = try parseCellAddress(try needData(arg), flag: "--search-cell", claims: &claims)
+            if !claims.isEmpty { o.locationClaim = (record: record, column: column, claims: claims, flag: "--search-cell") }
             o.searchScopeFlags += 1
             o.searchScope = .cell(record: record, column: column)
         case "search-row":
@@ -798,8 +803,13 @@ func parseArgs(_ argv: [String]) throws -> Options {
             o.cellModifier = false; o.colModifier = false
         case "delete":
             let spec = try need(arg)
-            o.edits.append(try parseDelete(spec, cell: o.cellModifier, col: o.colModifier,
-                                           argvTail: argv, index: i))
+            var delClaims: [LocationClaim] = []
+            let verb = try parseDelete(spec, cell: o.cellModifier, col: o.colModifier,
+                                       argvTail: argv, index: i, claims: &delClaims)
+            if !delClaims.isEmpty, case .deleteCell(let dr, let dc) = verb {
+                o.locationClaim = (record: dr, column: dc, claims: delClaims, flag: "-delete -cell")
+            }
+            o.edits.append(verb)
             o.cellModifier = false; o.colModifier = false
         case "get":
             try once("-get")
@@ -814,14 +824,18 @@ func parseArgs(_ argv: [String]) throws -> Options {
             // 現在由 parseCellAddress 統一說明，而且 -get、-update、-delete -cell 說的
             // 是同一句：這段解釋過去只存在於這裡，於是同一個性質有三種說法，其中兩種
             // 怪罪的是「工具自己印出來的位址」的形狀。
-            o.getCell = try parseCellAddress(addr, flag: arg)
+            var getClaims: [LocationClaim] = []
+            o.getCell = try parseCellAddress(addr, flag: arg, claims: &getClaims)
+            if !getClaims.isEmpty, let g = o.getCell { o.locationClaim = (record: g.0, column: g.1, claims: getClaims, flag: arg) }
             o.cellModifier = false; o.colModifier = false
         case "update":
             let addr = try need(arg)
             let literal = try needLiteralValue(arg)
             if literal != nil { o.literalUpdateValueProvided = true }
             let val = literal ?? ""
-            let (r, c) = try parseCellAddress(addr, flag: arg)
+            var upClaims: [LocationClaim] = []
+            let (r, c) = try parseCellAddress(addr, flag: arg, claims: &upClaims)
+            if !upClaims.isEmpty { o.locationClaim = (record: r, column: c, claims: upClaims, flag: arg) }
             o.edits.append(.update(record: r, column: c, value: val))
             o.cellModifier = false; o.colModifier = false
         case "update-where":
@@ -934,7 +948,8 @@ func parseMid(_ s: String) throws -> (Int, Int?) {
     return (a, b)
 }
 
-func parseDelete(_ spec: String, cell: Bool, col: Bool, argvTail: [String], index: Int) throws -> EditVerb {
+func parseDelete(_ spec: String, cell: Bool, col: Bool, argvTail: [String], index: Int,
+                 claims: inout [LocationClaim]) throws -> EditVerb {
     // -cell and -col are opposites: one keeps the field and empties it, the
     // other removes the field from every record. Given both, there is no
     // reading that satisfies each, and picking one would make the other
@@ -968,7 +983,7 @@ func parseDelete(_ spec: String, cell: Bool, col: Bool, argvTail: [String], inde
             "「\(spec)」是儲存格位址；要清空該格請加 -cell，要刪除整筆請給紀錄號")
     }
     if cell {
-        let (r, c) = try parseCellAddress(spec, flag: "-delete -cell")
+        let (r, c) = try parseCellAddress(spec, flag: "-delete -cell", claims: &claims)
         return .deleteCell(record: r, column: c)
     }
     let parts = spec.split(separator: ",").map(String.init)
@@ -997,6 +1012,31 @@ func parseDelete(_ spec: String, cell: Bool, col: Bool, argvTail: [String], inde
 /// 不會報錯，只會改到別的儲存格。`r:c` 也正是 `-contains` 印出來的格式，因此
 /// 一個指令的輸出可以直接接到下一個。
 func parseCellAddress(_ s: String, flag: String) throws -> (Int, String) {
+    var ignored: [LocationClaim] = []
+    return try parseCellAddress(s, flag: flag, claims: &ignored)
+}
+
+func parseCellAddress(_ s0: String, flag: String,
+                      claims: inout [LocationClaim]) throws -> (Int, String) {
+    // The decoration rides on the COLUMN half: `1:1@L2` splits at the colon
+    // into "1" and "1@L2". Stripping it here is what lets a printed address be
+    // pasted back, which is what the README promises and what the refusal
+    // further down had to apologise for.
+    // 裝飾掛在**欄**的那一半上：`1:1@L2` 在冒號處切開是 "1" 與 "1@L2"。在這裡把它剝掉，正是
+    // 「印出來的位址可以直接貼回去」得以成立的原因——那是 README 的承諾，也是底下那則拒絕
+    // 原本必須為之道歉的事。
+    // Strip REPEATEDLY. With both flags the printed form carries both
+    // decorations -- `3:1@L6 [A4]` -- and stripping once left `3:1@L6`, which
+    // then failed as a column name. The two flags are usable together and the
+    // README promises what they print composes, so half the promise was kept.
+    // **剝到沒有為止**。同時給兩個旗標時，印出來的形式帶著兩段裝飾——`3:1@L6 [A4]`——而只剝
+    // 一次會留下 `3:1@L6`，接著它會以「沒有這個欄名」失敗。那兩個旗標可以並用，而 README 承諾
+    // 它們印出來的東西可以直接接下去，於是那個承諾原本只兌現了一半。
+    var s = s0
+    while let (bare, c) = parsedLocation(s) {
+        s = bare
+        claims.append(c)
+    }
     // omittingEmptySubsequences: false, or "1:" splits into ONE part and every
     // check below that asks for two is skipped -- which is how `-get 1:`
     // reached "expected r:c" again after being given its own reason. Swift's
@@ -2465,6 +2505,75 @@ func resolveColumn(_ token: String, header: Record) throws -> Int {
 /// `1@L2` -> `1`, `1 [A2]` -> `1`. Nil when there is nothing that looks like
 /// one of the two decorations the locating report can add.
 /// `1@L2` → `1`、`1 [A2]` → `1`。若結尾沒有那兩種定位報告可能加上的裝飾，回傳 nil。
+/// What the trailing decoration on a printed address CLAIMS.
+///
+/// The two notations claim DIFFERENT things, and conflating them would make
+/// one of the two checks meaningless:
+///
+///   `@L2`   -- the PHYSICAL line the record starts on, which is `Record.line`
+///   `[A2]`  -- the SPREADSHEET row, which is record number plus header count,
+///              and the COLUMN as a letter
+///
+/// They differ exactly when a record spans lines: a quoted newline keeps the
+/// record in one spreadsheet row while the physical line runs ahead. Ops.swift
+/// explains this where it prints them.
+///
+/// 印出來的位址結尾那段裝飾**宣稱**了什麼。
+///
+/// 兩種記法宣稱的是**不同的東西**，混為一談會讓其中一項檢查失去意義：
+///
+///   `@L2`   ——紀錄開始的**實體行號**，也就是 `Record.line`
+///   `[A2]`  ——**試算表列號**，即紀錄號加上標頭列數，以及以字母表示的**欄**
+///
+/// 兩者只在「紀錄跨行」時不同：引號內的換行讓紀錄仍佔一個試算表列，而實體行號跑在前面。
+/// Ops.swift 在印出它們的地方說明了這件事。
+struct LocationClaim {
+    enum Kind { case physicalLine, spreadsheetRow }
+    var kind: Kind
+    var row: Int
+    var column: Int?      // 0-based; only the [A2] form names a column
+    var text: String      // as written, so a refusal can quote it back
+}
+
+/// The inverse of `a1Column`, which is 0-based: index 0 is "A".
+/// `a1Column` 的反函式；它是 0-based：索引 0 是 "A"。
+func a1ColumnNumber(_ letters: String) -> Int? {
+    guard !letters.isEmpty else { return nil }
+    var n = 0
+    for ch in letters {
+        guard let a = ch.asciiValue, a >= 65, a <= 90 else { return nil }
+        n = n * 26 + Int(a - 65) + 1
+    }
+    return n - 1
+}
+
+/// Split a printed address into the address itself and what its decoration
+/// claims. Returns nil when there is no decoration, which is the ordinary case.
+/// 把一個印出來的位址拆成「位址本身」與「它的裝飾所宣稱的東西」。沒有裝飾時回傳 nil，
+/// 那是一般情況。
+func parsedLocation(_ token: String) -> (bare: String, claim: LocationClaim)? {
+    if let at = token.range(of: "@L", options: .backwards) {
+        let tail = token[at.upperBound...]
+        if !tail.isEmpty, tail.allSatisfy({ $0.isNumber }), let n = Int(tail) {
+            return (String(token[token.startIndex..<at.lowerBound]),
+                    LocationClaim(kind: .physicalLine, row: n, column: nil,
+                                  text: String(token[at.lowerBound...])))
+        }
+    }
+    if token.hasSuffix("]"), let br = token.range(of: " [", options: .backwards) {
+        let tail = token[br.upperBound..<token.index(before: token.endIndex)]
+        let letters = String(tail.prefix(while: { $0.isLetter }))
+        let digits = String(tail.dropFirst(letters.count))
+        if !letters.isEmpty, !digits.isEmpty, digits.allSatisfy({ $0.isNumber }),
+           let n = Int(digits), let col = a1ColumnNumber(letters) {
+            return (String(token[token.startIndex..<br.lowerBound]),
+                    LocationClaim(kind: .spreadsheetRow, row: n, column: col,
+                                  text: String(token[br.lowerBound...])))
+        }
+    }
+    return nil
+}
+
 func strippedLocation(_ token: String) -> String? {
     if let at = token.range(of: "@L", options: .backwards) {
         let tail = token[at.upperBound...]
@@ -3191,6 +3300,13 @@ func main() -> Int32 {
         try validate(&o)
 
         Logger.shared.log(.info, "csv2 \(sanitizedCommandLine(Array(CommandLine.arguments.dropFirst())))")
+
+        // Before the dispatch, not inside a branch: every verb that takes a
+        // cell address goes through here, and putting it in one branch is how
+        // a rule ends up covering part of the range it holds for.
+        // 放在**分派之前**，不是放在某一支裡：每一個接受儲存格位址的動詞都會經過這裡，而把它
+        // 放進某一支，正是一條規則變成「只涵蓋它成立範圍的一部分」的方式。
+        try validateLocationClaim(o)
 
         if o.count {
             try runCount(o)

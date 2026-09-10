@@ -436,6 +436,28 @@ the document's and there is nothing to add.
 `--physical` cannot be combined with `--json`; it adds to the address in the
 locating report, which `--json` does not produce. Use `--json`'s own `line`.
 
+**A printed address can be pasted back, and its decoration is checked.**
+`-get 2:1@L5` and `-get '2:1 [A3]'` both name the same cell as `-get 2:1`, and
+so does `2:1@L5 [A3]` when both flags printed it. The decoration is not
+ignored: it is a CLAIM about the file as it was when the address was printed,
+and csv2 refuses when it no longer holds --
+
+    csv2: -get: @L9 says record 2 starts on physical line 9, but in this file
+    it starts on line 5; the file has changed since that address was printed
+
+That refusal is the point. An address you saved yesterday still names record 2
+today, but record 2 may be a different record; an address that carries what it
+expected to find can say so instead of editing the wrong row. `@L` claims the
+PHYSICAL line and `[A3]` claims the SPREADSHEET row and the column -- they
+differ exactly when a record spans lines, and each is checked separately.
+
+A claim about physical lines turns off the index seek for that one call, because
+seeking to a byte offset skips newlines without counting them. It costs a scan,
+and only on a decorated address.
+
+Until 2026-09-10 pasting one back was refused with a message pointing at the
+decoration. The refusal was correct and was not the best answer.
+
 Use `--en` or `--zh` to choose the header language in human-readable output.
 `--version`/`-V` prints the build version; `--help`/`-h` prints the complete
 option list.

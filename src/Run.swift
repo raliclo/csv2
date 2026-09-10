@@ -695,6 +695,125 @@ func runCount(_ o: Options) throws {
     Platform.writeStdout("\(n)\n")
 }
 
+/// Validate what a pasted address CLAIMED, before the verb acts on it.
+///
+/// `--physical` and `--a1` print a location beside every address, and until
+/// now pasting one back was refused. Accepting it is only half the point: the
+/// decoration is a CLAIM about the file as it was when the address was
+/// printed, and if the file has changed since, acting on that address is
+/// exactly the edit the caller does not want. An address that validates itself
+/// is worth more than one that merely remembers.
+///
+/// 在動詞對一個貼回來的位址動作**之前**，先驗證它宣稱了什麼。
+///
+/// `--physical` 與 `--a1` 會在每個位址旁印出一段位置，而在此之前把它貼回去會被拒絕。接受它
+/// 只做到一半：那段裝飾是一個**關於「位址被印出來的當下那個檔案」的宣稱**，若檔案之後變了，
+/// 照那個位址動手正是呼叫者最不想要的那一次編輯。**一個會自我驗證的位址，比一個只是記得的
+/// 位址有價值。**
+///
+/// One place, before the dispatch, so every verb that takes a cell address is
+/// covered by the same check: `-get`, `-update`, `-delete -cell` and
+/// `--search-cell`. Putting it inside the emitters would have covered the read
+/// path and left the edit path to grow its own copy.
+/// 放在分派**之前**的單一位置，讓每一個接受儲存格位址的動詞都被同一道檢查涵蓋：`-get`、
+/// `-update`、`-delete -cell` 與 `--search-cell`。放進 emitter 裡的話，只會涵蓋讀取路徑，而編輯
+/// 路徑會長出它自己的一份。
+func validateLocationClaim(_ o: Options) throws {
+    guard let lc = o.locationClaim else { return }
+    // EVERY claim, not the first. `--physical --a1` prints both decorations on
+    // one address, and checking one of two would be a guard that passes on the
+    // half it did not look at.
+    // **每一個**宣稱，不是第一個。`--physical --a1` 會在同一個位址上印出兩段裝飾，而只檢查其中
+    // 一個，等於一道「在它沒看的那一半上放行」的守衛。
+    for claim in lc.claims {
+        try validateOneClaim(o, lc: lc, claim: claim)
+    }
+}
+
+private func validateOneClaim(_ o: Options,
+                              lc: (record: Int, column: String, claims: [LocationClaim], flag: String),
+                              claim: LocationClaim) throws {
+
+    // A numeric column in the address can be compared with `[A2]`'s letter. A
+    // NAMED column cannot, without resolving it against the headers, and the
+    // printed form is always numeric -- `--a1` prints `1:1 [A2]` -- so a named
+    // column with a letter claim is hand-written. The row half still applies.
+    // 位址裡的數字欄可以與 `[A2]` 的字母比對。**具名**的欄不行，除非拿標頭去解析它；而印出來
+    // 的形式一定是數字（`--a1` 印的是 `1:1 [A2]`），所以「具名欄 + 字母宣稱」是手寫的。列的
+    // 那一半仍然適用。
+    func checkColumn(_ resolvedZeroBased: Int?) throws {
+        guard let want = claim.column, let got = resolvedZeroBased else { return }
+        if want != got {
+            throw fault(
+                "\(lc.flag): the address names column \(got + 1) and \(claim.text) says column \(a1Column(want)); they cannot both be right",
+                "\(lc.flag)：位址指的是第 \(got + 1) 欄，而 \(claim.text) 說的是第 \(a1Column(want)) 欄；兩者不可能同時正確")
+        }
+    }
+
+    switch claim.kind {
+    case .spreadsheetRow:
+        // Arithmetic, not a scan: the spreadsheet row is the record number
+        // plus the header rows, and both are known without reading a record.
+        // That is also why this half works on stdin.
+        // 這是算術，不是掃描：試算表列號等於紀錄號加上標頭列數，而兩者都不必讀任何一筆紀錄
+        // 就知道。那也是為什麼這一半在 stdin 上仍然成立。
+        let plan = try openInput(o)
+        defer { plan.source.close() }
+        let want = lc.record + plan.headerRows
+        if claim.row != want {
+            throw fault(
+                "\(lc.flag): \(claim.text) says record \(lc.record) is spreadsheet row \(claim.row), but in this file it is row \(want); the file is not the one that address was printed from",
+                "\(lc.flag)：\(claim.text) 說第 \(lc.record) 筆在試算表的第 \(claim.row) 列，而在這個檔案裡它是第 \(want) 列；這不是那個位址被印出來時的那個檔案")
+        }
+        try checkColumn(Int(lc.column).map { $0 - 1 })
+
+    case .physicalLine:
+        // A scan, and deliberately NOT through the index. `planIndex` seeks to
+        // a byte offset, and every newline skipped over on the way was never
+        // counted -- so the line number after a seek is not the file's. The
+        // index records record boundaries, not layout, and validating a claim
+        // about layout with a path that cannot count lines was never going to
+        // work. The cost falls only on a decorated address.
+        // 一次掃描，而且**刻意不走索引**。`planIndex` 會 seek 到一個位元組位移，而途中被跳過的
+        // 每一個換行都沒有被數——所以 seek 之後的行號不是這個檔案的行號。索引記的是紀錄邊界，
+        // 不是排版；用一條數不了行的路徑去驗證一個關於排版的宣稱，本來就不會成立。這個成本
+        // 只落在「帶裝飾的那一次呼叫」上。
+        guard o.input != nil else {
+            throw fault(
+                "\(lc.flag): \(claim.text) is a claim about physical lines, which cannot be checked on stdin because it cannot be read twice",
+                "\(lc.flag)：\(claim.text) 是一個關於實體行號的宣稱，而 stdin 無法被讀第二次，因此檢查不了")
+        }
+        let plan = try openInput(o)
+        defer { plan.source.close() }
+        var headers: [Record] = []
+        var found: Int?
+        var lastRecord = 0
+        let parser = RecordParser(format: plan.format, truncatePartial: o.truncatePartial) { rec in
+            if headers.count < plan.headerRows { headers.append(rec); return true }
+            let n = rec.number - plan.headerRows
+            lastRecord = n
+            if n == lc.record { found = rec.line; return false }
+            return true
+        }
+        while found == nil, let c = plan.source.next() { try parser.feed(c) }
+        if found == nil { try? parser.finish() }
+        guard let line = found else {
+            // Not this check's job to complain that the record is absent: the
+            // verb itself says that, and better. Say nothing and let it.
+            // 「那一筆不存在」不是這道檢查該抱怨的事：動詞自己會說，而且說得更好。這裡閉嘴，
+            // 讓它去說。
+            _ = lastRecord
+            return
+        }
+        if line != claim.row {
+            throw fault(
+                "\(lc.flag): \(claim.text) says record \(lc.record) starts on physical line \(claim.row), but in this file it starts on line \(line); the file has changed since that address was printed",
+                "\(lc.flag)：\(claim.text) 說第 \(lc.record) 筆從實體第 \(claim.row) 行開始，而在這個檔案裡它從第 \(line) 行開始；這個檔案在那個位址被印出來之後變過了")
+        }
+        try checkColumn(Int(lc.column).map { $0 - 1 })
+    }
+}
+
 func runVerifyIndex(_ o: Options) throws {
     guard let path = o.input else {
         throw fault("--verify-index needs -i FILE", "--verify-index 需要 -i FILE")

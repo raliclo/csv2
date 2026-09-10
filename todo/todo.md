@@ -379,7 +379,43 @@ streaming path only, and nothing has ever measured the parallel path's memory.
 把批次強制降到 1,峰值 RSS 只變動百分之零點五。修正後 615 MB 的檔案從 608 MB 降到 23 MB。
 測試 T108 已補上,那也是這一節當初點名缺少的東西。
 
-## 4. 讓 `--physical` / `--a1` 的位址可以被接受,並且驗證它
+## ~~4. 讓 `--physical` / `--a1` 的位址可以被接受,並且驗證它~~ 已完成（2026-09-10）
+
+### 2026-09-10：完成
+
+四個動詞（`-get`、`-update`、`-delete -cell`、`--search-cell`）都接受帶裝飾的位址，並驗證那個
+宣稱。驗證放在**分派之前的單一位置**（`validateLocationClaim`），四個動詞因此不可能各自漂走。
+
+實作時發現的、原本沒有寫在這一節裡的三件事：
+
+1. **兩種記法宣稱的是不同的東西。** `@L` 是實體行（`Record.line`），`[A3]` 是試算表列
+   （紀錄號＋標頭列數）**與欄**。它們只在「紀錄跨行」時不同，而 `Ops.swift` 早就把這件事寫在
+   印出它們的地方。因此 `[A3]` 那一半根本不需要掃描——它是算術——**只有 `@L` 需要停用索引 seek**。
+2. **兩段裝飾會同時出現。** `--physical --a1` 一起給時印的是 `3:1@L6 [A4]`，而只剝一層會留下
+   `3:1@L6`，接著以「沒有這個欄名」失敗。改成剝到沒有為止，並且**每一個宣稱都驗**——只驗第一個
+   等於一道「在它沒看的那一半上放行」的守衛。
+3. **`[A3]` 也宣稱了欄**，所以它抓得到一個「列的檢查」看不見的欄列對調。
+
+`T132d`／`T132e` 原本斷言「帶裝飾的位址會被拒絕」，現在改成斷言那趟**來回**：報告印出來的位址
+貼回去，要拿到報告裡那個值。那是比原本更強的斷言。
+
+T302 共 19 個案例：四個動詞 × 兩種記法 × 成立／不成立，加上兩段並存時各自出錯、欄位對調、
+有索引時仍然正確（那是唯一說出「seek 被停用」的案例），以及「沒有裝飾的位址不受影響」。
+fixture 刻意含一筆跨三行的紀錄——**那是兩種記法唯一會不一致的情況，沒有它的 fixture 會讓一個錯的
+實作把兩半都通過。**
+
+Done. All four verbs accept a decorated address and validate the claim, in ONE place before the
+dispatch so they cannot drift apart. Three things the section above did not know: the two
+notations claim DIFFERENT things (physical line versus spreadsheet row plus column), so only the
+`@L` half needs the index seek disabled and the `[A]` half is arithmetic; both decorations
+appear together when both flags are given, and stripping once left an address that failed as a
+column name; and `[A3]` claims a column too, which catches a transposition the row check cannot
+see. T132d/e asserted the old refusal and now assert the round trip, which is the stronger
+claim. T302 is nineteen cases over four verbs, two notations, both directions, with a fixture
+carrying a record that spans three lines -- the only case where the notations disagree, and
+without it a wrong implementation passes both halves.
+
+
 
 `--physical` 印 `1:1@L2`、`--a1` 印 `1:1 [A2]`。目前把它們餵回去會被拒絕,而訊息會指出
 那段結尾是裝飾(DX、T132d/e)。**拒絕是對的,但不是最好的答案。**
@@ -391,6 +427,53 @@ streaming path only, and nothing has ever measured the parallel path's memory.
 需要的是「由紀錄號求出實體行號」這條路徑。索引 sidecar 已經記錄了紀錄邊界,但那是位元組
 位移而非行號,而含有內嵌換行的檔案兩者不相等——這正是 `csv2view` 也在等的那一項
 (見 README 的「Designed but not built」)。兩者可以一起做。
+
+### 2026-09-10：這一節的前提是錯的，而修正它讓這件事小了一圈
+
+上面寫著「需要的是**由紀錄號求出實體行號**這條路徑。索引 sidecar 已經記錄了紀錄邊界，但那是
+位元組位移而非行號」。**讀程式碼之後：那條路徑已經存在。** `Record` 在 `src/Core.swift:256` 上
+就有 `var line: Int`，而解析器一路在維護它——`--physical` 印得出 `@L2` 正是因為它拿得到。
+
+真正的限制窄得多，而且只有一條：**索引 seek 之後行號不再是真的。** `planIndex()` 會從一個
+位元組位移開始讀（`index hit: record N via grid point … at byte offset`），而那時已經跳過的
+換行沒有被數。
+
+於是設計決定是：**位址帶著位置宣稱時，不走索引 seek。** 那條宣稱講的正是檔案的實體排版，而索引
+記的不是排版——用一個記不住行號的加速路徑去驗證一個關於行號的宣稱，本來就不成立。代價只落在
+「有帶裝飾的那一次呼叫」上。
+
+### 要做的四件事
+
+1. **`parsedLocation(token)`**：擴充既有的 `strippedLocation()`（`src/main.swift`），讓它除了回傳
+   去掉裝飾的字串，也回傳那個宣稱：`@L<n>` → 行號 n；` [A<n>]` → 欄號（由字母換算）與行號 n。
+   `[A2]` 同時宣稱了欄與行，兩者都要驗。
+2. **`parseCellAddress()`**：裝飾在**欄的那一段**上（`1:1@L2` 以 `:` 切開後是 `1` 與 `1@L2`）。
+   剝掉它、把宣稱記進 `Options`。四個呼叫點：`--search-cell`、`-get`、`-update`、`-delete -cell`。
+3. **索引**：有宣稱時停用 seek（不是停用寫入）。
+4. **驗證**：在那一筆被取到的地方比對 `r.line`；不符就以「宣稱不成立」拒絕，而**不是**以「格式
+   錯誤」拒絕——那兩者要說的是完全不同的事。
+
+### 為什麼「不符」時要拒絕
+
+`@L2` 是一個關於「你搜尋當下那個檔案」的宣稱。若檔案之後變了，那個宣稱就不成立——而那正是
+應該拒絕的時刻。**一個帶著自我驗證的位址，比一個只靠自己記得「當時是第幾行」的位址有用得多**：
+後者會安靜地編輯到別的紀錄。
+
+### 測試要涵蓋的（每一項都要證明它會咬）
+
+- 四個動詞 × 兩種記法 × （宣稱成立／宣稱不成立）
+- **一個含有內嵌換行的檔案**——那是唯一「行號 ≠ 紀錄號」的情況，也是這整件事存在的理由
+- 有索引存在時仍然正確（也就是 seek 真的被停用了）
+- `[A2]` 的欄宣稱與位址的欄不一致時要拒絕
+
+The premise of this section was wrong, and correcting it makes the work smaller. It said a
+record-number-to-physical-line path was needed. `Record.line` already exists in Core.swift and
+the parser maintains it -- which is how `--physical` prints `@L2` at all. The single real
+constraint is narrower: after an INDEX SEEK the line number is no longer true, because the
+newlines skipped over were never counted. So the design decision is that an address carrying a
+location claim does not take the index seek. The claim is about physical layout; the index does
+not record layout, and validating a claim about line numbers with a path that cannot count
+lines was never going to work. The cost falls only on the decorated call.
 
 Accept `--physical` / `--a1` addresses AND validate the decoration: `@L2` is a
 claim about where that record was, and refusing when it no longer holds is more

@@ -9444,23 +9444,25 @@ for _t132_addr in '0:1' '0a:1' '0b:1'; do
     done
 done
 
-# A decorated address names the decoration, not a column that does not exist.
-# 帶裝飾的位址要指出那段裝飾，而不是指向一個不存在的欄位。
-_t132_phys=$("$CSV2" -contains foo --physical -i "$TMP/t132.csv" | cut -f1)
-_t132_out=$("$CSV2" -get "$_t132_phys" -i "$TMP/t132.csv" 2>&1)
-if [[ $_t132_out == *"--physical or --a1 prints"* ]]; then
-    ok "T132d a --physical address is diagnosed as one / --physical 的位址會被指認出來"
-else
-    bad "T132d $_t132_phys gave: $(print -r -- $_t132_out | head -1) / 訊息如上"
-fi
+# A printed address COMPOSES: paste it back and get the cell it named. These
+# two asserted the opposite until 2026-09-10 -- that a decorated address was
+# refused with a message pointing at the decoration. The refusal was correct
+# and was not the best answer: the decoration is a CLAIM about the file, and
+# checking it is worth more than declining to read it. T302 covers the claim;
+# these two cover the round trip, which is what the README promises.
+# 印出來的位址是**可以接下去的**：貼回去就會拿到它指名的那一格。這兩個案例直到 2026-09-10 為止
+# 斷言的是相反的事——帶裝飾的位址會以一則指出那段裝飾的訊息被拒絕。那個拒絕是對的，但不是最好
+# 的答案：那段裝飾是一個關於檔案的**宣稱**，而驗證它比拒讀它有價值。T302 涵蓋那個宣稱；這兩個
+# 涵蓋那趟來回，也就是 README 承諾的東西。
+_t132_phys=$("$CSV2" -contains foo --physical -i "$TMP/t132.csv" | head -1 | cut -f1)
+_t132_want=$("$CSV2" -contains foo --physical -i "$TMP/t132.csv" | head -1 | cut -f3)
+assert_eq "$("$CSV2" -get "$_t132_phys" -i "$TMP/t132.csv" 2>/dev/null)" "$_t132_want" \
+    "T132d a --physical address pastes back to the cell it named / --physical 的位址貼回去會拿到它指名的那一格"
 
-_t132_a1=$("$CSV2" -contains foo --a1 -i "$TMP/t132.csv" | cut -f1)
-_t132_out=$("$CSV2" -get "$_t132_a1" -i "$TMP/t132.csv" 2>&1)
-if [[ $_t132_out == *"--physical or --a1 prints"* ]]; then
-    ok "T132e and so is an --a1 address / --a1 的位址同樣如此"
-else
-    bad "T132e $_t132_a1 gave: $(print -r -- $_t132_out | head -1) / 訊息如上"
-fi
+_t132_a1=$("$CSV2" -contains foo --a1 -i "$TMP/t132.csv" | head -1 | cut -f1)
+_t132_a1want=$("$CSV2" -contains foo --a1 -i "$TMP/t132.csv" | head -1 | cut -f3)
+assert_eq "$("$CSV2" -get "$_t132_a1" -i "$TMP/t132.csv" 2>/dev/null)" "$_t132_a1want" \
+    "T132e and so does an --a1 address / --a1 的位址同樣如此"
 
 # And a column whose NAME ends that way is still a column. Deciding by
 # appearance alone would tell someone their own column name is a decoration.
@@ -17953,6 +17955,109 @@ else
 fi
 
 echo
+echo "--- T302: a printed address can be pasted back, and its decoration is CHECKED / T302：印出來的位址可以貼回去，而它的裝飾會被驗證 ---"
+# `--physical` prints `1:1@L2` and `--a1` prints `1:1 [A2]`, and until
+# 2026-09-10 pasting either back was refused. Accepting them is only half the
+# point: the decoration is a CLAIM about the file as it was when the address
+# was printed, so if the file has changed since, acting on that address is
+# exactly the edit the caller does not want.
+# `--physical` 印 `1:1@L2`、`--a1` 印 `1:1 [A2]`，而直到 2026-09-10 為止把它們貼回去都會被拒絕。
+# 接受它們只做到一半：那段裝飾是一個「關於位址被印出時那個檔案」的**宣稱**，所以若檔案之後
+# 變了，照那個位址動手正是呼叫者最不想要的那一次編輯。
+#
+# The fixture has a record spanning three lines. That is the ONLY case where
+# the two notations disagree -- `@L` counts physical lines, `[A]` counts
+# spreadsheet rows, and a quoted newline keeps a record in one row while the
+# line number runs ahead. A fixture without one would let a wrong
+# implementation pass both halves.
+# 這個 fixture 有一筆跨三行的紀錄。那是兩種記法**唯一**會不一致的情況——`@L` 數的是實體行，
+# `[A]` 數的是試算表列，而引號內的換行讓紀錄留在同一列、行號卻跑在前面。沒有這種紀錄的
+# fixture，會讓一個錯的實作把兩半都通過。
+printf 'k,v\nr1,"a\nb\nc"\nr2,plain\nr3,last\n' > "$TMP/t302.csv"
+# Record 1 starts on line 2 and is row 2; record 2 starts on line 5 and is
+# row 3; record 3 on line 6, row 4.
+# 第 1 筆從第 2 行開始、是第 2 列；第 2 筆從第 5 行開始、是第 3 列；第 3 筆第 6 行、第 4 列。
+assert_eq "$("$CSV2" -get '2:1@L5' -i "$TMP/t302.csv" 2>/dev/null)" "r2" \
+    "T302a a true @L claim is accepted / 成立的 @L 宣稱被接受"
+assert_eq "$("$CSV2" -get '2:1 [A3]' -i "$TMP/t302.csv" 2>/dev/null)" "r2" \
+    "T302b a true [A] claim is accepted / 成立的 [A] 宣稱被接受"
+assert_eq "$("$CSV2" -get '3:1@L6 [A4]' -i "$TMP/t302.csv" 2>/dev/null)" "r3" \
+    "T302c both decorations at once, as --physical --a1 prints them together / 兩段裝飾並存，正是 --physical --a1 一起印出來的形式"
+
+# The refusals. Each one names BOTH numbers, because "that is wrong" without
+# saying what the file says sends the reader to look it up by hand.
+# 那些拒絕。每一則都指出**兩個**數字，因為只說「那是錯的」而不說檔案裡是什麼，會讓讀者自己去
+# 查一遍。
+assert_fails "T302d a false @L claim is refused / 不成立的 @L 宣稱被拒絕" -- \
+    "$CSV2" -get '2:1@L9' -i "$TMP/t302.csv"
+assert_contains "$("$CSV2" -get '2:1@L9' -i "$TMP/t302.csv" 2>&1)" "starts on line 5" \
+    "T302e and it says what the file actually says / 而且它說出檔案實際上是什麼"
+assert_fails "T302f a false [A] claim is refused / 不成立的 [A] 宣稱被拒絕" -- \
+    "$CSV2" -get '2:1 [A9]' -i "$TMP/t302.csv"
+# Each half of a two-decoration address is checked. A guard that checked the
+# first and stopped would pass here, which is why both directions are given.
+# 兩段裝飾的位址，每一半都要被檢查。一道「檢查第一個就停」的守衛在這裡會通過，所以兩個方向
+# 都要給。
+assert_fails "T302g both decorations, the SECOND one false / 兩段裝飾，錯的是第二個" -- \
+    "$CSV2" -get '3:1@L6 [A9]' -i "$TMP/t302.csv"
+assert_fails "T302h both decorations, the FIRST one false / 兩段裝飾，錯的是第一個" -- \
+    "$CSV2" -get '3:1@L99 [A4]' -i "$TMP/t302.csv"
+# `[A2]` claims a COLUMN as well as a row, so it catches a transposition the
+# row check cannot see.
+# `[A2]` 除了列以外也宣稱了**欄**，因此它抓得到一個「列的檢查」看不見的欄列對調。
+assert_fails "T302i [B3] on a column-1 address is refused / 位址是第 1 欄而宣稱 [B3] 會被拒絕" -- \
+    "$CSV2" -get '2:1 [B3]' -i "$TMP/t302.csv"
+
+# Every verb that takes a cell address, not just -get. The check lives in one
+# place before the dispatch precisely so this list cannot drift.
+# 每一個接受儲存格位址的動詞，不只 -get。那道檢查放在分派之前的**單一位置**，正是為了讓這份
+# 清單不會漂掉。
+cp "$TMP/t302.csv" "$TMP/t302u.csv"
+assert_succeeds "T302j -update accepts a true claim / -update 接受成立的宣稱" \
+    "$CSV2" -update '2:2@L5' 'CHANGED' -i "$TMP/t302u.csv" --in-place
+assert_eq "$(cell "$TMP/t302u.csv" 2 v)" "CHANGED" \
+    "T302k and the edit landed / 而且那次編輯真的落地了"
+cp "$TMP/t302.csv" "$TMP/t302v.csv"
+cp "$TMP/t302v.csv" "$TMP/t302v.bak"
+assert_fails "T302l -update refuses a false claim / -update 拒絕不成立的宣稱" -- \
+    "$CSV2" -update '2:2@L9' 'NOPE' -i "$TMP/t302v.csv" --in-place
+assert_same "$TMP/t302v.csv" "$TMP/t302v.bak" \
+    "T302m and the file is untouched -- a refusal that wrote would be worse than no check / 而檔案原封不動——一個「寫了才拒絕」的檢查比沒有檢查更糟"
+cp "$TMP/t302.csv" "$TMP/t302d.csv"
+cp "$TMP/t302d.csv" "$TMP/t302d.bak"
+assert_fails "T302n -delete -cell refuses a false claim / -delete -cell 拒絕不成立的宣稱" -- \
+    "$CSV2" -delete -cell '3:2@L99' -i "$TMP/t302d.csv" --in-place
+assert_same "$TMP/t302d.csv" "$TMP/t302d.bak" \
+    "T302o and that file is untouched too / 那個檔案也原封不動"
+assert_succeeds "T302p --search-cell accepts a true claim / --search-cell 接受成立的宣稱" \
+    "$CSV2" -contains plain --search-cell '2:2@L5' -i "$TMP/t302.csv"
+
+# With an index present the seek starts mid-file, and every newline skipped on
+# the way was never counted -- so a physical-line claim checked through the
+# index would be checked against a number that is not the file's. The claim
+# turns the seek OFF, and this case is the only thing that says so.
+# 有索引時 seek 會從檔案中途開始，而途中被跳過的每一個換行都沒有被數——因此一個「透過索引
+# 檢查的」實體行號宣稱，比對的會是一個不屬於這個檔案的數字。有宣稱時 seek 會被關掉，而這個
+# 案例是唯一說出這件事的東西。
+cp "$TMP/t302.csv" "$TMP/t302i.csv"
+"$CSV2" --build-index -i "$TMP/t302i.csv" >/dev/null 2>&1
+if [[ -f "$TMP/t302i.csv.index" ]]; then
+    assert_eq "$("$CSV2" -get '3:1@L6' -i "$TMP/t302i.csv" 2>/dev/null)" "r3" \
+        "T302q a physical-line claim is still right with an index beside the file / 檔案旁邊有索引時，實體行號宣稱仍然正確"
+    assert_fails "T302r and a false one is still refused with an index / 而有索引時，不成立的宣稱仍然被拒絕" -- \
+        "$CSV2" -get '3:1@L99' -i "$TMP/t302i.csv"
+else
+    T302_SKIPPED=1
+    skipt "T302q an index could not be built here / 這裡建不出索引"
+fi
+
+# The plain form must go on working. A change that made the decoration
+# mandatory would pass every case above.
+# 單純的形式必須繼續有效。一個「把裝飾變成必要」的改動，會讓上面每一個案例都通過。
+assert_eq "$("$CSV2" -get '2:1' -i "$TMP/t302.csv" 2>/dev/null)" "r2" \
+    "T302s an address with no decoration is unaffected / 沒有裝飾的位址不受影響"
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -18117,6 +18222,7 @@ fi
 (( ${T298_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T299_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T300_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T302_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode
