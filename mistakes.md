@@ -1221,6 +1221,36 @@ guard must be shown to bite", applied to edits rather than to new guards.
 而同一天，**我自己回頭核對 24 個 commit 的那一次，唯一報出的問題是我的檢查樣式寫錯了**——樹是對的。
 自我核對找到的是零。
 
+**上面那張表只寫了一個方向，而那是不準確的。** 交換是雙向的，另一側同一天拿到的是：
+
+| 這裡給出去的 | 對方拿它做了什麼 |
+|---|---|
+| 「動過一個測試之後，把它弄壞一次」 | 當場抓到他們守衛的四個缺陷，包括「自我測試根本抓不到它要測的那個 bug」 |
+| 「把編輯與提交用 `&&` 串起來」 | 規則寫下不到一小時就擋掉一次空訊息 commit |
+| 「自己造的樣本會繼承自己的盲點」 | 解釋了他們的正控組為什麼一路通過 |
+| 「`${(s:,:)}` 你漏了」 | 他們去量，發現自己漏的是**三種** |
+| 「一個手寫的檢查回報有問題時，也可能是它自己錯了」 | 他們四個核對全報命中，其中一個命中的是雙語註記的**英文那一半** |
+
+**最後那一條是這一整天最尖銳的對照**：我那次是一筆假的「不在」，他們那次是一筆假的「在」——而
+**沒有人會去複查一筆綠燈**。那句話讓他們加了負控組，而負控組接著又抓到兩個。
+
+**這件事對這一條的意義，比「有人幫了忙」大得多。** 如果只有單向，那是運氣；雙向意味著**機制是
+對稱的**——兩邊各自的自我檢查產出都是零，而各自指向對方的檢查都有產出。那不是誰比較細心，是
+「檢查一份你參與產生的理解」這件事本身沒有產出。
+
+The table above records one direction and that is not accurate. The exchange was two-way: the
+same day, the other side took "after touching a test, break it once" and found four defects in
+its own guard including a self-test that could not catch the bug it existed for; took "join the
+edit to the commit with &&" and had it stop an empty-message commit within the hour; took
+"self-made samples inherit your own blind spots" as the explanation for why its control group
+passed; measured `${(s:,:)}` after being told of it and found it was short by THREE shapes; and
+took "a hand-written check can be wrong when it reports a problem too" -- whereupon its four
+verifications, all reporting hits, turned out to include one matching the English half of a
+bilingual note. Mine was a false absence; theirs was a false presence, and nobody re-checks a
+green. That mattered more than the courtesy: one direction would be luck, and two means the
+mechanism is symmetric. Both sides' self-review produced nothing; each side's review of the
+other produced everything.
+
 ### 為什麼「更仔細」不是解法
 
 **自己造的樣本會繼承自己的盲點。** 一個守衛的樣式與它的正控組，出自同一份不完整的理解，所以兩邊
