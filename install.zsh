@@ -427,6 +427,39 @@ target_dir() {
     case "$(uname -s)" in
         MINGW*|MSYS*|CYGWIN*)
             setopt local_options extended_glob
+            # If SCOOP manages csv2, this script must not write into its app
+            # directory: scoop verifies hashes there and an upgrade would
+            # overwrite whatever was dropped in. Refuse and name the two ways
+            # forward, rather than producing an install that works until the
+            # next `scoop update`.
+            #
+            # 如果 csv2 是由 **scoop** 管理的，這支腳本不可以寫進它的 app 目錄：scoop 會在那裡
+            # 驗證 hash，而一次升級會覆蓋掉任何被放進去的東西。拒絕，並說出兩條可走的路——而不是
+            # 產生一個「能用到下一次 `scoop update` 為止」的安裝。
+            #
+            # The exit status is USELESS here: `scoop prefix csv2` answers
+            # "Could not find app path for 'csv2'." and still exits 0. Measured
+            # on the Windows node, 2026-09-10. So the discriminator is the
+            # OUTPUT -- it must look like a Windows path AND name a directory
+            # that exists -- which is the same shape as reading a version out
+            # of `--version`: match something self-validating, never split and
+            # hope.
+            #
+            # 這裡的退出碼**沒有用**：`scoop prefix csv2` 會回答「Could not find app path for
+            # 'csv2'.」而且仍然以 0 結束。2026-09-10 在 Windows 節點上量到。所以判別式看的是
+            # **輸出**——它必須長得像一個 Windows 路徑，而且指向一個存在的目錄——那與「從
+            # `--version` 讀出版本號」是同一個形狀：比對一個能自我驗證的東西，不要切了就用。
+            if (( $+commands[scoop] )); then
+                local _sp
+                _sp=$(scoop prefix csv2 2>/dev/null | tr -d '\r' | tail -1)
+                if [[ $_sp == [A-Za-z]:[\\/]* ]]; then
+                    local _spp
+                    _spp=$(cygpath -u -- "$_sp" 2>/dev/null || print -r -- "${_sp//\\//}")
+                    if [[ -d $_spp ]]; then
+                        die "scoop manages csv2 here ($_sp). Writing into a scoop app directory fights its hash checks and the next \`scoop update csv2\` would overwrite this build. Use \`scoop update csv2\` for a release, or --dir DIR to place a development build somewhere scoop does not own. / scoop 在這裡管理著 csv2（$_sp）。寫進 scoop 的 app 目錄會與它的 hash 驗證相衝，而下一次 \`scoop update csv2\` 會覆蓋掉這次建置。要裝正式版請用 \`scoop update csv2\`；要放一份開發建置，請用 --dir DIR 指到一個不屬於 scoop 的地方。"
+                    fi
+                fi
+            fi
             local shim shim_file line win
             shim=$(command -v csv2 2>/dev/null)
             [[ -n $shim ]] && shim_file=${shim:h}/csv2.shim
