@@ -17,22 +17,28 @@ aarch64 Linux, WSL, and Windows through the standalone module/client check.
 
 ## Install a release
 
-Three archives are published per version, one per platform that can both build
+Four archives are published per version, one per platform that can both build
 and verify its own — each was packed on the machine that built the binary, and
 the packaging script ends by extracting the archive, running the extracted
 binary and having it read a CSV.
 
 ```sh
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.0/csv2-0.1.0-macos-arm64.tar.zst
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.0/csv2-0.1.0-macos-arm64.tar.zst.sha256
-sha256sum -c csv2-0.1.0-macos-arm64.tar.zst.sha256
-zstd -d csv2-0.1.0-macos-arm64.tar.zst -c | tar -x
-./csv2-0.1.0-macos-arm64/csv2 --version
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.1/csv2-0.1.1-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.1/csv2-0.1.1-macos-arm64.tar.zst.sha256
+sha256sum -c csv2-0.1.1-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.1.1-macos-arm64.tar.zst -c | tar -x
+./csv2-0.1.1-macos-arm64/csv2 --version
 ```
 
-Substitute `linux-x86_64` or `windows-x86_64` for the other two. **aarch64 Linux
-is tested and its archive is not published yet** — it simply has not been built
-on that machine.
+Substitute `linux-x86_64`, `linux-aarch64` or `windows-x86_64` for the others.
+
+**aarch64 Linux joined the published set in v0.1.1.** It was absent from v0.1.0
+not for want of testing — T47 compares twelve invocations byte for byte against
+macOS on every run — but because an archive built after that tag was cut would
+have reported a different version string from its three siblings. That is a
+property of `git describe`, which answers according to whether a tag existed
+when the build ran rather than according to the source; the four v0.1.1
+archives were all built at the tag.
 
 Until 2026-09-09 this paragraph gave a reason: that the image testing it has no
 zstd. That was false; it has `/usr/bin/zstd`. The file I read was Buildroot's own

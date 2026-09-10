@@ -19,15 +19,19 @@ English documentation: [README.md](README.md)。
 那台機器上打包，而打包腳本的結尾是**解開封存、執行解開後的執行檔、並讓它讀一個 CSV**。
 
 ```sh
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.0/csv2-0.1.0-macos-arm64.tar.zst
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.0/csv2-0.1.0-macos-arm64.tar.zst.sha256
-sha256sum -c csv2-0.1.0-macos-arm64.tar.zst.sha256
-zstd -d csv2-0.1.0-macos-arm64.tar.zst -c | tar -x
-./csv2-0.1.0-macos-arm64/csv2 --version
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.1/csv2-0.1.1-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.1/csv2-0.1.1-macos-arm64.tar.zst.sha256
+sha256sum -c csv2-0.1.1-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.1.1-macos-arm64.tar.zst -c | tar -x
+./csv2-0.1.1-macos-arm64/csv2 --version
 ```
 
-另外兩個把 `macos-arm64` 換成 `linux-x86_64` 或 `windows-x86_64`。**aarch64 Linux 有測試，而它的封存
-還沒發布**——單純是還沒在那台機器上建出來。
+其餘三個把 `macos-arm64` 換成 `linux-x86_64`、`linux-aarch64` 或 `windows-x86_64`。
+
+**aarch64 Linux 從 v0.1.1 起加入已發布的那一組。** 它在 v0.1.0 缺席，不是因為缺少測試——**T47**
+每一次執行都拿十二組呼叫與 macOS 逐位元比對——而是因為一份「在那個 tag 打完之後才建的」封存，
+會回報與它三個手足不同的版本字串。那是 `git describe` 的性質：它的答案取決於「建置執行的當下有
+沒有 tag」，而不是取決於原始碼；v0.1.1 的四份封存全部是在 tag 上建的。
 
 直到 2026-09-09 為止，這一段給了一個理由：「測試它的那個映像沒有 zstd」。**那是假的**，它有
 `/usr/bin/zstd`。我讀到的是 Buildroot **上游自帶的範例 defconfig**，而不是這個專案實際餵給 Buildroot
