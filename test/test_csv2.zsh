@@ -18058,6 +18058,61 @@ assert_eq "$("$CSV2" -get '2:1' -i "$TMP/t302.csv" 2>/dev/null)" "r2" \
     "T302s an address with no decoration is unaffected / 沒有裝飾的位址不受影響"
 
 echo
+echo "--- T303: the build id always carries the commit / T303：build id 永遠帶著那個 commit ---"
+# `git describe --always` answers according to whether a tag existed WHEN THE
+# BUILD RAN, not according to the source. The three published v0.1.0 archives
+# say `(8d5600e)` because they were built before the tag was cut; the same
+# commit built afterwards says `(v0.1.0)`. Same source, two strings, and no
+# rebuild changes it -- so the id could not answer the one question it exists
+# to answer, which commit this is. QD.
+# `git describe --always` 的答案取決於「**建置執行的當下**」有沒有 tag，不取決於原始碼。已發布的
+# 三份 v0.1.0 封存說 `(8d5600e)`，因為它們是在 tag 被打之前建的；同一個 commit 之後建出來說
+# `(v0.1.0)`。同一份原始碼、兩種字串，重建也改不了——於是那個 id 回答不了它存在所要回答的唯一
+# 問題：這是哪一個 commit。QD。
+if ! command -v git >/dev/null 2>&1 || [[ ! -d $ROOT/.git && ! -f $ROOT/.git ]]; then
+    T303_SKIPPED=1
+    skipt "T303 the build id always carries the commit / build id 永遠帶著那個 commit (not a git checkout here / 這裡不是一個 git checkout)"
+else
+    _t303_short=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null)
+    _t303_ver=$("$CSV2" --version 2>/dev/null)
+    if [[ -n $_t303_short && $_t303_ver == *"$_t303_short"* ]]; then
+        ok "T303a --version carries $_t303_short, so it names the commit whatever the tag state was / --version 帶著 $_t303_short，因此無論建置時的 tag 狀態如何，它都指名了那個 commit"
+    else
+        bad "T303a --version is [$_t303_ver] and HEAD is $_t303_short / 版本字串與 HEAD 如上"
+    fi
+
+    # The rule lives in build_id.zsh so the thing that stamps and the thing
+    # that checks cannot disagree. A script that went back to calling
+    # `git describe` directly would pass T303a on a commit past a tag -- where
+    # describe already carries the hash -- and fail only AT a tag, during a
+    # release. So the sourcing is checked too.
+    # 那條規則放在 build_id.zsh，讓「蓋章的一方」與「檢查的一方」不可能有不同意見。一支改回直接
+    # 呼叫 `git describe` 的腳本，在「tag 之後的 commit」上會通過 T303a——那裡 describe 本來就帶著
+    # 雜湊——而只在**正好位於 tag 上**時失敗，也就是某次出貨當中。所以連「有沒有 source 它」也要查。
+    _t303_bad=()
+    for _t303_f in compile_csv2.zsh compile_csv2_linux.zsh release.zsh; do
+        [[ -r $ROOT/$_t303_f ]] || continue
+        LC_ALL=C grep -q 'csv2_build_id' "$ROOT/$_t303_f" || _t303_bad+=("$_t303_f")
+    done
+    if (( ${#_t303_bad} == 0 )); then
+        ok "T303b every zsh build path asks build_id.zsh rather than git describe / 每一條 zsh 建置路徑都問 build_id.zsh，而不是問 git describe"
+    else
+        bad "T303b these do not use csv2_build_id: ${_t303_bad} / 這些沒有用 csv2_build_id"
+    fi
+
+    # The batch copy cannot source it. What it CAN be held to is the same
+    # property: it must ask for the short hash as well as describe.
+    # batch 那一份 source 不了它。能要求它的是同一個性質：它必須除了 describe 之外，也去問短雜湊。
+    if [[ -r $ROOT/compile_csv2_win.bat ]]; then
+        if LC_ALL=C grep -q 'rev-parse --short HEAD' "$ROOT/compile_csv2_win.bat"; then
+            ok "T303c and the batch copy asks for the short hash too / 而 batch 那一份也去問了短雜湊"
+        else
+            bad "T303c compile_csv2_win.bat does not ask for the short hash, so a tagged Windows build would drop it / batch 那一份沒有問短雜湊，於是在 tag 上的 Windows 建置會把它弄丟"
+        fi
+    fi
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -18223,6 +18278,7 @@ fi
 (( ${T299_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T300_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T302_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T303_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode

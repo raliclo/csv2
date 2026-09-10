@@ -125,7 +125,8 @@ REPORTED=$("$BIN" --version)
 # 出現在字串的任何位置」，而它**仍然假設那裡面有一個雜湊**。在一個 tag 所指的 commit 上，
 # `describe` 回答的就只是 `v0.1.0`，因此 2026-09-10 它在 v0.1.0 上拒絕了——那是它存在所要服務的
 # 唯一那個 commit——並建議「發行前請重新建置」，而重建產生的是同一個字串。QC。
-EXPECTED_ID=$(git describe --always --dirty)
+source "${0:A:h}/build_id.zsh"
+EXPECTED_ID=$(csv2_build_id "${0:A:h}")
 # ANCHORED, not "contains". The first attempt at this fix compared containment
 # and let a WORSE thing through than the bug it replaced: at v0.1.0 the expected
 # id is `v0.1.0`, and `csv2 0.1.0 (v0.1.0-13-g1750de3)` contains that string --

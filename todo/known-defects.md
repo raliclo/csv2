@@ -12324,6 +12324,40 @@ csv2 0.1.0 (8d5600e)
 
 **這條先寫下來、不先修。** 它會改變一個對外可見的字串，而已經有三份封存帶著舊的形式出去了。
 
+### 2026-09-10：已修，決定是「兩者都印」
+
+使用者選了「兩者都印」。build id 現在**永遠帶著那個 commit**，而在有 tag 時也說出 tag：
+
+| 情況 | `--version` 印出 |
+|---|---|
+| 正好在一個 tag 上 | `csv2 0.1.1 (v0.1.1 / a1b2c3d)` |
+| tag 之後 N 個 commit | `csv2 0.1.1 (v0.1.1-5-ga1b2c3d)`（describe 本來就帶著雜湊，不重複印） |
+| 沒有任何 tag | `csv2 0.1.1 (a1b2c3d)` |
+| 沒有 `.git`（guest 的 payload） | `csv2 0.1.1 (unknown)`——關於那次建置的一句真話 |
+
+規則放在**一個地方**：`build_id.zsh`，由 `compile_csv2.zsh`、`compile_csv2_linux.zsh` 與
+`release.zsh` 共同 source。**「蓋章的一方」與「檢查那個章的一方」因此不可能對它的形狀有不同
+意見**——而 release.zsh 的版本檢查已經錯過三次（QC），三次都是去列舉 `git describe` 可能回答的
+形式。
+
+`compile_csv2_win.bat` 帶著一份 batch 副本（它 source 不了 zsh）。T303 釘住兩者都必須滿足的那個
+性質——**`--version` 一定含有 HEAD 的短雜湊**——所以一份漂掉的副本會被回報，而不是在某次出貨
+當中才被發現。T303b 另外檢查三支 zsh 腳本真的在問 `build_id.zsh`：一支改回直接呼叫
+`git describe` 的腳本，在「tag 之後的 commit」上會通過，**只在正好位於 tag 上時失敗，也就是某次
+出貨當中**。
+
+**已發布的三份 v0.1.0 封存維持舊形式**，那無法回頭改；而 v0.1.1 的四份會一致。
+
+Fixed on 2026-09-10; the decision was to print both. The build id now always carries the
+commit and says the tag when there is one, and the rule lives in one place -- `build_id.zsh`,
+sourced by both compile scripts and by release.zsh -- so the thing that stamps and the thing
+that checks cannot disagree about its shape, which is what went wrong three times in QC. The
+batch build carries a copy that cannot source zsh; T303 pins the property both must satisfy, so
+a drifted copy is reported rather than found during a release, and T303b checks the zsh scripts
+still ask build_id.zsh, because one that went back to `git describe` would pass everywhere
+except AT a tag.
+
+
 ### 2026-09-10 的決定
 
 **維持不修**，等下一次出貨前一併決定。同時決定 **aarch64 不補進 v0.1.0，改在 v0.1.1 與另外三個
