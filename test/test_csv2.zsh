@@ -17864,7 +17864,24 @@ _t301_cmd='(^|[|;&(]|\$\()[[:space:]]*'
 # 改寫 TARGET_PACKAGES.csv 中 status_notes 的那一個，也就是這棵樹存在的直接原因。我自己的守衛，
 # 在自己的樹上、對著這個專案最在意的那個形狀，回報了乾淨。QH。
 _t301_pe='\$\{[^}]*(%%?,\*|##?\*,)'
-_t301_re="${_t301_cmd}cut[[:space:]]+-d'?,|${_t301_cmd}awk[[:space:]]+-F'?,|IFS=,[[:space:]]+read|${_t301_pe}"
+# The FIFTH shape: zsh's own `${(s:,:)line}`, which splits on a comma directly.
+# It is not in the four-line rule, because that rule is written for portable
+# shell -- but this project is zsh only, so it is the form most likely to be
+# reached for here, and T301 was not looking for it. There are currently ZERO
+# instances, which is precisely the state in which the first one goes
+# unnoticed. Reported by the linuxcs-87 session after its own pattern turned
+# out to miss it too.
+# **第五種形狀**：zsh 自己的 `${(s:,:)line}`，它直接以逗號切割。那條四行的規則沒有列它，因為那條
+# 規則是為可攜的 shell 寫的——但這個專案只用 zsh，所以它反而是這裡最可能被伸手去拿的那一種，而
+# T301 沒有在找它。目前的實例數是**零**，而那正是「第一個違規不會被發現」的那個狀態。由
+# linuxcs-87 那個 session 回報，他們自己的樣式也漏了它。
+#
+# `s` followed by any non-alphanumeric delimiter, a comma, then that class
+# again -- covers `s:,:`, `s/,/`, `s.,.` and `s|,|` without enumerating them.
+# `s` 後面接任何非英數的分隔符、一個逗號、再一個同類字元——涵蓋 `s:,:`、`s/,/`、`s.,.`、`s|,|`，
+# 而不必逐一列舉。
+_t301_zsh='\$\{\([^)]*s[^a-zA-Z0-9],[^a-zA-Z0-9]'
+_t301_re="${_t301_cmd}cut[[:space:]]+-d'?,|${_t301_cmd}awk[[:space:]]+-F'?,|IFS=,[[:space:]]+read|${_t301_pe}|${_t301_zsh}"
 _t301_files=($ROOT/**/*.zsh(N))
 if (( ${#_t301_files} < 4 )); then
     bad "T301a the glob found ${#_t301_files} .zsh files, so nothing was scanned / glob 只找到 ${#_t301_files} 個 .zsh 檔，等於什麼都沒掃"
@@ -17885,33 +17902,52 @@ else
         bad "T301a comma-split without a $_t301_mark marker at: $(print -r -- "$_t301_hits" | head -2 | tr '\n' ' ') / 缺少標記的逗號切割如上"
     fi
 
-    # It must bite, and it must NOT bite the marked line -- a check that
-    # reported both would be indistinguishable from one that reported neither.
-    # 它必須會咬，而且**不能**咬那行有標記的——一個兩者都回報的檢查，與一個兩者都不回報的檢查，
-    # 分不出差別。
-    # These two build the probe; they split nothing. T218b hid its literal by
-    # assembling it, which works but leaves the reader wondering why. The
-    # marker is better here: the line stays readable and says why it is exempt.
-    # 這兩行是在**建構**探針，它們沒有切任何東西。T218b 是靠「把字面值組出來」來閃避，那可行，
-    # 但會讓讀者不明白為什麼要這樣寫。這裡用標記更好：那一行保持可讀，而且自己說出它為何豁免。
-    print -r -- "x=\$(f | cut -d, -f6)" > "$TMP/t301probe.zsh"   # CSV-SPLIT-OK: builds the probe text, splits nothing / 這是在建構探針文字，沒有切任何東西
-    print -r -- "y=\$(g | cut -d, -f6)   # $_t301_mark: deliberate" >> "$TMP/t301probe.zsh"   # CSV-SPLIT-OK: same / 同上
-    print -r -- "# a comment about cut -d, must not be flagged" >> "$TMP/t301probe.zsh"
-    # The fourth shape gets its own probe line, because it was the one missing.
-    # 第四種形狀有自己的一行探針，因為它就是漏掉的那一個。
-    print -r -- "z=\${line%,*}" >> "$TMP/t301probe.zsh"   # CSV-SPLIT-OK: builds the probe text, splits nothing / 這是在建構探針文字，沒有切任何東西
-    _t301_probe=$(LC_ALL=C grep -nE "$_t301_re" "$TMP/t301probe.zsh" 2>/dev/null \
-                  | LC_ALL=C grep -vE '^[^:]*:[0-9]+:[[:space:]]*#' \
-                  | LC_ALL=C grep -v -- "$_t301_mark" || true)
-    # `1:` at the START. grep -n on a SINGLE file prints `LINE:text` with no
-    # filename, so the first version looked for `:1:` and never matched -- the
-    # check failed while the thing it checks was working.
-    # 開頭是 `1:`。對**單一檔案**下 grep -n 印的是 `行號:內容`、沒有檔名，所以第一版去找 `:1:`
-    # 永遠匹配不到——那個檢查失敗了，而它要檢查的東西其實是好的。
-    if [[ $(print -r -- "$_t301_probe" | LC_ALL=C grep -c .) == 2 && $_t301_probe == "1:"* && $_t301_probe == *$'\n'"4:"* ]]; then
-        ok "T301b and it reports both bare splits, not the marked one nor the comment / 而它回報兩行沒標記的切割，不回報有標記的、也不回報註解"
+    # NAMED one by one, not counted. A count cannot say WHICH shape is
+    # missing -- it says "expected 5, got 4" -- and this pattern has now been
+    # short twice: it stopped at three of the rule's four shapes (QH), and then
+    # missed zsh's own `${(s:,:)}`, which is not in that rule at all because
+    # the rule is written for portable shell while this project is zsh only.
+    # The linuxcs-87 session made the same change to its control group for the
+    # same reason, after its pattern turned out to be short by three.
+    # **逐一具名**，不是數數量。一個數字說不出**少了哪一種**——它只會說「應為 5、實得 4」——而這個
+    # 樣式已經短過兩次了：它停在那條規則四種形狀裡的第三種（QH），然後又漏了 zsh 自己的
+    # `${(s:,:)}`——那一種根本不在那條規則裡，因為那條規則是為可攜的 shell 寫的，而這個專案只用
+    # zsh。linuxcs-87 那個 session 基於同一個理由，把它的正控組做了同樣的改動——它的樣式短了三種。
+    #
+    # Every line here is ASSEMBLED from $_ban-style pieces? No -- they are
+    # written out, because T301 reads this file and each one carries a marker
+    # saying it builds a probe. A marker is more readable than a hidden
+    # literal, and it is the mechanism this case is testing.
+    # 這裡每一行都是寫出來的，不是組出來的，因為 T301 會讀這個檔案，而每一行都帶著一個標記說明
+    # 它是在建構探針。一個標記比一個藏起來的字面值好讀，而且那正是這個案例在測的機制。
+    _t301_bad=()
+    _t301_probe_line() {   # <label> <line> <should-be-caught 1|0>
+        local label=$1 line=$2 want=$3 got
+        print -r -- "$line" > "$TMP/t301probe.zsh"
+        got=$(LC_ALL=C grep -nE "$_t301_re" "$TMP/t301probe.zsh" 2>/dev/null \
+              | LC_ALL=C grep -vE '^[0-9]+:[[:space:]]*#' \
+              | LC_ALL=C grep -v -- "$_t301_mark" || true)
+        if [[ -n $got ]]; then got=1; else got=0; fi
+        (( got == want )) || _t301_bad+=("$label: caught=$got wanted=$want")
+    }
+    _t301_probe_line "cut -d,"        'x=$(f | cut -d, -f6)'                    1   # CSV-SPLIT-OK: probe text / 探針文字
+    _t301_probe_line "awk -F,"        "y=\$(g | awk -F',' '{print \$1}')"       1   # CSV-SPLIT-OK: probe text / 探針文字
+    _t301_probe_line "IFS=, read"     'IFS=, read -r a b'                       1   # CSV-SPLIT-OK: probe text / 探針文字
+    _t301_probe_line 'PE %,*'         'z=${line%,*}'                            1   # CSV-SPLIT-OK: probe text / 探針文字
+    _t301_probe_line 'PE %%,*'        'z=${line%%,*}'                           1   # CSV-SPLIT-OK: probe text / 探針文字
+    _t301_probe_line 'PE #*,'         'z=${line#*,}'                            1   # CSV-SPLIT-OK: probe text / 探針文字
+    _t301_probe_line 'PE ##*,'        'z=${line##*,}'                           1   # CSV-SPLIT-OK: probe text / 探針文字
+    _t301_probe_line 'zsh (s:,:)'     'w=${(s:,:)line}'                         1   # CSV-SPLIT-OK: probe text / 探針文字
+    _t301_probe_line 'zsh (ps:,:)'    'v=${(ps:,:)line}'                        1   # CSV-SPLIT-OK: probe text / 探針文字
+    # And the two that must NOT be caught, or the check is indistinguishable
+    # from one that reports everything.
+    # 以及兩個**不能**被抓到的，否則這個檢查與一個「什麼都回報」的檢查分不出差別。
+    _t301_probe_line "marked line"    "q=\$(f | cut -d, -f6)   # $_t301_mark: deliberate"   0   # CSV-SPLIT-OK: probe text / 探針文字
+    _t301_probe_line "comment"        '# a comment about cut -d, must not be flagged'       0
+    if (( ${#_t301_bad} == 0 )); then
+        ok "T301b it catches all nine split shapes by name, and leaves the marked line and the comment alone / 它逐一具名地抓到九種切割形狀，並放過有標記的那行與註解"
     else
-        bad "T301b the probe should have reported lines 1 and 4, got [$_t301_probe] / 探針應該回報第 1 與第 4 行，實得如上"
+        bad "T301b ${#_t301_bad} wrong: ${_t301_bad[1]}${_t301_bad[2]:+ ; ${_t301_bad[2]}} / 判斷錯誤如上"
     fi
     rm -f "$TMP/t301probe.zsh"
 fi
