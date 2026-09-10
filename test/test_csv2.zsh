@@ -17619,25 +17619,35 @@ echo "--- T300: every tracked .zsh is executable in the index / T300：每一支
 # repo 的性質。它活下來，是因為唯一會自動呼叫它的地方用的是 `zsh <path>`，那裡模式位元根本不
 # 參與：那條路徑成功過很多次，而它證明的是與被問的問題**相鄰**的一件事。QE。
 #
-# The INDEX, not the working tree. A checkout on a filesystem without
-# permission bits -- or a file chmod'd locally -- would answer a different
-# question from "what does a clone get".
-# 看**索引**，不看工作區。一個位於沒有權限位元的檔案系統上的 checkout——或一個在本機被 chmod
-# 過的檔案——回答的是與「一份 clone 拿到什麼」不同的問題。
+# HEAD, not the index and not the working tree. A clone gets what is in the
+# COMMIT. The first version of this case read the index, and that is not a
+# smaller mistake than reading the working tree -- it is the one that can be
+# rewritten by the very next command. `git update-index --chmod=+x` set the
+# index to 100755, T300a passed, and the `git add -A` in the same commit line
+# re-staged the file from disk, where it was still 644, putting 100644 back.
+# The commit went out claiming a fix the tree did not contain, and the guard
+# had already reported green on a state that no longer existed. Entry 1.
+# 看 **HEAD**，不看索引、也不看工作區。一份 clone 拿到的是 **commit** 裡的東西。這個案例的第一版
+# 讀的是索引，而那不是比「讀工作區」小的錯——它是那個「會被下一條命令改寫」的對象。
+# `git update-index --chmod=+x` 把索引設成 100755、T300a 通過，然後同一行裡的 `git add -A` 從磁碟
+# 重新暫存了那個檔案——磁碟上它還是 644——於是 100644 被放了回去。那個 commit 帶著一個「樹裡並不
+# 存在的修正」出去了，而守衛早已對著一個不再存在的狀態回報了綠燈。第 1 條。
 if ! command -v git >/dev/null 2>&1 || [[ ! -d $ROOT/.git && ! -f $ROOT/.git ]]; then
     T300_SKIPPED=1
     skipt "T300 every tracked .zsh is executable in the index / 每一支被追蹤的 .zsh 在索引裡都可執行 (not a git checkout here / 這裡不是一個 git checkout)"
 else
-    _t300_all=$(git -C "$ROOT" ls-files -s '*.zsh' 2>/dev/null || true)
+    _t300_all=$(git -C "$ROOT" ls-tree -r HEAD --name-only 2>/dev/null \
+                | LC_ALL=C grep '\.zsh$' \
+                | while IFS= read -r _f; do git -C "$ROOT" ls-tree HEAD -- "$_f"; done || true)
     _t300_n=$(print -r -- "$_t300_all" | LC_ALL=C grep -c . || true)
     # Zero files means the query failed, not that the tree is clean. T218a.
     # 零個檔案代表那個查詢失敗了，不代表樹是乾淨的。T218a。
     if (( _t300_n < 4 )); then
         bad "T300a git ls-files returned $_t300_n .zsh entries, so nothing was checked / git ls-files 只回傳 $_t300_n 筆 .zsh，等於什麼都沒檢查"
     else
-        _t300_bad=$(print -r -- "$_t300_all" | LC_ALL=C awk '$1 != "100755" {print $1, $4}')
+        _t300_bad=$(print -r -- "$_t300_all" | LC_ALL=C awk '$1 != "100755" {print $1, $NF}')
         if [[ -z $_t300_bad ]]; then
-            ok "T300a all $_t300_n tracked .zsh files are 100755 / 全部 $_t300_n 支被追蹤的 .zsh 都是 100755"
+            ok "T300a all $_t300_n .zsh files in HEAD are 100755 / HEAD 裡全部 $_t300_n 支 .zsh 都是 100755"
         else
             bad "T300a not executable in the index: $(print -r -- "$_t300_bad" | tr '\n' ' ') / 索引裡不可執行的如上"
         fi
@@ -17646,8 +17656,8 @@ else
     # non-executable mode is the smallest input that answers "would it notice".
     # 這個比對必須會咬。餵它一行「ls-files 自己的格式、但模式不可執行」的資料，是能回答
     # 「它會不會察覺」的最小輸入。
-    _t300_probe=$(print -r -- "100644 0000000000000000000000000000000000000000 0	probe.zsh" \
-                  | LC_ALL=C awk '$1 != "100755" {print $1, $4}')
+    _t300_probe=$(print -r -- "100644 blob 0000000000000000000000000000000000000000	probe.zsh" \
+                  | LC_ALL=C awk '$1 != "100755" {print $1, $NF}')
     if [[ -n $_t300_probe ]]; then
         ok "T300b and a 100644 entry is reported when there is one / 而真的有一筆 100644 時，它會被回報"
     else

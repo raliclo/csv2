@@ -24,7 +24,7 @@ judgement the owning session is best placed to make.
 
 ## 1. 測試碰到的不是被測物（環境、工具，或 fixture 弄丟了那個屬性）
 
-**20 次 / 10 天**（2026-08-20、2026-08-27、2026-08-29、2026-09-02、2026-09-03、2026-09-06、
+**21 次 / 10 天**（2026-08-20、2026-08-27、2026-08-29、2026-09-02、2026-09-03、2026-09-06、
 2026-09-07、2026-09-08、2026-09-09、2026-09-10），單日最多 3 次（2026-08-27）。
 
 *這一行直到 2026-09-08 為止寫的是「9 次 / 6 天」，而 `mistakes_counter.csv2` 當時已經是 17 次 / 8 天。
@@ -57,6 +57,38 @@ T218a 是為了強制 zstat 規則而寫的——那條規則本身正是為了�
 每一次都回報通過。
 
 skill 裡有一模一樣的先例：「這一次發生在為了防它而寫的腳本裡」。
+
+### 第二十一次：守衛問了索引，而問題是「一份 clone 拿到什麼」——而索引在下一秒被改寫
+
+修第二十次時我打的是：
+
+```zsh
+git update-index --chmod=+x compile_csv2_linux.zsh   # 索引 → 100755
+# ...跑測試，T300a 通過...
+git add -A && git commit ...                          # 索引 ← 工作區（磁碟上仍是 644）
+```
+
+**`git add -A` 把它改了回去。** 那個 commit 帶著一段說明「已修」的訊息出去了，而樹裡沒有那個修正。
+
+而 T300a **通過了**——它是在 `git add -A` 之前跑的，讀的是當時的索引。**一道守衛對著一個下一條
+命令就會覆蓋掉的狀態回報了綠燈。**
+
+我在那個案例的註解裡寫著「看**索引**，不看工作區……一份 clone 拿到什麼」。那句話自己就矛盾：
+**一份 clone 拿到的是 commit。** 索引不是比工作區小的錯，它是三者裡唯一「會被下一條命令改寫」
+的那個——我挑中的正好是最不穩的那一個，還為它寫了理由。
+
+改成讀 `git ls-tree HEAD`。而順序也跟著改：**一個活在 commit 裡的性質，必須在 commit 之後驗，
+不是之前。**
+
+The twenty-first: fixing the twentieth, `git update-index --chmod=+x` set the index to 100755,
+T300a passed, and the `git add -A` in the same line re-staged the file from disk -- still 644
+-- putting 100644 back. The commit went out with a message describing a fix the tree did not
+contain, and the guard had already gone green against a state the next command destroyed. The
+case's own comment said "the INDEX, not the working tree ... what a clone gets", which
+contradicts itself: a clone gets the COMMIT. The index is not a smaller mistake than the
+working tree; it is the one of the three that the next command rewrites, and I picked it and
+wrote down a reason for it. Now it reads `git ls-tree HEAD`, and the order changed with it: a
+property that lives in a commit has to be verified after the commit, not before.
 
 ### 第二十次：唯一會執行它的地方，繞過了正要被測的那個性質
 
