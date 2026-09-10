@@ -593,7 +593,8 @@ booted at the time.
 
 ## 出貨流程只有一半是腳本 / Half the release is scripted
 
-**加入於 2026-09-08，出完 v0.1.0 之後。**
+**加入於 2026-09-08，出完 v0.1.0 之後。2026-09-10 由 `publish.zsh` 做掉了第 1、3–7 步；
+第 2 步（收集）刻意留在外面，理由見下。**
 
 `release.zsh` 負責「一個節點」那一段，而且做得夠嚴：拒絕不乾淨的工作區、拒絕
 「`--version` 與 HEAD 不符」的執行檔、指名檢查 `zstd`，最後解開封存、執行解開後的執行檔、
@@ -616,6 +617,33 @@ booted at the time.
 一支 `publish.zsh` 應該做完 1–7，而且要沿用 `release.zsh` 的態度：sha256 從封存**現算**、不從
 別處抄；formula 與 manifest 的 URL 與 hash **產生**而非手填；發布後那一次公開 URL 的重新驗證是
 流程的一部分，不是額外的好習慣。
+
+### 2026-09-10：`publish.zsh` 做掉了第 1、3–7 步
+
+預設是試跑，`--publish` 才會動。它在碰任何對外的東西之前先拒絕：工作區不乾淨、HEAD 領先
+origin、tag 已存在、沒有 `gh` 或未登入。每一份封存的 sha256 都**現算**，並與建置節點寫下的
+`.sha256` 比對（不一致代表檔案在傳輸中變了）；每一份都必須解得開、而且裡面有它宣稱的執行檔。
+發布之後從**公開 URL** 重新下載每一個 asset 再比一次——「`gh release create` 以 0 結束」說的是
+「上傳被接受了」，那與「陌生人下載到的就是我建出來的」是兩件事。第 6、7 步由 `rewrite_version`
+與 `rewrite_pair` 產生，然後讀回來；兩個檔案裡只要還留著任何一個不是本次版本的版本號就拒絕。
+
+**第 2 步（從三個節點收集）刻意不在裡面。** 它用的是這台機器的 multissh 設定——埠、主機名、
+`~/.multissh/generated/` 底下那兩個 config——那不是這個 repo 裡的腳本能知道的事。同樣不在
+裡面的還有建置與測試：一份封存必須在它的執行檔被建置**且**被測試的那台機器上產生，那正是
+`release.zsh` 已經在做的事。
+
+**尚未實測的那一半**：`--publish` 這條路只能靠真的發布一次來驗證，因此目前只走過 dry run
+（用三份形狀正確的假 0.1.1 封存，六個步驟都列了出來）。風險最高的兩支——`rewrite_version` 與
+`rewrite_pair`——是直接在 `Formula/csv2.rb` 與 `scoop/csv2.json` 的**複本**上跑過並檢查產物的，
+其中一次就抓到了一個會弄爛 JSON 的缺陷（見 `mistakes.md` 第 6 條）。剩下沒被執行過的是
+`gh release create`、tag 推送，以及公開 URL 的重新下載。
+
+`publish.zsh` now does steps 1 and 3-7, dry-run by default. Step 2 -- collecting the archives
+from three nodes -- is deliberately left out: it uses this machine's multissh setup, which a
+script in this repository cannot know. Building and testing stay out for the same reason
+`release.zsh` exists. Untested: the `--publish` path can only be verified by publishing, so
+only the dry run has been exercised; the two riskiest functions were run against COPIES of the
+package files and their products inspected, which is how a JSON-mangling defect was caught.
 
 Half the release is scripted. `release.zsh` covers one node and is strict about
 it; the other seven steps -- tag, collect from three nodes, re-checksum after
