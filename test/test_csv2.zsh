@@ -18115,7 +18115,14 @@ else
     if [[ -r $ROOT/build_id.zsh ]]; then
         _t303_want=$(zsh -c "source '$ROOT/build_id.zsh'; csv2_build_id '$ROOT'" 2>/dev/null)
         _t303_hd=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null)
-        if [[ -n $_t303_want && -n $_t303_hd && $_t303_id == *"$_t303_hd"* ]]; then
+        # Only when the tree is CLEAN. A dirty tree makes the rule say
+        # `-dirty` while a binary built a moment earlier does not, and that
+        # difference is about the tree's state, not about the rule -- the same
+        # moving target T303a's first version compared against.
+        # 只在工作區**乾淨**時比。工作區髒的時候，規則會說 `-dirty`，而一分鐘前建好的執行檔不會，
+        # 而那個差異講的是工作區的狀態、不是那條規則——與 T303a 第一版比對的是同一個會動的目標。
+        _t303_clean=$(git -C "$ROOT" status --porcelain 2>/dev/null | LC_ALL=C grep -c . || true)
+        if [[ -n $_t303_want && -n $_t303_hd && $_t303_id == *"$_t303_hd"* && $_t303_clean == 0 ]]; then
             # A build of this commit: the id must be what the rule produces.
             # 這是這個 commit 的建置：那個 id 必須就是規則產生的東西。
             if [[ $_t303_id == $_t303_want ]]; then
@@ -18129,7 +18136,7 @@ else
             # package a binary in that state, which is where that belongs.
             # 這不是這個 commit 的建置，因此無從比對值，而閉嘴是誠實的回答。release.zsh 會拒絕
             # 打包一個處於那個狀態的執行檔，那件事本來就屬於它。
-            ok "T303d the binary is not a build of this commit, so its id is not compared / 這個執行檔不是這個 commit 的建置，因此不比對它的 id"
+            ok "T303d the binary is not a build of this commit, or the tree has changed since; its id is not compared / 這個執行檔不是這個 commit 的建置、或工作區在那之後變過；因此不比對它的 id"
         fi
     fi
 
@@ -18161,6 +18168,82 @@ else
         else
             bad "T303c compile_csv2_win.bat does not ask for the short hash, so a tagged Windows build would drop it / batch 那一份沒有問短雜湊，於是在 tag 上的 Windows 建置會把它弄丟"
         fi
+    fi
+fi
+
+echo
+echo "--- T304: release.zsh takes the version from the binary / T304：release.zsh 的版本來自執行檔 ---"
+# It was `VERSION=${VERSION:-0.1.0}`, a constant. On the day v0.1.1 was cut it
+# packaged a binary reporting `csv2 0.1.1` into an archive named
+# `csv2-0.1.0-macos-arm64.tar.zst`, reported "verified: extracted, ran, and read
+# a CSV" -- true, every check held and none of them was the name -- and
+# overwrote the local copy of the PUBLISHED v0.1.0 archive on the way. QI.
+# 它原本是 `VERSION=${VERSION:-0.1.0}`，一個常數。在 v0.1.1 被打出來的那天，它把一個回報
+# `csv2 0.1.1` 的執行檔打包成一份叫 `csv2-0.1.0-macos-arm64.tar.zst` 的封存，回報「已驗證：解開、
+# 執行過，而且讀得了一個 CSV」——那是真的，它檢查的每一件事都成立，而其中沒有一件是那個名字——
+# 並且順手覆蓋掉了**已發布**的 v0.1.0 封存的本機複本。QI。
+#
+# A constant that is only wrong when the version changes is wrong at the one
+# moment it matters, which is why this is checked rather than remembered.
+# 一個「只有在版本改變時才會錯」的常數，會在它唯一要緊的那一刻出錯——那正是這件事要用檢查而不是
+# 用記得來處理的原因。
+if [[ ! -r $ROOT/release.zsh ]]; then
+    T304_SKIPPED=1
+    skipt "T304 release.zsh takes the version from the binary / release.zsh 的版本來自執行檔 (no release.zsh in this tree / 這棵樹裡沒有 release.zsh)"
+else
+    # No version-shaped literal may be assigned to VERSION. `${VERSION:-}` is
+    # the empty default and is what the fixed line looks like.
+    # 不得把一個「版本形狀」的字面值指派給 VERSION。`${VERSION:-}` 是空的預設值，也就是修好之後
+    # 那一行的樣子。
+    _t304_lit=$(LC_ALL=C grep -nE '^VERSION=.*[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/release.zsh" || true)
+    if [[ -z $_t304_lit ]]; then
+        ok "T304a release.zsh assigns no version literal to VERSION / release.zsh 沒有把版本字面值指派給 VERSION"
+    else
+        bad "T304a a version literal at: $_t304_lit / 版本字面值如上"
+    fi
+
+    # The extraction EXTRACTED from the script, not copied. A copy would be a
+    # second place to forget, and this file already has that lesson twice.
+    # 那個抽取式是**從腳本裡取出來的**，不是抄的。抄一份就是第二個會忘記更新的地方，而這個檔案
+    # 已經有兩次這個教訓了。
+    _t304_expr=$(LC_ALL=C grep -m1 'VERSION=\${\${(z)' "$ROOT/release.zsh" | LC_ALL=C sed 's/^[[:space:]]*//')
+    if [[ $_t304_expr != *'(z)'* ]]; then
+        bad "T304b could not extract the version expression from release.zsh, got [$_t304_expr] / 從 release.zsh 取不出那個抽取式"
+    else
+        _t304_bad=()
+        for _t304_case in 'csv2 0.1.1 (v0.1.1 / 29667b7)|0.1.1' \
+                          'csv2 0.1.0 (8d5600e)|0.1.0' \
+                          'csv2 12.34.56 (unknown)|12.34.56' ; do
+            _rv=${_t304_case%|*}
+            _want=${_t304_case##*|}
+            eval "$_t304_expr"
+            [[ $VERSION == $_want ]] || _t304_bad+=("[$_rv] gave [$VERSION] wanted [$_want]")
+        done
+        unset VERSION _rv
+        if (( ${#_t304_bad} == 0 )); then
+            ok "T304b the expression reads the version out of every --version shape / 那個抽取式從每一種 --version 形狀裡都讀得出版本號"
+        else
+            bad "T304b ${_t304_bad[1]} / 判斷錯誤如上"
+        fi
+    fi
+
+    # And it must REFUSE rather than guess when the format is not what it
+    # expects. The check in release.zsh is `!= <->.<->.<->`.
+    # 而在格式不如預期時，它必須**拒絕**而不是用猜的。release.zsh 裡的判斷是 `!= <->.<->.<->`。
+    if LC_ALL=C grep -q 'refusing to name an archive by guessing' "$ROOT/release.zsh"; then
+        ok "T304c and it refuses rather than guessing when it cannot read one / 而讀不出來時它會拒絕，不會用猜的"
+    else
+        bad "T304c release.zsh has no refusal for an unreadable version / release.zsh 沒有「讀不出版本號就拒絕」這道守衛"
+    fi
+
+    # Making an archive must not overwrite one. `rm -rf` on the archive path is
+    # what destroyed a published artefact's local copy.
+    # 「產生一份封存」不得覆寫另一份。對封存路徑下 `rm -rf`，正是一份已發布產物的本機複本被毀掉
+    # 的方式。
+    if LC_ALL=C grep -q 'already exists; remove it first' "$ROOT/release.zsh"; then
+        ok "T304d and it refuses to overwrite an archive that already exists / 而且它拒絕覆寫一份已經存在的封存"
+    else
+        bad "T304d release.zsh does not refuse to overwrite an existing archive / release.zsh 不會拒絕覆寫既有的封存"
     fi
 fi
 
@@ -18331,6 +18414,7 @@ fi
 (( ${T300_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T302_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T303_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T304_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode

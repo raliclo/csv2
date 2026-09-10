@@ -32,7 +32,41 @@ TRAPZERR() {
 HERE=${0:A:h}
 cd -- "$HERE"
 
-VERSION=${VERSION:-0.1.0}
+# The version comes from the BINARY, not from a constant written here. This
+# line said `${VERSION:-0.1.0}` until 2026-09-10, and on the day v0.1.1 was cut
+# it packaged a binary reporting `csv2 0.1.1` into an archive named
+# `csv2-0.1.0-macos-arm64.tar.zst`, said "verified: extracted, ran, and read a
+# CSV" -- which was TRUE, every check held and none of them was the name -- and
+# overwrote the local copy of the PUBLISHED v0.1.0 archive on the way. QI.
+#
+# A constant that is only wrong when the version changes is wrong at the one
+# moment it matters. Same family as QC and QD: what this script knew about what
+# it was releasing came from inside itself rather than from the thing it was
+# releasing.
+#
+# 版本來自**執行檔**，不是來自寫在這裡的一個常數。這一行直到 2026-09-10 為止寫的是
+# `${VERSION:-0.1.0}`，而在 v0.1.1 被打出來的那天，它把一個回報 `csv2 0.1.1` 的執行檔打包成一份
+# 叫 `csv2-0.1.0-macos-arm64.tar.zst` 的封存，然後說「已驗證：解開、執行過，而且讀得了一個
+# CSV」——那是**真的**，它檢查的每一件事都成立，而其中沒有一件是「這個名字對不對」——並且順手
+# 覆蓋掉了**已發布**的 v0.1.0 封存的本機複本。QI。
+#
+# 一個「只有在版本改變時才會錯」的常數，會在它唯一要緊的那一刻出錯。與 QC、QD 同一族：這支腳本
+# 對「它正在發行什麼」的認識，來自它自己，而不是來自它正在發行的那個東西。
+VERSION=${VERSION:-}
+if [[ -z $VERSION ]]; then
+    _rv=$("$BIN" --version 2>/dev/null)
+    # `csv2 <version> (<id>)`. Taken as the second field and then REQUIRED to
+    # look like a version, so a changed format gives a refusal rather than a
+    # plausible wrong name.
+    # `csv2 <版本> (<id>)`。取第二個欄位，然後**要求**它長得像一個版本號——這樣一來，格式改變會
+    # 得到一則拒絕，而不是一個看起來合理的錯名字。
+    VERSION=${${(z)_rv}[2]}
+    if [[ $VERSION != <->.<->.<-> ]]; then
+        print -u2 -- "cannot read a version out of [$_rv]; refusing to name an archive by guessing"
+        print -u2 -- "從 [$_rv] 讀不出版本號；拒絕用猜的方式為封存命名"
+        exit 1
+    fi
+fi
 DIST=$HERE/dist
 
 # ---------------------------------------------------------------------
@@ -151,7 +185,19 @@ fi
 # 打包。封存裡只有一個目錄，這樣解開時不會把檔案灑進呼叫端的目前目錄——那是
 # 「`tar xf` 是安全的」與「有人得手動收拾」之間的差別。
 # ---------------------------------------------------------------------
-rm -rf -- "$DIST/$STEM" "$ARCHIVE" "$ARCHIVE.sha256"
+# Refuse to overwrite. `rm -rf` on the archive path is how the local copy of
+# the PUBLISHED v0.1.0 macOS archive was destroyed on 2026-09-10, together with
+# its .sha256 -- leaving a self-consistent pair that was no longer the file
+# anyone had downloaded. Making an archive has no reason to overwrite one.
+# 拒絕覆寫。對封存路徑下 `rm -rf`，正是 2026-09-10 那份**已發布**的 v0.1.0 macOS 封存的本機複本
+# 連同它的 .sha256 一起被毀掉的方式——留下一對彼此自洽、卻已經不是任何人下載到的那個檔案。
+# 「產生一份封存」這件事沒有任何理由需要覆寫另一份。
+if [[ -e $ARCHIVE ]]; then
+    print -u2 -- "$ARCHIVE already exists; remove it first if you mean to replace it"
+    print -u2 -- "$ARCHIVE 已經存在；若真要取代它，請先自行刪除"
+    exit 1
+fi
+rm -rf -- "$DIST/$STEM"
 mkdir -p -- "$DIST/$STEM"
 cp -- "$BIN" "$DIST/$STEM/$BIN_NAME"
 cp -- "$HERE/LICENSE" "$HERE/README.md" "$HERE/README.zh-TW.md" "$DIST/$STEM/"

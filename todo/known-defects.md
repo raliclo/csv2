@@ -12710,3 +12710,55 @@ describes text the tree did not contain. The code fix was in; only the record wa
 is the second time in one day -- QE's mode bit was the first -- and both have the same cause: a
 single command line chaining an edit to a commit, where a failed edit does not stop the commit.
 Both were found by going to look at the thing afterwards, not by a command failing.
+
+## QI. `release.zsh` 的版本號是寫死的，於是它用 0.1.1 的執行檔產生了一個叫 0.1.0 的封存——並覆蓋掉已發布的那一份
+
+**2026-09-10 發現，就在出 v0.1.1 的當中。已修。**
+
+```zsh
+VERSION=${VERSION:-0.1.0}     # release.zsh:35
+```
+
+它**不問執行檔**。在 tag `v0.1.1` 上建置之後：
+
+```
+$ ./release/csv2 --version
+csv2 0.1.1 (v0.1.1 / 29667b7)
+$ ./release.zsh
+/Volumes/LinuxCS/sos/csv2/dist/csv2-0.1.0-macos-arm64.tar.zst      ← 名字說 0.1.0
+verified: extracted, ran, and read a CSV                            ← 而且它「驗證」通過了
+```
+
+**封存的名字與它的內容不一致，而那句 `verified` 是真的**——它確實解開了、執行了、讀了一個 CSV。
+它驗證的每一件事都成立，只是沒有一件是「這個名字對不對」。
+
+而它同時**覆蓋掉了 `dist/csv2-0.1.0-macos-arm64.tar.zst`**——那是 v0.1.0 已發布的那一份的本機
+複本——連同它的 `.sha256`。兩者仍然自洽，但已經不是被發布出去的那個檔案。
+
+### 這一條與 QC／QD 是同一族
+
+那三條講的都是同一件事：**這支腳本對「它正在發行什麼」的認識，來自它自己寫在裡面的常數，而不是
+來自那個執行檔。** QC 是「HEAD 是什麼」寫死了猜法；QD 是「build id 是什麼」取決於環境而非原始碼；
+QI 是「版本是什麼」直接寫成一個字面值。
+
+**而它在 v0.1.0 那次不會出事**，因為那時常數剛好是對的。一個「只有在版本改變時才會錯」的常數，
+會在它唯一要緊的那一刻出錯。
+
+### 修法
+
+1. 版本**從執行檔取得**：`csv2 --version` 印的是 `csv2 <版本> (<id>)`，取第二個欄位，並要求它
+   長得像一個版本號（`<數字>.<數字>.<數字>`），否則拒絕——不是切了就用。
+2. **拒絕覆蓋 `dist/` 裡已存在的封存。** 那正是它蓋掉一份已發布產物的原因，而「產生一份封存」
+   這個動作沒有任何理由需要覆寫。
+3. 被蓋掉的那一份從**公開 URL** 重新下載回來，因為那才是權威的複本。
+
+`release.zsh` hardcoded `VERSION=${VERSION:-0.1.0}`. Built at tag v0.1.1 from a binary reporting
+`csv2 0.1.1`, it produced `csv2-0.1.0-macos-arm64.tar.zst` -- a name disagreeing with its
+contents -- and said `verified: extracted, ran, and read a CSV`, which was TRUE: everything it
+checked held, and none of it was the name. It also overwrote the local copy of the published
+v0.1.0 macOS archive and its .sha256, leaving a self-consistent pair that is no longer the
+published file. Same family as QC and QD: what this script knows about what it is releasing came
+from a constant written inside it rather than from the binary. The constant was right for
+v0.1.0, so it could only be wrong at the moment it mattered. Fixed by taking the version from
+`--version` and requiring it to look like one, refusing to overwrite an archive that already
+exists in dist/, and re-downloading the clobbered file from the public URL.
