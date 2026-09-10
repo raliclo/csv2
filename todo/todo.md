@@ -721,7 +721,62 @@ after that first one was sound and faithfully inherited a false premise. The
 lesson is one sentence: ask the machine, not the file that describes it. It was
 booted at the time.
 
-## v0.1.1 要做的：aarch64 與另外三個平台一起出
+## ~~v0.1.1 要做的：aarch64 與另外三個平台一起出~~ 已出貨
+
+### 2026-09-10：v0.1.1 出了，四個平台
+
+`https://github.com/raliclo/csv2/releases/tag/v0.1.1`
+
+| 平台 | 建置於 | build id |
+|---|---|---|
+| macOS arm64 | 本機 | `v0.1.1 / 4ae95f6` |
+| Linux aarch64 | guest VM | `v0.1.1 / 4ae95f6` |
+| Linux x86_64 | WSL2 | `v0.1.1 / 4ae95f63` |
+| Windows x86_64 | Ralic-W11 | `v0.1.1 / 4ae95f6` |
+
+**四份全部在 tag 上建置**，各自在「跑那個平台測試的那台機器」上；每一份的 sha256 都由產生它的
+節點算一次、由這台機器獨立再算一次，兩者一致才收下。發布後每一個 asset 又從公開 URL 重新下載
+比對過一次。
+
+四節點在同一個 commit 上的測試：macOS 1385/0/1、WSL2 1380/0/1、guest 1360/0/9（T47 十二份輸出
+逐位元相同）、Windows 1346/0/16。
+
+### 出貨當中抓到的三件事
+
+**沒有一件是靠推理抓到的，三件都是機器說的。**
+
+1. **QI**：`release.zsh` 的版本號寫死（`VERSION=${VERSION:-0.1.0}`），於是它用一個 0.1.1 的執行檔
+   產生了一份叫 `csv2-0.1.0-macos-arm64.tar.zst` 的封存，並回報「已驗證」——**那是真的**，它檢查
+   的每一件事都成立，而其中沒有一件是那個名字。它同時覆蓋掉了已發布的 v0.1.0 封存的本機複本
+   （已從公開 URL 還原）。
+2. **`compile_csv2_win.bat` 裡一個多餘的 `)`**：它把 `if (` 區塊提前關掉，`_described` 變空，
+   build id 退回純短雜湊——而那**仍然含有一個 commit**，所以形狀檢查（T303a）通過而值是錯的。
+   T303d 因此改為比對**值**。
+3. **`git fetch --tags` 在遠端 tag 移動過時會失敗**（拒絕覆蓋既有 tag），而我用 `&&` 串接又把訊息
+   丟掉了——於是兩個節點的 merge 從來沒執行，卻回報 `at=v0.1.1`。要 `--force`。
+
+### `publish.zsh --publish` 那條路現在走過了
+
+先前只走過 dry run。這一次 `gh release create`、tag 推送、公開 URL 重新下載、Formula／scoop 的
+改寫與讀回，全部實際執行過。**第 2 步（從各節點收集封存）仍然是手動的**，理由不變：那用的是這台
+機器的 multissh 設定。
+
+順帶記下收集時的兩件事：multiscp 對 Windows 節點要用 `C:/Users/...` 這種原生路徑形式，`/c/Users/...`
+會**靜默地什麼都不做**（沒有錯誤、沒有完成訊息）；而 IPv6 位址要寫成 `[addr]:path`。
+
+v0.1.1 shipped on four platforms, all four archives built AT the tag on the machine that runs
+that platform's tests, each sha256 computed by the building node and independently by this one,
+and every asset re-downloaded from its public URL afterwards. Three defects were caught during
+the release and none by reasoning: release.zsh's hardcoded version naming a 0.1.1 build 0.1.0
+while reporting "verified" (QI); a stray `)` in the batch build id, whose fallback still
+contained a commit so the shape check passed on a wrong value; and `git fetch --tags` failing
+when a remote tag has moved, chained with `&&` and its message discarded, so two nodes never
+merged while reporting the tag they were still on.
+
+---
+
+### 原本的計畫（保留）
+
 
 **2026-09-10 決定。** aarch64 的原始碼與測試在 guest 上都已驗證（T47 通過、套件在 guest 內
 執行），但 **v0.1.0 不補封存**。理由是 QD：`--version` 內嵌的 build id 取決於「建置時有沒有
