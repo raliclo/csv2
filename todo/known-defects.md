@@ -12320,6 +12320,17 @@ csv2 0.1.0 (8d5600e)
 
 **這條先寫下來、不先修。** 它會改變一個對外可見的字串，而已經有三份封存帶著舊的形式出去了。
 
+### 2026-09-10 的決定
+
+**維持不修**，等下一次出貨前一併決定。同時決定 **aarch64 不補進 v0.1.0，改在 v0.1.1 與另外三個
+平台一起出**——那時四份都在同一個 tag 上、用修好的 `release.zsh` 建，版本字串自然一致，也就不必
+在 release notes 裡解釋一個沒有必要存在的差異。v0.1.0 維持三個平台。
+
+Decided 2026-09-10: leave QD unfixed and settle it before the next release. aarch64 is NOT
+back-filled into v0.1.0; it ships in v0.1.1 alongside the other three, built at one tag with
+the fixed release.zsh, so the version strings agree without a note explaining why they do not.
+v0.1.0 stays at three platforms.
+
 The embedded build id is not reproducible: `git describe` answers according to whether a tag
 existed when the build ran, not according to the source. The three published v0.1.0 archives
 report `csv2 0.1.0 (8d5600e)` because they were built before the tag was cut; building the

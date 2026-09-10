@@ -596,6 +596,24 @@ after that first one was sound and faithfully inherited a false premise. The
 lesson is one sentence: ask the machine, not the file that describes it. It was
 booted at the time.
 
+## v0.1.1 要做的：aarch64 與另外三個平台一起出
+
+**2026-09-10 決定。** aarch64 的原始碼與測試在 guest 上都已驗證（T47 通過、套件在 guest 內
+執行），但 **v0.1.0 不補封存**。理由是 QD：`--version` 內嵌的 build id 取決於「建置時有沒有
+tag」，所以現在補建的 aarch64 會回報 `(v0.1.0)`，而已發布的三份是 tag 之前建的、回報 `(8d5600e)`
+——同一份原始碼，兩種字串，而重建改不了。
+
+**v0.1.1 時四個平台在同一個 tag 上、用修好的 `release.zsh`（QC）一起建**，版本字串自然一致。
+屆時 aarch64 那一份的產生路徑是：在 guest 內跑 `./release.zsh`，**只回傳一行 sha256**，封存用
+`multiscp` 拉回，host 端再算一次比對——兩條獨立的通道都要說同一個數字才算數。那條命令輸出通道
+會截斷（見 `blind-test-flow.md`），所以「短到截不掉、而且截掉了看得出來」是設計的一部分。
+
+Decided 2026-09-10: aarch64 ships in v0.1.1 with the other three rather than being back-filled
+into v0.1.0, because QD means an archive built now cannot carry its siblings' version string.
+The route is: run release.zsh in the guest returning ONE line of sha256, pull the archive with
+multiscp, recompute on the host and compare -- two independent channels having to agree,
+because the command-output channel truncates.
+
 ## 出貨流程只有一半是腳本 / Half the release is scripted
 
 **加入於 2026-09-08，出完 v0.1.0 之後。2026-09-10 由 `publish.zsh` 做掉了第 1、3–7 步；
