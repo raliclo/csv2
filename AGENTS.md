@@ -235,6 +235,17 @@ that one case and nothing else, because a rule written next to its first
 application is a note about that application. It is here now because this is a
 file that gets read before the work, not during it.
 
+**The ban covers documents too, and that half survived until 2026-09-10.** The
+scan enforcing it read `.zsh` files, so a reproduction in
+`todo/known-defects.md` kept a `$ shasum -a 256 ...` line -- written six days
+before the rule existed -- and nothing objected, because it was not code. A
+reproduction that cannot be RUN in this tree is worse than none: that file says
+the reproductions are the only way to tell later whether a fix has regressed,
+and one needing Perl in a tree without Perl quietly stops being that. T249d now
+reads the documents, and it looks for an INVOCATION rather than a mention --
+a line starting with a shell prompt, or with the tool followed by a flag --
+because prose about this ban is everywhere on purpose and must not be flagged.
+
 ## 不用 Perl，因此不用 `shasum`
 
 **這棵樹上任何東西都不得依賴 Perl 或 Python。** aarch64 guest 是每一次變更都要驗證的四個節點
@@ -249,6 +260,14 @@ file that gets read before the work, not during it.
 `openssl dgst -sha256`——原廠 macOS 的 /usr/bin/openssl 就有。而要斷言「一個檔案沒有被改動」時，
 **根本不要對它取雜湊**：先 `cp` 一份，再用 `cmp -s`。對同一個路徑取兩次雜湊，會在雜湊工具缺席時
 通過，因為空字串等於空字串——T246a 在 guest 上就是這樣，回報 PASS 而什麼都沒量。
+
+**這條禁令也涵蓋文件，而那一半活到了 2026-09-10。** 執行它的掃描讀的是 `.zsh`，
+於是 `todo/known-defects.md` 裡一段重現保留著 `$ shasum -a 256 …` 這一行——寫於這條規則存在的
+六天之前——而沒有任何東西反對，因為它不是程式碼。**一段在這棵樹裡跑不起來的重現，比沒有重現
+更糟**：那個檔案自己說那些重現是「日後判斷修正有沒有退化的唯一依據」，而一段需要 Perl 的重現，
+在一棵沒有 Perl 的樹裡會安靜地不再是那個依據。T249d 現在會讀那些文件，而且它找的是**呼叫**而
+不是**提及**——一行以 shell 提示符開頭，或以那個工具名開頭且後面跟著旗標——因為談論這條禁令的
+散文到處都是，那是刻意的，絕不能被標記。
 
 **這條規則直到 2026-09-06 為止，只活在 T68 旁邊的一段註解裡。** 那段註解寫出了理由（guest 上沒有
 perl 或 python），而它只約束了那一個案例、沒有約束別的，因為**一條寫在它第一個應用旁邊的規則，

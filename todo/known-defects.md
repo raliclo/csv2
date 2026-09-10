@@ -7779,11 +7779,15 @@ $ csv2 -r --json --zh -i bi.csv2      # --zh 什麼也沒改變，rc=0，安靜
 同一回合,經親手重現。同樣 45 萬筆、逐位元相同的輸出:
 
 ```console
-$ shasum -a 256 <(csv2 -r -i big.csv) <(csv2 -r -i big.csv2)   # 相同
+$ openssl dgst -sha256 <(csv2 -r -i big.csv) <(csv2 -r -i big.csv2)   # 兩行相同
 $ # best of 5
 -r      .csv  : 422 ms      -r      .csv2 : 767 ms      （1.82×，+345 ms）
 --json  .csv  : 1335 ms     --json  .csv2 : 1719 ms     （+384 ms）
 ```
+
+（2026-08-31 實際跑的是 `shasum -a 256`；那早於 2026-09-06 寫下的「不用 Perl」規則。
+指令換成 `openssl dgst -sha256` 是為了讓這段重現在這棵樹裡還跑得起來——`shasum` 在 macOS 上是
+一支 Perl 腳本。兩者對同一份輸入給出相同的摘要，被重現的那件事沒有改變。）
 
 差值大致是平的,因此那是「每個值都要付的工」而不是輸出量。兩個 fixture 裡**一個反斜線都沒有**,
 所以付的是「掃描」的錢,不是「解跳脫」的錢。

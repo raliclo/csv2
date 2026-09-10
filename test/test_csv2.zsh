@@ -14571,6 +14571,61 @@ else
     bad "T249b the scan missed a planted invocation, which is how its first version passed / 掃描漏掉了一個植入的呼叫，而那正是它第一版通過的方式"
 fi
 
+# T249d. The .zsh scan above cannot see a COMMAND IN A DOCUMENT. On 2026-09-10
+# the tree had exactly one: `$ shasum -a 256 <(...)` inside a reproduction in
+# todo/known-defects.md, written 2026-08-31, six days before the ban was
+# written down. Prose about the ban is everywhere and must not be flagged --
+# AGENTS.md, mistakes.md and this file all discuss `sha`+`sum` at length -- so
+# the shape checked is INVOCATION, not mention: a line that starts with a shell
+# prompt, or one that starts with the tool followed by a flag.
+# T249d。上面那個 .zsh 掃描看不到**文件裡的一行指令**。2026-09-10 這棵樹裡恰好有一處：
+# todo/known-defects.md 的一段重現裡有 `$ shasum -a 256 <(...)`，寫於 2026-08-31，比那條禁令
+# 被寫下來早六天。而談論這條禁令的散文到處都是、絕不能被標記——AGENTS.md、mistakes.md 與這個
+# 檔案自己都大篇幅討論它——所以檢查的形狀是**呼叫**而不是**提及**：一行以 shell 提示符開頭，
+# 或以那個工具名開頭且後面跟著一個旗標。
+#
+# A reproduction that cannot be run in this tree is worse than no reproduction:
+# known-defects.md says the reproductions are the only way to tell later
+# whether a fix has regressed, and one that needs Perl in a tree without Perl
+# quietly stops being that.
+# 一段在這棵樹裡跑不起來的重現，比沒有重現更糟：known-defects.md 說那些重現是「日後判斷修正有
+# 沒有退化的唯一依據」，而一段需要 Perl 的重現，在一棵沒有 Perl 的樹裡會安靜地不再是那個依據。
+_t249d_docs=($ROOT/*.md(N) $ROOT/todo/*.md(N) $ROOT/plan/*.md(N) $ROOT/verifications/*.md(N) $ROOT/csv2view/*.md(N))
+# Two files is a legitimate count: the payload sent into the guest carries only
+# the two READMEs. Zero means the glob failed. T218a.
+# 兩個檔案是合理的數量：送進 guest 的 payload 只帶了兩份 README。零個代表 glob 壞了。T218a。
+if (( ${#_t249d_docs} == 0 )); then
+    bad "T249d the glob found no .md files, so nothing was scanned / glob 一個 .md 都沒找到，等於什麼都沒掃"
+else
+    _t249d_re=""
+    for _b in $_ban; do
+        [[ -z $_t249d_re ]] || _t249d_re+="|"
+        _t249d_re+="$_b"
+    done
+    _t249d_hits=$(LC_ALL=C grep -nE "^\\\$ .*(${_t249d_re})[[:space:]]|^[[:space:]]*(${_t249d_re})[[:space:]]+-" \
+                  $_t249d_docs 2>/dev/null || true)
+    if [[ -z $_t249d_hits ]]; then
+        ok "T249d no document invokes a banned tool in a command a reader would copy / 沒有文件在「讀者會照抄的指令」裡呼叫被禁的工具"
+    else
+        bad "T249d banned tool invoked in a document at: $(print -r -- "$_t249d_hits" | head -2 | tr '\n' ' ') / 文件裡呼叫了被禁的工具"
+    fi
+    # It must bite, and on the shape that actually occurred rather than an
+    # easier one. The line is ASSEMBLED so this file does not carry it. KF.
+    # 它必須會咬，而且咬的是「真的發生過」的那個形狀，不是一個比較好抓的形狀。那一行是**組出來
+    # 的**，這個檔案才不會自己帶著它。KF。
+    print -r -- "\$ ${_ban[1]} -a 256 <(cmd) <(cmd)" > "$TMP/t249d.md"
+    print -r -- "${_ban[2]} -e 'print 1'" >> "$TMP/t249d.md"
+    print -r -- "談論 ${_ban[1]} 的散文，不應該被標記" >> "$TMP/t249d.md"
+    _t249d_probe=$(LC_ALL=C grep -cE "^\\\$ .*(${_t249d_re})[[:space:]]|^[[:space:]]*(${_t249d_re})[[:space:]]+-" \
+                   "$TMP/t249d.md" 2>/dev/null)
+    if [[ $_t249d_probe == 2 ]]; then
+        ok "T249d2 and it catches both invocation shapes while leaving the prose line alone / 而它抓到兩種呼叫形狀，並放過那行散文"
+    else
+        bad "T249d2 the probe should have matched exactly 2 of 3 lines, matched $_t249d_probe / 探針應該在三行裡命中兩行，實際命中 $_t249d_probe"
+    fi
+    rm -f "$TMP/t249d.md"
+fi
+
 # python3 is allowed, but only where its absence is handled. Any file invoking
 # it must also guard it -- otherwise the guest, which has no python3, loses the
 # case silently rather than skipping it visibly.
