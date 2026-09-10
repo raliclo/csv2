@@ -516,6 +516,33 @@ the four nodes a case that silently stops running is visible only as a moved tot
 proxy rather than a measurement. The script belongs to the parent project's tree, so this is a
 suggestion to report there, not something to change from here.
 
+## 待確認：`run_csv2_test.zsh` 免疫於那個通道問題嗎
+
+**2026-09-10 開啟，等 guest VM 回來。**
+
+走 `helper/run_remote.zsh guest` 跑完整套件，得到 408 行輸出，而其中的失敗訊息斷在字中間、只剩一個
+字元、是空字串。那些案例檢查的都是命令的**輸出**，所以那是通道在截斷，不是 csv2 變了。母專案那個
+session 從另一側獨立撞到同一件事（大量輸出後掛住 500 秒），並已表示會查那支 helper 並替它加上時間
+上限。
+
+**要做的**：VM 回來後，在同一個 commit 上走 `sos/test_submodules/run_csv2_test.zsh` 跑一次。
+
+- **通過** → 通道問題定案，而且「那條路為什麼存在」有了證據。**那時要把理由連同那四行證據補進
+  `run_csv2_test.zsh` 的註解裡**——對方明確說了，那個理由目前不存在於任何檔案，所以下一個人還是會
+  選看起來比較方便的 `run_remote.zsh`。
+- **不通過** → 那就不是通道，我得回頭逐條查那些失敗。
+
+**在它有結果之前，不要把那 408 行裡的任何一條記成缺陷。** 它們每一則都言之有物，而那正是它們危險的
+地方。
+
+Whether `run_csv2_test.zsh` is immune to the channel that truncated a full suite
+run through `helper/run_remote.zsh guest` is not established. Run it on the same
+commit when the VM returns. If it passes, the reason that path exists is proven
+and belongs in that file's comments -- it is currently written down nowhere,
+which is why the more convenient route gets picked. Until then, record none of
+those 408 lines as defects: each one argues for itself, and that is exactly what
+makes them dangerous.
+
 ## aarch64 Linux 的封存還沒補上，而我先前寫的理由是假的
 
 **2026-09-09。**

@@ -330,6 +330,56 @@ has been paid for four times. Every step also invalidates the ones after it --
 a failure on the Mac makes the other three meaningless, so there is no reason
 to spend them.
 
+**Reach the aarch64 guest through `sos/test_submodules/run_csv2_test.zsh`, not
+through a shell into it.** The parent project also offers
+`helper/run_remote.zsh guest '<cmd>'`, which is one line and looks like the
+obvious choice. On 2026-09-10 a full suite run through it produced 408 lines of
+output in which the failures were not failures:
+
+```
+T168b  missing 'CSV2_MAX_BUFFER_RECORDS' in: csv2: -B 6 exceeds the buffered-record lim
+T171a  missing 'single-threaded' in: c
+T170b2 missing 'unterminated record' in:
+T169a  missing '\x1B' in: 2026-09-09T23:40:48.184Z INFO  csv2 -update …
+```
+
+Cut mid-word, cut to one character, empty, and one case capturing a different
+line entirely. Every one of those cases inspects the OUTPUT of a command, so a
+channel that truncates command substitution turns correct behaviour into a page
+of specific, plausible-looking defects. **That is the worst kind to receive:
+each message argues for itself.** Acting on them means changing correct code
+until the wrong thing passes.
+
+The session that owns that helper hit the same channel from the other side the
+same morning -- a large-output command that ran 500 seconds and returned
+nothing, then a zero-output command immediately after it that also hung. Hangs
+there, truncation here; large output in both cases. Two independent shapes
+ruled out two explanations: it is not csv2 behaving differently, and it is not
+one test's shape.
+
+**What is NOT established yet is that `run_csv2_test.zsh` is immune.** It takes
+a different route -- a payload tar and the serial console -- and the guess is
+that this is why it exists, but nobody wrote that reason down and a guess is not
+a reason. When a run through it passes on the same commit, the reason belongs in
+that file's comments, with these four lines as the evidence. Until then this
+paragraph says what was seen, not what it means.
+
+**經由 `sos/test_submodules/run_csv2_test.zsh` 抵達 aarch64 guest，不要用一個進去它的 shell。**
+母專案另外提供 `helper/run_remote.zsh guest '<cmd>'`，一行就能用，看起來是理所當然的選擇。
+2026-09-10 一次完整的測試套件走它，吐出 408 行，而其中的失敗不是失敗：訊息斷在字中間、只剩一個
+字元、是空字串、或抓到了另一行的內容。那些案例檢查的**都是某個命令的輸出**，因此一個會截斷命令
+替換的通道，會把正確的行為變成滿滿一頁「具體而且看起來言之有物」的缺陷。**那是最糟的一種：
+每一則訊息都在為自己辯護。** 照著它們去修，等於改動正確的程式碼，直到錯的那個通過。
+
+擁有那支 helper 的 session 在同一個早上從另一側撞到同一個通道——一條輸出量大的命令跑滿 500 秒、
+一個字都沒回來，緊接著一條輸出為零的命令也掛住。那邊是掛住、這邊是截斷，而兩邊的共同點都是大量
+輸出。兩種獨立的形狀排除了兩個解釋：不是 csv2 行為改變，也不是某一個測試的形狀特殊。
+
+**還沒有被確立的是「`run_csv2_test.zsh` 免疫」。** 它走的是另一條路——payload tar 加序列主控台
+——而「那大概就是它存在的理由」是一個猜測，不是理由。等到走它的一次執行在**同一個 commit** 上通過，
+那個理由就該連同上面那四行證據，補進那個檔案的註解裡。在那之前，這一段說的是「看到了什麼」，
+不是「那代表什麼」。
+
 **How to reach the other two, because not saying it cost days.** The Mac dials
 out. `~/.multissh/generated/config2Win` reaches Windows on port 16888 and
 `config2WSL` reaches WSL2 on 16889; both use user `lowei` and the host answers
