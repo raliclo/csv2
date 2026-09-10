@@ -867,8 +867,8 @@ T241b 用一個真的含有「未計數旗標」的檔案證明那個掃描會�
 
 ## 4. 說了要做，然後沒有做，而沒有任何東西會回報
 
-**8 次 / 3 天**（2026-09-02、2026-09-03、2026-09-07）。前五次全部在同一次盤點中被發現；
-第 6–8 次不是。
+**10 次 / 4 天**（2026-09-02、2026-09-03、2026-09-07、2026-09-10）。前五次全部在同一次
+盤點中被發現；第 6 次之後不是。
 
 被說出口、然後沒有做的：
 
@@ -968,6 +968,48 @@ sentence, I did not re-measure the two beside it -- in the same paragraph, four 
 cursor, and contradicting each other. The unit of re-measurement is the PARAGRAPH: a paragraph
 is the natural boundary of a group of related claims, and related claims are exactly what goes
 stale together and gets fixed one at a time.
+
+### 第九、第十次：commit 訊息描述了樹裡沒有的東西，兩次都是同一條命令列造成的
+
+2026-09-10，同一天兩次：
+
+| 次 | 訊息說了什麼 | 樹裡實際是什麼 |
+|---|---|---|
+| 9 | 「`compile_csv2_linux.zsh` 已改為可執行」 | 索引被 `git add -A` 改回 100644（QE） |
+| 10 | 「QH 的追加已寫入 known-defects.md」 | 那段編輯失敗了，紀錄不存在 |
+
+**兩次的成因一模一樣，而且它不在人的注意力上，在命令列的語法上：**一次編輯與一次提交之間，
+用的是**換行**而不是 `&&`。換行是一個「無論如何都繼續」的分隔符。
+
+**編輯失敗不會阻止提交。** 第 9 次是編輯其實成功了、但被後續的 `git add -A` 抵銷；第 10 次是編輯
+本身以非零結束——而兩次的下一條命令都照跑不誤。
+
+### 這一次有機械修法了
+
+第 4 條在此之前寫的是「依 skill 的判準這是單日集中而非跨日再犯……若再跨一天發生，就需要一道真正
+的檢查」。**它跨天再犯了**，所以那道檢查是這個：
+
+> **把編輯與提交用 `&&` 串起來，不要用換行。**
+
+它是語法層面的，不需要記得，而且第 10 次會被它擋下來。它擋不住第 9 次那種「編輯成功、被後續命令
+抵銷」的形式——那一種只能靠**提交之後去看那個東西在不在**，而那也正是兩次真正被發現的方式：
+不是靠命令失敗。
+
+**附帶一個當場的示範**：這一節的第一版寫不進去，因為我在裡面放了一段示範用的 shell 程式碼，而
+那段程式碼裡有一行字面上的 heredoc 結束標記——它把承載這一節的那個 heredoc 提前關掉了。一段
+關於 shell 陷阱的說明，本身踩了一個 shell 陷阱。
+
+Ninth and tenth, on one day, with one cause that lives in the command line rather than in
+anyone's attention: an edit and a commit separated by a NEWLINE instead of `&&`. A newline is a
+"continue regardless" separator, so a failed edit does not stop the commit after it. Once the
+edit succeeded and a later `git add -A` undid it (QE); once the edit exited non-zero and the
+commit ran anyway (QH's addendum). Entry 4 previously said a cross-day repeat would need a real
+check, and this is one: join the edit to the commit with `&&`, never a newline. It is
+syntactic, so it does not depend on remembering. It does not cover the ninth's shape -- an edit
+undone by a later command -- and nothing does except going to LOOK at the thing after
+committing, which is how both were actually found. The first attempt at writing this section
+failed for a related reason: it contained an illustrative shell snippet whose text included a
+literal heredoc terminator, which closed the heredoc carrying the section early.
 
 ### 矯正措施
 
