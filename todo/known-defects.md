@@ -12510,3 +12510,63 @@ and this surfaced immediately. T2 now builds its own fixture reproducing the 202
 incident (a timestamp column and a commit column, one cell carrying a quoted comma), round-trips
 it, and asserts cell by cell BY COLUMN NAME, which stays meaningful even if the round-trip ever
 stops being byte-identical.
+
+## QH. T301 找了四種切逗號的形狀中的三種，漏掉的正好是造成 2026-08-15 那次事故的那一種
+
+**2026-09-10 發現，由另一個 session 把它的守衛指向這棵樹時回報。已修。**
+
+全域規則列的是四種寫法：
+
+```sh
+cut -d, -f3 file.csv          # 不要
+awk -F, '{print $3}' file.csv # 不要
+${line%,*}                    # 不要   ← T301 沒有找這一種
+IFS=, read -r a b c           # 不要
+```
+
+**我實作了三種。** 而漏掉的那一種，正是 2026-08-15 改寫 `TARGET_PACKAGES.csv` 中 `status_notes`
+欄中段的那一個——**這棵樹存在的直接原因**。
+
+於是它在測試套件裡有兩處：
+
+```zsh
+# T34b（第 1239 行）——把密文那一格的第一個字元翻掉
+_t34_pre=${_t34_enc_line%,*}          # everything before the LAST comma
+_t34_ct=${_t34_enc_line##*,}          # secret is the last column in this fixture
+
+# T197（第 11185 行）——重建標頭第一列
+print -r -- "${_t197_a%%,*},${${_t197_a#*,}%%,*},secret"
+```
+
+兩處都是「偶然地正確」：這兩個 fixture 的相關欄位裡剛好沒有引號內的逗號。而註解自己就寫著
+`secret is the last column in this fixture`——**那句話是一個對 fixture 的假設，不是對格式的保證。**
+
+### 為什麼守衛沒有涵蓋它
+
+沒有理由，就是漏了。T301 的樣式是我照著全域規則那四行寫的，寫了三行。**這是第 3 條**：一條規則
+只套用到它成立範圍的一部分，而那一部分是被隨手決定的。
+
+更糟的是它被發現的方式：**是別人把守衛指向這棵樹時看到的。** 我自己的守衛在自己的樹上、對著
+自己最在意的那個形狀，回報了乾淨。
+
+### 修法
+
+T34b 現在用 `cell()` 讀出密文（csv2 的定址），翻掉第一個字元，然後**逐行做位元組替換**把那個
+唯一的密文字串換掉——完全不解析 CSV。那其實更貼近它要模擬的事：儲存中的一個位元組被改掉。
+（`-update` 走不通，而且那是對的：csv2 會拒絕寫入一個已宣告為轉換過的欄位，訊息說明了為什麼那會
+把整欄一起帶走。）
+
+T197 改用既有的 `header_cell()` 讀那兩個標頭名稱。
+
+T301 的樣式加上 `${var%,*}`、`${var%%,*}`、`${var#*,}`、`${var##*,}` 四種形式，探針也一併加上。
+
+T301 looked for three of the four comma-splitting shapes the rule names, and the missing one is
+`${line%,*}` -- the one that rewrote the middle of `status_notes` in TARGET_PACKAGES.csv on
+2026-08-15, which is the direct reason this tree exists. It had two sites in the suite, both
+correct by accident because those fixtures carry no quoted comma in the relevant column; one of
+them says so in its own comment, `secret is the last column in this fixture`, which is an
+assumption about a fixture rather than a guarantee about the format. There was no reason for
+the omission: the pattern was written from the four lines of the rule and stopped at three,
+which is entry 3 with an arbitrary boundary. Worse is how it surfaced -- another session
+pointed ITS guard at this tree. Mine, on its own tree, aimed at the shape this project cares
+about most, reported clean.

@@ -600,7 +600,7 @@ skill 說「摘要樣式是附加的，失敗掃描是強制的」。**把整個
 
 ## 3. 一條規則只套用到它成立範圍的一部分
 
-**19 次 / 8 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
+**20 次 / 8 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
 2026-09-08、2026-09-10），單日最多 5 次（2026-09-03）。
 
 *數字的權威來源是 `mistakes_counter.csv2`；這一行是它的副本。副本會漂，而那本身是第 1 類——
@@ -734,6 +734,40 @@ The scope where a rule holds includes what gets written after it, and nothing wa
 half: counting existing duplicates cannot find the one not yet typed. The shape already had a
 name -- PE in `todo/known-defects.md`, with the reproduction -- and I rewrote it from memory
 instead of reading the record.
+
+### 第二十次：守衛找了四種形狀裡的三種，而漏掉的正是這棵樹存在的那一種
+
+全域規則列了四種「自己切 CSV」的寫法。我照著那四行寫 T301 的樣式，**寫了三行**：
+
+```
+cut -d, -f3        ✓
+awk -F, '{...}'    ✓
+${line%,*}         ✗   ← 漏了
+IFS=, read -r a b  ✓
+```
+
+漏掉的那一個，正是 2026-08-15 改寫 `TARGET_PACKAGES.csv` 中 `status_notes` 欄中段的那一個——
+**這棵樹存在的直接原因**。它在測試套件裡有兩處（T34b、T197），兩處都「偶然地正確」，而其中一處的
+註解自己就寫著 `secret is the last column in this fixture`：**那是一個對 fixture 的假設，不是對
+格式的保證。**
+
+沒有理由，就是停在第三行。而這一條真正的形狀就是這個：**範圍的邊界是被隨手決定的，而沒有任何
+東西會指出那個邊界在哪裡。**
+
+**最難看的是它被發現的方式：另一個 session 把它的守衛指向這棵樹。** 我自己的守衛，在自己的樹上、
+對著這個專案最在意的那個形狀，回報了乾淨。一個只涵蓋四分之三的檢查，與一個完整的檢查，在輸出上
+分不出差別——兩者都印 PASS。
+
+The twentieth: the pattern was written from the four lines of the rule and stopped at three, and
+the missing shape, `${line%,*}`, is the one that rewrote status_notes in TARGET_PACKAGES.csv --
+the direct reason this tree exists. Two sites in the suite, both correct by accident, one of
+them saying so in its own comment: "secret is the last column in this fixture", an assumption
+about a fixture rather than a guarantee about the format. No reason for the boundary; it was
+simply where writing stopped, which is what this entry always is -- an arbitrary edge with
+nothing to point at it. It was found because another session aimed ITS guard at this tree.
+Mine, on its own tree, at the shape this project cares about most, reported clean: a check
+covering three quarters and a complete one are indistinguishable in their output. Both print
+PASS.
 
 ### 第十九次：修好了一種形式，而範圍還有第三種——而那一次的修正比缺陷更糟
 

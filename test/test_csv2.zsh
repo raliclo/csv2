@@ -1236,18 +1236,36 @@ assert_same "$PKG" "$TMP/dec.csv" "T34a encrypt then decrypt restores every byte
 printf 'id,secret\n1,alpha\n2,beta\n' > "$TMP/t34src.csv"
 "$CSV2" -encrypt secret -keyfile "$KEY" -i "$TMP/t34src.csv" -o "$TMP/t34enc.csv" -t 2>/dev/null
 _t34_enc_line=$(sed -n 2p "$TMP/t34enc.csv")
-_t34_pre=${_t34_enc_line%,*}          # everything before the LAST comma
-_t34_ct=${_t34_enc_line##*,}          # secret is the last column in this fixture
+# The ciphertext comes from cell(), and the tamper is a BYTE substitution of
+# that one unique string -- no CSV is parsed here at all. This used
+# `${line%,*}` and `${line##*,}` with a comment saying "secret is the last
+# column in this fixture", which is an assumption about a fixture and not a
+# guarantee about the format. That expansion is the shape that rewrote
+# status_notes in TARGET_PACKAGES.csv on 2026-08-15 -- the direct reason this
+# tree exists -- and T301 was not looking for it. QH.
+# 密文由 cell() 取得，而竄改是對「那一個唯一字串」做**位元組替換**——這裡完全不解析 CSV。
+# 這裡原本用的是 `${line%,*}` 與 `${line##*,}`，旁邊一句註解寫著「secret 是這個 fixture 的最後
+# 一欄」——那是一個對 fixture 的假設，不是對格式的保證。那個展開正是 2026-08-15 改寫
+# TARGET_PACKAGES.csv 中 status_notes 的形狀，也就是這棵樹存在的直接原因，而 T301 沒有在找它。QH。
+#
+# It cannot be done with -update: csv2 refuses to write a raw value into a
+# column the file declares transformed, and says why -- the whole column stops
+# decrypting, including records the edit never touched. The refusal is correct,
+# and tampering from outside is exactly what this case simulates: a byte
+# changed in storage.
+# 這件事不能用 -update 做：csv2 會拒絕把原始值寫進一個「本檔案宣告為已轉換」的欄位，而且說明了
+# 理由——整欄會停止解密，連這次編輯從未碰過的紀錄也一樣。那個拒絕是對的；而「從外面竄改」正是
+# 這個案例所模擬的事：儲存中的一個位元組被改掉。
+_t34_ct=$(cell "$TMP/t34enc.csv" 1 secret)
 if [[ ${_t34_ct[1]} == A ]]; then
     _t34_new="B${_t34_ct[2,-1]}"
 else
     _t34_new="A${_t34_ct[2,-1]}"
 fi
-{
-    head -1 "$TMP/t34enc.csv"
-    print -r -- "${_t34_pre},${_t34_new}"
-    sed -n '3,$p' "$TMP/t34enc.csv"
-} > "$TMP/t34tamper.csv"
+: > "$TMP/t34tamper.csv"
+while IFS= read -r _t34_line || [[ -n $_t34_line ]]; do
+    print -r -- "${_t34_line//$_t34_ct/$_t34_new}" >> "$TMP/t34tamper.csv"
+done < "$TMP/t34enc.csv"
 if cmp -s "$TMP/t34enc.csv" "$TMP/t34tamper.csv"; then
     bad "T34b the tamper changed nothing, so nothing is being tested / 這次竄改什麼也沒改，因此什麼也沒有被測試"
 else
@@ -11181,8 +11199,14 @@ printf 'pkg,ver,secret\n套件,版本,機密\nzlib,1.3,s1\nzstd,1.5,s2\n' > "$TM
 # 只把 0a 那一列的標記拿掉，讓 0b 仍然宣告該欄已加密。用 shell 做：這是一個「有人把英文標頭
 # 整理乾淨」就會產生的狀態，而沒有任何 csv2 指令造得出它。
 {
-    _t197_a=$(head -1 "$TMP/t197e.csv2")
-    print -r -- "${_t197_a%%,*},${${_t197_a#*,}%%,*},secret"
+    # header_cell(), not `${a%%,*}` and `${${a#*,}%%,*}`. Those were right
+    # because this fixture's header names carry no comma -- an assumption about
+    # a fixture, and the expansion that rewrote TARGET_PACKAGES.csv on
+    # 2026-08-15. QH.
+    # 用 header_cell()，不用 `${a%%,*}` 與 `${${a#*,}%%,*}`。那兩個之所以是對的，是因為這個
+    # fixture 的標頭名稱裡沒有逗號——那是一個對 fixture 的假設，而那個展開正是 2026-08-15 改寫
+    # TARGET_PACKAGES.csv 的那一個。QH。
+    print -r -- "$(header_cell "$TMP/t197e.csv2" 1),$(header_cell "$TMP/t197e.csv2" 2),secret"
     sed -n '2,$p' "$TMP/t197e.csv2"
 } > "$TMP/t197bad.csv2"
 
@@ -17829,7 +17853,18 @@ _t301_mark="CSV-SPLIT"$'-'"OK"
 # 一個 `$(`、一個 `;` 或 `&&`，或者它就在行首。這個樣式的第一版沒有這個錨點，於是它回報了
 # 「示範這條規則的那個案例」自己的斷言訊息。
 _t301_cmd='(^|[|;&(]|\$\()[[:space:]]*'
-_t301_re="${_t301_cmd}cut[[:space:]]+-d'?,|${_t301_cmd}awk[[:space:]]+-F'?,|IFS=,[[:space:]]+read"
+# The FOURTH shape, added after another session's guard found two of them
+# here. The rule names four ways to split a CSV by hand and this pattern was
+# written from those four lines and stopped at three -- and the missing one,
+# `${line%,*}`, is the one that rewrote status_notes in TARGET_PACKAGES.csv on
+# 2026-08-15, which is the direct reason this tree exists. My guard, on my own
+# tree, aimed at the shape this project cares about most, reported clean. QH.
+# **第四種形狀**，在另一個 session 的守衛在這裡找到兩處之後補上。那條規則列了四種「自己切 CSV」
+# 的寫法，而這個樣式是照著那四行寫的、停在第三行——而漏掉的那一個 `${line%,*}`，正是 2026-08-15
+# 改寫 TARGET_PACKAGES.csv 中 status_notes 的那一個，也就是這棵樹存在的直接原因。我自己的守衛，
+# 在自己的樹上、對著這個專案最在意的那個形狀，回報了乾淨。QH。
+_t301_pe='\$\{[^}]*(%%?,\*|##?\*,)'
+_t301_re="${_t301_cmd}cut[[:space:]]+-d'?,|${_t301_cmd}awk[[:space:]]+-F'?,|IFS=,[[:space:]]+read|${_t301_pe}"
 _t301_files=($ROOT/**/*.zsh(N))
 if (( ${#_t301_files} < 4 )); then
     bad "T301a the glob found ${#_t301_files} .zsh files, so nothing was scanned / glob 只找到 ${#_t301_files} 個 .zsh 檔，等於什麼都沒掃"
@@ -17862,6 +17897,9 @@ else
     print -r -- "x=\$(f | cut -d, -f6)" > "$TMP/t301probe.zsh"   # CSV-SPLIT-OK: builds the probe text, splits nothing / 這是在建構探針文字，沒有切任何東西
     print -r -- "y=\$(g | cut -d, -f6)   # $_t301_mark: deliberate" >> "$TMP/t301probe.zsh"   # CSV-SPLIT-OK: same / 同上
     print -r -- "# a comment about cut -d, must not be flagged" >> "$TMP/t301probe.zsh"
+    # The fourth shape gets its own probe line, because it was the one missing.
+    # 第四種形狀有自己的一行探針，因為它就是漏掉的那一個。
+    print -r -- "z=\${line%,*}" >> "$TMP/t301probe.zsh"   # CSV-SPLIT-OK: builds the probe text, splits nothing / 這是在建構探針文字，沒有切任何東西
     _t301_probe=$(LC_ALL=C grep -nE "$_t301_re" "$TMP/t301probe.zsh" 2>/dev/null \
                   | LC_ALL=C grep -vE '^[^:]*:[0-9]+:[[:space:]]*#' \
                   | LC_ALL=C grep -v -- "$_t301_mark" || true)
@@ -17870,10 +17908,10 @@ else
     # check failed while the thing it checks was working.
     # 開頭是 `1:`。對**單一檔案**下 grep -n 印的是 `行號:內容`、沒有檔名，所以第一版去找 `:1:`
     # 永遠匹配不到——那個檢查失敗了，而它要檢查的東西其實是好的。
-    if [[ $(print -r -- "$_t301_probe" | LC_ALL=C grep -c .) == 1 && $_t301_probe == "1:"* ]]; then
-        ok "T301b and it reports the bare split, not the marked one nor the comment / 而它只回報那行沒標記的，不回報有標記的、也不回報註解"
+    if [[ $(print -r -- "$_t301_probe" | LC_ALL=C grep -c .) == 2 && $_t301_probe == "1:"* && $_t301_probe == *$'\n'"4:"* ]]; then
+        ok "T301b and it reports both bare splits, not the marked one nor the comment / 而它回報兩行沒標記的切割，不回報有標記的、也不回報註解"
     else
-        bad "T301b the probe should have reported line 1 only, got [$_t301_probe] / 探針應該只回報第 1 行，實得如上"
+        bad "T301b the probe should have reported lines 1 and 4, got [$_t301_probe] / 探針應該回報第 1 與第 4 行，實得如上"
     fi
     rm -f "$TMP/t301probe.zsh"
 fi

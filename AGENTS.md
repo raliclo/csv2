@@ -295,6 +295,12 @@ way, so two wrong numbers agreed. QF.
 Use `cell()`, `header_cell()` or `column()` in the suite; all three address
 through csv2 and none of them splits anything.
 
+**T301 covers all four shapes the rule names, and until 2026-09-10 it covered
+three.** The missing one was `${line%,*}` -- the expansion that rewrote
+`status_notes` in `TARGET_PACKAGES.csv` and is the direct reason this tree
+exists. It had two sites in the suite, both correct by accident. It was found
+because another session aimed ITS guard here; mine reported clean. QH.
+
 **What is NOT enforced: documents.** `todo/known-defects.md` quotes comma-splits
 inside reproductions of defects that were ABOUT comma-splitting, and no check
 distinguishes those from a fresh one. Said here so nobody believes that half is
@@ -316,6 +322,11 @@ is not.
 **通過了**：兩邊用同一種錯的方式數，兩個錯的數字彼此相等。QF。
 
 測試裡請用 `cell()`、`header_cell()` 或 `column()`；三者都經由 csv2 定址，都不切任何東西。
+
+**T301 涵蓋那條規則所列的四種形狀，而直到 2026-09-10 為止它只涵蓋三種。** 漏掉的是
+`${line%,*}`——改寫 `TARGET_PACKAGES.csv` 中 `status_notes` 的那個展開，也就是這棵樹存在的直接
+原因。它在測試套件裡有兩處，兩處都是偶然地正確。它被發現，是因為另一個 session 把**它的**守衛
+指向這裡；我自己的回報乾淨。QH。
 
 **沒有被執行的那一半：文件。** `todo/known-defects.md` 在一些重現裡引用了逗號切割，而那些缺陷
 **本身就是關於逗號切割的**；沒有任何檢查能把它們與一次新寫的區分開。這裡講出來，是為了不讓任何
