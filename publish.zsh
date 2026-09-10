@@ -79,10 +79,36 @@ if [[ -n "$(git rev-list @{upstream}..HEAD 2>/dev/null)" ]]; then
     print -u2 -- "HEAD 領先 origin；請先推送，否則那個 tag 指向一個沒有人抓得到的 commit"
     exit 1
 fi
+# The thing worth refusing is a PUBLISHED RELEASE, not the tag on its own.
+#
+# An archive has to be built AT the tag or its build id cannot say the version
+# -- that is QD -- so the working order is: tag, build on each node, collect,
+# publish. A blanket refusal on an existing tag makes that order impossible and
+# the only way through it would be to build before tagging, which is the defect
+# it was trying to protect against.
+#
+# 值得拒絕的是一個**已發布的 release**，不是 tag 本身。
+#
+# 一份封存必須**在 tag 上**建置，否則它的 build id 說不出版本號——那就是 QD——所以可行的順序是：
+# 先打 tag、各節點建置、收集、發布。對「tag 已存在」一律拒絕，會讓那個順序不可能成立，而唯一的
+# 繞法就是「在打 tag 之前建置」——那正是它想防的那個缺陷。
+TAG_EXISTED=0
 if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-    print -u2 -- "$TAG already exists. Re-cutting a published tag disturbs anyone who fetched it; pick the next version"
-    print -u2 -- "$TAG 已經存在。重打一個已發布的 tag 會動到任何抓過它的人；請改用下一個版本號"
-    exit 1
+    if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
+        print -u2 -- "$TAG is already published. Re-cutting it disturbs anyone who fetched it; pick the next version"
+        print -u2 -- "$TAG 已經發布過了。重打它會動到任何抓過它的人；請改用下一個版本號"
+        exit 1
+    fi
+    # It exists but nothing was published from it. It must point at the commit
+    # being released, or the archives were built from something else.
+    # 它存在，但還沒有從它發布過任何東西。它必須指向「正在發布的那個 commit」，否則那些封存是
+    # 從別的東西建出來的。
+    if [[ $(git rev-parse "$TAG^{commit}") != $(git rev-parse HEAD) ]]; then
+        print -u2 -- "$TAG exists but points at $(git rev-parse --short "$TAG^{commit}"), not HEAD $(git rev-parse --short HEAD)"
+        print -u2 -- "$TAG 存在，但它指向 $(git rev-parse --short "$TAG^{commit}")，不是 HEAD $(git rev-parse --short HEAD)"
+        exit 1
+    fi
+    TAG_EXISTED=1
 fi
 command -v gh >/dev/null 2>&1 || { print -u2 -- "gh is not on PATH"; exit 1 }
 gh auth status >/dev/null 2>&1 || { print -u2 -- "gh is not authenticated"; exit 1 }
@@ -162,10 +188,15 @@ done
 # ---------------------------------------------------------------------
 say ""
 say "steps / 步驟："
-would "git tag -a $TAG && git push origin $TAG"
-if (( DO_PUBLISH )); then
-    git tag -a "$TAG" -m "csv2 $VERSION"
-    git push -q origin "$TAG"
+if (( TAG_EXISTED )); then
+    say "  $TAG already points at HEAD and nothing is published from it; reusing it"
+    if (( DO_PUBLISH )); then git push -q origin "$TAG" 2>/dev/null || true; fi
+else
+    would "git tag -a $TAG && git push origin $TAG"
+    if (( DO_PUBLISH )); then
+        git tag -a "$TAG" -m "csv2 $VERSION"
+        git push -q origin "$TAG"
+    fi
 fi
 
 # ---------------------------------------------------------------------
