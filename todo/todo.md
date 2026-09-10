@@ -548,7 +548,15 @@ which is why the more convenient route gets picked. Until then, record none of
 those 408 lines as defects: each one argues for itself, and that is exactly what
 makes them dangerous.
 
-## aarch64 Linux 的封存還沒補上，而我先前寫的理由是假的
+## ~~aarch64 Linux 的封存還沒補上，而我先前寫的理由是假的~~ 已由下一節取代
+
+**2026-09-09 開啟；2026-09-10 由「v0.1.1 要做的」那一節取代。** 這一條的診斷仍然為真（封存
+缺席沒有好理由），但它提議的動作——補進 v0.1.0——已經被否決了，理由是 QD：內嵌的 build id
+取決於建置當下有沒有 tag，所以現在補建的封存回報 `(v0.1.0)`，而已發布的三份回報 `(8d5600e)`。
+同一份原始碼、兩種字串，重建改不了。**留著這一節而不標示，會讓讀的人自己去判斷哪一節是現行的。**
+
+Superseded on 2026-09-10. The diagnosis holds; the proposed action, back-filling v0.1.0, does not,
+because QD means an archive built now cannot carry its siblings' version string.
 
 **2026-09-09。**
 
