@@ -17447,8 +17447,25 @@ echo "--- T298: mistakes.md's counts match the counter / T298：mistakes.md 的�
 # 維護目的呼叫 csv2 的地方。
 _t298_md=$ROOT/mistakes.md
 _t298_counter=$ROOT/mistakes_counter.csv2
-if [[ ! -r $_t298_md || ! -r $_t298_counter ]]; then
-    bad "T298 mistakes.md or mistakes_counter.csv2 is missing / 找不到 mistakes.md 或 mistakes_counter.csv2"
+# Not every tree this suite runs in is a full checkout. run_csv2_test.zsh sends
+# a PAYLOAD into the guest -- src, test, verifications and the READMEs -- and
+# neither mistakes.md nor plan/ goes with it. On 2026-09-10 this case FAILED
+# there on its first guest run, reading "absent" as "inconsistent".
+# 這份測試執行的樹不一定是完整的 checkout。run_csv2_test.zsh 送進 guest 的是一份 **payload**
+# ——src、test、verifications 與兩份 README——`mistakes.md` 與 `plan/` 都不在裡面。2026-09-10
+# 這個案例在 guest 的第一次執行就 FAIL 了，它把「不在」讀成了「不一致」。
+#
+# "Skip when the file is missing" would be the wrong fix: deleting mistakes.md
+# on a host would then be a silent skip. `plan/plan.md` is in every checkout and
+# in no payload, so it is what separates the two cases -- present without
+# mistakes.md is a broken tree and fails; both absent is a payload and skips.
+# 「檔案不在就略過」是錯的修法：那樣一來，在 host 上刪掉 mistakes.md 也會變成一次安靜的略過。
+# `plan/plan.md` 在每一個 checkout 裡、不在任何 payload 裡，因此用它來區分兩種情況——有它卻
+# 沒有 mistakes.md 是壞掉的樹，要失敗；兩者都沒有是 payload，略過並說出理由。
+if [[ ! -r $_t298_md && ! -r $_t298_counter && ! -r $ROOT/plan/plan.md ]]; then
+    skipt "T298 mistakes.md's counts match the counter / mistakes.md 的次數與計數器一致 (this tree is a payload, not a checkout: no mistakes.md and no plan/ / 這棵樹是 payload 而不是 checkout：沒有 mistakes.md，也沒有 plan/)"
+elif [[ ! -r $_t298_md || ! -r $_t298_counter ]]; then
+    bad "T298 mistakes.md or mistakes_counter.csv2 is missing from a tree that has plan/plan.md / 一棵有 plan/plan.md 的樹裡卻找不到 mistakes.md 或 mistakes_counter.csv2"
 else
     # The prose line must be within 4 lines of its heading. Without that, the
     # English `## 3.` heading further down would adopt whatever `**N ...` line

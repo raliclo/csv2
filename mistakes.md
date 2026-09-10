@@ -24,8 +24,8 @@ judgement the owning session is best placed to make.
 
 ## 1. 測試碰到的不是被測物（環境、工具，或 fixture 弄丟了那個屬性）
 
-**18 次 / 9 天**（2026-08-20、2026-08-27、2026-08-29、2026-09-02、2026-09-03、2026-09-06、
-2026-09-07、2026-09-08、2026-09-09），單日最多 3 次（2026-08-27）。
+**19 次 / 10 天**（2026-08-20、2026-08-27、2026-08-29、2026-09-02、2026-09-03、2026-09-06、
+2026-09-07、2026-09-08、2026-09-09、2026-09-10），單日最多 3 次（2026-08-27）。
 
 *這一行直到 2026-09-08 為止寫的是「9 次 / 6 天」，而 `mistakes_counter.csv2` 當時已經是 17 次 / 8 天。
 數字的權威來源是那個檔案；這裡是它的副本，而副本會漂。* **這一條本身就是第 1 類**——比對的不是被測物
@@ -57,6 +57,40 @@ T218a 是為了強制 zstat 規則而寫的——那條規則本身正是為了�
 每一次都回報通過。
 
 skill 裡有一模一樣的先例：「這一次發生在為了防它而寫的腳本裡」。
+
+### 第十九次：測試假設了「一個完整的 checkout」，而 guest 拿到的是 payload 子集
+
+2026-09-10 加入的 T298 比對 `mistakes.md` 的次數與 `mistakes_counter.csv2`。它在 macOS 上通過，
+在 guest 內 **FAIL**：
+
+```
+FAIL  T298 mistakes.md or mistakes_counter.csv2 is missing
+```
+
+兩個檔案確實不在。`run_csv2_test.zsh` 送進 guest 的 payload 是
+
+```
+src test verifications README.md README.zh-TW.md compile_csv2*.zsh install.zsh
+```
+
+——沒有 `plan/`、沒有 `todo/`、沒有 `mistakes.md`。**被測的東西不在那台機器上**，而測試沒有
+問過它在不在，直接把「不在」讀成「不一致」。
+
+它與這一條的其他十八次一樣，只是這次朝「會叫」的方向壞掉，所以被看見了。往另一個方向壞的
+那種——在缺少某樣東西的平台上**安靜地通過**——才是這一條真正貴的形式。
+
+**修法不是「檔案不在就略過」**，那會讓「有人在 host 上刪掉 mistakes.md」也變成一次安靜的略過。
+改成問一個能區分兩種情況的問題：`plan/plan.md` 在不在。一個完整的 checkout 一定有它，而 payload
+一定沒有。有 `plan/plan.md` 卻沒有 `mistakes.md` 是壞掉的樹，要 FAIL；兩者都沒有是 payload 子集，
+略過並說出理由。
+
+A test added the same day compared mistakes.md against its counter and FAILED in the guest,
+where neither file exists: the payload carries `src test verifications README*` and the build
+scripts, not `plan/`, `todo/` or `mistakes.md`. The subject was not on that machine and the
+test read "absent" as "inconsistent". The fix is not "skip when absent" -- that would make
+deleting mistakes.md on the host a silent skip too -- but asking a question that separates the
+two cases: `plan/plan.md` is in every checkout and in no payload, so its presence is what makes
+a missing mistakes.md a failure rather than a skip.
 
 ### 第十八次：我問了描述那台機器的檔案，而那台機器就開著
 
