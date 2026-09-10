@@ -446,10 +446,16 @@ fi
 say ""
 if (( DO_PUBLISH )); then
     say "published: https://github.com/$REPO/releases/tag/$TAG"
-    say "next, by hand and on purpose: the release notes, and the version in"
-    say "Formula/csv2.rb and scoop/csv2.json if this is a new minor version"
-    say "接下來是刻意留給人做的：release notes，以及（若這是新的次版本）Formula/csv2.rb 與"
-    say "scoop/csv2.json 裡的版本號"
+    # The version in the package files is NOT left to a person: rewrite_version
+    # did it above and the read-back confirmed it. This hint said otherwise
+    # until 2026-09-10, which is a correct instruction turned wrong by the work
+    # being done -- it told the reader to redo something already finished.
+    # 套件檔裡的版本號**不是**留給人做的：上面的 rewrite_version 已經改了，而讀回來那一步確認過。
+    # 這句提示直到 2026-09-10 為止說的是相反的事——一句正確的指示，因為那件事被做掉了而變成錯的，
+    # 它在叫讀者重做一件已經完成的事。
+    say "next, by hand and on purpose: the release notes. The version in the"
+    say "package files was rewritten above and read back."
+    say "接下來是刻意留給人做的：release notes。套件檔裡的版本號，上面已經改寫並讀回確認過了。"
     say "then run ./test/test_csv2.zsh -- the package files are checked by it"
     say "然後跑 ./test/test_csv2.zsh——那些套件檔由它檢查"
 else

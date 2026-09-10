@@ -30,7 +30,7 @@
 class Csv2 < Formula
   desc "Fail-loudly CSV parser and editor: names the record and field, never repairs"
   homepage "https://github.com/raliclo/csv2"
-  version "0.1.0"
+  version "0.1.1"
   license "MIT"
 
   # Only the platforms whose archive was built AND verified on that platform.
@@ -40,27 +40,27 @@ class Csv2 < Formula
   # 刻意缺席，而不是指向一份「在產生它的地方沒有人執行得了」的封存——見 release notes。
   on_macos do
     on_arm do
-      url "https://github.com/raliclo/csv2/releases/download/v0.1.0/csv2-0.1.0-macos-arm64.tar.zst"
-      sha256 "2619221d845cd1f1db01531039b4fef8a1085397a0b8bcfd99a1e647163c586c"
+      url "https://github.com/raliclo/csv2/releases/download/v0.1.1/csv2-0.1.1-macos-arm64.tar.zst"
+      sha256 "b7cb31c0a635b2eb6f6c981750a49b46a814f5c3e2332b6d2a784b8fe3b647b8"
     end
   end
 
   on_linux do
     on_intel do
-      url "https://github.com/raliclo/csv2/releases/download/v0.1.0/csv2-0.1.0-linux-x86_64.tar.zst"
-      sha256 "b944339433d2092175e6fc1dc2f123cad41b32750ad7a5346c85226010c5f55a"
+      url "https://github.com/raliclo/csv2/releases/download/v0.1.1/csv2-0.1.1-linux-x86_64.tar.zst"
+      sha256 "8833a6128c0bc47756d307159d6def785ad306213c1e18a28607b84d2199accb"
     end
-    # aarch64 arrives in v0.1.1. It was absent from v0.1.0 not because it was
+    # aarch64 arrives in v0.1.1. It was absent from v0.1.1 not because it was
     # untested -- T47 compares twelve invocations byte for byte against macOS
     # on every run -- but because an archive built after the tag was cut would
     # have reported a different version string from its three siblings, which
     # is QD. All four of v0.1.1's archives were built at the tag.
-    # aarch64 從 v0.1.1 開始有。它在 v0.1.0 缺席，不是因為沒有測試——T47 每一次執行都拿十二組
+    # aarch64 從 v0.1.1 開始有。它在 v0.1.1 缺席，不是因為沒有測試——T47 每一次執行都拿十二組
     # 呼叫與 macOS 逐位元比對——而是因為一份「在 tag 打完之後才建的」封存，會回報與它三個手足
     # 不同的版本字串，那就是 QD。v0.1.1 的四份封存全部是在 tag 上建的。
     on_arm do
-      url "https://github.com/raliclo/csv2/releases/download/v0.1.0/csv2-0.1.0-linux-aarch64.tar.zst"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+      url "https://github.com/raliclo/csv2/releases/download/v0.1.1/csv2-0.1.1-linux-aarch64.tar.zst"
+      sha256 "a83394fc14059b6fc7c7f712c229088f973ceee29331c06d17f9af0c5f8a777f"
     end
   end
 
@@ -76,6 +76,6 @@ class Csv2 < Formula
   test do
     (testpath/"p.csv").write("pkg,license\nzlib,MIT\n")
     assert_equal "MIT", shell_output("#{bin}/csv2 -get 1:license -i #{testpath}/p.csv").strip
-    assert_match "csv2 0.1.0", shell_output("#{bin}/csv2 --version")
+    assert_match "csv2 0.1.1", shell_output("#{bin}/csv2 --version")
   end
 end
