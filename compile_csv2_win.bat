@@ -100,7 +100,17 @@ for /f "usebackq tokens=* delims=" %%G in (`git rev-parse --short HEAD 2^>nul`) 
 if not "!_described!"=="" (
     set "_build=!_described!"
     if not "!_short!"=="" (
-        echo(!_described!) | findstr /C:"!_short!" >nul
+        :: `echo(` with NO closing paren. Adding one closed the enclosing
+        :: `if (` block early, `_described` came out empty, and the build fell
+        :: back to the bare short hash -- which still CONTAINS a commit, so
+        :: T303a's shape check passed while the value was wrong. Measured on
+        :: the Windows node: the build said `(97e3908)` where MSYS `git
+        :: describe` says `v0.1.0-34-g97e3908`.
+        :: `echo(` 後面**不加**收尾括號。加了它會把外層的 `if (` 區塊提前關掉，`_described` 因此
+        :: 是空的，建置退回純短雜湊——而那**仍然含有一個 commit**，所以 T303a 的形狀檢查照樣
+        :: 通過，值卻是錯的。在 Windows 節點上量到：建置說 `(97e3908)`，而 MSYS 的 git describe
+        :: 說 `v0.1.0-34-g97e3908`。
+        echo(!_described!| findstr /C:"!_short!" >nul
         if errorlevel 1 set "_build=!_described! / !_short!"
     )
 ) else (

@@ -18097,6 +18097,42 @@ else
         bad "T303a the build id is [$_t303_id] and carries no commit; a bare tag is exactly what QD is about / build id 如上，裡面沒有 commit——而「只有一個純 tag」正是 QD 講的那件事"
     fi
 
+    # The VALUE, not only the shape -- but only when the binary is a build of
+    # THIS tree, so a stale binary is not reported as a wrong one.
+    #
+    # T303a alone was not enough, and the Windows node showed why on the day it
+    # was written: a stray `)` in the batch copy closed an `if` block early,
+    # `_described` came out empty, and the build fell back to the bare short
+    # hash. That still CONTAINS a commit, so the shape check passed while the
+    # value was wrong -- `(97e3908)` where the rule says `v0.1.0-34-g97e3908`.
+    #
+    # 測的是**值**，不只是形狀——但只在「這個執行檔是這棵樹的建置」時才測，這樣一個過期的
+    # 執行檔才不會被回報成一個錯的。
+    #
+    # 只有 T303a 是不夠的，而 Windows 節點在它被寫下的當天就示範了原因：batch 副本裡一個多餘的
+    # `)` 把一個 `if` 區塊提前關掉，`_described` 變成空的，建置退回純短雜湊。那**仍然含有一個
+    # commit**，於是形狀檢查通過而值是錯的——建置說 `(97e3908)`，而規則說 `v0.1.0-34-g97e3908`。
+    if [[ -r $ROOT/build_id.zsh ]]; then
+        _t303_want=$(zsh -c "source '$ROOT/build_id.zsh'; csv2_build_id '$ROOT'" 2>/dev/null)
+        _t303_hd=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null)
+        if [[ -n $_t303_want && -n $_t303_hd && $_t303_id == *"$_t303_hd"* ]]; then
+            # A build of this commit: the id must be what the rule produces.
+            # 這是這個 commit 的建置：那個 id 必須就是規則產生的東西。
+            if [[ $_t303_id == $_t303_want ]]; then
+                ok "T303d a fresh build's id is exactly what build_id.zsh produces / 一次新鮮建置的 id，正是 build_id.zsh 產生的那個"
+            else
+                bad "T303d the binary says [$_t303_id] and the rule says [$_t303_want] / 執行檔與規則說的如上"
+            fi
+        else
+            # Not a build of this commit, so the value cannot be compared and
+            # saying nothing is the honest answer. release.zsh refuses to
+            # package a binary in that state, which is where that belongs.
+            # 這不是這個 commit 的建置，因此無從比對值，而閉嘴是誠實的回答。release.zsh 會拒絕
+            # 打包一個處於那個狀態的執行檔，那件事本來就屬於它。
+            ok "T303d the binary is not a build of this commit, so its id is not compared / 這個執行檔不是這個 commit 的建置，因此不比對它的 id"
+        fi
+    fi
+
     # The rule lives in build_id.zsh so the thing that stamps and the thing
     # that checks cannot disagree. A script that went back to calling
     # `git describe` directly would pass T303a on a commit past a tag -- where
