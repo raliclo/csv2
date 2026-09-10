@@ -52,21 +52,6 @@ cd -- "$HERE"
 #
 # 一個「只有在版本改變時才會錯」的常數，會在它唯一要緊的那一刻出錯。與 QC、QD 同一族：這支腳本
 # 對「它正在發行什麼」的認識，來自它自己，而不是來自它正在發行的那個東西。
-VERSION=${VERSION:-}
-if [[ -z $VERSION ]]; then
-    _rv=$("$BIN" --version 2>/dev/null)
-    # `csv2 <version> (<id>)`. Taken as the second field and then REQUIRED to
-    # look like a version, so a changed format gives a refusal rather than a
-    # plausible wrong name.
-    # `csv2 <版本> (<id>)`。取第二個欄位，然後**要求**它長得像一個版本號——這樣一來，格式改變會
-    # 得到一則拒絕，而不是一個看起來合理的錯名字。
-    VERSION=${${(z)_rv}[2]}
-    if [[ $VERSION != <->.<->.<-> ]]; then
-        print -u2 -- "cannot read a version out of [$_rv]; refusing to name an archive by guessing"
-        print -u2 -- "從 [$_rv] 讀不出版本號；拒絕用猜的方式為封存命名"
-        exit 1
-    fi
-fi
 DIST=$HERE/dist
 
 # ---------------------------------------------------------------------
@@ -94,6 +79,21 @@ case "$(uname -s)" in
     MSYS*|MINGW*|CYGWIN*|Windows*) OS=windows ;;
     *)                             OS=$(uname -s | tr '[:upper:]' '[:lower:]') ;;
 esac
+VERSION=${VERSION:-}
+if [[ -z $VERSION ]]; then
+    _rv=$("$BIN" --version 2>/dev/null)
+    # `csv2 <version> (<id>)`. Taken as the second field and then REQUIRED to
+    # look like a version, so a changed format gives a refusal rather than a
+    # plausible wrong name.
+    # `csv2 <版本> (<id>)`。取第二個欄位，然後**要求**它長得像一個版本號——這樣一來，格式改變會
+    # 得到一則拒絕，而不是一個看起來合理的錯名字。
+    VERSION=${${(z)_rv}[2]}
+    if [[ $VERSION != <->.<->.<-> ]]; then
+        print -u2 -- "cannot read a version out of [$_rv]; refusing to name an archive by guessing"
+        print -u2 -- "從 [$_rv] 讀不出版本號；拒絕用猜的方式為封存命名"
+        exit 1
+    fi
+fi
 ARCH=$(uname -m)
 STEM=csv2-$VERSION-$OS-$ARCH
 ARCHIVE=$DIST/$STEM.tar.zst
