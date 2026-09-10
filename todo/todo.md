@@ -897,6 +897,46 @@ in the first minute -- `./compile_csv2_linux.zsh` exited 126, the file having ne
 executable bit (QE) -- and then caught a second thing, that the fix was not in the commit that
 claimed it while the guard passed anyway.
 
+## 已安裝的那一份沒有東西讓它跟上 / Nothing keeps the installed copy current
+
+**2026-09-10 加入，由另一個 session 回報。**
+
+`/usr/local/bin/csv2` 在那台機器上停在 `v0.1.0-4-g3515258`（今天工作開始之前的狀態），而那個
+session 用它做了一整天的文件編輯——包括寫下那些關於「工具與它描述的東西反向漂移」的條目。
+
+**沒有東西壞掉、沒有東西沉默。** `csv2 --version` 一整天都誠實地回報 `v0.1.0-4-g3515258`。
+**只是沒有人看。**
+
+那與今天 `sync_all.zsh` 那個 `Done.` 是同一個形狀：資訊在，沒有人加總。
+
+### 這裡能決定的與不能決定的
+
+**能決定的（屬於這棵樹）**：`install.zsh` 存在、可用、而且會以「執行它」驗證安裝結果。它沒有
+問題。
+
+**不能決定的**：`install.zsh` 應該在**什麼時候**被呼叫。那是母專案的節奏問題——這棵樹不知道別人
+什麼時候需要一個新的 csv2，也不該替他們決定往 `/usr/local/bin` 寫入。已由那個 session 報給
+使用者。
+
+### 一個這裡可以做、而且不需要那個決定的東西
+
+**讓落差自己說出來。** 目前要發現它，得有人主動去比對 `csv2 --version` 與 submodule 的 HEAD。
+一個可行的形式是：`install.zsh` 在安裝前印出「現有的那一份是哪一版、要裝的是哪一版」——那不
+需要任何排程，而且它出現的時機正是有人在意這件事的時機。
+
+**尚未實作，因為它會改變一個對外可見的輸出**，而今天已經有一次「順手改掉一個訊息」的教訓。
+
+Nothing keeps `/usr/local/bin/csv2` in step with the submodule. On the machine that reported
+this it sat at `v0.1.0-4-g3515258` all day while being used for documentation edits, including
+entries about tools drifting away from what they describe. Nothing broke and nothing was silent
+-- `--version` said so all along, and nobody looked. Same shape as `sync_all.zsh`'s unconditional
+`Done.`: the information was there and nothing added it up. What this tree can decide is that
+install.zsh works; WHEN it should run is the parent project's rhythm and its decision, since
+writing to /usr/local/bin is not ours to schedule. What could be done here without that decision
+is to make the gap announce itself -- install.zsh printing which version is already in place and
+which is about to replace it -- but that changes an outward-facing output and is not implemented
+today.
+
 ## 出貨流程只有一半是腳本 / Half the release is scripted
 
 **加入於 2026-09-08，出完 v0.1.0 之後。2026-09-10 由 `publish.zsh` 做掉了第 1、3–7 步；

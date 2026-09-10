@@ -12837,3 +12837,34 @@ never consulted and the file was parsed as CSV until the first comma in prose. E
 two implementations, the second missing a case. Fixed by having the fast path DECLINE `.md`
 rather than by giving it a third copy of the rule -- and a `.md` table is translated before
 parsing anyway, which a byte-wise append cannot do. It failed safely: exit 1, file byte-identical.
+
+### 一份重現必須指名它跑在哪一個執行檔上
+
+回報這個缺陷的 session 隨後發現：**他們跑的是一個落後 46 個 commit 的執行檔**
+（`/usr/local/bin/csv2`，`v0.1.0-4-g3515258`，今天工作開始之前的狀態）。他們自己把這件事講出來，
+並問「T305 釘的是哪一版的行為」。
+
+那個問題是對的，而答案是「現行版」——但**要靠查，不是靠推**：
+
+| | 版本 | 結果 |
+|---|---|---|
+| 他們的重現 | `v0.1.0-4-g3515258` | `-append` 拒絕 |
+| 我的重現 | `v0.1.1-8-g894fd04`（晚 45 個 commit） | `-append` 拒絕 |
+| 修正後 | `v0.1.1-9-g3add10b` | `-append` 接受，`-insert`、`-o` 也都接受 |
+
+而那段期間唯一動過 `src/Run.swift` 的 commit（`43cc9e6`）**沒有碰到追加快路徑**——`git show` 查的，
+不是推的。所以兩份重現講的是同一段程式碼。
+
+**一般教訓：這個檔案裡的每一份重現都該指名執行檔的版本。** 我的 QJ 紀錄原本也沒有指名——它寫了
+指令與輸出，卻沒寫「那是哪一個 csv2」。一份重現的價值在於「日後判斷修正有沒有退化」，而一份不
+知道跑在哪一版上的重現，無法回答那個問題：它可能在描述一個早就修好的東西。
+
+A reproduction has to name the binary it ran on. The session that reported this found afterwards
+that it had run a binary 46 commits behind, said so, and asked which version T305 pins. The
+answer is the current one -- established by looking, not by assuming: their run and mine both
+refused, on binaries 45 commits apart, and the only commit touching src/Run.swift in between did
+not touch the append fast path. The general lesson is that every reproduction in this file should
+name the version; this one did not until now, and a reproduction whose binary is unknown cannot
+answer the question the file exists to answer, because it may be describing something already
+fixed.
+
