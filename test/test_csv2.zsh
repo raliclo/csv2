@@ -18073,12 +18073,28 @@ if ! command -v git >/dev/null 2>&1 || [[ ! -d $ROOT/.git && ! -f $ROOT/.git ]];
     T303_SKIPPED=1
     skipt "T303 the build id always carries the commit / build id 永遠帶著那個 commit (not a git checkout here / 這裡不是一個 git checkout)"
 else
-    _t303_short=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null)
+    # The SHAPE, not the freshness. The first version of this case asked
+    # whether the id contained HEAD's short hash, which fails whenever the
+    # binary is older than the tree -- after a docs-only commit, say. That is a
+    # fact about the environment and not about the property under test, and
+    # whether a binary matches HEAD is release.zsh's job, where it belongs.
+    # Entry 1, written into the case meant to pin a different lesson.
+    # 測的是**形狀**，不是新鮮度。這個案例的第一版問的是「那個 id 有沒有含 HEAD 的短雜湊」，而
+    # 那在「執行檔比工作樹舊」時就會失敗——例如剛提交了一個只改文件的 commit。那是一件關於
+    # 環境的事實，不是關於被測性質的；而「執行檔與 HEAD 相不相符」是 release.zsh 的職責，它本來
+    # 就在那裡。第 1 條，寫在一個本來要釘住另一條教訓的案例裡。
+    setopt local_options extended_glob
     _t303_ver=$("$CSV2" --version 2>/dev/null)
-    if [[ -n $_t303_short && $_t303_ver == *"$_t303_short"* ]]; then
-        ok "T303a --version carries $_t303_short, so it names the commit whatever the tag state was / --version 帶著 $_t303_short，因此無論建置時的 tag 狀態如何，它都指名了那個 commit"
+    _t303_id=${${_t303_ver##*\(}%%\)*}
+    if [[ $_t303_id == unknown ]]; then
+        # A build with no .git says so rather than guessing. That is the guest,
+        # which builds from a tar payload.
+        # 一次沒有 .git 的建置會直說，而不是用猜的。那就是 guest：它從 tar payload 建置。
+        ok "T303a the build id is \"unknown\", which is what a build with no .git should say / build id 是 \"unknown\"，那正是一次沒有 .git 的建置該說的"
+    elif [[ $_t303_id == *[0-9a-f](#c7,)* ]]; then
+        ok "T303a the build id [$_t303_id] carries a commit, whatever the tag state was at build time / build id 帶著一個 commit，無論建置當下的 tag 狀態如何"
     else
-        bad "T303a --version is [$_t303_ver] and HEAD is $_t303_short / 版本字串與 HEAD 如上"
+        bad "T303a the build id is [$_t303_id] and carries no commit; a bare tag is exactly what QD is about / build id 如上，裡面沒有 commit——而「只有一個純 tag」正是 QD 講的那件事"
     fi
 
     # The rule lives in build_id.zsh so the thing that stamps and the thing

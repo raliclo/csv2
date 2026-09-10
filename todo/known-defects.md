@@ -12357,6 +12357,41 @@ a drifted copy is reported rather than found during a release, and T303b checks 
 still ask build_id.zsh, because one that went back to `git describe` would pass everywhere
 except AT a tag.
 
+### 未驗證的那一半：batch 副本在 tag 上的分支
+
+`compile_csv2_win.bat` 那份副本，在 Windows 節點上**只驗到一半**：
+
+| 分支 | 狀態 |
+|---|---|
+| tag **之後**（describe 已帶雜湊 → 不重複） | ✅ 實測 `BUILD=v0.1.0-33-g2348064` |
+| **正好在 tag 上**（describe 沒有雜湊 → 要接起來） | ❌ **未驗證** |
+
+而未驗證的那一條，正好**只在出貨當中才會觸發**。
+
+停在這裡的理由是：五次遠端嘗試全部掛在「透過多層 shell 造一個 .bat」這件事上，不是掛在被測的
+目標上（第一次抽取式的測試是成功的）。繼續下去是在除錯我的命令管線，不是在除錯那段 batch。
+
+已做的補救：把原本的 `||` 改成 `if errorlevel 1`。`||` 放在括號區塊內、又接在重導之後，在 batch
+裡的結合方式難以預測——而那正是這條分支的形狀。
+
+**在那台機器上驗證它的一行指令**（在 `csv2` 的 checkout 內）：
+
+```
+git -c advice.detachedHead=false worktree add ..\csv2-tag v0.1.0
+cd ..\csv2-tag && compile_csv2_win.bat && release\csv2.exe --version
+```
+
+預期看到 `csv2 0.1.0 (v0.1.0 / 8d5600e)`。看到 `(v0.1.0)` 就表示那條分支沒有觸發。
+
+Half verified on the Windows node: the past-a-tag branch was exercised and gave
+`v0.1.0-33-g2348064`; the AT-a-tag branch, which joins the two halves, was not -- and that is
+the branch that only fires during a release. Five remote attempts all failed in the plumbing
+that builds a .bat through several shell layers rather than in the target, so this stops here
+rather than debugging the plumbing. The `||` was replaced with `if errorlevel 1`, since `||`
+inside a parenthesised block after a redirect is the least predictable form in batch. The
+one-line check for whoever is at that machine is above.
+
+
 
 ### 2026-09-10 的決定
 

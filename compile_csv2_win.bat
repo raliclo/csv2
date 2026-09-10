@@ -89,10 +89,19 @@ set "_described="
 set "_short="
 for /f "usebackq tokens=* delims=" %%G in (`git describe --always --dirty 2^>nul`) do set "_described=%%G"
 for /f "usebackq tokens=* delims=" %%G in (`git rev-parse --short HEAD 2^>nul`) do set "_short=%%G"
+:: `if errorlevel 1` rather than `||`. Inside a parenthesised block, after a
+:: redirected command, `||` in batch binds in ways that are hard to predict and
+:: harder to test from another machine -- and this branch is the one that only
+:: fires AT A TAG, which is to say during a release. The conventional form has
+:: no such ambiguity.
+:: 用 `if errorlevel 1` 而不是 `||`。在一個括號區塊內、又接在重導之後，batch 的 `||` 結合方式
+:: 難以預測，而且更難從另一台機器上測——而這條分支**只在正好位於 tag 上時**才會觸發，也就是
+:: 某次出貨當中。常規的寫法沒有這個歧義。
 if not "!_described!"=="" (
     set "_build=!_described!"
     if not "!_short!"=="" (
-        echo(!_described! | findstr /C:"!_short!" >nul || set "_build=!_described! / !_short!"
+        echo(!_described!) | findstr /C:"!_short!" >nul
+        if errorlevel 1 set "_build=!_described! / !_short!"
     )
 ) else (
     if not "!_short!"=="" set "_build=!_short!"
