@@ -417,13 +417,21 @@ target_dir() {
     # 會再次產生缺陷 MM——一次成功的安裝，而 shell 仍然透過一個沒有人去看的 shim 解析到更舊的
     # 執行檔。
     #
-    # NOT handled, and deliberately not guessed at: a csv2 that scoop itself
-    # manages. `scoop prefix csv2` answers "Could not find app path" on the
-    # node this was measured on, so that branch cannot be exercised here, and
-    # an untested refusal is worse than an honest gap. Recorded in todo.md.
-    # **未處理，而且刻意不猜**：一個由 scoop 自己管理的 csv2。在量測這件事的那個節點上，
-    # `scoop prefix csv2` 回答的是「Could not find app path」，所以那條分支在這裡無法被執行，
-    # 而一個沒被測過的拒絕比一個誠實的缺口更糟。已記在 todo.md。
+    # A csv2 that scoop itself manages IS handled now, above. It was recorded
+    # as an honest gap first, because `scoop prefix csv2` answers "Could not
+    # find app path" on the node and an untested refusal is worse than a stated
+    # one. What could not be exercised, though, was that FACT and not the
+    # query: scoop manages other apps there, and a fake `scoop` early on PATH
+    # produces the condition. The two were separable and had not been
+    # separated. Both directions were then measured on the node -- the real
+    # state still resolves through the shim, and a scoop that claims csv2
+    # refuses.
+    # 「由 scoop 自己管理的 csv2」現在**已經處理**，就在上面。它先前是被當成一個誠實的缺口記
+    # 下來的，因為 `scoop prefix csv2` 在那個節點上回答「Could not find app path」，而一個沒被
+    # 測過的拒絕比一個講明白的缺口更糟。但執行不到的是那個**事實**，不是那個查詢：那台機器上
+    # scoop 管理著別的 app，而一個放在 PATH 前面的假 `scoop` 就能製造出那個條件。兩者可以分開，
+    # 而先前沒有分開。之後兩個方向都在節點上量過——真實狀態仍然經由 shim 解析，而一個宣稱管理著
+    # csv2 的 scoop 會被拒絕。
     case "$(uname -s)" in
         MINGW*|MSYS*|CYGWIN*)
             setopt local_options extended_glob

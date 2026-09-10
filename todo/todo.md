@@ -51,6 +51,20 @@ guest 比對吞掉 csv2 的結束狀態（已修——csv2 單獨執行、檢查
 >
 > **這件事需要動到使用者機器上的 Homebrew／scoop 狀態，所以留給人決定，不由測試代跑。**
 >
+> **另外那個「未處理」的缺口，2026-09-10 稍晚關掉了。** 它原本記著「csv2 由 scoop 自己管理時的
+> 行為未處理，因為那條分支在節點上執行不到」。**執行不到的是那個事實，不是那個查詢**——那台
+> 機器上 scoop 管理著別的 app（`scoop prefix zsh` 回傳一個真的路徑），而一個放在 PATH 前面的
+> 假 `scoop` 就能製造出「csv2 被管理」這個條件。兩者可以分開，而我先前沒有分開。
+>
+> 順帶量到一件事：**`scoop prefix csv2` 失敗時仍然回傳 rc=0**，只印一句「Could not find app
+> path」。所以判別式看的是**輸出**（必須長得像 Windows 路徑、且指向一個存在的目錄），不是退出碼。
+>
+> The gap recorded here as "not handled" was closed later the same day. What could not be
+> exercised was the FACT that csv2 is not a scoop app on that node, not the query itself: scoop
+> manages other apps there, and a fake `scoop` early on PATH produces the condition. Also
+> measured: `scoop prefix csv2` exits 0 while printing "Could not find app path", so the
+> discriminator is the output, not the status.
+>
 > Status re-measured 2026-09-10: all five parts are done, and what remains is not building
 > something but RUNNING it. The Windows shim landed today; the blockage recorded here -- both
 > halves needing a URL the installing machine can fetch -- ended when v0.1.1 shipped. What has
