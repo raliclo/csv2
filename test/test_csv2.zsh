@@ -17607,7 +17607,7 @@ else
 fi
 
 echo
-echo "--- T300: every tracked .zsh is executable in the index / T300：每一支被追蹤的 .zsh 在索引裡都可執行 ---"
+echo "--- T300: every .zsh in HEAD is executable / T300：HEAD 裡每一支 .zsh 都可執行 ---"
 # compile_csv2_linux.zsh was 100644 while the other thirteen were 100755, so
 # `./compile_csv2_linux.zsh` on a fresh clone exits 126 -- found, not
 # executable, which reads like a typo rather than a repository property. It
@@ -17634,7 +17634,7 @@ echo "--- T300: every tracked .zsh is executable in the index / T300：每一支
 # 存在的修正」出去了，而守衛早已對著一個不再存在的狀態回報了綠燈。第 1 條。
 if ! command -v git >/dev/null 2>&1 || [[ ! -d $ROOT/.git && ! -f $ROOT/.git ]]; then
     T300_SKIPPED=1
-    skipt "T300 every tracked .zsh is executable in the index / 每一支被追蹤的 .zsh 在索引裡都可執行 (not a git checkout here / 這裡不是一個 git checkout)"
+    skipt "T300 every .zsh in HEAD is executable / HEAD 裡每一支 .zsh 都可執行 (not a git checkout here / 這裡不是一個 git checkout)"
 else
     _t300_all=$(git -C "$ROOT" ls-tree -r HEAD --name-only 2>/dev/null \
                 | LC_ALL=C grep '\.zsh$' \
