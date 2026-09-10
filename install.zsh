@@ -394,8 +394,64 @@ target_dir() {
     # 裡的一個 shim 指向它，而 scoop/shims 在 PATH 上。**裝到 shim 本來就指著的那個位置**，
     # 會讓 shell 解析到新的建置，而這支腳本完全不必往 scoop 自己的目錄裡寫東西——建立 shim
     # 是 scoop 的事，不是我們的。
+    # ASK the shim where it points; do not assume. The line above this one
+    # used to print %LOCALAPPDATA%/csv2 unconditionally, with a comment
+    # explaining that the shim on that machine names exactly that directory.
+    # It does -- measured on 2026-09-10, the shim file says
+    # `path = "C:\\Users\\lowei\\AppData\\Local\\csv2\\csv2.exe"` -- but that is a fact
+    # about one machine, and the macOS branch six lines up does not assume the
+    # equivalent: it runs `brew --prefix`. This is the same question asked the
+    # same way.
+    #
+    # **問** shim 它指向哪裡，不要假設。這一段原本無條件印出 %LOCALAPPDATA%/csv2，附一段註解
+    # 說明「那台機器上的 shim 指的正是那個目錄」。它確實是——2026-09-10 實測，那個 shim 檔寫的是
+    # `path = "C:\\Users\\lowei\\AppData\\Local\\csv2\\csv2.exe"`——但那是一個關於**某一台機器**的
+    # 事實，而上面六行的 macOS 分支並沒有做等價的假設：它去跑 `brew --prefix`。這裡問的是同一個
+    # 問題，用同一種方式。
+    #
+    # The shim is the authoritative answer to the only question that matters
+    # here: where will the shell find csv2 after this install. Writing anywhere
+    # else produces defect MM again -- an install that succeeds while the shell
+    # goes on resolving an older binary through a shim nobody looked at.
+    # shim 是「這次安裝之後，shell 會在哪裡找到 csv2」這個唯一要緊的問題的權威答案。裝到別的地方
+    # 會再次產生缺陷 MM——一次成功的安裝，而 shell 仍然透過一個沒有人去看的 shim 解析到更舊的
+    # 執行檔。
+    #
+    # NOT handled, and deliberately not guessed at: a csv2 that scoop itself
+    # manages. `scoop prefix csv2` answers "Could not find app path" on the
+    # node this was measured on, so that branch cannot be exercised here, and
+    # an untested refusal is worse than an honest gap. Recorded in todo.md.
+    # **未處理，而且刻意不猜**：一個由 scoop 自己管理的 csv2。在量測這件事的那個節點上，
+    # `scoop prefix csv2` 回答的是「Could not find app path」，所以那條分支在這裡無法被執行，
+    # 而一個沒被測過的拒絕比一個誠實的缺口更糟。已記在 todo.md。
     case "$(uname -s)" in
         MINGW*|MSYS*|CYGWIN*)
+            setopt local_options extended_glob
+            local shim shim_file line win
+            shim=$(command -v csv2 2>/dev/null)
+            [[ -n $shim ]] && shim_file=${shim:h}/csv2.shim
+            if [[ -n $shim_file && -r $shim_file ]]; then
+                # A `key = "value"` line. Matched as a whole rather than cut at
+                # a delimiter: if it does not look like a Windows path, nothing
+                # is extracted, and the fallback below runs. mistakes entry 6.
+                # 一行 `key = "value"`。整段比對而不是在分隔符處切開：如果它看起來不像一個
+                # Windows 路徑，就什麼都不會被取出，底下的 fallback 會接手。mistakes 第 6 條。
+                while IFS= read -r line; do
+                    [[ $line == (#b)*'"'([^\"]##)'"'* ]] || continue
+                    [[ $match[1] == [A-Za-z]:[\\/]* ]] || continue
+                    win=$match[1]
+                    break
+                done < $shim_file
+            fi
+            if [[ -n $win ]]; then
+                local posix
+                if posix=$(cygpath -u -- "$win" 2>/dev/null) && [[ -n $posix ]]; then
+                    print -r -- "${posix:h}"
+                else
+                    print -r -- "${${win//\\//}:h}"
+                fi
+                return
+            fi
             local appdata=${LOCALAPPDATA:-$HOME/AppData/Local}
             print -r -- "${appdata//\\//}/csv2"
             return
