@@ -12391,6 +12391,38 @@ rather than debugging the plumbing. The `||` was replaced with `if errorlevel 1`
 inside a parenthesised block after a redirect is the least predictable form in batch. The
 one-line check for whoever is at that machine is above.
 
+### 2026-09-10 稍晚：那個缺口關掉了，而關掉它的是一個暫時的 tag
+
+不必等到出貨。在 Windows 節點上打一個**本地的**暫時 tag，建置，再刪掉：
+
+```
+git tag -a ztmp-buildid -m tmp
+cmd //c ".\compile_csv2_win.bat"
+release\csv2.exe --version     ->  csv2 0.1.0 (ztmp-buildid / ea96044)
+git tag -d ztmp-buildid
+```
+
+`(ztmp-buildid / ea96044)`——**那正是「正好位於 tag 上」時該有的形式**，也就是先前唯一沒被執行過
+的那條分支。tag 是本地的、沒有推出去，刪掉之後 `git describe` 回到 `v0.1.0-35-gea96044`。
+
+**而在那之前先抓到了一個真的錯誤，是那台機器抓的，不是推理抓的。** 那台機器建置後回報
+`csv2 0.1.0 (97e3908)`，而同一份 checkout 在 MSYS 下的 `git describe` 說 `v0.1.0-34-g97e3908`。
+成因是我在改寫時多打了一個收尾括號：`echo(!_described!)` 把外層的 `if (` 區塊提前關掉，
+`_described` 變成空的，於是退回純短雜湊。
+
+**而那個退路仍然含有一個 commit，所以 T303a 的形狀檢查通過了。** 那是這棵樹一再記錄的那個形狀
+——守衛在它沒有看的那一半上亮綠燈。T303d 因此被加上：比對**值**（必須等於 `build_id.zsh` 產生的
+那個），但只在「這個執行檔是這個 commit 的建置」時才比。
+
+Closed the same day, and what closed it was a TEMPORARY LOCAL TAG on the Windows node: tag,
+build, read `--version`, delete the tag. It printed `(ztmp-buildid / ea96044)`, which is the
+AT-a-tag form -- the one branch that had never been executed. Before that it caught a real
+error, and the machine caught it rather than reasoning: the build said `(97e3908)` where MSYS
+`git describe` says `v0.1.0-34-g97e3908`, because a closing paren I added to `echo(!_described!)`
+closed the enclosing `if (` block early. The fallback still CONTAINED a commit, so the shape
+check passed while the value was wrong, which is why T303d now compares the value.
+
+
 
 
 ### 2026-09-10 的決定
