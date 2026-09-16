@@ -49,6 +49,17 @@ case "$HOST_KERNEL" in
         # `build: FAILED`，而那個節點保留了它先前的二進位檔——那正是這棵樹在 2026-08-19、
         # 以及今天早上各記錄過一次的形狀：一次從未執行的建置，之後的測試回報的是一個從未被造出來
         # 的程式。
+        #
+        # Correction, 2026-09-17: the sentence above over-generalises. cmd.exe
+        # DOES search the current directory by default; it stops when the
+        # process carries NoDefaultCurrentDirectoryInExePath, which the
+        # environment that hit this failure did. `.\` is still right -- it works
+        # either way -- but the reason is that variable, not cmd.exe itself. The
+        # same variable is what hid vswhere.exe from VsDevCmd.bat. QK.
+        # 更正（2026-09-17）：上面那句概括過頭了。cmd.exe **預設會**搜尋當前目錄；是行程帶著
+        # NoDefaultCurrentDirectoryInExePath 時才不搜，而碰到這次失敗的環境正帶著它。`.\` 仍然是對的
+        # ——兩種情況都有效——但理由是那個變數，不是 cmd.exe 本身。讓 VsDevCmd.bat 找不到
+        # vswhere.exe 的也是同一個變數。QK。
         MSYS2_ARG_CONV_EXCL='*' cmd.exe /d /c '.\compile_csv2_win.bat' "$@"
         exit $?
         ;;

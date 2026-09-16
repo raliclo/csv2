@@ -44,7 +44,18 @@ if errorlevel 1 (
 :: tools present, even for a project with no C of its own. vswhere is the
 :: supported way to locate them; hardcoding a Visual Studio path breaks on the
 :: next version, and on any machine that installed it elsewhere.
-set "_vswhere=C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+::
+:: The Installer directory is APPENDED to PATH before vcvars64.bat runs.
+:: VsDevCmd.bat pushd's into that directory and calls `vswhere.exe` by bare
+:: name, relying on cmd.exe searching the current directory. When the process
+:: carries NoDefaultCurrentDirectoryInExePath (some launchers set it), that
+:: search is off and every build printed "'vswhere.exe' is not recognized".
+:: Clearing the variable instead would also have worked, but it would re-enable
+:: current-directory lookup for everything vcvars runs from the repo root,
+:: which is what the variable exists to prevent. Appending cannot shadow
+:: anything already on PATH. QK.
+set "_vsinstaller=C:\Program Files (x86)\Microsoft Visual Studio\Installer"
+set "_vswhere=%_vsinstaller%\vswhere.exe"
 where cl.exe > nul 2>&1
 if errorlevel 1 (
     if not exist "%_vswhere%" (
@@ -62,14 +73,13 @@ if errorlevel 1 (
         echo [FAIL] vcvars64.bat not found under "!_vsroot!"
         exit /b 1
     )
+    set "PATH=!PATH!;!_vsinstaller!"
     call "!_vsroot!\VC\Auxiliary\Build\vcvars64.bat" > nul
 )
 
 :: The build identity, produced before the list that names it is read. Same
 :: three lines as the macOS and Linux scripts, in batch: git if there is a git,
 :: and `unknown` if there is not, rather than a guess.
-:: 這次建置的身分，在「指名它的那份清單」被讀取之前產生。與 macOS 與 Linux 腳本相同的三行，
-:: 寫成 batch：有 git 就用 git，沒有就是 `unknown`，而不是用猜的。
 :: The build id ALWAYS carries the commit, and says the tag when there is one.
 :: `git describe --always` answers according to whether a tag existed WHEN THE
 :: BUILD RAN, not according to the source, so the same commit produced
@@ -78,12 +88,13 @@ if errorlevel 1 (
 :: This is a COPY of build_id.zsh, which batch cannot source. T303 pins the
 :: property both must satisfy, so a copy that drifts is reported rather than
 :: found during a release.
-:: 這個 build id **永遠帶著那個 commit**，而在有 tag 時也說出 tag。`git describe --always` 的答案
-:: 取決於「建置執行的當下」有沒有 tag，不取決於原始碼，所以同一個 commit 在 v0.1.0 被打之前產生
-:: `(8d5600e)`、之後產生 `(v0.1.0)`。QD。
 ::
-:: 這是 build_id.zsh 的一份**副本**——batch source 不了它。T303 釘住兩者都必須滿足的那個性質，
-:: 於是一份漂掉的副本會被回報，而不是在某次出貨當中才被發現。
+:: English only, like the rest of this file (see the note at the top). Thirteen
+:: Chinese lines were added here on 2026-09-10, and cmd.exe then executed
+:: fragments of them cut mid-character -- on some runs and not others. The
+:: Chinese text for these notes is in build_id.zsh and known-defects.md QK.
+:: That is also why the generated BuildInfo.swift carries only the English
+:: comment line on Windows: an `echo` of non-ASCII is the same hazard.
 set "_build=unknown"
 set "_described="
 set "_short="
@@ -94,22 +105,19 @@ for /f "usebackq tokens=* delims=" %%G in (`git rev-parse --short HEAD 2^>nul`) 
 :: harder to test from another machine -- and this branch is the one that only
 :: fires AT A TAG, which is to say during a release. The conventional form has
 :: no such ambiguity.
-:: 用 `if errorlevel 1` 而不是 `||`。在一個括號區塊內、又接在重導之後，batch 的 `||` 結合方式
-:: 難以預測，而且更難從另一台機器上測——而這條分支**只在正好位於 tag 上時**才會觸發，也就是
-:: 某次出貨當中。常規的寫法沒有這個歧義。
+::
+:: The `echo(` below has NO closing paren. Adding one closed the enclosing
+:: `if (` block early, `_described` came out empty, and the build fell back to
+:: the bare short hash -- which still CONTAINS a commit, so T303a's shape check
+:: passed while the value was wrong. Measured on the Windows node: the build
+:: said `(97e3908)` where MSYS `git describe` says `v0.1.0-34-g97e3908`.
+::
+:: That note used to sit INSIDE the block as `::` lines. A `::` line is a label,
+:: not a comment, and inside a parenthesised block cmd.exe tries to run it,
+:: printing "The system cannot find the drive specified" on every build. QK.
 if not "!_described!"=="" (
     set "_build=!_described!"
     if not "!_short!"=="" (
-        :: `echo(` with NO closing paren. Adding one closed the enclosing
-        :: `if (` block early, `_described` came out empty, and the build fell
-        :: back to the bare short hash -- which still CONTAINS a commit, so
-        :: T303a's shape check passed while the value was wrong. Measured on
-        :: the Windows node: the build said `(97e3908)` where MSYS `git
-        :: describe` says `v0.1.0-34-g97e3908`.
-        :: `echo(` 後面**不加**收尾括號。加了它會把外層的 `if (` 區塊提前關掉，`_described` 因此
-        :: 是空的，建置退回純短雜湊——而那**仍然含有一個 commit**，所以 T303a 的形狀檢查照樣
-        :: 通過，值卻是錯的。在 Windows 節點上量到：建置說 `(97e3908)`，而 MSYS 的 git describe
-        :: 說 `v0.1.0-34-g97e3908`。
         echo(!_described!| findstr /C:"!_short!" >nul
         if errorlevel 1 set "_build=!_described! / !_short!"
     )
@@ -117,7 +125,6 @@ if not "!_described!"=="" (
     if not "!_short!"=="" set "_build=!_short!"
 )
 > src\BuildInfo.swift echo // Generated by the build. Not in git: it changes with every commit.
->> src\BuildInfo.swift echo // 由建置產生。不進 git：它每個 commit 都會變。
 >> src\BuildInfo.swift echo let CSV2_BUILD = "!_build!"
 
 :: ONE source list, read from src\sources.list, the same file the macOS and

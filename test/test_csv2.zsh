@@ -18291,6 +18291,58 @@ assert_eq "$("$CSV2" -count -i "$TMP/t305.csv" | tr -d ' ')" "2" \
     "T305f and it appended exactly one record / 而它剛好追加了一筆"
 
 echo
+echo "--- T306: the Windows build script stays parseable by cmd.exe / T306：Windows 建置腳本維持 cmd.exe 解析得了的樣子 ---"
+# The Windows build succeeded while printing three kinds of error on stderr,
+# and one was cmd.exe executing fragments of Chinese comment lines, cut
+# mid-character, on some runs and not others. The file's own header already
+# said it must be English-only; nothing enforced that, and thirteen Chinese
+# lines went in on 2026-09-10. A build that prints errors every time teaches
+# its reader to ignore the next real one. QK.
+# Windows 建置成功，卻在 stderr 上印出三種錯誤，其中一種是 cmd.exe 執行了中文註解行的片段——從
+# 字元中間切開，而且有時出現、有時不出現。那個檔案自己的開頭已經寫著必須只用英文；沒有東西在
+# 執行那條規則，於是 2026-09-10 加進了十三行中文。一段每次都印錯誤的建置，會教讀者忽略下一個
+# 真的錯誤。QK。
+#
+# These are static checks on purpose: they run on every platform, so a Chinese
+# line added from a Mac is reported on the Mac, not on the next Windows build.
+# 刻意做成靜態檢查：它們在每個平台上都跑，於是一行從 Mac 加進去的中文會在 Mac 上被回報，而不是
+# 等到下一次 Windows 建置。
+_t306_bat="$ROOT/compile_csv2_win.bat"
+if [[ ! -r $_t306_bat ]]; then
+    bad "T306 compile_csv2_win.bat is missing / compile_csv2_win.bat 不見了"
+else
+    # Bytes, not a regex: a UTF-8 locale grep does not agree across platforms
+    # on what `[^ -~]` means, and `tr` on bytes has no locale to disagree about.
+    # 以位元組計，不用 regex：在 UTF-8 locale 下，各平台的 grep 對 `[^ -~]` 的意思不一致，而
+    # 對位元組操作的 `tr` 沒有 locale 可以不一致。
+    _t306_nonascii=$(LC_ALL=C tr -d '\000-\177' < "$_t306_bat" | wc -c | tr -d ' ')
+    assert_eq "$_t306_nonascii" "0" \
+        "T306a compile_csv2_win.bat contains no non-ASCII byte / compile_csv2_win.bat 不含任何非 ASCII 位元組"
+
+    # Every parenthesised block in this file is indented, so an indented `::`
+    # is a label inside a block -- which cmd.exe runs, printing "The system
+    # cannot find the drive specified". Use `rem` there, or move the note out.
+    # 這個檔案裡每一個括號區塊都有縮排，所以一行有縮排的 `::` 就是區塊內的標籤——cmd.exe 會去執行
+    # 它，印出「The system cannot find the drive specified」。那裡要用 `rem`，或把說明移到區塊外。
+    if LC_ALL=C grep -q -E '^[[:space:]]+::' "$_t306_bat"; then
+        bad "T306b compile_csv2_win.bat has a :: label inside a block / compile_csv2_win.bat 的區塊內有 :: 標籤"
+    else
+        ok "T306b no :: label inside a block / 區塊內沒有 :: 標籤"
+    fi
+
+    # VsDevCmd.bat calls vswhere.exe by bare name from its own directory, which
+    # fails under NoDefaultCurrentDirectoryInExePath. The fix appends the
+    # Installer directory to PATH rather than clearing that variable.
+    # VsDevCmd.bat 在它自己的目錄裡以裸名呼叫 vswhere.exe，而那在 NoDefaultCurrentDirectoryInExePath
+    # 之下會失敗。修法是把 Installer 目錄附加到 PATH，而不是清掉那個變數。
+    if LC_ALL=C grep -q 'set "PATH=!PATH!;!_vsinstaller!"' "$_t306_bat"; then
+        ok "T306c the vswhere directory is on PATH before vcvars64.bat runs / 呼叫 vcvars64.bat 之前，vswhere 的目錄已在 PATH 上"
+    else
+        bad "T306c vcvars64.bat is called without the vswhere directory on PATH / 呼叫 vcvars64.bat 時，vswhere 的目錄不在 PATH 上"
+    fi
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

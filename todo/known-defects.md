@@ -12868,3 +12868,109 @@ name the version; this one did not until now, and a reproduction whose binary is
 answer the question the file exists to answer, because it may be describing something already
 fixed.
 
+## QK. Windows 建置在 stderr 上印出三種錯誤，而其中一種是在執行註解的片段（2026-09-17 修正，T306a–c）
+
+**2026-09-17 發現，在一次「專案狀態」盤點重建 HEAD 時。經親手重現。同日已修。**
+
+修正後（`v0.1.1-10-gb9ded3a-dirty`，同一台機器、同一個帶著那個變數的環境）：完整建置的 stderr 只剩
+連結器的 `Creating library release\csv2.lib and object release\csv2.exp`（那是 link.exe 的正常
+訊息，不是錯誤）；到寫出 `BuildInfo.swift` 為止的前 128 行連跑 5 次，stdout 與 stderr 皆 0 位元組。
+套件 `PASS 1359 FAIL 0 SKIP 16`。T306a–c 對修正前的腳本（`git show HEAD:compile_csv2_win.bat`）
+三條全部失敗（非 ASCII 1080 位元組、有區塊內 `::`、PATH 沒有附加），對修正後的三條全部通過。
+
+- 非 ASCII：十三行中文註解移除（中文說明在本條與 `build_id.zsh`）；`BuildInfo.swift` 在 Windows
+  上只寫英文那一行註解，因為一個輸出非 ASCII 的 `echo` 是同一個危險。
+- 區塊內的 `::`：那段說明移到區塊外。**沒有改成 `rem`**：那段文字含 `echo(` 與 `if (`，放在區塊內
+  的括號是另一個要去證明安全的東西，而移出去就不用證明。
+- vswhere：呼叫 `vcvars64.bat` 之前把 Installer 目錄**附加**到 PATH。沒有選「暫時清掉
+  `NoDefaultCurrentDirectoryInExePath`」，因為那會讓 vcvars 從 repo 根目錄執行的每一個裸名都重新
+  搜尋當前目錄——那正是那個變數要防的；附加在尾端則遮蔽不了 PATH 上既有的任何東西。
+
+另外還有一件事：修正後第一次跑套件時被拒絕，理由是 `STALE BINARY … newer than it: BuildInfo.swift`——
+那 5 次探測在建置之後又寫了一次 `BuildInfo.swift`。守衛是對的：重建後再跑才是上面那個數字。
+
+建置本身成功，`--version` 也對（`csv2 0.1.1 (v0.1.1-10-gb9ded3a)`），所以沒有任何東西會因為它而
+失敗。但 `compile_csv2.zsh` 在 Windows 上印出：
+
+```console
+$ ./compile_csv2.zsh          # HEAD b9ded3a，Windows 11 / Git Bash，Swift 6.3.3，VS 2022 17.14
+'vswhere.exe' is not recognized as an internal or external command,
+operable program or batch file.
+The system cannot find the drive specified.
+The system cannot find the drive specified.
+The system cannot find the drive specified.
+The system cannot find the drive specified.
+The system cannot find the drive specified.
+Building csv2.exe (-O)
+   Creating library release\csv2.lib and object release\csv2.exp
+OK: csv2 0.1.1 (v0.1.1-10-gb9ded3a) -> release\csv2.exe
+```
+
+**「沒有影響結果」正是危險的地方**：一段每次都印錯誤的建置，會讓下一個真的錯誤被當成同一批雜訊。
+
+### 重現：三個成因，各自隔離
+
+把 `compile_csv2_win.bat` 的前 121 行（到寫出 `BuildInfo.swift` 為止，不含 swiftc）複製成
+`_probeA.bat` 放在 repo 根目錄，**保留 CRLF**，以 `cmd.exe /d /c` 執行；stdout 為 0 位元組，以下全在 stderr。
+
+**同一個檔案連跑兩次，結果不同：**
+
+```console
+=== A 第 1 次
+'vswhere.exe' is not recognized as an internal or external command,
+'�碼，所以同一個' is not recognized as an internal or external command,      ← 註解的片段被執行
+'��次出貨當中才被發現。' is not recognized as an internal or external command,
+The system cannot find the drive specified.        （×5）
+=== A 第 2 次
+'vswhere.exe' is not recognized as an internal or external command,
+The system cannot find the drive specified.        （×5）
+```
+
+1. **非 ASCII 的註解行 → 片段被當成指令執行，而且不是每次。** 那兩個片段來自第 81–86 行的中文
+   `::` 註解，而且是從一個多位元組字元的中間切開的。這個檔案的開頭**已經寫著**「非 ASCII 位元組會
+   破壞 cmd.exe 對後續行的解析，所以這是 csv2 唯一不雙語的檔案」——而 2026-09-10 的
+   `2348064`、`97e3908`、`ea96044` 為 build id 加註解時，照專案其他地方的慣例寫成了雙語，加進 13 行
+   中文。規則寫在同一個檔案的第 6 行，沒有任何東西在執行它。
+   它今天印的是「not recognized」，是因為被切出來的片段剛好不是一個指令名。
+2. **`::` 放在括號區塊內 → `The system cannot find the drive specified.`** 第 103–112 行的十行
+   `::` 在 `if (...)` 區塊裡。`::` 是一個標籤，而標籤在區塊內不被當成註解；cmd 把它當成磁碟機代號
+   `:` 去解析。把區塊內的 `::` 改成 `rem`（其餘不變）之後，五行全部消失——變體 B（只拿掉非 ASCII
+   行）還剩 3 行，變體 C（再把區塊內的 `::` 換成 `rem`）剩 0 行。
+3. **`vswhere.exe` 找不到 → 來自 `vcvars64.bat` 內部，不是這支腳本。** 四個變體都有它。
+   `VsDevCmd.bat` 第 180–181 行先 `pushd` 到 Installer 目錄，再以**裸名** `vswhere.exe` 呼叫。
+   cmd 預設會在當前目錄找執行檔，所以這行平常成立；但這個行程的環境帶著
+   `NoDefaultCurrentDirectoryInExePath=1`（不在 `HKCU\Environment` 也不在 HKLM 的系統環境，
+   是啟動這個 shell 的行程給的），而那個變數正是「不要在當前目錄找」：
+
+   ```console
+   $ cat vsw_probe.bat                      # cd 到 Installer 目錄，再呼叫裸名 vswhere.exe
+   $ cmd.exe /d /c vsw_probe.bat            # 環境照繼承
+   'vswhere.exe' is not recognized as an internal or external command,
+   $ env -u NoDefaultCurrentDirectoryInExePath cmd.exe /d /c vsw_probe.bat
+   17.14.37710.0
+   ```
+
+   VsDevCmd 用它讀產品版本，讀不到就略過，所以 MSVC 環境照樣建立——這就是為什麼建置仍然成功。
+
+**附帶一件：`compile_csv2.zsh` 裡那段 `.\compile_csv2_win.bat` 的註解說「cmd.exe 不會為了找一個
+執行檔而搜尋當前目錄」。那不是 cmd.exe 的一般行為，是同一個變數的行為。** 結論（要寫 `.\`）仍然對，
+而且在那個變數存在時是必要的；錯的是那句理由的普遍性。
+
+### 附帶：拿掉非 ASCII 的第一次嘗試本身就錯了
+
+`grep -v` 過濾非 ASCII 行產生的變體 B，第一次是**純 LF**——MSYS 的 grep 以文字模式讀檔，CR 在
+比對之前就被剝掉了（全域 `CLAUDE.md` 的「Line endings」一節）。那個變體跑出一個缺了第 3 行的
+`BuildInfo.swift`，看起來像是「拿掉中文破壞了建置」。以 `awk '{printf "%s\r\n", $0}'` 補回 CRLF、
+`tr -dc '\r' | wc -c` 確認 106 CR / 106 行之後才是有效的量測。
+
+The Windows build succeeds but prints three kinds of error on stderr, and one of them is cmd.exe
+executing fragments of comments, nondeterministically. (1) Thirteen Chinese `::` lines were added
+on 2026-09-10 to a file whose sixth line says it is English-only because non-ASCII bytes corrupt
+cmd.exe's parsing; the same 121-line copy run twice printed two such fragments once and none the
+second time. (2) `::` inside a parenthesised block is a label, not a comment, and prints "The
+system cannot find the drive specified" -- `rem` removes all five. (3) `vswhere.exe` is not found
+inside VsDevCmd.bat, which pushd's into the Installer directory and calls it by bare name; this
+process carries `NoDefaultCurrentDirectoryInExePath=1`, which disables exactly that lookup, and
+removing the variable makes the same probe print `17.14.37710.0`. The comment in compile_csv2.zsh
+attributing the need for `.\` to cmd.exe in general is really describing that variable.
+
