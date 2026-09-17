@@ -19,11 +19,11 @@ English documentation: [README.md](README.md)。
 那台機器上打包，而打包腳本的結尾是**解開封存、執行解開後的執行檔、並讓它讀一個 CSV**。
 
 ```sh
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.1/csv2-0.1.1-macos-arm64.tar.zst
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.1/csv2-0.1.1-macos-arm64.tar.zst.sha256
-sha256sum -c csv2-0.1.1-macos-arm64.tar.zst.sha256
-zstd -d csv2-0.1.1-macos-arm64.tar.zst -c | tar -x
-./csv2-0.1.1-macos-arm64/csv2 --version
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.2/csv2-0.1.2-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.2/csv2-0.1.2-macos-arm64.tar.zst.sha256
+sha256sum -c csv2-0.1.2-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.1.2-macos-arm64.tar.zst -c | tar -x
+./csv2-0.1.2-macos-arm64/csv2 --version
 ```
 
 其餘三個把 `macos-arm64` 換成 `linux-x86_64`、`linux-aarch64` 或 `windows-x86_64`。

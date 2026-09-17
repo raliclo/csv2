@@ -23,11 +23,11 @@ the packaging script ends by extracting the archive, running the extracted
 binary and having it read a CSV.
 
 ```sh
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.1/csv2-0.1.1-macos-arm64.tar.zst
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.1/csv2-0.1.1-macos-arm64.tar.zst.sha256
-sha256sum -c csv2-0.1.1-macos-arm64.tar.zst.sha256
-zstd -d csv2-0.1.1-macos-arm64.tar.zst -c | tar -x
-./csv2-0.1.1-macos-arm64/csv2 --version
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.2/csv2-0.1.2-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.2/csv2-0.1.2-macos-arm64.tar.zst.sha256
+sha256sum -c csv2-0.1.2-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.1.2-macos-arm64.tar.zst -c | tar -x
+./csv2-0.1.2-macos-arm64/csv2 --version
 ```
 
 Substitute `linux-x86_64`, `linux-aarch64` or `windows-x86_64` for the others.
