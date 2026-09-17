@@ -18549,6 +18549,73 @@ else
 fi
 
 echo
+echo "--- T309: the build id asks git from inside the directory, not with -C / T309：build id 從目錄裡面問 git，不用 -C ---"
+# On Windows, zsh's pwd is MSYS-style `/c/Users/...`, so `${0:A:h}` is too, and
+# git for Windows answers `fatal: cannot change to '/c/Users/...'`. Both git
+# calls returned empty, and the function fell through to the branch that exists
+# for the guest -- so a correct 0.1.2 binary was refused on the Windows node
+# with "rebuild before releasing". The shell can cd there; git asked from
+# inside needs no path. QN.
+# 在 Windows 上 zsh 的 pwd 是 MSYS 風格的 `/c/Users/...`，於是 `${0:A:h}` 也是，而 git for Windows
+# 會回 `fatal: cannot change to '/c/Users/...'`。兩次 git 呼叫都回空字串，函式落到那個「為 guest 而
+# 存在」的分支——於是一個正確的 0.1.2 執行檔在 Windows 節點上以「發行前請重新建置」被拒。shell 進得去
+# 那個目錄，而從裡面問 git 根本不需要路徑。QN。
+# Comment lines are excluded, for the reason T218a excludes them: the text
+# explaining why `git -C` is wrong must be able to write `git -C`. The first
+# version of this case did not, and failed on its own explanation.
+# 排除註解行，理由與 T218a 相同：說明「為什麼 `git -C` 是錯的」那段文字，必須寫得出 `git -C`。
+# 這個案例的第一版沒有排除，於是敗在它自己的說明上。
+_t309_gitC=$(LC_ALL=C grep -n 'git -C' "$ROOT/build_id.zsh" | LC_ALL=C grep -v ':[[:space:]]*#' || true)
+if [[ -n $_t309_gitC ]]; then
+    bad "T309a build_id.zsh still uses git -C outside a comment: ${_t309_gitC//$'\n'/ } / build_id.zsh 在註解之外仍用著 git -C"
+else
+    ok "T309a build_id.zsh asks git from inside the directory / build_id.zsh 從目錄裡面問 git"
+fi
+
+# The same tree, named two ways, must give one answer. This is the property the
+# Windows node violated -- `.` worked and the absolute path did not.
+# 同一棵樹用兩種寫法指稱，必須得到同一個答案。這正是 Windows 節點違反的性質——`.` 可以，絕對路徑不行。
+_t309_abs=$(cd "$ROOT" && zsh -c 'source ./build_id.zsh; csv2_build_id "$PWD"' 2>/dev/null)
+_t309_dot=$(cd "$ROOT" && zsh -c 'source ./build_id.zsh; csv2_build_id .' 2>/dev/null)
+if [[ -n $_t309_abs && $_t309_abs == $_t309_dot ]]; then
+    ok "T309b an absolute path and '.' give the same build id ($_t309_abs) / 絕對路徑與 '.' 給出同一個 build id"
+else
+    bad "T309b absolute gave [$_t309_abs], '.' gave [$_t309_dot] / 兩種寫法答案不同"
+fi
+
+# A tree WITH a .git whose git says nothing is a malformed question, not an
+# unknown build. A fake git exiting 128 reproduces what Windows did, on any
+# platform.
+# 一棵**有** .git 而 git 什麼都不說的樹，是一個問錯的問題，不是一次來歷不明的建置。一個退出 128 的
+# 假 git，在任何平台上都能重現 Windows 上發生的事。
+_t309_bin=$TMP/t309bin
+_t309_repo=$TMP/t309repo
+mkdir -p "$_t309_bin" "$_t309_repo/.git"
+print -rl -- '#!/bin/sh' "printf 'fatal: cannot change to %s\\n' \"\$3\" >&2" 'exit 128' > "$_t309_bin/git"
+chmod +x "$_t309_bin/git"
+_t309_out=$(cd "$ROOT" && env PATH="$_t309_bin:$PATH" zsh -c "source ./build_id.zsh; csv2_build_id '$_t309_repo'" 2>&1)
+_t309_rc=$?
+if (( _t309_rc != 0 )) && [[ $_t309_out != *unknown* ]]; then
+    ok "T309c a repo whose git answers nothing is refused, not called unknown / git 什麼都不答的 repo 會被拒絕，而不是被稱為 unknown"
+else
+    bad "T309c rc=$_t309_rc said [$_t309_out]; a malformed question was answered as an unknown build / 一個問錯的問題被當成「來歷不明的建置」回答了"
+fi
+
+# And the guest must still work: no .git at all is a real unknown, answered
+# with status 0. Without this, T309c could be satisfied by refusing everything.
+# 而 guest 必須照舊：完全沒有 .git 是一次真正的 unknown，以 0 結束。沒有這一條，T309c 可以靠
+# 「什麼都拒絕」來滿足。
+_t309_bare=$TMP/t309bare
+mkdir -p "$_t309_bare"
+_t309_g=$(cd "$ROOT" && env PATH="$_t309_bin:$PATH" zsh -c "source ./build_id.zsh; csv2_build_id '$_t309_bare'" 2>/dev/null)
+_t309_grc=$?
+if (( _t309_grc == 0 )) && [[ $_t309_g == unknown ]]; then
+    ok "T309d a payload with no .git is still 'unknown', with status 0 / 沒有 .git 的 payload 仍然是 unknown，且以 0 結束"
+else
+    bad "T309d rc=$_t309_grc said [$_t309_g]; the guest's build would now be refused / guest 的建置現在會被拒絕"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

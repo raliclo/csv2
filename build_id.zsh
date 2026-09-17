@@ -35,15 +35,42 @@
 # 三份 v0.1.0 封存說的是 `(8d5600e)`，因為它們是在 tag 被打之前建的，而同一個 commit 之後建出來
 # 說的是 `(v0.1.0)`。同一份原始碼、兩種字串，而重建改不了——於是那個 id 回答不了它存在所要回答的
 # 唯一問題：「這是哪一個 commit」。QD。
+# `cd` in a subshell rather than `git -C`, because the shell and git do not
+# agree about what a path is on Windows. There, zsh's `pwd` is MSYS-style
+# `/c/Users/...` -- so `${0:A:h}` is too -- and git for Windows answers
+# `fatal: cannot change to '/c/Users/...'`. The shell can cd there perfectly
+# well, and git asked from inside that directory needs no path at all. QN.
+# 在子 shell 裡 `cd`，不用 `git -C`：在 Windows 上 shell 與 git 對「路徑是什麼」的看法不同。
+# 那裡 zsh 的 `pwd` 是 MSYS 風格的 `/c/Users/...`（於是 `${0:A:h}` 也是），而 git for Windows 會說
+# `fatal: cannot change to '/c/Users/...'`。shell 進得去那個目錄，而從那個目錄裡問 git，就完全
+# 不需要路徑了。QN。
 csv2_build_id() {   # csv2_build_id <repo-dir>
     local dir=$1 described short
-    described=$(git -C "$dir" describe --always --dirty 2>/dev/null) || described=""
-    short=$(git -C "$dir" rev-parse --short HEAD 2>/dev/null) || short=""
+    described=$(cd "$dir" 2>/dev/null && git describe --always --dirty 2>/dev/null) || described=""
+    short=$(cd "$dir" 2>/dev/null && git rev-parse --short HEAD 2>/dev/null) || short=""
     # No git at all: the guest builds from a tar payload with no .git, and
     # `unknown` is a true thing to say about that build rather than a guess.
+    #
+    # But `unknown` was ALSO the answer when git was present and the question
+    # was malformed -- one string standing for "there is no git here" and for
+    # "I asked git the wrong way". That is how QN presented: a Windows release
+    # refused with "rebuild before releasing", when the binary was right and
+    # the checker was wrong. Where a repository exists, an empty answer is a
+    # failure and is reported as one.
+    #
     # 完全沒有 git：guest 是從一個沒有 .git 的 tar payload 建的，而 `unknown` 是關於那次建置的
     # 一句真話，不是猜測。
+    #
+    # 但 `unknown` **同時也是**「git 在，而我問錯了」的答案——一個字串代表兩件事。QN 就是這樣現形的：
+    # 一次 Windows 出貨以「發行前請重新建置」被拒，而執行檔是對的、錯的是檢查它的那一方。只要那裡
+    # 有一個 repository，空的答案就是一次失敗，並且要被當成失敗講出來。
     if [[ -z $described && -z $short ]]; then
+        if [[ -e $dir/.git ]]; then
+            print -u2 -- "csv2_build_id: $dir has a .git but git answered nothing; the question was malformed, not the tree"
+            print -u2 -- "csv2_build_id：$dir 有 .git，而 git 什麼都沒回答；問題出在提問方式，不在那棵樹"
+            print -u2 -- "$(cd "$dir" 2>/dev/null && git describe --always --dirty 2>&1 | head -2)"
+            return 1
+        fi
         print -r -- unknown
         return
     fi

@@ -13178,3 +13178,77 @@ would make it claim that run printed `csv2 0.1.2`, on a day 0.1.2 did not exist,
 cannot catch this; it points the other way, so prose staying correct makes that check FAIL. The
 check is right -- it is what would have caught v0.1.0's `extract_dir` and `assert_match` -- but it
 shares with the rewrite an assumption that every line in the file is the same kind of line.
+
+---
+
+## QN. `csv2_build_id` 在 Windows 上回報 `unknown`，因為 `git -C /c/...` 對 git for Windows 不是一個路徑（2026-09-18 修正，T309a–d）
+
+**2026-09-18 發現，在 v0.1.2 出貨、於 Windows 節點跑 `./release.zsh` 時。經親手重現。同日已修。**
+
+修法：`csv2_build_id` 改成在子 shell 裡 `cd` 進那個目錄再問 git，不再用 `git -C`——shell 進得去 MSYS
+風格的路徑，而從目錄裡面問 git 根本不需要路徑。另外把「這裡沒有 git」與「我問錯了」分開：目錄裡有
+`.git` 而 git 什麼都不答時，回傳非零並把 git 那句話印到 stderr，而不是答 `unknown`。T309a 掃描
+`build_id.zsh` 裡註解之外的 `git -C`（第一版沒有排除註解，敗在它自己的說明上，與 T218a 同一個教訓），
+T309b 要求絕對路徑與 `.` 給出同一個答案，T309c 用一個退出 128 的假 git 確認「有 .git 卻答不出來」會被
+拒絕，T309d 確認沒有 `.git` 的 payload 仍然是 `unknown` 且以 0 結束——沒有 T309d，T309c 可以靠「什麼
+都拒絕」來滿足。
+
+`release.zsh` 用 `${0:A:h}` 取得自己所在的目錄，再交給 `csv2_build_id`：
+
+```zsh
+source "${0:A:h}/build_id.zsh"
+EXPECTED_ID=$(csv2_build_id "${0:A:h}")
+```
+
+在那台 Windows 上，zsh 的 `pwd` 是 **MSYS 風格**的 `/c/Users/lowei/proj/csv2`，於是 `${0:A:h}`
+也是那個形狀。而 **git for Windows 不認得它**：
+
+```console
+$ echo "HOME=[$HOME]"
+HOME=[C:/Users/lowei]
+$ cd ~/proj/csv2 && pwd
+/c/Users/lowei/proj/csv2
+$ git -C /c/Users/lowei/proj/csv2 describe --always --dirty
+fatal: cannot change to '/c/Users/lowei/proj/csv2': No such file or directory
+rc=128
+$ git -C C:/Users/lowei/proj/csv2 describe --always --dirty
+v0.1.2
+rc=0
+```
+
+`csv2_build_id` 把兩次 `git` 失敗都寫成空字串（`2>/dev/null` 加上 `|| described=""`），於是它走到
+「完全沒有 git」那一支並回傳 **`unknown`**——而那一支存在的理由是 guest：guest 從一個沒有 `.git`
+的 tar payload 建置，`unknown` 對它是一句真話。**這裡不是那個情況。** 同一個回答被用來表示兩件
+不同的事：「這裡沒有 git」與「我剛才問 git 的方式是錯的」。
+
+```console
+$ ./release.zsh
+the binary reports [csv2 0.1.2 (v0.1.2 / 297d7c8)] but this checkout is [unknown]; rebuild before releasing
+release_rc=1
+```
+
+而同一台機器上，只要路徑是原生的或相對的，同一個函式就正常：
+
+```console
+$ cd ~/proj/csv2 && source ./build_id.zsh
+$ csv2_build_id .                          → v0.1.2 / 297d7c8
+$ csv2_build_id ~/proj/csv2                → v0.1.2 / 297d7c8     ← $HOME 是 C:/Users/lowei，原生
+$ csv2_build_id /c/Users/lowei/proj/csv2   → unknown
+```
+
+**它失敗在安全的方向**——`release.zsh` 的版本檢查拒絕了，沒有產生封存——但它擋住了 Windows 的出貨，
+而那則訊息叫人「重新建置」，那是錯的建議：執行檔是對的，問錯問題的是檢查它的那一方。
+
+這與已知的 multiscp 那一條是同一個家族：**Windows 要原生路徑，MSYS 風格的 `/c/...` 不會報錯，只是
+做別的事。** 差別在 multiscp 那次是靜默地什麼都沒做，這次 git 有講話——只是那句話被 `2>/dev/null`
+丟掉了。
+
+`csv2_build_id` reports `unknown` on Windows because `${0:A:h}` is an MSYS-style path and git for
+Windows cannot change to it. Both git calls fail, both are turned into empty strings by
+`2>/dev/null` plus `|| x=""`, and the function falls through to the branch that exists for the
+guest -- which builds from a tar payload with no `.git`, where `unknown` is true. One answer is
+being used for two different things: "there is no git here" and "I asked git the wrong way". It
+fails safe (release.zsh refuses and no archive is made) but it blocks the Windows release, and
+its message says to rebuild, which is wrong: the binary is right and the checker asked a bad
+question. Same family as the recorded multiscp lesson -- Windows needs native paths -- except
+that git did say so, and `2>/dev/null` threw the sentence away.
