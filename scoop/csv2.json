@@ -6,11 +6,11 @@
     "notes": [
         "Installed as csv2.exe. Verify with:  csv2 --version",
         "The archive is .tar.zst; Scoop unpacks it with the zstd it ships.",
-        "Verified on 2026-09-08 by hand on a Windows node: the URL downloads, the hash",
-        "matches, extract_dir is the directory the archive really contains, and the",
-        "extracted csv2.exe runs and reads a CSV. `scoop install` itself was NOT run,",
-        "because that machine carries a hand-placed csv2 shim scoop does not manage and",
-        "installing would have collided with it.",
+        "Verified on 2026-09-17 by running this exact install on Windows 11: the hash",
+        "checked ok, the shim resolves to apps\\csv2\\current, and `csv2 --version` prints",
+        "csv2 0.1.1 (v0.1.1 / 4ae95f6) from bash, cmd.exe and zsh, and reads a CSV.",
+        "If csv2 was placed by install.zsh before, run `./install.zsh --uninstall` first:",
+        "Scoop overwrites that shim. After this, install.zsh refuses to write over it.",
         "Only 64bit is published: an archive is built on the machine that built the binary,",
         "and only that arrangement lets the version inside it be checked by running it."
     ],

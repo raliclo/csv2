@@ -12875,7 +12875,7 @@ fixed.
 修正後（`v0.1.1-10-gb9ded3a-dirty`，同一台機器、同一個帶著那個變數的環境）：完整建置的 stderr 只剩
 連結器的 `Creating library release\csv2.lib and object release\csv2.exp`（那是 link.exe 的正常
 訊息，不是錯誤）；到寫出 `BuildInfo.swift` 為止的前 128 行連跑 5 次，stdout 與 stderr 皆 0 位元組。
-套件 `PASS 1359 FAIL 0 SKIP 16`。T306a–c 對修正前的腳本（`git show HEAD:compile_csv2_win.bat`）
+套件 0 FAIL（通過數刻意不寫：T69a 不准文件引用會增長的數字）。T306a–c 對修正前的腳本（`git show HEAD:compile_csv2_win.bat`）
 三條全部失敗（非 ASCII 1080 位元組、有區塊內 `::`、PATH 沒有附加），對修正後的三條全部通過。
 
 - 非 ASCII：十三行中文註解移除（中文說明在本條與 `build_id.zsh`）；`BuildInfo.swift` 在 Windows
@@ -12973,4 +12973,103 @@ inside VsDevCmd.bat, which pushd's into the Installer directory and calls it by 
 process carries `NoDefaultCurrentDirectoryInExePath=1`, which disables exactly that lookup, and
 removing the variable makes the same probe print `17.14.37710.0`. The comment in compile_csv2.zsh
 attributing the need for `.\` to cmd.exe in general is really describing that variable.
+
+## QL. `install.zsh` 在「scoop 管理 csv2」時並沒有拒絕：訊息被反斜線吃掉，而 `die` 只結束了一個子 shell（2026-09-17 修正，T307a–e）
+
+**2026-09-17 發現，在第一次真正執行 `scoop install csv2` 之後。經親手重現。同日已修。**
+
+修法：`die()` 與「未知選項」改為 `print -r`；`DEST_DIR=$(target_dir) || exit $?`，並在後面加上
+「`DEST_DIR` 為空就拒絕」；`--uninstall` 在 scoop 管理時也拒絕，並指向 `scoop uninstall csv2`（修正前
+它以 rc=0 預演 `rm -f /csv2.exe`）。同一台機器上重測：`--dry-run`、`--no-rc`、`--uninstall --dry-run`、
+`--uninstall` 皆 rc=1、訊息完整、stderr 無 NUL／BEL；`--dir DIR --dry-run` 仍 rc=0；scoop 那一份不變。
+
+T307 以四個假指令（`uname`、`brew`、`scoop`、`cygpath`）讓 Windows 那一支在每個平台都走得到。它對
+三個版本量過：修正後五條全過；修正前、有建置五條全敗；修正前、**沒有**建置一過四敗。寫它時
+踩到兩個「看起來通過」：
+
+- 第一版的 T307b 只看 stdout 是否為空。修正前的腳本在沒有建置的樹上也會以 1 結束、stdout 為空——
+  只是晚一步停在「no binary at …」。Mac 上正是那個情況。改成數 stderr 裡 `install.zsh:` 出現幾次。
+- 第二版那個計數用 `grep -o`，對修正前的腳本得到 1——因為壞掉的訊息含 NUL，grep 把檔案當成二進位，
+  以一行「Binary file matches」取代所有比對結果。加上 `-a` 之後是 2。
+
+`19593e6`（install.zsh: refuse when scoop manages csv2）與 `894fd04`（Verified on the node, both
+directions, and the gap is closed）宣稱這條路會拒絕。在一台 csv2 **真的**由 scoop 管理的機器上，
+它不會。
+
+### 重現
+
+機器狀態：`scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.json`
+剛裝好 `csv2 0.1.1 (v0.1.1 / 4ae95f6)`；`scoop prefix csv2` → `C:\Users\lowei\scoop\apps\csv2\current`。
+腳本：`install.zsh` @ `585dc9e`；要安裝的建置：`release/csv2.exe`，`csv2 0.1.1 (v0.1.1-10-gb9ded3a-dirty)`。
+
+```console
+$ zsh ./install.zsh --dry-run
+install.zsh: scoop manages csv2 here (C: sersloweiscoopppscsv2 install / 安裝
+  from    : /c/Users/lowei/proj/csv2/release/csv2.exe (csv2 0.1.1 (v0.1.1-10-gb9ded3a-dirty))
+  to      : /csv2.exe                        ← 目的地是空字串加上檔名
+  (dry run — nothing will be written / 預演，不會寫入任何東西)
+
+  DRY  mkdir -p
+  DRY  cp -f /c/Users/lowei/proj/csv2/release/csv2.exe /csv2.exe
+  DRY  chmod 755 /csv2.exe
+$ echo $?
+0                                            ← 「拒絕」之後預演成功
+
+$ zsh ./install.zsh --dry-run 2>err >/dev/null; od -c err
+0000000   i   n   s   t   a   l   l   .   z   s   h   :       s   c   o
+0000020   o   p       m   a   n   a   g   e   s       c   s   v   2    
+0000040   h   e   r   e       (   C   :  \0   s   e   r   s   l   o   w
+0000060   e   i   s   c   o   o   p  \a   p   p   s
+0000073                                      ← 在 `\csv2` 的 `\c` 處截斷，沒有換行
+```
+
+不加 `--dry-run`（先確認 `mkdir -p ''` 在這裡會失敗、不會走到 `cp`，才跑的）：
+
+```console
+$ zsh ./install.zsh --no-rc
+csv2 install / 安裝
+  from    : /c/Users/lowei/proj/csv2/release/csv2.exe (csv2 0.1.1 (v0.1.1-10-gb9ded3a-dirty))
+  to      : /csv2.exe
+install.zsh: scoop manages csv2 here (C:sersloweiscoopppsmkdir: missing operand    ← stderr，已去掉 NUL 與 BEL
+Try 'mkdir --help' for more information.
+install.zsh: failed: mkdir -p
+$ echo $?
+1
+$ ls /csv2.exe
+ls: cannot access '/csv2.exe': No such file or directory
+$ csv2 --version
+csv2 0.1.1 (v0.1.1 / 4ae95f6)                ← scoop 那一份沒被動到
+```
+
+**它最後停下來，靠的是一個不相干的 `mkdir` 失敗，不是那道拒絕。**
+
+### 成因：兩個，各自足以讓拒絕失效
+
+1. **`die()` 是 `print -u2 -- "install.zsh: $1"`，沒有 `-r`。** zsh 的 `print` 會解讀反斜線跳脫，
+   而 `scoop prefix` 給的是 Windows 路徑：`\U`（後面不是十六進位）→ NUL、`\l`、`\s` 的反斜線被丟掉、
+   `\a` → BEL、`\c` → **停止輸出**，所以 `\current` 之後的整段訊息——包括「用 `scoop update csv2`
+   或 `--dir DIR`」那兩條路——一個字都沒印出來。`say()` 在第 86 行就是 `print -r --`，`die()` 在第 87 行
+   不是。同一個形狀還在第 81 行（`unknown option: $1`，`$1` 是使用者給的）。
+2. **`die` 在 `target_dir()` 裡被呼叫，而 `target_dir` 是在 `DEST_DIR=$(target_dir)`（第 520 行）裡跑的。**
+   命令替換是子 shell，`exit 1` 結束的是子 shell；主程式拿到空的 `DEST_DIR`，而那個指派的退出狀態沒有
+   人看。第 467 行是 `target_dir()` 裡唯一的 `die`。
+
+### 為什麼「在節點上雙向驗過」沒有抓到
+
+`894fd04` 用一個放在 PATH 前面的假 `scoop` 製造「csv2 被管理」，然後看到「refused, naming scoop update
+and --dir」。那兩條路**能**被印出來，表示假 scoop 回的路徑裡沒有 `\c`——而判定「拒絕了」看的是
+**訊息**，不是**之後有沒有停**。成因 2 與路徑長什麼樣無關，所以那次驗證期間它同樣沒有停，只是沒有
+人看退出碼與底下那幾行。套件裡沒有任何案例涵蓋這條路（`grep -n 'scoop manages' test/test_csv2.zsh` 無結果）。
+
+**這是全域 `CLAUDE.md` 那句「看起來成功」的原型：一句正確的拒絕訊息，掛在一個照樣往下跑的程式上。**
+
+`install.zsh` does not refuse when scoop really manages csv2, contrary to 19593e6 and 894fd04. Two
+causes, each sufficient: `die()` prints without `-r`, so the Windows path from `scoop prefix` is
+read as escapes (`\U` -> NUL, `\a` -> BEL, `\c` -> stop output), and the message is cut before the
+two ways forward it was written to name; and `die` runs inside `DEST_DIR=$(target_dir)`, so
+`exit 1` ends the command-substitution subshell and the script carries on with an empty
+destination -- `--dry-run` exits 0 planning `cp ... /csv2.exe`. A real run stopped only because
+`mkdir -p ''` failed; nothing was written and the scoop install was untouched. The node
+verification judged "refused" from the message, which a fake scoop without backslashes printed in
+full, and never looked at whether the script stopped.
 

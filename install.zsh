@@ -78,13 +78,21 @@ while (( $# )); do
         --prefix)    shift; [[ $# -gt 0 ]] || { print -u2 -- "--prefix needs a directory / --prefix 需要一個目錄"; exit 2 }; PREFIX=$1 ;;
         --dir)       shift; [[ $# -gt 0 ]] || { print -u2 -- "--dir needs a directory / --dir 需要一個目錄"; exit 2 }; DEST_DIR=$1 ;;
         -h|--help)   sed -n '3,21p' ${0:A}; exit 0 ;;
-        *) print -u2 -- "unknown option: $1 / 未知選項：$1"; exit 2 ;;
+        *) print -r -u2 -- "unknown option: $1 / 未知選項：$1"; exit 2 ;;
     esac
     shift
 done
 
+# `-r` on every print that carries a value from outside. Without it zsh reads
+# backslashes as escapes, and a Windows path is nothing but backslashes:
+# `C:\Users\...\apps\csv2` printed `C:` NUL `sers...` BEL `pps`, and `\c`
+# stopped the output there -- so the refusal never reached the two ways
+# forward it was written to name. `say` had `-r`; `die` did not. QL.
+# 每一個帶著外來值的 print 都要 `-r`。少了它，zsh 會把反斜線當成跳脫，而一個 Windows 路徑全是反斜線：
+# `C:\Users\...\apps\csv2` 印成 `C:` NUL `sers...` BEL `pps`，而 `\c` 讓輸出就停在那裡——那道拒絕
+# 從來沒有印到它要說出的那兩條路。`say` 有 `-r`，`die` 沒有。QL。
 say()  { print -r -- "$1" }
-die()  { print -u2 -- "install.zsh: $1"; exit 1 }
+die()  { print -r -u2 -- "install.zsh: $1"; exit 1 }
 run()  { if (( DRY )); then say "  DRY  $*"; else "$@" || die "failed: $*"; fi }
 
 # ---------------------------------------------------------------------
@@ -464,6 +472,12 @@ target_dir() {
                     local _spp
                     _spp=$(cygpath -u -- "$_sp" 2>/dev/null || print -r -- "${_sp//\\//}")
                     if [[ -d $_spp ]]; then
+                        # Uninstall is refused too, with its own way forward: the
+                        # file here is scoop's, and removing it behind scoop's back
+                        # leaves scoop listing an app whose shim runs nothing.
+                        # 移除也一樣拒絕，但給它自己的出路：這裡的檔案是 scoop 的，繞過 scoop 刪掉它，
+                        # scoop 會繼續列著一個 shim 什麼都執行不了的 app。
+                        [[ $MODE == uninstall ]] && die "scoop manages csv2 here ($_sp). Remove it with \`scoop uninstall csv2\`; this script did not put it there. / scoop 在這裡管理著 csv2（$_sp）。請用 \`scoop uninstall csv2\` 移除；它不是這支腳本放的。"
                         die "scoop manages csv2 here ($_sp). Writing into a scoop app directory fights its hash checks and the next \`scoop update csv2\` would overwrite this build. Use \`scoop update csv2\` for a release, or --dir DIR to place a development build somewhere scoop does not own. / scoop 在這裡管理著 csv2（$_sp）。寫進 scoop 的 app 目錄會與它的 hash 驗證相衝，而下一次 \`scoop update csv2\` 會覆蓋掉這次建置。要裝正式版請用 \`scoop update csv2\`；要放一份開發建置，請用 --dir DIR 指到一個不屬於 scoop 的地方。"
                     fi
                 fi
@@ -517,7 +531,19 @@ target_dir() {
     print -r -- $HOME/.local/bin
 }
 
-DEST_DIR=$(target_dir)
+# `|| exit`, because target_dir runs in a command substitution: a `die` inside
+# it ends that SUBSHELL, not this script. Without this, the scoop refusal
+# printed its message and the script went on with an empty DEST_DIR --
+# `--dry-run` exited 0 planning `cp ... /csv2.exe`, and a real run stopped only
+# because `mkdir -p ''` happened to fail. The emptiness check behind it is for
+# the next branch that prints nothing: an install with no destination is never
+# right, whatever the reason. QL.
+# `|| exit`，因為 target_dir 是在命令替換裡跑的：它裡面的 `die` 結束的是那個**子 shell**，不是這支
+# 腳本。少了它，scoop 那道拒絕印完訊息後，腳本帶著空的 DEST_DIR 繼續——`--dry-run` 以 0 結束並規劃
+# `cp ... /csv2.exe`，而真的執行之所以停下，只是因為 `mkdir -p ''` 剛好失敗。後面那道「是否為空」的
+# 檢查，是給下一個什麼都沒印的分支：一次沒有目的地的安裝，不論理由為何都不會是對的。QL。
+DEST_DIR=$(target_dir) || exit $?
+[[ -n $DEST_DIR ]] || die "no destination directory was determined; refusing to install to /csv2 / 沒有決定出目的地目錄；拒絕安裝到 /csv2"
 # `.exe` on Windows, because the shell will not run it otherwise and the scoop
 # shim names it that way. Everywhere else the extension would be noise.
 # Windows 上要 `.exe`，否則 shell 不會執行它，而 scoop 的 shim 指的也是那個名字。

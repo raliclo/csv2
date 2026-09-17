@@ -18343,6 +18343,94 @@ else
 fi
 
 echo
+echo "--- T307: install.zsh really stops when scoop manages csv2 / T307：scoop 管理 csv2 時，install.zsh 真的會停 ---"
+# The refusal existed and had been "verified on the node", yet on the first
+# machine where scoop really managed csv2 it did not stop. `die` printed without
+# `-r`, so the Windows path was read as escapes and `\c` cut the message short;
+# and `die` ran inside `DEST_DIR=$(target_dir)`, so it ended a subshell and the
+# script carried on with an empty destination -- `--dry-run` exited 0 planning
+# `cp ... /csv2.exe`. The node check had judged "refused" from the message.
+# This case judges it from the exit status and from what was planned. QL.
+# 那道拒絕早就存在，也「在節點上驗過」，但在第一台 scoop 真的管理著 csv2 的機器上，它沒有停。`die` 印的
+# 時候沒有 `-r`，於是 Windows 路徑被當成跳脫、`\c` 把訊息截斷；而且 `die` 是在 `DEST_DIR=$(target_dir)`
+# 裡跑的，結束的是子 shell，腳本帶著空的目的地繼續——`--dry-run` 以 0 結束並規劃 `cp ... /csv2.exe`。
+# 節點上的那次檢查是看訊息判定「拒絕了」。這個案例看的是退出碼與它規劃了什麼。QL。
+#
+# Four fakes early on PATH make the Windows branch reachable on every platform:
+# `uname` says MINGW, `brew` has no prefix (it is asked first), `scoop` answers
+# with a path full of backslashes -- `\c` and `\a` included on purpose, since
+# those are the two that destroyed the message -- and `cygpath` maps it to a
+# directory that exists. DEST_DIR is computed before the built binary is looked
+# for, so no Windows build is needed on a Mac.
+# 四個放在 PATH 前面的假指令，讓 Windows 那一支在每個平台上都走得到：`uname` 說 MINGW、`brew` 沒有
+# prefix（它會先被問）、`scoop` 回一個滿是反斜線的路徑——**刻意**含 `\c` 與 `\a`，因為毀掉訊息的就是
+# 這兩個——而 `cygpath` 把它對應到一個存在的目錄。DEST_DIR 在尋找建好的執行檔之前就算出來，所以
+# 在 Mac 上不需要 Windows 建置。
+_t307_bin="$TMP/t307bin"
+_t307_app="$TMP/t307app"
+mkdir -p "$_t307_bin" "$_t307_app"
+_t307_win='C:\Users\fake\scoop\apps\csv2\current'
+print -rl -- '#!/bin/sh' "printf '%s\n' MINGW64_NT-10.0-26200" > "$_t307_bin/uname"
+print -rl -- '#!/bin/sh' 'exit 1' > "$_t307_bin/brew"
+print -rl -- '#!/bin/sh' "[ \"\$1\" = prefix ] && printf '%s\n' '$_t307_win'" > "$_t307_bin/scoop"
+print -rl -- '#!/bin/sh' "printf '%s\n' '$_t307_app'" > "$_t307_bin/cygpath"
+chmod +x "$_t307_bin"/*
+
+_t307_run() {
+    env PATH="$_t307_bin:$PATH" "$ROOT/install.zsh" "$@" > "$TMP/t307.out" 2> "$TMP/t307.err"
+}
+
+_t307_run --dry-run --no-rc; _t307_rc=$?
+assert_eq "$_t307_rc" "1" \
+    "T307a --dry-run exits 1 when scoop manages csv2 / scoop 管理 csv2 時 --dry-run 以 1 結束"
+# Exit status 1 alone does not prove the REFUSAL stopped it. Where no Windows
+# build exists -- a Mac, or a tree that was never built -- the old script also
+# exited 1, one step later, at "no binary at ...". Measured against the
+# pre-fix install.zsh: T307a passed for that reason. So this counts
+# diagnostics: a script that stopped at the refusal says `install.zsh:` once.
+# 單憑退出碼 1 證明不了停下它的是**那道拒絕**。在沒有 Windows 建置的地方——Mac，或一棵從沒建置過的
+# 樹——舊腳本也以 1 結束，只是晚一步，停在「no binary at ...」。以修正前的 install.zsh 量過：T307a
+# 正是因為這樣而通過。所以這裡數診斷訊息：停在拒絕那一步的腳本只會說一次 `install.zsh:`。
+# `-a`: the broken message carried a NUL, which makes grep call the file binary
+# and print one "Binary file matches" line in place of the matches -- a count
+# of 1, which is the passing answer. It did exactly that against the old script.
+# `-a`：壞掉的訊息含一個 NUL，會讓 grep 把檔案當成二進位，並以一行「Binary file matches」取代那些
+# 比對結果——計數是 1，也就是「通過」的那個答案。對舊腳本它正是這樣做的。
+_t307_diags=$(LC_ALL=C grep -a -o 'install\.zsh:' "$TMP/t307.err" | wc -l | tr -d ' ')
+if [[ -s $TMP/t307.out || $_t307_diags != 1 ]]; then
+    bad "T307b it went on after refusing ($_t307_diags diagnostics; stdout: $(head -3 "$TMP/t307.out")) / 拒絕之後它繼續往下跑了"
+else
+    ok "T307b it stops at the refusal: one diagnostic, nothing planned / 它停在拒絕：一則診斷，什麼都沒規劃"
+fi
+# The whole path, backslashes and all, AND the text after it: `\c` stopped the
+# output right inside the path, so the part after it is what proves the cut is
+# gone.
+# 整段路徑，連同反斜線，**以及**它後面的文字：`\c` 就在路徑中間讓輸出停下，所以後面那段才是證明
+# 截斷已經消失的東西。
+if LC_ALL=C grep -qF -- "$_t307_win" "$TMP/t307.err" && LC_ALL=C grep -qF -- '--dir DIR' "$TMP/t307.err"; then
+    ok "T307c the refusal prints the Windows path verbatim and names both ways forward / 拒絕原樣印出 Windows 路徑，並說出兩條出路"
+else
+    bad "T307c the refusal was mangled: $(LC_ALL=C tr -d '\000\007' < "$TMP/t307.err" | head -c 200) / 拒絕訊息被破壞了"
+fi
+
+_t307_run --uninstall --dry-run; _t307_rc=$?
+if [[ $_t307_rc == 1 ]] && LC_ALL=C grep -qF 'scoop uninstall csv2' "$TMP/t307.err"; then
+    ok "T307d --uninstall is refused too, and pointed at scoop uninstall / --uninstall 也被拒絕，並被指向 scoop uninstall"
+else
+    bad "T307d --uninstall rc=$_t307_rc, said: $(head -c 200 "$TMP/t307.err") / 實得如上"
+fi
+
+# The same missing `-r` was on the unknown-option message, whose value is
+# whatever the caller typed.
+# 同一個缺少的 `-r` 也在「未知選項」那則訊息上，而它的值是呼叫端打的任何東西。
+"$ROOT/install.zsh" 'C:\a\cb' > /dev/null 2> "$TMP/t307.err"
+if LC_ALL=C grep -qF -- 'C:\a\cb' "$TMP/t307.err"; then
+    ok "T307e an unknown option is echoed verbatim / 未知選項被原樣印回"
+else
+    bad "T307e an unknown option was mangled: $(LC_ALL=C tr -d '\000\007' < "$TMP/t307.err") / 未知選項被破壞了"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

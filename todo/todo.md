@@ -51,6 +51,15 @@ guest 比對吞掉 csv2 的結束狀態（已修——csv2 單獨執行、檢查
 >
 > **這件事需要動到使用者機器上的 Homebrew／scoop 狀態，所以留給人決定，不由測試代跑。**
 >
+> **2026-09-17：scoop 那一半跑了，由使用者決定。** 先以 `./install.zsh --uninstall` 移除手放的
+> `%LOCALAPPDATA%\csv2\csv2.exe`（0.1.0），再照 README 原文執行
+> `scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.json`：下載、hash
+> `ok`、解開、`WARN Overwriting shim`，shim 從 `AppData\Local\csv2` 改指 `scoop\apps\csv2\current`。
+> 在 bash、全新的 cmd.exe、全新的 zsh 裡 `csv2 --version` 都是 `csv2 0.1.1 (v0.1.1 / 4ae95f6)`
+> （`4ae95f6` 就是 `v0.1.1^{}`），並讀得了一個含引號逗號的 CSV。**跑它又找到一件讀不出來的事：**
+> 之後的 `./install.zsh --dry-run` 本該拒絕，卻印出一段被反斜線吃掉的訊息、再以 rc=0 規劃
+> `cp … /csv2.exe`——見 known-defects 的 QL。`brew install` 的 v0.1.1 仍未實跑（這台是 Windows）。
+>
 > **另外那個「未處理」的缺口，2026-09-10 稍晚關掉了。** 它原本記著「csv2 由 scoop 自己管理時的
 > 行為未處理，因為那條分支在節點上執行不到」。**執行不到的是那個事實，不是那個查詢**——那台
 > 機器上 scoop 管理著別的 app（`scoop prefix zsh` 回傳一個真的路徑），而一個放在 PATH 前面的
