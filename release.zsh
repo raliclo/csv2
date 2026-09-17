@@ -203,7 +203,24 @@ cp -- "$BIN" "$DIST/$STEM/$BIN_NAME"
 cp -- "$HERE/LICENSE" "$HERE/README.md" "$HERE/README.zh-TW.md" "$DIST/$STEM/"
 chmod 755 "$DIST/$STEM/$BIN_NAME"
 
-tar -C "$DIST" -cf - "$STEM" | zstd -19 -q -o "$ARCHIVE"
+# Every tool below is given a RELATIVE name from inside the right directory,
+# never an absolute one. `$DIST` comes from `${0:A:h}`, which on Windows is
+# MSYS-style `/c/Users/...` because that is what zsh's `pwd` gives there -- and
+# zstd and csv2.exe are native Windows programs that cannot open it:
+#
+#     echo hi | zstd -q -o /c/Users/.../probe.zst   No such file or directory
+#     echo hi | zstd -q -o C:/Users/.../probe.zst   ok
+#     echo hi | zstd -q -o dist/probe.zst           ok
+#
+# The sha256 block below already did this. QO is that the practice was in this
+# file and had not been carried to the rest of its range.
+#
+# 底下每一個工具拿到的都是「從正確目錄裡看出去的相對名稱」，不是絕對路徑。`$DIST` 來自
+# `${0:A:h}`，在 Windows 上是 MSYS 風格的 `/c/Users/...`（那是 zsh 的 `pwd` 在那裡給的形狀），
+# 而 zstd 與 csv2.exe 是原生 Windows 程式，開不了它——相對路徑與原生路徑都可以，只有絕對的
+# MSYS 路徑不行。底下寫 sha256 那一段本來就是這樣做的；QO 就是「那個做法已經在這個檔案裡，
+# 只是沒有推廣到它成立的其餘範圍」。
+( cd -- "$DIST" && tar -cf - "$STEM" | zstd -19 -q -o "$STEM.tar.zst" )
 
 # ---------------------------------------------------------------------
 # Verify by EXTRACTING AND RUNNING, not by checking the archive exists.
@@ -220,7 +237,7 @@ tar -C "$DIST" -cf - "$STEM" | zstd -19 -q -o "$ARCHIVE"
 # ---------------------------------------------------------------------
 CHECK=$(mktemp -d "$DIST/.verify.XXXXXX")
 trap 'rm -rf -- "$CHECK"' EXIT
-zstd -dq -c "$ARCHIVE" | tar -C "$CHECK" -xf -
+( cd -- "$DIST" && zstd -dq -c "$STEM.tar.zst" ) | ( cd -- "$CHECK" && tar -xf - )
 EXTRACTED=$CHECK/$STEM/$BIN_NAME
 [[ -x $EXTRACTED ]] || { print -u2 -- "the archive does not contain an executable $BIN_NAME"; exit 1 }
 EXTRACTED_VERSION=$("$EXTRACTED" --version)
@@ -234,7 +251,10 @@ fi
 # prints its version has proved only that it starts.
 # 而它還必須真的讀得了一個檔案——因為一個「啟動並印出版本」的執行檔，只證明了它啟動得起來。
 printf 'pkg,license\nzlib,MIT\n' > "$CHECK/probe.csv"
-PROBE=$("$EXTRACTED" -get 1:license -i "$CHECK/probe.csv")
+# csv2.exe is a native Windows program too, so it is asked from inside $CHECK
+# with a bare filename rather than handed the absolute path. QO.
+# csv2.exe 同樣是原生 Windows 程式，因此從 $CHECK 裡面以裸檔名問它，不把絕對路徑交給它。QO。
+PROBE=$( cd -- "$CHECK" && "./$STEM/$BIN_NAME" -get 1:license -i probe.csv )
 [[ $PROBE == MIT ]] || { print -u2 -- "the extracted binary could not read a CSV: got [$PROBE]"; exit 1 }
 
 # ---------------------------------------------------------------------

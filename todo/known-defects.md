@@ -13252,3 +13252,59 @@ fails safe (release.zsh refuses and no archive is made) but it blocks the Window
 its message says to rebuild, which is wrong: the binary is right and the checker asked a bad
 question. Same family as the recorded multiscp lesson -- Windows needs native paths -- except
 that git did say so, and `2>/dev/null` threw the sentence away.
+
+---
+
+## QO. `release.zsh` 把絕對的 MSYS 路徑交給原生 Windows 工具，於是 Windows 上做不出封存（2026-09-18 修正，T310a–c）
+
+**2026-09-18 發現，在 v0.1.2 出貨、於 Windows 節點跑 `./release.zsh` 時（緊接在 QN 修好之後）。
+經親手重現。同日已修：三處都改成「從正確的目錄裡以相對名稱呼叫」，與同檔案裡寫 sha256 那一段一致。**
+
+QN 修好之後，同一次執行往前走了一步，然後倒在下一個相同形狀的地方：
+
+```console
+$ ./release.zsh
+zstd: /c/Users/lowei/proj/csv2/dist/csv2-0.1.2-windows-x86_64.tar.zst: No such file or directory
+release.zsh: a command failed; nothing in dist/ should be trusted
+release_rc=1
+```
+
+`$DIST` 來自 `${0:A:h}`，在那台機器上是 MSYS 風格的 `/c/...`；而 `zstd` 是 scoop 的原生執行檔：
+
+```console
+$ which zstd
+/c/Users/lowei/scoop/shims/zstd
+$ echo hi | zstd -q -o /c/Users/lowei/proj/csv2/dist/probe.zst   → rc=1，No such file or directory
+$ echo hi | zstd -q -o C:/Users/lowei/proj/csv2/dist/probe2.zst  → rc=0
+$ echo hi | zstd -q -o dist/probe3.zst                           → rc=0
+```
+
+**相對路徑與原生路徑都可以，只有絕對的 MSYS 路徑不行。**
+
+三處會踩到，全部是「把一個絕對路徑交給一個不是 MSYS 程式的工具」：
+
+| 行 | 寫法 | 交給誰 |
+|---|---|---|
+| 206 | `tar -C "$DIST" -cf - "$STEM" \| zstd -19 -q -o "$ARCHIVE"` | zstd |
+| 223 | `zstd -dq -c "$ARCHIVE" \| tar -C "$CHECK" -xf -` | zstd |
+| 238 | `"$EXTRACTED" -get 1:license -i "$CHECK/probe.csv"` | `csv2.exe` 自己，也是原生程式 |
+
+而**同一個檔案裡，寫 sha256 的那一段已經是對的**——它 `( cd -- "$DIST" && … )` 之後用相對檔名。
+那個做法已經在這支腳本裡了，只是沒有被推廣到它成立的其餘範圍（mistakes 第 3 條的形狀）。
+
+### 沒有確定的事，要說出來
+
+那一行自 `8d5600e` 建立以來從未改過，而**同一台機器在 2026-09-08 用它做出過 v0.1.0 的 Windows
+封存**（`dist/` 裡那份的時間戳就是那天）。也就是說它曾經在這裡成立，現在不成立，而**中間變的是
+什麼，從這裡查不出來**。scoop 的 zstd 目錄時間是 6/20，不是新裝的。`dist/` 裡沒有 v0.1.1 的
+Windows 封存，所以那一份不是在這個目錄、用這條路徑做出來的。這幾件事都量過了；它們之間的因果
+沒有。
+
+`release.zsh` hands absolute MSYS-style paths to native Windows tools. `$DIST` comes from
+`${0:A:h}`, which on that machine is `/c/Users/...`, and scoop's `zstd` refuses it while accepting
+both a relative and a native path. Three sites do it: the two zstd calls and the probe that hands
+`csv2.exe` a path to read. The sha256 block in the same file is already right -- it `cd`s into
+`$DIST` and uses a bare filename -- so the correct practice was present and simply not carried to
+the rest of its range. The line has not changed since it was written, and this machine did build
+v0.1.0's Windows archive with it on 2026-09-08; what changed in between is not established here,
+and is not guessed at.

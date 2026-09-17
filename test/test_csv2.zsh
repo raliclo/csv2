@@ -18616,6 +18616,50 @@ else
 fi
 
 echo
+echo "--- T310: release.zsh gives native tools relative names, not absolute MSYS paths / T310：release.zsh 給原生工具相對名稱，不給絕對 MSYS 路徑 ---"
+# On Windows zsh's pwd is `/c/Users/...`, so `${0:A:h}` is too, and scoop's
+# zstd -- a native program -- cannot open it. A relative name works and so does
+# a native path; only the absolute MSYS one fails. csv2.exe is native as well,
+# so the probe file is named relatively too. The sha256 block in the same file
+# was already doing this, which is what makes it QO rather than a discovery:
+# the practice was present and had not been carried to the rest of its range.
+# 在 Windows 上 zsh 的 pwd 是 `/c/Users/...`，`${0:A:h}` 也是，而 scoop 的 zstd 是原生程式，開不了它。
+# 相對名稱可以、原生路徑可以，只有絕對的 MSYS 路徑不行。csv2.exe 同樣是原生程式，所以那個探測檔也用
+# 相對名稱。同一個檔案裡寫 sha256 那段本來就是這樣做的——那正是這件事算 QO 而不算新發現的原因：做法
+# 已經在，只是沒有推廣到它成立的其餘範圍。
+_t310_bad=$(LC_ALL=C grep -nE 'zstd' "$ROOT/release.zsh" \
+            | LC_ALL=C grep -v ':[[:space:]]*#' \
+            | LC_ALL=C grep -F '$ARCHIVE' || true)
+if [[ -n $_t310_bad ]]; then
+    bad "T310a release.zsh hands zstd an absolute path: ${_t310_bad//$'\n'/ } / release.zsh 把絕對路徑交給了 zstd"
+else
+    ok "T310a zstd is never given \$ARCHIVE, only a name relative to \$DIST / zstd 從未拿到 \$ARCHIVE，只拿相對於 \$DIST 的名稱"
+fi
+
+_t310_probe=$(LC_ALL=C grep -nE '\$EXTRACTED"? ' "$ROOT/release.zsh" \
+              | LC_ALL=C grep -v ':[[:space:]]*#' \
+              | LC_ALL=C grep -F '$CHECK/' || true)
+if [[ -n $_t310_probe ]]; then
+    bad "T310b the extracted binary is handed an absolute path to read: ${_t310_probe//$'\n'/ } / 解開後的執行檔被交了一個絕對路徑去讀"
+else
+    ok "T310b the extracted binary reads a bare filename from inside \$CHECK / 解開後的執行檔從 \$CHECK 裡面讀一個裸檔名"
+fi
+
+# The control group: the shapes above must be ones this scan can actually see.
+# A pattern that matches nothing passes whatever the file says.
+# 負控組：上面那兩個形狀必須是這個掃描真的看得見的。一個什麼都比不到的樣式，無論檔案寫什麼都會通過。
+_t310_fake=$TMP/t310-release.zsh
+{ cat "$ROOT/release.zsh"; print -r -- 'zstd -dq -c "$ARCHIVE" | tar -xf -'; \
+  print -r -- 'X=$("$EXTRACTED" -get 1:license -i "$CHECK/probe.csv")'; } > "$_t310_fake"
+_t310_c1=$(LC_ALL=C grep -nE 'zstd' "$_t310_fake" | LC_ALL=C grep -v ':[[:space:]]*#' | LC_ALL=C grep -cF '$ARCHIVE' || true)
+_t310_c2=$(LC_ALL=C grep -nE '\$EXTRACTED"? ' "$_t310_fake" | LC_ALL=C grep -v ':[[:space:]]*#' | LC_ALL=C grep -cF '$CHECK/' || true)
+if [[ $_t310_c1 == 1 && $_t310_c2 == 1 ]]; then
+    ok "T310c both scans find the old shape when it is put back / 把舊形狀放回去，兩個掃描都找得到"
+else
+    bad "T310c the scans found $_t310_c1 and $_t310_c2 of the two planted lines, so T310a/b prove nothing / 兩行被種回去的舊寫法只找到 $_t310_c1 與 $_t310_c2，於是 T310a/b 什麼都沒證明"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
