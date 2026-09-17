@@ -279,9 +279,101 @@ base_url=https://github.com/$REPO/releases/download/$TAG
 # 執行檔放到不存在的地方；Formula 的 `version` 與它的 `assert_match "csv2 X"` 是另外兩個。
 # 只改 url/hash 那一對，會在兩個檔案裡留下四個過期的位置——2026-09-10 是靠「改寫一份複本、
 # 再 grep 舊版本號」發現的，而那正是結尾的讀回來檢查現在也會做的事。
+# Which lines carry the version as DATA, and which merely TALK ABOUT it.
+#
+# Both rewritten files contain prose that names a version as history, and
+# history does not move with a new release. Before 2026-09-18 the rewrite did
+# not distinguish them, so publishing v0.1.1 turned the Formula's
+# "aarch64 arrives in v0.1.1. It was absent from v0.1.0" into "absent from
+# v0.1.1" -- a sentence contradicting itself, shipped. Publishing 0.1.2 would
+# have done worse: scoop's notes carry a DATED record of a real Windows
+# verification, and the rewrite would have made it claim that run printed
+# `csv2 0.1.2`, on a day 0.1.2 did not exist, with v0.1.1's commit still beside
+# it. A record that says it was verified is the one a reader has least reason
+# to doubt. That is QM.
+#
+# ONE definition, used by the rewrite AND by the read-back that demands no
+# stale version remains. If they disagreed, prose left correct by one would be
+# failed by the other, and the only way to satisfy both would be to corrupt it
+# -- which is precisely how the defect survived: the check made the damage a
+# PASSING condition.
+#
+# 哪些行「帶著版本號這個資料」，哪些只是「在談論那個版本號」。
+#
+# 兩個被改寫的檔案裡都有把版本號當成**歷史**來記的散文，而歷史不隨新版本前進。2026-09-18 之前
+# 改寫不分這兩者，於是發布 v0.1.1 那一步把 Formula 裡的「aarch64 arrives in v0.1.1. It was
+# absent from v0.1.0」改成「absent from v0.1.1」——一句自相矛盾的話，而且出貨了。發布 0.1.2 會
+# 更糟：scoop 的 notes 裡有一筆**帶日期**的 Windows 查證紀錄，改寫會讓它宣稱那次執行印出
+# `csv2 0.1.2`——在 0.1.2 還不存在的那一天——而 v0.1.1 的 commit 原封不動留在旁邊。一則說自己
+# 「已被驗證」的紀錄，是讀者最沒有理由懷疑的那一種。那就是 QM。
+#
+# **一份定義**，同時給改寫與「不得殘留舊版本號」那道讀回檢查用。兩者若各有一份，被其中一個
+# 正確留下的散文會被另一個判定失敗，而唯一能同時滿足它們的做法就是把散文改壞——這正是這個缺陷
+# 活下來的方式：那道檢查把「破壞」變成了**通過條件**。
+# The KIND is passed explicitly rather than taken from the name, because the
+# leftover check runs against `$file.rewriting.$$`, whose extension is a process
+# id. Deriving it there would classify nothing as prose and quietly restore the
+# old behaviour for the one check that matters most.
+# **種類**是明白傳進來的，不是從檔名推的：殘留檢查跑的對象是 `$file.rewriting.$$`，它的副檔名是
+# 一個 process id。在那裡用推的會把「沒有任何一行是散文」當成結論，於是最重要的那道檢查會安靜地
+# 退回舊行為。
+prose_lines() {   # prose_lines <file> <kind> — prints the prose line numbers, one per line
+    setopt local_options extended_glob
+    local file=$1 kind=$2 line trimmed
+    integer n=0 in_notes=0
+    while IFS= read -r line || [[ -n $line ]]; do
+        n+=1
+        trimmed=${line##[[:space:]]#}
+        case $kind in
+            rb)
+                # A Ruby comment is never read by brew.
+                # Ruby 註解不會被 brew 讀到。
+                [[ $trimmed == '#'* ]] && print -r -- $n
+                ;;
+            json)
+                # scoop's "notes" are shown to the person installing. They are
+                # prose, and one of them records a dated verification.
+                # scoop 的 "notes" 會顯示給安裝的人看。它們是散文，而其中一筆記的是一次帶日期的查證。
+                if (( in_notes )); then
+                    print -r -- $n
+                    [[ $trimmed == ']'* ]] && in_notes=0
+                elif [[ $trimmed == '"notes"'* ]]; then
+                    print -r -- $n
+                    [[ $line == *']'* ]] || in_notes=1
+                fi
+                ;;
+        esac
+    done < $file
+}
+
+data_text() {   # data_text <file> <kind> — the file with its prose lines removed
+    local file=$1 kind=$2 line ln
+    local -A p
+    integer n=0
+    for ln in ${(f)"$(prose_lines $file $kind)"}; do
+        [[ -n $ln ]] && p[$ln]=1
+    done
+    while IFS= read -r line || [[ -n $line ]]; do
+        n+=1
+        [[ -n ${p[$n]-} ]] || print -r -- "$line"
+    done < $file
+}
+
 rewrite_version() {   # $1 = file
     setopt local_options extended_glob
-    local file=$1 line old=""
+    # `kind` on its own line: zsh expands every word of a `local` BEFORE making
+    # any of the assignments, so `local file=$1 kind=${file:e}` reads a `file`
+    # that is local-but-unset and dies under `no_unset` -- during a publish.
+    # `kind` 另起一行：zsh 會先展開 `local` 的**所有**字詞才做賦值，所以
+    # `local file=$1 kind=${file:e}` 讀到的是一個「已宣告為區域、但還沒有值」的 `file`，
+    # 在 `no_unset` 之下會死掉——而且是死在發布途中。
+    local file=$1 line old="" ln
+    local kind=${file:e}
+    local -A prose
+    integer lineno=0
+    for ln in ${(f)"$(prose_lines $file $kind)"}; do
+        [[ -n $ln ]] && prose[$ln]=1
+    done
     # The version this file currently declares, taken as the first X.Y.Z token
     # on a line that mentions "version". An earlier attempt read "the first
     # quoted word after the first quote", which on scoop's `"version": "0.1.0",`
@@ -293,6 +385,8 @@ rewrite_version() {   # $1 = file
     # `: `——接著把整個檔案裡的 `: ` 都替換掉，38 行裡弄爛了 22 行。它被抓到，是因為改寫先在
     # **一份複本**上試過；在真的檔案上，它會發生在一次發布的當中。
     while IFS= read -r line; do
+        lineno+=1
+        [[ -n ${prose[$lineno]-} ]] && continue
         [[ $line == *version* ]] || continue
         [[ $line == (#b)*([0-9]##.[0-9]##.[0-9]##)* ]] || continue
         old=$match[1]
@@ -307,8 +401,10 @@ rewrite_version() {   # $1 = file
     local tmpf=$file.rewriting.$$
     integer n=0
     : > $tmpf
+    lineno=0
     while IFS= read -r line || [[ -n $line ]]; do
-        if [[ $line == *$old* ]]; then
+        lineno+=1
+        if [[ -z ${prose[$lineno]-} ]] && [[ $line == *$old* ]]; then
             line=${line//$old/$VERSION}
             n+=1
         fi
@@ -321,7 +417,7 @@ rewrite_version() {   # $1 = file
     # 在採用之前先檢查**產物**。上面那次破壞留下的檔案仍然讀得動、也仍然含有新版本號；只有看
     # 整份產物才看得出來。`|| true` 是因為找不到東西的 grep 回傳 1，在 errexit 之下會殺掉腳本——PE。
     local left
-    left=$(LC_ALL=C grep -oE '[0-9]+\.[0-9]+\.[0-9]+' $tmpf | LC_ALL=C sort -u \
+    left=$(data_text $tmpf $kind | LC_ALL=C grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | LC_ALL=C sort -u \
            | LC_ALL=C grep -vxF -- "$VERSION" || true)
     if (( n == 0 )) || [[ -n $left ]]; then
         rm -f $tmpf
@@ -432,7 +528,12 @@ if (( DO_PUBLISH )); then
         # carrying BOTH the new version and a stale one still fail.
         # 檔案裡每一個相異的 X.Y.Z token，扣掉正在發布的那一個。比對 token 而不是比對「行」，
         # 是「一行同時含有新版本與一個過期版本」時仍然會失敗的原因。
-        _stale=$(LC_ALL=C grep -oE '[0-9]+\.[0-9]+\.[0-9]+' "$f" \
+        # Prose is excluded here by the SAME definition the rewrite used, so a
+        # sentence recording history keeps its version and a data line that went
+        # stale still fails. QM.
+        # 這裡用**與改寫相同的那份定義**排除散文，於是一句記錄歷史的話保住它的版本號，而一行過期的
+        # 資料仍然會失敗。QM。
+        _stale=$(data_text "$f" "${f:e}" | LC_ALL=C grep -oE '[0-9]+\.[0-9]+\.[0-9]+' \
                  | LC_ALL=C sort -u | LC_ALL=C grep -vxF -- "$VERSION" || true)
         [[ -z $_stale ]] || {
             print -u2 -- "${f:t} still carries version(s) other than $VERSION: ${_stale//$'\n'/ }"

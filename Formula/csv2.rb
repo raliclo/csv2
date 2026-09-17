@@ -50,7 +50,7 @@ class Csv2 < Formula
       url "https://github.com/raliclo/csv2/releases/download/v0.1.1/csv2-0.1.1-linux-x86_64.tar.zst"
       sha256 "8833a6128c0bc47756d307159d6def785ad306213c1e18a28607b84d2199accb"
     end
-    # aarch64 arrives in v0.1.1. It was absent from v0.1.1 not because it was
+    # aarch64 arrives in v0.1.1. It was absent from v0.1.0 not because it was
     # untested -- T47 compares twelve invocations byte for byte against macOS
     # on every run -- but because an archive built after the tag was cut would
     # have reported a different version string from its three siblings, which

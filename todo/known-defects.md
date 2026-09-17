@@ -13073,3 +13073,108 @@ destination -- `--dry-run` exits 0 planning `cp ... /csv2.exe`. A real run stopp
 verification judged "refused" from the message, which a fake scoop without backslashes printed in
 full, and never looked at whether the script stopped.
 
+
+---
+
+## QM. 出貨時的版本號改寫會連**散文**一起改，於是一則有日期的查證紀錄會被改成假話（2026-09-18 修正，T308a–e）
+
+**2026-09-18 發現，在準備 v0.1.2 出貨、讀 `Formula/csv2.rb` 時。經親手重現。同日已修。**
+
+修法：新增 `prose_lines()`，回報一個檔案裡「哪些行只是在談論版本號」——`.rb` 是註解行，`.json` 是
+`notes` 陣列裡的行——而 `data_text()` 給出扣掉那些行之後的檔案。改寫與「不得殘留舊版本號」那道讀回
+檢查**共用這一份定義**。共用是重點：兩者若各有一份，被其中一個正確留下的散文會被另一個判定失敗，
+而唯一能同時滿足它們的做法就是把散文改壞——這正是這個缺陷活下來的方式。`Formula/csv2.rb` 第 53 行
+那句被 `38c7950` 改壞的話，一併改回 `v0.1.0`。
+
+寫這個修正時踩到一個：`local file=$1 line old="" ln kind=${file:e}` 會失敗，因為 zsh 先展開 `local`
+的**所有**字詞才做賦值，於是 `${file:e}` 讀到的是一個「已宣告為區域、但還沒有值」的 `file`——在
+`no_unset` 之下那會死在發布途中。`kind` 已另起一行。另外 `prose_lines` 的「種類」是明白傳進來的，
+不是從檔名推的：殘留檢查跑的對象是 `$file.rewriting.$$`，它的副檔名是一個 process id，用推的會把
+「沒有任何一行是散文」當成結論，安靜地退回舊行為。
+
+T308 有五個案例。T308a 確認那三個函式真的被抽出來了（否則底下每一個案例量的都是空檔案）。T308b
+斷言每一行散文逐位元存活，T308c 斷言資料位置確實動了（否則 T308b 會在一個沒改過的檔案上通過）。
+**T308d 是負控組**：它把舊的全域替換跑一遍，證明那確實會改掉 scoop 那筆帶日期的查證紀錄——沒有它，
+T308b 對一個「從來就沒有運作過的改寫」也會通過。T308e 把一行過期的 `extract_dir` 種進去，確認放寬
+之後那道檢查的牙齒還在。
+
+`publish.zsh` 的 `rewrite_version()` 對「含有舊版本號的每一行」做全域替換：
+
+```zsh
+while IFS= read -r line || [[ -n $line ]]; do
+    if [[ $line == *$old* ]]; then
+        line=${line//$old/$VERSION}
+        n+=1
+    fi
+    print -r -- "$line" >> $tmpf
+done < $file
+```
+
+它不區分「版本號是這一行的**資料**」與「版本號是這一行**敘述的內容**」。兩個被改寫的檔案裡都有
+後者，而它們記的是**歷史**——歷史不該隨著新版本前進。
+
+### 重現一：已經出貨的那一次
+
+`Formula/csv2.rb` 第 53 行現在寫著一句自相矛盾的話：
+
+```console
+$ grep -n 'aarch64 arrives' Formula/csv2.rb
+53:    # aarch64 arrives in v0.1.1. It was absent from v0.1.1 not because it was
+```
+
+「從 v0.1.1 開始有。它在 v0.1.1 缺席」。原文不是這樣：
+
+```console
+$ git log --oneline -L53,54:Formula/csv2.rb | head -8
+38c7950 v0.1.1 is published, on four platforms
+-    # aarch64 arrives in v0.1.1. It was absent from v0.1.0 not because it was
++    # aarch64 arrives in v0.1.1. It was absent from v0.1.1 not because it was
+```
+
+**那一行是被 `38c7950`（也就是出貨那一步本身）改壞的。** 它已經隨 v0.1.1 出去了。
+
+### 重現二：v0.1.2 會對 scoop 的查證紀錄做什麼
+
+`scoop/csv2.json` 的 `notes` 裡有一筆帶日期的紀錄，寫的是「2026-09-17 在 Windows 11 上實際跑過
+**這個**安裝」的結果。把同樣的替換套上去：
+
+```console
+$ while IFS= read -r line || [[ -n $line ]]; do
+>   [[ $line == *0.1.1* ]] && line=${line//0.1.1/0.1.2}
+>   print -r -- "$line"
+> done < scoop/csv2.json > /tmp/csv2-0.1.2.json
+$ diff <(sed -n '6,16p' scoop/csv2.json) <(sed -n '6,16p' /tmp/csv2-0.1.2.json)
+6c6
+<         "csv2 0.1.1 (v0.1.1 / 4ae95f6) from bash, cmd.exe and zsh, and reads a CSV.",
+---
+>         "csv2 0.1.2 (v0.1.2 / 4ae95f6) from bash, cmd.exe and zsh, and reads a CSV.",
+```
+
+**那會變成一句假話，而且是可以當場查核的假話**：它說 2026-09-17 那次查證印出的是 `csv2 0.1.2`，
+而 0.1.2 那天還不存在；`4ae95f6` 又原封不動留著，那是 v0.1.1 的 commit。一則「宣稱被驗證過」的
+紀錄，是讀者最沒有理由去懷疑的那一種。
+
+### 為什麼現有的檢查抓不到
+
+出貨結尾那道「兩個檔案裡不得再留著別的版本號」的檢查，方向正好相反：它要求**沒有**舊版本號殘留。
+散文如果保持正確，那道檢查就會**失敗**。也就是說，現在這個設計把「散文被改壞」變成了**通過條件**。
+
+那道檢查本身是對的，v0.1.0 的 `extract_dir` 與 `assert_match` 就是它會抓到的；問題在它與改寫共用
+「整個檔案每一行都一樣」這個前提，而那個前提不成立。
+
+### 這與 QI 的關係
+
+QI 是「版本號寫死在腳本裡」，這一條是「版本號改寫改過頭」——同一個出貨步驟的兩端。兩次都不是靠
+任何命令失敗發現的：QI 是靠檔名與內容對不上，這一條是靠**讀了那句話發現它自相矛盾**。
+
+`publish.zsh`'s `rewrite_version()` replaces the old version on every line containing it, without
+distinguishing a version that is the line's DATA from one that is what the line is TALKING ABOUT.
+Both rewritten files contain the latter, recording history, and history does not move with the
+new release. It has already shipped once: `38c7950`, the publish step itself, turned "aarch64
+arrives in v0.1.1. It was absent from v0.1.0" into "absent from v0.1.1". Publishing 0.1.2 would
+do worse -- scoop's notes carry a dated record of a real Windows verification, and the rewrite
+would make it claim that run printed `csv2 0.1.2`, on a day 0.1.2 did not exist, while leaving
+`4ae95f6` (v0.1.1's commit) beside it. The end-of-publish check that no OTHER version remains
+cannot catch this; it points the other way, so prose staying correct makes that check FAIL. The
+check is right -- it is what would have caught v0.1.0's `extract_dir` and `assert_match` -- but it
+shares with the rewrite an assumption that every line in the file is the same kind of line.

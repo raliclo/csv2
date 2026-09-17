@@ -18431,6 +18431,124 @@ else
 fi
 
 echo
+echo "--- T308: the publish rewrite moves the version as DATA and leaves prose alone / T308：出貨改寫動的是「資料」裡的版本號，不動散文 ---"
+# Both package files contain prose that names a version as HISTORY, and history
+# does not move with a new release. Until 2026-09-18 the rewrite replaced the
+# old version on every line, so publishing v0.1.1 turned the Formula's "aarch64
+# arrives in v0.1.1. It was absent from v0.1.0" into "absent from v0.1.1" -- a
+# sentence contradicting itself, and it shipped. Publishing again would have
+# rewritten scoop's DATED record of a real Windows verification into a claim
+# that the run printed a version that did not exist on that date. QM.
+#
+# 兩個套件檔裡都有把版本號當成**歷史**來記的散文，而歷史不隨新版本前進。2026-09-18 之前，改寫會
+# 替換每一行上的舊版本號，於是發布 v0.1.1 那一步把 Formula 的「aarch64 arrives in v0.1.1. It was
+# absent from v0.1.0」變成「absent from v0.1.1」——一句自相矛盾的話，而且出貨了。再發布一次，會把
+# scoop 那筆**帶日期**的 Windows 查證紀錄改寫成「那次執行印出了一個當天還不存在的版本」。QM。
+_t308_fn=$TMP/t308fn.zsh
+sed -n '/^prose_lines() {/,/^}/p;/^data_text() {/,/^}/p;/^rewrite_version() {/,/^}/p' \
+    "$ROOT/publish.zsh" > "$_t308_fn"
+# The extraction must actually find all three, or every case below measures an
+# empty file and passes. Same shape as T218a's file-count guard.
+# 這個抽取必須真的找到三個，否則底下每一個案例量的都是一個空檔案而且會通過。與 T218a 的檔案數
+# 守衛是同一個形狀。
+_t308_nfn=$(LC_ALL=C grep -cE '^(prose_lines|data_text|rewrite_version)\(\) \{' "$_t308_fn" | tr -d ' ')
+if [[ $_t308_nfn == 3 ]]; then
+    ok "T308a publish.zsh still defines the three functions this case measures / publish.zsh 仍定義著本案例所量的三個函式"
+else
+    bad "T308a extracted $_t308_nfn of 3 functions from publish.zsh / 從 publish.zsh 只抽出 $_t308_nfn 個函式（應為 3）"
+fi
+
+# 9.9.9 rather than a real next version: the case must not go stale when the
+# tree's version moves, and a token that appears nowhere makes "did this line
+# change" unambiguous.
+# 用 9.9.9 而不是真的下一版：這個案例不能在樹的版本前進時過期，而一個哪裡都沒出現過的 token
+# 讓「這一行有沒有變」沒有歧義。
+_t308_rewrite() {   # _t308_rewrite <file>  -- rewrites in place to 9.9.9, prints nothing
+    zsh -c '
+        emulate -L zsh
+        setopt no_unset
+        VERSION=9.9.9
+        say() { : }
+        source $1
+        rewrite_version $2
+    ' t308 "$_t308_fn" "$1" >/dev/null 2>&1
+}
+_t308_prose_of() {   # _t308_prose_of <file> <kind>  -- the prose lines, verbatim
+    local nums
+    nums=$(zsh -c '
+        emulate -L zsh
+        setopt no_unset
+        source $1
+        prose_lines $2 $3
+    ' t308 "$_t308_fn" "$1" "$2")
+    print -r -- "$nums" | LC_ALL=C awk 'NR==FNR { if ($1 != "") w[$1]; next } FNR in w' - "$1"
+}
+
+for _t308_pair in "Formula/csv2.rb rb" "scoop/csv2.json json"; do
+    _t308_src=${${=_t308_pair}[1]}
+    _t308_kind=${${=_t308_pair}[2]}
+    _t308_orig=$TMP/t308-orig-${_t308_src:t}
+    _t308_new=$TMP/t308-new-${_t308_src:t}
+    cp "$ROOT/$_t308_src" "$_t308_orig"
+    cp "$ROOT/$_t308_src" "$_t308_new"
+    _t308_rewrite "$_t308_new"
+    if diff -q <(_t308_prose_of "$_t308_orig" "$_t308_kind") \
+               <(_t308_prose_of "$_t308_new"  "$_t308_kind") >/dev/null 2>&1; then
+        ok "T308b ${_t308_src:t}: every prose line survives the rewrite byte for byte / 每一行散文逐位元存活"
+    else
+        bad "T308b ${_t308_src:t}: the rewrite changed prose: $(diff <(_t308_prose_of "$_t308_orig" "$_t308_kind") <(_t308_prose_of "$_t308_new" "$_t308_kind") | head -4) / 改寫動到了散文"
+    fi
+    # And it must have done SOMETHING. A rewrite that silently changed nothing
+    # also leaves the prose untouched, which is the passing answer above.
+    # 而它必須真的做了**某件事**。一次「靜默地什麼都沒改」的改寫同樣不會動到散文——那正是上面
+    # 那個「通過」的答案。
+    if LC_ALL=C grep -q '9\.9\.9' "$_t308_new"; then
+        ok "T308c ${_t308_src:t}: the data sites did move to the new version / 資料位置確實換到了新版本"
+    else
+        bad "T308c ${_t308_src:t}: nothing was rewritten, so T308b passed on an unchanged file / 什麼都沒改寫，於是 T308b 是在一個沒動過的檔案上通過的"
+    fi
+done
+
+# The control group. Asserting "prose survives" is worth nothing unless the old
+# behaviour is shown to break it -- otherwise the case would pass against a
+# rewrite that had never worked at all.
+# 負控組。「散文存活」這個斷言，除非證明舊行為會破壞它，否則什麼都沒說——不然這個案例對一個
+# 「從來就沒有運作過的改寫」也會通過。
+_t308_blunt=$TMP/t308-blunt-csv2.json
+: > "$_t308_blunt"
+_t308_old=$(LC_ALL=C grep -oE '"version": "[0-9]+\.[0-9]+\.[0-9]+"' "$ROOT/scoop/csv2.json" \
+            | LC_ALL=C grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+while IFS= read -r _t308_line || [[ -n $_t308_line ]]; do
+    [[ $_t308_line == *$_t308_old* ]] && _t308_line=${_t308_line//$_t308_old/9.9.9}
+    print -r -- "$_t308_line" >> "$_t308_blunt"
+done < "$ROOT/scoop/csv2.json"
+if diff -q <(_t308_prose_of "$ROOT/scoop/csv2.json" json) \
+           <(_t308_prose_of "$_t308_blunt" json) >/dev/null 2>&1; then
+    bad "T308d the blanket replace left the notes alone, so T308b proves nothing / 全域替換沒有動到 notes，於是 T308b 什麼都沒證明"
+else
+    ok "T308d the blanket replace does rewrite the dated verification note, which is what T308b forbids / 全域替換確實會改掉那筆帶日期的查證紀錄，而那正是 T308b 所禁止的"
+fi
+
+# A version that went stale in a DATA line must still be refused. Excluding
+# prose from the leftover check is exactly the kind of loosening that can take
+# the check's teeth out with it.
+# 一行過期的**資料**仍然必須被拒絕。把散文排除在殘留檢查之外，正是那種「可能連檢查的牙齒一起
+# 拔掉」的放寬。
+_t308_stale=$TMP/t308-stale-csv2.json
+LC_ALL=C sed 's/"extract_dir": "csv2-[0-9][0-9.]*-windows-x86_64"/"extract_dir": "csv2-0.0.9-windows-x86_64"/' \
+    "$ROOT/scoop/csv2.json" > "$_t308_stale"
+if LC_ALL=C grep -q '0\.0\.9' "$_t308_stale"; then
+    _t308_rewrite "$_t308_stale"
+    if LC_ALL=C grep -q '0\.0\.9' "$_t308_stale" && ! LC_ALL=C grep -q '9\.9\.9' "$_t308_stale"; then
+        ok "T308e a stale version in a data line is still refused, and nothing is adopted / 資料行裡過期的版本號仍會被拒絕，而且不採用任何改動"
+    else
+        bad "T308e a stale extract_dir was accepted / 過期的 extract_dir 被接受了"
+    fi
+else
+    bad "T308e the fixture did not get a stale extract_dir, so nothing was tested / fixture 沒有拿到過期的 extract_dir，因此什麼都沒測到"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
