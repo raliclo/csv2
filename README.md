@@ -1018,6 +1018,21 @@ The local suite reports pass/fail/skip counts and exits non-zero on failure.
 The parent-project runner builds csv2 in the aarch64 Linux guest, compares
 host and guest output, runs the guest suite, and records measurements.
 
+**The guest skips more cases than a host does, and every one of them is an
+environment difference rather than a gap in csv2.** These kinds have occurred:
+the payload sent into the guest carries no `.git`, so cases that read the
+repository's own history skip; that image has no `iconv` and no `python3`, so
+cases needing a second implementation to check against skip; and the guest runs
+as root, which cannot be denied read access to a file, so the case that needs an
+unreadable one skips.
+
+Counts are deliberately absent here: a number written into a document drifts
+away from the suite that produces it, and nothing reports the drift. The
+categories are listed because a reader comparing one platform's run against
+another's would otherwise read a larger skip count as a regression. **The
+authority is the run itself** -- `run_csv2_test.zsh` names every skipped case,
+by name, in the report it writes each time.
+
 ### Measured read/write time
 
 These are recorded wall-clock durations for the benchmark corpus, shown in
