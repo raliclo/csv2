@@ -1014,6 +1014,52 @@ stale together and gets fixed one at a time.
 **編輯失敗不會阻止提交。** 第 9 次是編輯其實成功了、但被後續的 `git add -A` 抵銷；第 10 次是編輯
 本身以非零結束——而兩次的下一條命令都照跑不誤。
 
+### 2026-09-17：拿那張表去對一次，而一份紀錄可以有兩種壞法
+
+`mistakes_prevention` 的那張表寫著：**同一天內重複 → 固化做法就夠；跨天重複 → 必須是機械的。**
+我讀過它很多次，一直當成一張**分類**的表——用來說明「這一條屬於哪一種」。它其實是一張**決策**的
+表：拿每一條去對，它會說出「這一條現在該有什麼」。
+
+對這裡七條跑一次：六條跨天，五條有機械守衛（T218／T231／T241／T297…）。剩下兩條——
+
+- **第 7 條**沒有守衛，而條目自己說明了為什麼：失敗發生在**下判斷之前**，不在任何產物上，沒有東西
+  可以掃。那是一個**有理由的例外**。
+- **第 4 條**的 `guard` 欄寫著「這是單日集中……**若再跨一天發生**，就需要一道真正的檢查」，而同一份
+  計數器往左三欄寫著 **10 次 / 4 天**。
+
+**那個條件早就滿足了**，而 `mistakes.md` 的內文在 2026-09-10 當天就記下了矯正措施（用 `&&` 而不是
+換行）。只有那一欄沒動。
+
+### T298 為什麼看不到它
+
+T298 比對的是「內文裡的次數」與「計數器裡的次數」。**兩份紀錄對數字是一致的，對那些數字的意義才
+不一致。** 一個數字更新了，而「根據那個數字該做什麼」的判斷停在寫下它的那一天。
+
+### 兩種壞法，而比較輕的那一種比較難發現
+
+另一個 session 對它自己的樹跑了同一次盤點，找到的是不同的東西，而那個對照值得留著：
+
+| | 形狀 | 怎麼浮現 |
+|---|---|---|
+| **自相矛盾** | 條件寫在紀錄裡、已經滿足、而結論沒動 | 兩欄對不上，**比對得出來** |
+| **標準未達** | 規則寫在 skill 裡、適用、而沒有人做 | **沒有任何一欄會與另一欄對不上** |
+
+**後者比較輕——沒有一份文件在說謊——但它更難自己浮現。** 要發現它，只能主動拿那張表去對每一條；
+沒有任何內部的不一致會把它推到眼前。
+
+A record can fail in two ways, and the milder one is harder to surface. The table in the
+mistakes_prevention skill says same-day clustering needs a solidified practice while a cross-day
+repeat needs a mechanical check. Read as a classification it explains which kind an entry is;
+read as a DECISION it says what each entry should have by now. Running it over these seven found
+six cross-day, five with a mechanical guard, entry 7 a justified exception, and entry 4 carrying
+a guard column that said "if it ever repeats across a day, a real check is needed" beside a count
+of ten over four days -- the condition had been met and the prose had recorded the corrective the
+same day, while that one column never moved. T298 cannot see this: both records agree about the
+numbers and disagree about what the numbers mean. The other session's audit of its own tree found
+the other shape -- a standard in the skill that applies and was never met -- which is milder,
+since no document is lying, and harder to notice, since no column contradicts another. Only
+taking the table to each entry deliberately finds it.
+
 ### 這一次有機械修法了
 
 第 4 條在此之前寫的是「依 skill 的判準這是單日集中而非跨日再犯……若再跨一天發生，就需要一道真正
