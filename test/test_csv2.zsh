@@ -18444,6 +18444,15 @@ echo "--- T308: the publish rewrite moves the version as DATA and leaves prose a
 # 替換每一行上的舊版本號，於是發布 v0.1.1 那一步把 Formula 的「aarch64 arrives in v0.1.1. It was
 # absent from v0.1.0」變成「absent from v0.1.1」——一句自相矛盾的話，而且出貨了。再發布一次，會把
 # scoop 那筆**帶日期**的 Windows 查證紀錄改寫成「那次執行印出了一個當天還不存在的版本」。QM。
+# The guest gets a tar payload, not a checkout: publish.zsh, Formula/ and
+# scoop/ do not travel in it. Absent, this case must SAY it did not run, the
+# way T299/T303/T304 do -- the first version FAILED there instead, reporting
+# "the rewrite changed prose" about files that were not present. The body is
+# left at its original indentation so the guard reads as one added line.
+# guest 拿到的是一份 tar payload，不是 checkout：publish.zsh、Formula/、scoop/ 都不在裡面。它們不在時，
+# 這個案例必須**說出自己沒有執行**，與 T299/T303/T304 一樣——第一版是在那裡**失敗**，對著不存在的檔案
+# 回報「改寫動到了散文」。底下的本體維持原本的縮排，讓這道守衛讀起來只是多加的一行。
+if [[ -r $ROOT/publish.zsh && -r $ROOT/Formula/csv2.rb && -r $ROOT/scoop/csv2.json ]]; then
 _t308_fn=$TMP/t308fn.zsh
 sed -n '/^prose_lines() {/,/^}/p;/^data_text() {/,/^}/p;/^rewrite_version() {/,/^}/p' \
     "$ROOT/publish.zsh" > "$_t308_fn"
@@ -18547,6 +18556,10 @@ if LC_ALL=C grep -q '0\.0\.9' "$_t308_stale"; then
 else
     bad "T308e the fixture did not get a stale extract_dir, so nothing was tested / fixture 沒有拿到過期的 extract_dir，因此什麼都沒測到"
 fi
+else
+    T308_SKIPPED=1
+    skipt "T308 the publish rewrite leaves prose alone / 出貨改寫不動散文 (publish.zsh and the package files do not travel in the guest payload / publish.zsh 與套件檔不在 guest 的 payload 裡)"
+fi
 
 echo
 echo "--- T309: the build id asks git from inside the directory, not with -C / T309：build id 從目錄裡面問 git，不用 -C ---"
@@ -18565,6 +18578,12 @@ echo "--- T309: the build id asks git from inside the directory, not with -C / T
 # version of this case did not, and failed on its own explanation.
 # 排除註解行，理由與 T218a 相同：說明「為什麼 `git -C` 是錯的」那段文字，必須寫得出 `git -C`。
 # 這個案例的第一版沒有排除，於是敗在它自己的說明上。
+# build_id.zsh is not in the guest payload either, and there `csv2_build_id`
+# has nothing to source: the first version reported "absolute gave [], '.'
+# gave []" and "rc=127", which is the harness failing, not the tree.
+# build_id.zsh 同樣不在 guest 的 payload 裡，那裡 `csv2_build_id` 沒有東西可以 source：第一版在那裡
+# 回報「絕對路徑給 []、'.' 給 []」與「rc=127」，那是測試自己壞了，不是那棵樹壞了。
+if [[ -r $ROOT/build_id.zsh ]]; then
 _t309_gitC=$(LC_ALL=C grep -n 'git -C' "$ROOT/build_id.zsh" | LC_ALL=C grep -v ':[[:space:]]*#' || true)
 if [[ -n $_t309_gitC ]]; then
     bad "T309a build_id.zsh still uses git -C outside a comment: ${_t309_gitC//$'\n'/ } / build_id.zsh 在註解之外仍用著 git -C"
@@ -18614,6 +18633,10 @@ if (( _t309_grc == 0 )) && [[ $_t309_g == unknown ]]; then
 else
     bad "T309d rc=$_t309_grc said [$_t309_g]; the guest's build would now be refused / guest 的建置現在會被拒絕"
 fi
+else
+    T309_SKIPPED=1
+    skipt "T309 the build id asks git from inside the directory / build id 從目錄裡面問 git (build_id.zsh does not travel in the guest payload / build_id.zsh 不在 guest 的 payload 裡)"
+fi
 
 echo
 echo "--- T310: release.zsh gives native tools relative names, not absolute MSYS paths / T310：release.zsh 給原生工具相對名稱，不給絕對 MSYS 路徑 ---"
@@ -18627,6 +18650,15 @@ echo "--- T310: release.zsh gives native tools relative names, not absolute MSYS
 # 相對名稱可以、原生路徑可以，只有絕對的 MSYS 路徑不行。csv2.exe 同樣是原生程式，所以那個探測檔也用
 # 相對名稱。同一個檔案裡寫 sha256 那段本來就是這樣做的——那正是這件事算 QO 而不算新發現的原因：做法
 # 已經在，只是沒有推廣到它成立的其餘範圍。
+# release.zsh is not in the guest payload. Without this guard the greps find
+# nothing in a file that is not there, `|| true` turns that into an empty
+# result, and all three cases PASS having measured nothing -- the shape T218a's
+# file-count guard exists for, and the more dangerous of the two failures,
+# because a green line is not read again.
+# release.zsh 不在 guest 的 payload 裡。沒有這道守衛，那些 grep 會在一個不存在的檔案上什麼都比不到，
+# `|| true` 把它變成空結果，於是三個案例**在什麼都沒量的情況下通過**——那正是 T218a 的檔案數守衛存在的
+# 理由，而且是兩種失敗裡比較危險的一種，因為一條綠燈不會有人再讀第二次。
+if [[ -r $ROOT/release.zsh ]]; then
 _t310_bad=$(LC_ALL=C grep -nE 'zstd' "$ROOT/release.zsh" \
             | LC_ALL=C grep -v ':[[:space:]]*#' \
             | LC_ALL=C grep -F '$ARCHIVE' || true)
@@ -18657,6 +18689,10 @@ if [[ $_t310_c1 == 1 && $_t310_c2 == 1 ]]; then
     ok "T310c both scans find the old shape when it is put back / 把舊形狀放回去，兩個掃描都找得到"
 else
     bad "T310c the scans found $_t310_c1 and $_t310_c2 of the two planted lines, so T310a/b prove nothing / 兩行被種回去的舊寫法只找到 $_t310_c1 與 $_t310_c2，於是 T310a/b 什麼都沒證明"
+fi
+else
+    T310_SKIPPED=1
+    skipt "T310 release.zsh gives native tools relative names / release.zsh 給原生工具相對名稱 (release.zsh does not travel in the guest payload / release.zsh 不在 guest 的 payload 裡)"
 fi
 
 echo
@@ -18876,6 +18912,18 @@ fi
 (( ${T191A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T200A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T200B_SKIPPED:-0} )) && (( want_skip += 1 ))
+
+# T308/T309/T310 measure publish.zsh, build_id.zsh and release.zsh, none of
+# which travel in the guest's tar payload. Counted here at the same time as the
+# skip was written, for the reason stated above T240: a new skip that is not
+# counted cancels out a stale entry, and the check then passes carrying two
+# errors, which is worse than a visible mismatch.
+# T308／T309／T310 量的是 publish.zsh、build_id.zsh 與 release.zsh，三者都不在 guest 的 tar payload
+# 裡。這裡與那三個略過**同時**加上計數，理由就寫在 T240 上面那一段：一個沒有被計數的新略過，會與一筆
+# 過期項目互相抵銷，於是那道檢查帶著兩個錯誤通過——那比一個看得見的數量不符更糟。
+(( ${T308_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T309_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T310_SKIPPED:-0} )) && (( want_skip += 1 ))
 
 # T219 -- content-anchored updates. The match is a whole data cell, and the
 # refusal must happen before the destination is created.
