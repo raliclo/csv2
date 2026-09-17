@@ -1087,12 +1087,65 @@ committing, which is how both were actually found. The first attempt at writing 
 failed for a related reason: it contained an illustrative shell snippet whose text included a
 literal heredoc terminator, which closed the heredoc carrying the section early.
 
+### 另一半，2026-09-17：那道檢查造出來了
+
+上面那一段說 `&&` 擋不住第 9 次的形狀（編輯成功、被後續命令抵銷），而那一種「只能靠提交之後去看
+那個東西在不在」。**去看**這件事現在有工具了：
+
+```
+~/.claude/skills/mistakes_prevention/scripts/claim_check.zsh [-C REPO] <commit> <樣式> [<樣式> ...]
+```
+
+對每個樣式在 `<commit>` 與 `<commit>~1` 各數一次命中，只有「之前 0、之後 >0」算通過。
+`0 → 0` 是「訊息說了樹裡沒有的東西」；而「改動之前就已經在」也算失敗——**包含 `1 → 2`**，
+那是刻意的，因為一個改動前就存在的樣式對那次改動什麼都沒說。
+
+**它先被證明會咬，才被採用**，而且用的是這棵樹自己一個真的沒落地的 commit，不是造出來的例子：
+`69277a5` 的訊息描述了一筆它本身不包含的 known-defects 紀錄（那就是第 10 次），工具回報 `0 → 0`；
+隔一個 commit 的補記 `572425e` 回報 `0 → 1`。
+
+四種情況一律**退出 2**而不是靜默通過：零個樣式（一個什麼都沒檢查而回報成功的檢查，正是本檔要擋的
+形狀）、merge commit（`^` 與 `~1` 都是第一個 parent，對 merge 而言那是工具沒有依據去做、卻會安靜
+做掉的選擇）、root commit、以及含換行的樣式（`git grep` 逐行，它永遠不可能命中，而它的零讀起來
+會像「那個宣稱不存在」）。
+
+merge 那一條是另一個 session 同一天的經驗換來的：他們用 `HEAD^` 當基準驗證自己的 commit，而這個
+session 在那之間推了東西上去，於是 `HEAD^` 是**他們自己**先前的 commit——**四個檢查全部回報「前後
+相同」，而那次執行看起來完全正常。** 它被抓到，只因為「前後相同」在這裡同樣算失敗；**若第三列
+寬鬆一點，那一次就會靜靜地過**，而這正是那一列不放寬的理由。
+
+**第一個撞到那一列的人是造它的人。** 拿它驗自己的 `e27778d`，先挑 `scoop prefix csv2` 得到 `8 → 9`、
+再挑 `一則紀錄` 得到 `2 → 2`，兩次都落在第三列。因為訊息裡先講明了「`1 → 2` 也算失敗，那是刻意的」，
+它沒有被誤診成工具故障——改挑那次 commit 獨有的字面就通過了。那句話是對方要求加的，而它在加上去
+的第一天就用掉了。
+
+The other half arrived on 2026-09-17. `&&` stops the edit that fails; nothing stopped the edit
+that was undone by a later command, and that one could only be caught by going to LOOK after
+committing. `claim_check.zsh` is that look: it counts a literal at `<commit>` and `<commit>~1`,
+and absent-before-present-after is the only pass. It was proved to bite against this tree's own
+un-landed commit before being adopted. Present-before fails deliberately, `1 → 2` included, and
+the message says so -- which is what stopped its author, the first person to hit it, from
+thinking it was broken. Zero patterns, merges, root commits and multi-line patterns are refused
+rather than passed; the merge refusal is another session's same-day experience, where `HEAD^`
+turned out to be their own earlier commit and all four checks reported "unchanged" while the run
+looked entirely normal.
+
 ### 矯正措施
 
 **在使用者可見的文字裡說出「我會做 X」的當下就記下來**（TaskCreate），不要等做完再回頭數。
 
-依 skill 的判準，這是**單日集中**而不是跨日再犯（兩天，而且全部在同一次盤點中浮現），因此
-需要的是把做法固化，不是強制檢查。若它再跨一天發生，就要有一道真正的檢查。
+依 skill 的判準這是**跨日再犯**——10 次 / 4 天——因此規則不夠，必須有一道機械檢查。兩半都齊了：
+`&&` 擋住「編輯失敗、提交照跑」，`claim_check.zsh` 擋住「編輯成功、被後續命令抵銷」。
+
+**這一段本身曾經是這一條的實例。** 它在 2026-09-17 之前寫的是「這是單日集中而不是跨日再犯（兩天，
+而且全部在同一次盤點中浮現），因此需要的是把做法固化，不是強制檢查。若它再跨一天發生，就要有一道
+真正的檢查。」——而那時它已經 10 次 / 4 天，上面幾節早就記下了 `&&` 與第 6、7、8 次。**條件早就
+滿足了，結論沒有動。** 計數檔的 guard 欄也是同一句話，同一天一起修。
+
+This section was itself an instance of this entry: it went on saying "same-day clustering, two
+days, so a solidified practice is enough; if it ever repeats across a day a real check is needed"
+while the count beside it read ten over four days and the prose above it had already recorded the
+corrective. The condition had been met and the conclusion never moved. Both halves now exist.
 
 ---
 
@@ -1161,7 +1214,7 @@ copied, and the next script will copy it too.
 
 ## 6. 用字串切割解析一個有結構的格式，於是安靜地拿到一個看起來合理的錯值
 
-**1 次 / 1 天**（2026-09-10）。
+**2 次 / 2 天**（2026-09-10、2026-09-17）。一次對 JSON，一次對這份 Markdown 自己。
 
 `publish.zsh` 要把套件檔裡的版本號換掉，所以它得先讀出「這個檔案目前宣告的版本」。我寫的是
 「第一個引號之後、到下一個引號為止」：
@@ -1204,6 +1257,40 @@ fallback 拿到的是 `: `。
 
 `rewrite_version` 現在把這一步內建了：它寫到暫存檔、檢查產物裡不再有其他版本號 token，然後
 才 `mv`。那擋得住這一個具體形狀的後果，擋不住「切錯欄位」本身。
+
+### 第二次：用 awk 拼接這個檔案，而那個錨點在檔案裡有六個
+
+2026-09-17，要把一節新內容插進第 4 條時，我寫了一段 awk：在 `^### 矯正措施$` 之前插入，並吃掉到
+下一個 `---` 為止的舊內容。**這個檔案裡有六個 `### 矯正措施`**，而 awk 命中的是第一個——第 1 條的
+那一節。**50 行插入、153 行刪除**，而 awk 以 0 結束、`mv` 成功、檔案看起來完好。
+
+**這與 JSON 那一次是同一件事**：拿一個扁平的行樣式去指涉一份有結構的文件裡的一個位置。
+`^### 矯正措施$` 不是「第 4 條的矯正措施」，它是「任何一條的」——就像 `${${line#*"}%%"*}` 不是
+「版本號」而是「第一組引號之間的東西」。兩次都得到一個**看起來合理的錯目標**，兩次都沒有任何一步
+失敗。差別只在這一次的後果是刪掉 153 行，而上一次是寫壞 22 行。
+
+**救回它的是這一條自己的矯正措施**：檢查產物，不是檢查命令有沒有回報成功。skill 規則 5 的後半句
+要求「若非用腳本改檔不可，事後一律 `git diff --stat`」，那一行印出 `50 insertions(+), 153
+deletions(-)`，而預期是大約 50 插入、6 刪除。**是那個形狀不對，不是那個命令失敗了。**
+
+重做時用的是 Edit 工具，錨在第 4 條獨有的那段散文上——那也就是規則 5 本來說的：改檔用 Edit／
+Write，要腳本就用 zsh。當時有一條 session 層級的指示要求盡量以 Bash 完成工作，而它同樣寫著
+「Bash 真的做不到時再用專用工具」；**一個有六個相同錨點的檔案就是那個「做不到」**，只是我先試了
+才知道。
+
+**這一次還先放錯了條**：它原本被寫進第 4 條（「說了要做然後沒有做」），因為那是我當時正在編輯的
+地方。但第 4 條講的是一個沒有被追蹤的意圖，而這一次的意圖有被完成——錯的是**指涉的方式**。歸錯條
+的紀錄會讓兩條的次數都失真，而更糟的是它會把矯正措施指向錯的方向。
+
+The same mistake as the JSON one, on a different structured format: an anchor of
+`^### 矯正措施$` names "any entry's corrective", not "entry 4's", exactly as `${${line#*"}%%"*}`
+names "whatever lies between the first quotes", not "the version". Both produced a
+plausible-looking wrong target with every step succeeding; this one deleted 153 lines with exit
+status 0. What caught it is this entry's own corrective -- check the PRODUCT, not whether the
+command reported success: `git diff --stat` read 50 insertions and 153 deletions against an
+expectation of 50 and 6. It was also first filed under entry 4, where I happened to be editing;
+entry 4 is about an intention nobody tracked, and this intention was carried out. What went
+wrong was how the place was named.
 
 Splitting strings to read a field out of a structured format. `${${line#*"}%%"*}` gives
 `0.1.0` on Homebrew's `version "0.1.0"` and `: ` on scoop's `"version": "0.1.0",` -- a legal
