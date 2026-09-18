@@ -799,6 +799,56 @@ after that first one was sound and faithfully inherited a false premise. The
 lesson is one sentence: ask the machine, not the file that describes it. It was
 booted at the time.
 
+## ~~v0.1.2~~ 已出貨
+
+### 2026-09-18：v0.1.2 出了，四個平台
+
+`https://github.com/raliclo/csv2/releases/tag/v0.1.2`，tag 指向 `3a472bb`。
+
+| 平台 | 建置於 | build id | 套件 |
+|---|---|---|---|
+| macOS arm64 | 本機 | `v0.1.2 / 3a472bb` | 1413/0/1 |
+| Linux aarch64 | guest VM | `v0.1.2 / 3a472bb` | 1374/0/13，T47 十二組逐位元相同 |
+| Linux x86_64 | WSL2 | `v0.1.2 / 3a472bb3` | 1412/0/1 |
+| Windows x86_64 | Ralic-W11 | `v0.1.2 / 3a472bb` | 1378/0/16 |
+
+四份都在 tag 上建，sha256 由建置節點算一次、本機算一次、上傳後再從公開 URL 算第三次；收下之後
+另外**逐一檢查執行檔裡刻的 `v0.1.2 / 3a472bb`**，不從「產生它的流程」推論。
+
+程式面只有一件使用者可見的修正（QJ），另外兩件決定安裝能不能成立（QK、QL）。**其餘四件全部是
+準備這次出貨時才浮現的，而且都在出貨路徑本身：**
+
+| | 是什麼 | 怎麼浮現 |
+|---|---|---|
+| **QM** | 版本號改寫連散文一起改 | 讀 Formula 時看到一句自相矛盾的話——而它已經隨 v0.1.1 出去了 |
+| **QN** | `git -C /c/...` 對 git for Windows 不是路徑 | Windows 節點的 `release.zsh` 拒絕了一個正確的執行檔 |
+| **QO** | `zstd` 拿到絕對 MSYS 路徑 | QN 修好之後，同一次執行倒在下一個相同形狀的地方 |
+| — | 三個新案例在 guest 裡失敗／空過 | guest 的 payload 不含 `publish.zsh`、`build_id.zsh`、`release.zsh` |
+
+**這四件沒有一件會被「再讀一次程式碼」找到。** QM 是讀到那句話才發現的；QN、QO 是真的去那台機器
+上跑；最後一件是把 guest 的條件在本機重現出來。
+
+### tag 移動過兩次，而這件事值得寫下來
+
+`v0.1.2` 從 `297d7c8` 移到 `dedf635`，再移到 `3a472bb`。每一次都是因為「要出貨的東西」在出貨途中
+被發現有缺陷，而封存必須**在 tag 上**建（QD）。移動的前提每一次都先查過：`gh release view v0.1.2`
+必須查不到——**沒有任何東西從那個 tag 發布過，才可以移動它**。一旦發布，就只能往下一個版本號走。
+
+一個代價要記著：每移動一次，四個節點的封存全部作廢，要重建、重測、重收。第三次之所以只有一次，
+是因為改用了「先不打 tag，在四個節點上把 `release.zsh` 預演一遍、產物丟棄」——這棵樹 2026-09-10
+對 aarch64 用過同一招。**預演抓到的東西，就是本來會逼出第四次移動的那些。**
+
+v0.1.2 shipped on four platforms on 2026-09-18, tag at 3a472bb, every archive built AT the tag
+and its embedded build id checked after collection rather than inferred. One user-visible program
+fix (QJ) and two that decide whether an install works (QK, QL); the other four were found while
+preparing the release, all of them in the release path itself, and none would have been found by
+re-reading code. The tag moved twice, each time because something being shipped turned out to be
+defective mid-release; the precondition was checked every time -- nothing published from it yet --
+and the cost is that all four archives are void and must be rebuilt, retested and recollected. It
+moved only twice because the third round was preceded by rehearsing release.zsh on all four nodes
+without a tag, products discarded, which is the manoeuvre this tree used for aarch64 on
+2026-09-10. What the rehearsal caught is exactly what would have forced a fourth move.
+
 ## ~~v0.1.1 要做的：aarch64 與另外三個平台一起出~~ 已出貨
 
 ### 2026-09-10：v0.1.1 出了，四個平台
