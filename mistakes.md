@@ -24,8 +24,8 @@ judgement the owning session is best placed to make.
 
 ## 1. 測試碰到的不是被測物（環境、工具，或 fixture 弄丟了那個屬性）
 
-**21 次 / 10 天**（2026-08-20、2026-08-27、2026-08-29、2026-09-02、2026-09-03、2026-09-06、
-2026-09-07、2026-09-08、2026-09-09、2026-09-10），單日最多 3 次（2026-08-27）。
+**22 次 / 11 天**（2026-08-20、2026-08-27、2026-08-29、2026-09-02、2026-09-03、2026-09-06、
+2026-09-07、2026-09-08、2026-09-09、2026-09-10、2026-09-18），單日最多 3 次（2026-08-27）。
 
 *這一行直到 2026-09-08 為止寫的是「9 次 / 6 天」，而 `mistakes_counter.csv2` 當時已經是 17 次 / 8 天。
 數字的權威來源是那個檔案；這裡是它的副本，而副本會漂。* **這一條本身就是第 1 類**——比對的不是被測物
@@ -527,9 +527,31 @@ T218a 的檔案數守衛、T231b 的門檻、T241a 的旗標數下限，都是�
 
 ---
 
+### 第二十二次（2026-09-18）：一個新測試在它所量的檔案不存在時，通過了
+
+T310 掃描 `release.zsh` 有沒有把絕對路徑交給原生工具。在 guest 裡 `release.zsh` **不存在**——它不在
+那份 tar payload 裡。三個 grep 在一個不存在的檔案上什麼都比不到，`|| true` 把那個「什麼都沒有」變成
+空結果，於是三個案例全部回報成功。
+
+**它量到的是那個檔案的缺席，而不是那個檔案的內容。** 同一天寫的 T308、T309 是在那裡**失敗**——那還
+算好的一種，紅燈會被讀；T310 的綠燈不會有人再讀第二次。
+
+這與 T218a 那次（`grep --include` 是 GNU 專屬的，guest 沒有它，於是那個檢查什麼都沒掃並以空結果通過）
+是同一件事，而 T218a 的守衛就寫在這個檔案裡。**我在同一天、在一則講「不要這樣做」的 commit 訊息旁邊，
+又寫了一次。** 現在三個區塊各自守著它所量的檔案，不在就具名略過。
+
+Twenty-second: a case added that day passed in the guest having measured nothing. T310 greps
+release.zsh, which is not in the guest payload; the greps found nothing in a file that is not
+there, `|| true` turned that into an empty result, and three cases reported success. It measured
+the file's absence, not its contents. T308 and T309 FAILED there, which is the better failure --
+a red line gets read. Same shape as T218a, whose guard is written in this file, rewritten the
+same day beside a commit message saying not to do it.
+
+---
+
 ## 2. 證據就在輸出裡，而我沒有讀它
 
-**5 次 / 3 天**（2026-08-29、2026-09-01、2026-09-02），單日最多 3 次。
+**6 次 / 4 天**（2026-08-29、2026-09-01、2026-09-02、2026-09-18），單日最多 3 次。
 
 **第五次是對這個關口本身做的。** 前四次是我寫的過濾器太窄；這一次我把 `run_checked` 的輸出
 整個丟進 `/dev/null`，只留退出碼。它回 1、而測試自己回報 `FAIL 0`——那個矛盾本身就是全部的
@@ -598,10 +620,42 @@ skill 說「摘要樣式是附加的，失敗掃描是強制的」。**把整個
 
 ---
 
+### 第六次（2026-09-18）：我把證據送進 `/dev/null`，然後照它沒說的話行動
+
+v0.1.2 出貨時，在 WSL 上跑：
+
+```zsh
+git fetch --tags --force origin >/dev/null 2>&1 && git checkout -q v0.1.2 && git describe && ./compile...
+```
+
+`build_rc=128`，而執行檔仍回報 `dedf635d`——上一個 commit。fetch 失敗了，`&&` 讓後面全部沒跑，而
+**它為什麼失敗，被我自己丟掉了**。接著 `release.zsh` 以 0 結束並產生了一份封存：那一份是用舊執行檔
+打的，而它的檢查通過，因為 checkout 與執行檔**彼此一致**——只是兩者都停在舊 commit。
+
+拿掉那個重導再跑一次，它就成功了，並印出 `t [tag update] v0.1.2 -> v0.1.2`。
+
+**這正是 v0.1.1 出貨時記下來的那一條**（「`git fetch --tags` 在遠端 tag 移動過時會失敗，而我用 `&&`
+串接又把訊息丟掉了——於是兩個節點的 merge 從來沒執行，卻回報 `at=v0.1.1`」）。那一次我把訊息丟在
+`&&` 裡，這一次我明確地把它重導到 `/dev/null`。**同一個結論，換一種丟法。**
+
+抓到它的不是退出碼——`release_rc=0`。是我讀了 `./release/csv2 --version` 那一行，看到它說的是舊 commit。
+現在每一個節點的那一輪都先印 `at=$(git rev-parse --short HEAD)`，而封存收下之前先看執行檔裡刻的 id。
+
+Sixth: I redirected the evidence to `/dev/null` and then acted on what it had not said. On WSL
+during the v0.1.2 release, `git fetch --tags --force origin >/dev/null 2>&1 && ...` -- the fetch
+failed, `&&` stopped everything after it, and why it failed was thrown away by me. release.zsh
+then exited 0 and produced an archive from the STALE binary, because its check compares the
+binary against the checkout and both were consistently one commit behind. Re-run without the
+redirection it succeeded, printing `t [tag update]`. This is the lesson recorded during v0.1.1 --
+discarded there by `&&`, discarded here by an explicit redirect. What caught it was reading the
+`--version` line, not the exit status, which was 0.
+
+---
+
 ## 3. 一條規則只套用到它成立範圍的一部分
 
-**21 次 / 8 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
-2026-09-08、2026-09-10），單日最多 5 次（2026-09-03）。
+**22 次 / 9 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
+2026-09-08、2026-09-10、2026-09-18），單日最多 5 次（2026-09-03）。
 
 *數字的權威來源是 `mistakes_counter.csv2`；這一行是它的副本。副本會漂，而那本身是第 1 類——
 2026-09-08 第 1 條的這一行就被抓到落後了八次。*
@@ -892,6 +946,33 @@ T241b 用一個真的含有「未計數旗標」的檔案證明那個掃描會�
 一份規則存在於兩個地方就會漂移，而這棵樹已經為此刪掉過全域 `CLAUDE.md` 裡那張缺陷表。因此這裡
 **不重述那條規則**，只記它適用於預期略過數：T69b 目前只比總數，那是刻意的（理由在它旁邊的設計
 註解），缺的是另一半而不是換掉這一半。詳見 known-defects 的 LG。
+
+---
+
+### 第二十二次（2026-09-18）：正確的做法就在同一個檔案裡，往下二十行
+
+`release.zsh` 在三個地方把絕對路徑交給原生 Windows 工具（兩次 `zstd`、一次 `csv2.exe` 自己），而
+Windows 上 `${0:A:h}` 是 MSYS 風格的 `/c/Users/...`，那些工具開不了它。QO。
+
+**而寫 sha256 的那一段，就在同一個檔案裡再往下二十行，本來就是對的：**
+
+```zsh
+( cd -- "$DIST" && sha256sum "$STEM.tar.zst" > "$STEM.tar.zst.sha256" )
+```
+
+先 `cd` 進去，再用裸檔名。那個做法已經被發現、被寫下、被採用過一次——只是沒有被推廣到它成立的
+其餘範圍，而沒有任何東西會指出這件事。
+
+**這一次的特別之處是「範圍」的形狀**：不是「同一種寫法出現了 N 次而我修了 N-1 次」，而是「一個
+正確的做法只長在它第一次被需要的那個位置」。它更難用 grep 找——要找的不是一個錯的樣式，是一個
+對的樣式的**缺席**。
+
+Twenty-second: release.zsh handed native Windows tools an absolute MSYS path in three places,
+while the sha256 block twenty lines further down in the same file already did the right thing --
+cd into the directory, use a bare filename. The practice had been found, written and adopted
+once, and never carried to the rest of its range. The shape here is harder than the usual one:
+not a wrong pattern repeated N times and fixed N-1, but a correct practice growing only where it
+was first needed. grep finds a wrong pattern; it does not find the absence of a right one.
 
 ---
 
