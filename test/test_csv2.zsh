@@ -18810,6 +18810,101 @@ else
 fi
 
 echo
+echo "--- T312: publish.zsh refuses an archive built from another commit / T312：publish.zsh 拒絕一份用別的 commit 建出來的封存 ---"
+# The gap this closes: every other check on an archive is equally true of one
+# built from the PREVIOUS commit. The two checksums agree because the node that
+# built the stale archive also wrote the .sha256 beside it; it unpacks; its name
+# says the right version. On 2026-09-18 a `git fetch` failed on the WSL node,
+# `&&` stopped the checkout, the message had gone to /dev/null, and release.zsh
+# packaged the stale binary and exited 0 -- its own check compares the binary
+# against the CHECKOUT, and both were one commit behind together. Reading
+# `--version` by hand is what caught it. This is that reading, scripted.
+# 這道檢查補的缺口：封存上其他每一項檢查，對「用**上一個** commit 建出來的封存」同樣成立——兩份校驗和
+# 相符（因為那份 .sha256 正是建置它的節點自己寫的）、解得開、名字正確。2026-09-18 WSL 節點上 `git fetch`
+# 失敗、`&&` 讓 checkout 沒跑、訊息進了 /dev/null，而 release.zsh 打包了那個過期的執行檔並以 0 結束——
+# 它自己的檢查比對的是執行檔與 checkout，兩者一起停在舊 commit。抓到它的是手動讀 `--version`。
+if [[ -r $ROOT/publish.zsh ]] && command -v zstd >/dev/null 2>&1; then
+_t312_fn=$TMP/t312fn.zsh
+sed -n '/^ARCHIVE_BUILD_ID=""$/,/^}$/p' "$ROOT/publish.zsh" > "$_t312_fn"
+if LC_ALL=C grep -q '^archive_commit_ok() {' "$_t312_fn"; then
+    ok "T312a publish.zsh still defines archive_commit_ok / publish.zsh 仍定義著 archive_commit_ok"
+else
+    bad "T312a archive_commit_ok was not extracted, so every case below measures an empty file / 沒有抽出 archive_commit_ok，底下每一個案例量的都是空檔案"
+fi
+
+# A synthetic commit, so the case does not go stale when this tree moves.
+# 一個合成的 commit，讓這個案例不會在這棵樹前進時過期。
+_t312_sha=abcdef1234567890abcdef1234567890abcdef12
+_t312_make() {   # _t312_make <name> <text inside the fake binary>
+    local d=$TMP/t312-$1
+    rm -rf "$d"; mkdir -p "$d/csv2-9.9.9-probe"
+    print -r -- "padding $2 padding" > "$d/csv2-9.9.9-probe/csv2"
+    ( cd -- "$d" && tar -cf - csv2-9.9.9-probe | zstd -q -o "$TMP/t312-$1.tar.zst" )
+}
+_t312_try() {   # _t312_try <name>  -- prints "ok <build id>" or "refused"
+    zsh -c '
+        emulate -L zsh
+        setopt no_unset pipe_fail
+        VERSION=9.9.9
+        HEAD_SHA=$2
+        source $1
+        if archive_commit_ok "$3" csv2-9.9.9-probe/csv2; then
+            print -r -- "ok $ARCHIVE_BUILD_ID"
+        else
+            print -r -- refused
+        fi
+    ' t312 "$_t312_fn" "$_t312_sha" "$TMP/t312-$1.tar.zst" 2>/dev/null
+}
+
+# Seven and eight hex digits of the same commit must both pass: WSL prints an
+# 8-character short hash where the other three print 7, so a check that fixed
+# the length would refuse one real node's archive every release.
+# 同一個 commit 的七位與八位都必須通過：WSL 印八位而其他三個印七位，一個把長度寫死的檢查，會在每次出貨
+# 拒絕掉一個真實節點的封存。
+_t312_make short "v9.9.9 / ${_t312_sha[1,7]}"
+_t312_make long  "v9.9.9 / ${_t312_sha[1,8]}"
+_t312_r7=$(_t312_try short)
+_t312_r8=$(_t312_try long)
+if [[ $_t312_r7 == "ok v9.9.9 / ${_t312_sha[1,7]}" && $_t312_r8 == "ok v9.9.9 / ${_t312_sha[1,8]}" ]]; then
+    ok "T312b a 7- and an 8-character short hash of the commit are both accepted, and the id is reported / 同一 commit 的七位與八位短雜湊都被接受，而且 id 被回報出來"
+else
+    bad "T312b 7-char gave [$_t312_r7], 8-char gave [$_t312_r8] / 兩種長度的結果如上"
+fi
+
+# The control. Without a refusal that fires, T312b would pass against a function
+# that accepts everything -- which is the state before this check existed.
+# 負控組。沒有一個真的會觸發的拒絕，T312b 對一個「什麼都接受」的函式也會通過——而那正是這道檢查存在
+# 之前的狀態。
+_t312_make other "v9.9.9 / 0000000"
+_t312_ro=$(_t312_try other)
+if [[ $_t312_ro == refused ]]; then
+    ok "T312c an archive whose binary names another commit is refused / 執行檔指名別的 commit 的封存會被拒絕"
+else
+    bad "T312c it was accepted: [$_t312_ro] / 它被接受了"
+fi
+
+# And an archive carrying no build id at all is refused rather than passed for
+# lack of evidence. The first version of this function looked for the assembled
+# `--version` line, which swift composes at run time and is nowhere in the file,
+# so it matched nothing and refused ALL FOUR real archives -- a check that is
+# always red gets worked around, not read. Found by running it on the archives
+# already on disk.
+# 而一份完全沒有 build id 的封存要被**拒絕**，不是因為「查無實據」而放行。這個函式的第一版找的是組好的
+# `--version` 那一行，而那一行是 swift 在執行時組出來的、根本不在檔案裡，於是它一個都比不到，把四份真實
+# 封存全部拒絕——**一個永遠是紅燈的檢查會被繞過，不會被讀。** 那是拿磁碟上現有的封存跑一次才發現的。
+_t312_make none "no build id here at all"
+_t312_rn=$(_t312_try none)
+if [[ $_t312_rn == refused ]]; then
+    ok "T312d an archive with no build id is refused, not passed for want of evidence / 沒有 build id 的封存會被拒絕，不是因查無實據而放行"
+else
+    bad "T312d it was accepted: [$_t312_rn] / 它被接受了"
+fi
+else
+    T312_SKIPPED=1
+    skipt "T312 publish.zsh refuses an archive built from another commit / publish.zsh 拒絕用別的 commit 建出來的封存 (publish.zsh or zstd is absent here / 這裡沒有 publish.zsh 或 zstd)"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -19039,6 +19134,7 @@ fi
 (( ${T309_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T310_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T311_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T312_SKIPPED:-0} )) && (( want_skip += 1 ))
 
 # T219 -- content-anchored updates. The match is a whole data cell, and the
 # refusal must happen before the destination is created.

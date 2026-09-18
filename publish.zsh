@@ -130,6 +130,101 @@ sha256_of() {
     fi
 }
 
+# The full sha of the commit being published, so each archive's embedded build
+# id can be checked against it below rather than against anything a node said.
+# 正在發布的那個 commit 的完整 sha，讓底下每一份封存內嵌的 build id 與它比對，而不是與任何一個節點
+# 說過的話比對。
+HEAD_SHA=$(git rev-parse HEAD)
+
+# The binary inside an archive must carry THIS commit.
+#
+# Nothing else here can tell. The two checksums agree, the archive unpacks, the
+# name says the right version -- and every one of those is equally true of an
+# archive built from the PREVIOUS commit, because the node that built it also
+# wrote the .sha256 beside it. Not hypothetical: on 2026-09-18 a `git fetch`
+# failed on the WSL node, `&&` stopped the checkout after it, and the message
+# had gone to /dev/null; release.zsh then packaged the stale binary and exited
+# 0, because its own check compares the binary against the CHECKOUT and both
+# were consistently one commit behind. What caught it was reading `--version`
+# by hand afterwards. This is that reading, done by the script, against the
+# commit actually being published rather than against anything a node said.
+#
+# 封存裡的那個執行檔必須帶著**這一個** commit。
+#
+# 這裡沒有別的東西看得出來：兩份校驗和相符、封存解得開、名字寫著正確的版本——而其中每一項對「用**上一個**
+# commit 建出來的封存」同樣成立，因為那份 `.sha256` 正是建置它的節點自己寫的。那不是假設：2026-09-18
+# WSL 節點上一次 `git fetch` 失敗，`&&` 讓後面的 checkout 沒跑，而訊息被送進了 /dev/null；接著
+# release.zsh 打包了那個過期的執行檔並以 0 結束——**它自己的檢查比對的是執行檔與 checkout，而兩者
+# 一致地都停在舊 commit。** 抓到它的是事後手動去讀 `--version`。這個函式就是那次閱讀，改由腳本做，
+# 而且比對的是「真正正在發布的那個 commit」，不是任何一個節點說過的話。
+ARCHIVE_BUILD_ID=""
+archive_commit_ok() {   # archive_commit_ok <archive> <inner path>
+    local a=$1 inner=$2 base=${1:t} bx ids id sha bad=""
+    local -a idlist
+    ARCHIVE_BUILD_ID=""
+    bx=$(mktemp -d "${TMPDIR:-/tmp}/csv2-bid.XXXXXX") || return 1
+    zstd -dq -c -- "$a" | ( cd -- "$bx" && tar -xf - "$inner" )
+    # `grep -a`: these are binaries, and without it grep replaces every match
+    # with a single "Binary file matches" line -- which reads as a count of one
+    # and, in a check shaped like this, as a pass. T307's counter was fooled
+    # exactly that way, against a message that happened to contain a NUL.
+    # `grep -a`：這些是二進位檔，少了它，grep 會用一行「Binary file matches」取代所有比對結果——那讀起來
+    # 像是「命中一次」，而在這種形狀的檢查裡就像是通過。T307 的計數器正是這樣被騙過的。
+    # The pattern is the BUILD ID alone, `vX.Y.Z / <commit>`, not the whole
+    # `--version` line: swift builds that line from pieces at run time, so
+    # `0.1.2 (v0.1.2 / 3a472bb)` is nowhere in the file. The first version of
+    # this function looked for the assembled form, matched nothing, and
+    # rejected all four archives with "no build id of that form" -- a check
+    # that is always red, which gets worked around rather than read. Found by
+    # running it against the four archives already on disk.
+    #
+    # Matching `v$VERSION / …` asserts two things at once: the tag the binary
+    # was built at, and its commit. It does NOT separately verify CSV2_VERSION
+    # inside the binary -- `0.1.2` alone is too common a string to locate
+    # reliably -- and that is left to release.zsh on the node, which ran the
+    # binary, and to the archive name checked above.
+    #
+    # 這個樣式是 **build id 本身**（`vX.Y.Z / <commit>`），不是整行 `--version`：那一行是 swift 在執行時
+    # 組出來的，`0.1.2 (v0.1.2 / 3a472bb)` 根本不在檔案裡。這個函式的第一版找的是組好的形式，一個都
+    # 比不到，於是把四份封存全部以「沒有那個形狀的 build id」拒絕——**一個永遠是紅燈的檢查，會被繞過
+    # 而不是被讀。** 那是拿磁碟上現有的四份封存跑一次才發現的。
+    #
+    # 比對 `v$VERSION / …` 同時斷言兩件事：執行檔建置時所在的 tag，以及它的 commit。它**不**另外驗證
+    # 執行檔裡的 CSV2_VERSION——單獨的 `0.1.2` 太常見，定位不可靠——那件事交給節點上跑過該執行檔的
+    # release.zsh，以及上面檢查過的封存名稱。
+    ids=$(LC_ALL=C grep -a -o -E "v$VERSION / [0-9a-f]{7,40}" "$bx/$inner" | sort -u || true)
+    rm -rf -- "$bx"
+    if [[ -z $ids ]]; then
+        print -u2 -- "$base: the binary carries no build id of the form \"v$VERSION / <commit>\""
+        print -u2 -- "$base：執行檔裡沒有「v$VERSION / <commit>」形狀的 build id"
+        return 1
+    fi
+    # Into an ARRAY, not a subscript on the expansion. `${${(f)ids}[1]}` looks
+    # like "the first line" and is the first CHARACTER -- it reported a build id
+    # of `v` on the passing path while the refusing path was entirely correct,
+    # so only the green line was wrong. Caught by reading it.
+    # 存進**陣列**，不要對展開式直接下標。`${${(f)ids}[1]}` 看起來像「第一行」，實際上是第一個**字元**
+    # ——它在通過那一路回報的 build id 是 `v`，而拒絕那一路完全正確，所以**錯的只有綠燈那一行**。
+    # 靠讀它才發現。
+    idlist=(${(f)ids})
+    for id in $idlist; do
+        sha=${id##* / }
+        # A node's short hash length varies -- WSL prints 8 where the others
+        # print 7 -- so this asks whether it is a PREFIX of the commit, not
+        # whether it equals some length this script picked.
+        # 各節點的短雜湊長度不同——WSL 印 8 而其他印 7——所以這裡問的是「它是不是那個 commit 的前綴」，
+        # 不是「它等不等於本腳本挑的某個長度」。
+        [[ $HEAD_SHA == $sha* ]] || bad="$bad $id"
+    done
+    if [[ -n $bad ]]; then
+        print -u2 -- "$base was built from another commit: its binary says$bad, this release is ${HEAD_SHA[1,7]}"
+        print -u2 -- "$base 是從別的 commit 建出來的：它的執行檔說$bad，而這次發布的是 ${HEAD_SHA[1,7]}"
+        return 1
+    fi
+    ARCHIVE_BUILD_ID=$idlist[1]
+    return 0
+}
+
 typeset -a ARCHIVES
 ARCHIVES=("$DIST"/csv2-$VERSION-*.tar.zst(N))
 (( ${#ARCHIVES} > 0 )) || {
@@ -180,7 +275,8 @@ for a in $ARCHIVES; do
         print -u2 -- "$base 裡面沒有 $stem/csv2 或 $stem/csv2.exe"
         exit 1
     }
-    say "    $base  $h"
+    archive_commit_ok "$a" "$inner" || exit 1
+    say "    $base  $h  $ARCHIVE_BUILD_ID"
 done
 
 # ---------------------------------------------------------------------
