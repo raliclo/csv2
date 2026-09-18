@@ -18518,24 +18518,64 @@ for _t308_pair in "Formula/csv2.rb rb" "scoop/csv2.json json"; do
     fi
 done
 
-# The control group. Asserting "prose survives" is worth nothing unless the old
-# behaviour is shown to break it -- otherwise the case would pass against a
-# rewrite that had never worked at all.
-# 負控組。「散文存活」這個斷言，除非證明舊行為會破壞它，否則什麼都沒說——不然這個案例對一個
-# 「從來就沒有運作過的改寫」也會通過。
-_t308_blunt=$TMP/t308-blunt-csv2.json
-: > "$_t308_blunt"
+# The control group, on a fixture it builds itself rather than on whatever the
+# tree happens to contain.
+#
+# The first version replaced the CURRENT version everywhere in scoop/csv2.json
+# and required the notes to change. That held only while the notes named the
+# version being published -- which is exactly the state a release ends: after
+# v0.1.2 shipped, the dated note still said 0.1.1 (correctly, because that is
+# what was verified that day), the blanket replace no longer touched it, and
+# this case failed saying "T308b proves nothing". It was right about itself.
+# A control that depends on an incidental property of the tree stops being a
+# control the moment the tree moves.
+#
+# So a line is PLANTED: prose that names the current version, which is the one
+# combination that tells the two behaviours apart. The blunt replace must
+# damage it and rewrite_version must not.
+#
+# 負控組，跑在它自己造的 fixture 上，而不是跑在「樹剛好是什麼樣子」上。
+#
+# 第一版把 scoop/csv2.json 裡的現行版本號全部替換掉，並要求 notes 有變。那件事**只在 notes 剛好
+# 提到正在發布的那個版本時**成立——而那正是一次發布所終結的狀態：v0.1.2 出去之後，那筆帶日期的
+# 紀錄仍寫著 0.1.1（那是對的，因為那天查證的就是它），全域替換不再碰到它，於是這個案例失敗並說
+# 「T308b 什麼都沒證明」。**它對自己的判斷是對的。** 一個依賴樹的偶然性質的對照組，在樹一動的
+# 那一刻就不再是對照組。
+#
+# 因此這裡**種一行進去**：一句提到現行版本的散文——那是唯一能把兩種行為分開的組合。全域替換必須
+# 弄壞它，而 rewrite_version 必須不動它。
 _t308_old=$(LC_ALL=C grep -oE '"version": "[0-9]+\.[0-9]+\.[0-9]+"' "$ROOT/scoop/csv2.json" \
             | LC_ALL=C grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+_t308_fix=$TMP/t308-fixture-csv2.json
+_t308_planted="        \"Verified on 2026-01-01: this install printed csv2 $_t308_old.\","
+: > "$_t308_fix"
 while IFS= read -r _t308_line || [[ -n $_t308_line ]]; do
-    [[ $_t308_line == *$_t308_old* ]] && _t308_line=${_t308_line//$_t308_old/9.9.9}
-    print -r -- "$_t308_line" >> "$_t308_blunt"
+    print -r -- "$_t308_line" >> "$_t308_fix"
+    [[ $_t308_line == *'"notes"'*'['* ]] && print -r -- "$_t308_planted" >> "$_t308_fix"
 done < "$ROOT/scoop/csv2.json"
-if diff -q <(_t308_prose_of "$ROOT/scoop/csv2.json" json) \
-           <(_t308_prose_of "$_t308_blunt" json) >/dev/null 2>&1; then
-    bad "T308d the blanket replace left the notes alone, so T308b proves nothing / 全域替換沒有動到 notes，於是 T308b 什麼都沒證明"
+
+if [[ -n $_t308_old ]] && LC_ALL=C grep -qF -- "$_t308_planted" "$_t308_fix"; then
+    _t308_blunt=$TMP/t308-blunt-csv2.json
+    : > "$_t308_blunt"
+    while IFS= read -r _t308_line || [[ -n $_t308_line ]]; do
+        [[ $_t308_line == *$_t308_old* ]] && _t308_line=${_t308_line//$_t308_old/9.9.9}
+        print -r -- "$_t308_line" >> "$_t308_blunt"
+    done < "$_t308_fix"
+    if LC_ALL=C grep -qF -- "$_t308_planted" "$_t308_blunt"; then
+        bad "T308d the blanket replace left the planted prose alone, so T308b proves nothing / 全域替換沒有動到被種下的那行散文，於是 T308b 什麼都沒證明"
+    else
+        ok "T308d the blanket replace does rewrite prose naming the current version, which is what T308b forbids / 全域替換確實會改掉「提到現行版本」的散文，而那正是 T308b 所禁止的"
+    fi
+    _t308_kept=$TMP/t308-kept-csv2.json
+    cp "$_t308_fix" "$_t308_kept"
+    _t308_rewrite "$_t308_kept"
+    if LC_ALL=C grep -qF -- "$_t308_planted" "$_t308_kept" && LC_ALL=C grep -q '9\.9\.9' "$_t308_kept"; then
+        ok "T308f on the same line, rewrite_version moves the data and leaves the sentence / 同一份檔案上，rewrite_version 換掉資料而留下那句話"
+    else
+        bad "T308f the planted sentence did not survive rewrite_version, or nothing was rewritten / 那句被種下的話沒有存活，或根本沒有改寫發生"
+    fi
 else
-    ok "T308d the blanket replace does rewrite the dated verification note, which is what T308b forbids / 全域替換確實會改掉那筆帶日期的查證紀錄，而那正是 T308b 所禁止的"
+    bad "T308d/f the fixture was not built (version read as [$_t308_old]), so nothing was tested / fixture 沒造出來（版本讀成 [$_t308_old]），因此什麼都沒測到"
 fi
 
 # A version that went stale in a DATA line must still be refused. Excluding

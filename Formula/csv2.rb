@@ -30,7 +30,7 @@
 class Csv2 < Formula
   desc "Fail-loudly CSV parser and editor: names the record and field, never repairs"
   homepage "https://github.com/raliclo/csv2"
-  version "0.1.1"
+  version "0.1.2"
   license "MIT"
 
   # Only the platforms whose archive was built AND verified on that platform.
@@ -40,15 +40,15 @@ class Csv2 < Formula
   # 刻意缺席，而不是指向一份「在產生它的地方沒有人執行得了」的封存——見 release notes。
   on_macos do
     on_arm do
-      url "https://github.com/raliclo/csv2/releases/download/v0.1.1/csv2-0.1.1-macos-arm64.tar.zst"
-      sha256 "b7cb31c0a635b2eb6f6c981750a49b46a814f5c3e2332b6d2a784b8fe3b647b8"
+      url "https://github.com/raliclo/csv2/releases/download/v0.1.2/csv2-0.1.2-macos-arm64.tar.zst"
+      sha256 "83f630d0c3b75c36020610ba987af66838b4deeb71dde7554d0cf59c4dd78712"
     end
   end
 
   on_linux do
     on_intel do
-      url "https://github.com/raliclo/csv2/releases/download/v0.1.1/csv2-0.1.1-linux-x86_64.tar.zst"
-      sha256 "8833a6128c0bc47756d307159d6def785ad306213c1e18a28607b84d2199accb"
+      url "https://github.com/raliclo/csv2/releases/download/v0.1.2/csv2-0.1.2-linux-x86_64.tar.zst"
+      sha256 "be4acc1e27f9793818ef62d0d86a78ad5a10cf3c3dad67fb45c57edd27cf79ab"
     end
     # aarch64 arrives in v0.1.1. It was absent from v0.1.0 not because it was
     # untested -- T47 compares twelve invocations byte for byte against macOS
@@ -59,8 +59,8 @@ class Csv2 < Formula
     # 呼叫與 macOS 逐位元比對——而是因為一份「在 tag 打完之後才建的」封存，會回報與它三個手足
     # 不同的版本字串，那就是 QD。v0.1.1 的四份封存全部是在 tag 上建的。
     on_arm do
-      url "https://github.com/raliclo/csv2/releases/download/v0.1.1/csv2-0.1.1-linux-aarch64.tar.zst"
-      sha256 "a83394fc14059b6fc7c7f712c229088f973ceee29331c06d17f9af0c5f8a777f"
+      url "https://github.com/raliclo/csv2/releases/download/v0.1.2/csv2-0.1.2-linux-aarch64.tar.zst"
+      sha256 "6ddff3c95f61dd8b00776ba369db1052902ea4eef3cdf24223fb615a32ae0ace"
     end
   end
 
@@ -76,6 +76,6 @@ class Csv2 < Formula
   test do
     (testpath/"p.csv").write("pkg,license\nzlib,MIT\n")
     assert_equal "MIT", shell_output("#{bin}/csv2 -get 1:license -i #{testpath}/p.csv").strip
-    assert_match "csv2 0.1.1", shell_output("#{bin}/csv2 --version")
+    assert_match "csv2 0.1.2", shell_output("#{bin}/csv2 --version")
   end
 end
