@@ -12413,6 +12413,38 @@ git tag -d ztmp-buildid
 `(ztmp-buildid / ea96044)`——**那正是「正好位於 tag 上」時該有的形式**，也就是先前唯一沒被執行過
 的那條分支。tag 是本地的、沒有推出去，刪掉之後 `git describe` 回到 `v0.1.0-35-gea96044`。
 
+> **2026-09-18 更正：上面那一行的 `cmd //c` 在那台機器上已經不成立，而它失敗的方式是 rc=0。**
+>
+> v0.1.2 出貨時照上面抄，得到 `build_rc=0`，而執行檔還是舊版本——`cmd` 開了一個**互動** shell、
+> 讀到 stdin 結束就離開，退出碼 0，批次檔從頭到尾沒有被執行。當場量的：
+>
+> ```console
+> $ cmd //c "echo SLASHSLASH > probe.txt"
+> Microsoft Windows [Version 10.0.26200.9457]
+> C:\Users\lowei>
+> //c rc=0  檔案:                      ← 沒有產生
+> $ cmd /c "echo SINGLE > probe.txt"
+> /c  rc=0  檔案: SINGLE               ← 產生了
+> ```
+>
+> `//c` 是 MSYS 的「不要把這個參數當路徑轉換」寫法，要靠那一層轉換把它變回 `/c`。那台機器現在的
+> zsh 是 `5.9.999.3-test`，它不做那個轉換，於是 `//c` 原樣傳給 `cmd`，而 `cmd` 不認得它就當成
+> 沒有給命令。**要用 `cmd /c`。**
+>
+> 值得記住的不是哪一個斜線，是**它的失敗形狀**：一個什麼都沒做的命令以 0 結束，而呼叫端正在用
+> 退出碼判斷建置成不成功。抓到它的不是 `build_rc`，是接在後面那一行 `./release/csv2.exe --version`
+> ——它說的是上一個 commit。**這就是為什麼「跑完之後去看產物」不能省。**
+>
+> Correction, 2026-09-18: `cmd //c` no longer works on that machine, and it fails with status 0.
+> Copying the line above during the v0.1.2 release gave `build_rc=0` with the binary unchanged:
+> `cmd` had started an INTERACTIVE shell, reached end of stdin and exited 0, and the batch file
+> never ran. `//c` is MSYS's escape for "do not path-convert this argument" and depends on that
+> conversion turning it back into `/c`; the zsh there is now `5.9.999.3-test` and does not convert,
+> so `cmd` receives `//c`, does not recognise it, and takes no command. Use `cmd /c`. The part
+> worth keeping is not which slash but the SHAPE: a command that did nothing exited 0 while the
+> caller was using the exit status to judge a build. What caught it was the next line --
+> `./release/csv2.exe --version` naming the previous commit -- not the status.
+
 **而在那之前先抓到了一個真的錯誤，是那台機器抓的，不是推理抓的。** 那台機器建置後回報
 `csv2 0.1.0 (97e3908)`，而同一份 checkout 在 MSYS 下的 `git describe` 說 `v0.1.0-34-g97e3908`。
 成因是我在改寫時多打了一個收尾括號：`echo(!_described!)` 把外層的 `if (` 區塊提前關掉，
