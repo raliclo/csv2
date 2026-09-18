@@ -6,10 +6,12 @@
 #   brew trust raliclo/csv2
 #   brew install raliclo/csv2/csv2
 #
-# The `brew trust` line is NOT optional and is not decoration: Homebrew 6
+# The `brew trust` line is NOT optional and is not decoration: Homebrew
 # refuses to load a formula from a third-party tap until the tap is trusted,
 # with "Refusing to load formula ... from untrusted tap". This comment said two
-# lines until 2026-09-08, when running them produced exactly that refusal.
+# lines until 2026-09-08, when running them produced exactly that refusal --
+# on Homebrew 6. Run again on 2026-09-18 under Homebrew 7.0.2: all three lines
+# still needed, and that run is what found QP.
 #
 # The archives are .tar.zst. Homebrew unpacks those natively; nothing extra is
 # required of the person installing.

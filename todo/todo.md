@@ -60,6 +60,30 @@ guest 比對吞掉 csv2 的結束狀態（已修——csv2 單獨執行、檢查
 > 之後的 `./install.zsh --dry-run` 本該拒絕，卻印出一段被反斜線吃掉的訊息、再以 rc=0 規劃
 > `cp … /csv2.exe`——見 known-defects 的 QL。`brew install` 的 v0.1.1 仍未實跑（這台是 Windows）。
 >
+> **~~2026-09-18：兩邊都跑了，這一項關掉。~~ 已完成**
+>
+> | | 做了什麼 | 結果 |
+> |---|---|---|
+> | Homebrew（本機 arm64） | 先 `./install.zsh --uninstall` 移除 2026-09-10 手放在 `/opt/homebrew/bin/csv2` 的 0.1.1，再照 README 原文跑 `brew tap` / `brew trust` / `brew install` | shim 指向 `Cellar/csv2/0.1.2`，`csv2 0.1.2 (v0.1.2 / 3a472bb)`，含引號逗號的欄位完整讀回、其後欄位沒有左移，`brew test` rc=0 |
+> | scoop（Ralic-W11） | `scoop update csv2`（0.1.1 → 0.1.2，manifest 來自 raw URL） | hash `ok`、shim 重新連到 `apps\csv2\current`，bash／cmd.exe／zsh 三者都是 `csv2 0.1.2 (v0.1.2 / 3a472bb)`，同樣讀得了含引號逗號的欄位 |
+>
+> **而跑它又找到一件事，而且比上一次那件更嚴重：`brew tap` 整個失敗。** 這份 formula 只在
+> `on_macos { on_arm }` 裡有 url，於是 macOS x86_64 那個情境一個 url 都沒有，而 Homebrew 7 會對它
+> 認識的每一種 (OS, 架構) 求值——**tap 失敗，所以 `brew install` 根本輪不到**。見 QP。它從來沒有對過，
+> 只是在 Homebrew 6 之下能用；變的是 brew，不是這棵樹。
+>
+> **兩次實跑，兩次都找到只有「跑它」才看得見的東西**（2026-09-17 是 QL，2026-09-18 是 QP），而兩次
+> 之前所有讀過這些檔案的人——包括寫它們的我——都沒有看出來。這一項之所以值得留到最後親手做，理由
+> 就在這裡。
+>
+> Both halves were run on 2026-09-18 and each found something only running could find. Homebrew:
+> the hand-placed 0.1.1 was removed with install.zsh --uninstall, then tap/trust/install per the
+> README -- and `brew tap` failed outright, because the formula had no url in the macOS x86_64
+> context and Homebrew 7 evaluates every (OS, arch) it knows, so install was never reached (QP).
+> After the fix: 0.1.2 installed, quoted comma read back whole, `brew test` rc=0. scoop: `scoop
+> update csv2` took the node from 0.1.1 to 0.1.2, hash ok, and all three shells report
+> `csv2 0.1.2 (v0.1.2 / 3a472bb)`. Two real installs, two defects that reading had not found.
+>
 > **另外那個「未處理」的缺口，2026-09-10 稍晚關掉了。** 它原本記著「csv2 由 scoop 自己管理時的
 > 行為未處理，因為那條分支在節點上執行不到」。**執行不到的是那個事實，不是那個查詢**——那台
 > 機器上 scoop 管理著別的 app（`scoop prefix zsh` 回傳一個真的路徑），而一個放在 PATH 前面的
