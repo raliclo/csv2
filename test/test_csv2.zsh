@@ -18736,6 +18736,80 @@ else
 fi
 
 echo
+echo "--- T311: the Formula has a url for every context Homebrew evaluates / T311：Formula 對 Homebrew 會求值的每一種情境都有 url ---"
+# Homebrew 7 evaluates a formula once per (OS, arch) it knows, and a combination
+# with no url is a LOAD-TIME error that fails the whole tap -- so `brew install`
+# is never reached. Until 2026-09-18 the only macOS url was inside
+# `on_macos { on_arm }`, leaving macOS x86_64 with none; `brew tap` refused for
+# every macOS version. publish.zsh's four checks all passed and none of them was
+# this question. QP.
+#
+# WHAT THIS CASE IS NOT: it is not "brew can load the formula". Only brew can
+# answer that, and it is not on three of the four nodes. This is a PROXY -- the
+# structural property whose absence caused QP -- and it is written down as a
+# proxy so the next reader does not take a green line here for a successful tap.
+#
+# Homebrew 7 對它認識的每一種 (OS, 架構) 各求值一次，而一個沒有 url 的組合是**載入期**錯誤，它會讓整個
+# tap 失敗——於是 `brew install` 根本輪不到。2026-09-18 之前，唯一的 macOS url 在 `on_macos { on_arm }`
+# 裡，macOS x86_64 一個都沒有，`brew tap` 對每個 macOS 版本都拒絕。publish.zsh 的四道檢查全部通過，
+# 而其中沒有一道是這個問題。QP。
+#
+# **這個案例不是什麼**：它不是「brew 載得起來」。那件事只有 brew 回答得了，而四個節點裡有三個沒有 brew。
+# 這是一個**代理指標**——QP 之所以發生的那個結構性質——而且明白寫成代理，免得下一個讀者把這裡的綠燈
+# 當成一次成功的 tap。
+if [[ -r $ROOT/Formula/csv2.rb ]]; then
+_t311_url=$(LC_ALL=C grep -c '^  url "' "$ROOT/Formula/csv2.rb" | tr -d ' ')
+_t311_sha=$(LC_ALL=C grep -c '^  sha256 "' "$ROOT/Formula/csv2.rb" | tr -d ' ')
+if [[ $_t311_url == 1 && $_t311_sha == 1 ]]; then
+    ok "T311a the Formula declares a default url and sha256 outside every on_* block / Formula 在所有 on_* 區塊之外宣告了一個預設 url 與 sha256"
+else
+    bad "T311a found $_t311_url top-level url(s) and $_t311_sha sha256(s); a context with none fails the whole tap / 頂層有 $_t311_url 個 url、$_t311_sha 個 sha256；任何一個沒有 url 的情境會讓整個 tap 失敗"
+fi
+
+# Because that default is the arm64 archive, macOS x86_64 has to be refused out
+# loud -- otherwise an Intel Mac silently fetches a binary it cannot execute,
+# which is the failure the block's own comment says it exists to avoid.
+# 因為那個預設就是 arm64 的封存，macOS x86_64 必須被**明講**拒絕——否則一台 Intel Mac 會安靜地抓走一個
+# 它執行不了的執行檔，而那正是那個區塊的註解說它要避免的失敗。
+if LC_ALL=C grep -qE '^ +depends_on arch: :arm64' "$ROOT/Formula/csv2.rb"; then
+    ok "T311b macOS is restricted to arm64, so the default url cannot reach an Intel Mac / macOS 被限制在 arm64，於是那個預設 url 到不了 Intel Mac"
+else
+    bad "T311b nothing restricts macOS to arm64, so an Intel Mac would fetch the arm64 archive / 沒有任何東西把 macOS 限制在 arm64，Intel Mac 會抓到 arm64 封存"
+fi
+
+# Exactly one url per platform: publish.zsh's rewrite_pair refuses when it finds
+# two, so "fix QP by duplicating the arm64 entry into an on_arm block" would
+# break the next release instead. The two requirements only agree on one shape.
+# 每個平台恰好一個 url：publish.zsh 的 rewrite_pair 看到兩個就拒絕，所以「把 arm64 那筆複製一份到
+# on_arm 區塊裡來修 QP」會改成弄壞下一次出貨。兩個要求只在一種形狀上相容。
+_t311_dupes=""
+for _t311_p in macos-arm64 linux-x86_64 linux-aarch64; do
+    _t311_n=$(LC_ALL=C grep -c "https://github.com/.*${_t311_p}\.tar\.zst" "$ROOT/Formula/csv2.rb" | tr -d ' ')
+    [[ $_t311_n == 1 ]] || _t311_dupes="$_t311_dupes $_t311_p=$_t311_n"
+done
+if [[ -z $_t311_dupes ]]; then
+    ok "T311c each platform's archive is named exactly once, which is what publish.zsh requires / 每個平台的封存恰好被指名一次，那是 publish.zsh 的要求"
+else
+    bad "T311c not one url per platform:$_t311_dupes / 不是每個平台一個 url：$_t311_dupes"
+fi
+
+# The control. Removing the default url must fail T311a, or that case would pass
+# against a Formula that never had one -- which is the state QP describes.
+# 負控組。把預設 url 拿掉必須讓 T311a 失敗，否則那個案例對一份「本來就沒有預設 url」的 Formula 也會通過
+# ——而那正是 QP 所描述的狀態。
+_t311_probe=$TMP/t311-csv2.rb
+LC_ALL=C grep -v '^  url "' "$ROOT/Formula/csv2.rb" > "$_t311_probe"
+if [[ $(LC_ALL=C grep -c '^  url "' "$_t311_probe" | tr -d ' ') == 0 ]]; then
+    ok "T311d with the default url removed the check reads 0, so T311a is measuring it / 拿掉預設 url 之後檢查讀到 0，可見 T311a 量的就是它"
+else
+    bad "T311d the probe still shows a top-level url, so T311a proves nothing / 探針裡仍看得到頂層 url，於是 T311a 什麼都沒證明"
+fi
+else
+    T311_SKIPPED=1
+    skipt "T311 the Formula has a url for every context Homebrew evaluates / Formula 對每一種情境都有 url (Formula/ does not travel in the guest payload / Formula/ 不在 guest 的 payload 裡)"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -18964,6 +19038,7 @@ fi
 (( ${T308_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T309_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T310_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T311_SKIPPED:-0} )) && (( want_skip += 1 ))
 
 # T219 -- content-anchored updates. The match is a whole data cell, and the
 # refusal must happen before the destination is created.

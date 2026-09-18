@@ -33,16 +33,44 @@ class Csv2 < Formula
   version "0.1.2"
   license "MIT"
 
+  # This url is the macOS arm64 one AND the formula's default, on purpose.
+  #
+  # Homebrew 7 evaluates a formula once per (OS, arch) it knows about, and a
+  # combination with no url at all is a load-time error -- "formula requires at
+  # least a URL" -- which fails the whole TAP, so install is never reached.
+  # Until 2026-09-18 the only macOS url lived inside `on_macos { on_arm }`, so
+  # the macOS x86_64 context had none and `brew tap` refused for every macOS
+  # version. It had never been right; it worked under Homebrew 6 anyway, and
+  # what changed is brew rather than this file. QP.
+  #
+  # It is written HERE rather than duplicated into an `on_macos { on_arm }`
+  # block because publish.zsh rewrites "exactly one url and one sha256 per
+  # platform" and refuses when it finds two. One site per platform is the
+  # arrangement both tools need.
+  #
+  # 這個 url 同時是「macOS arm64 那一筆」與「這份 formula 的預設」，那是刻意的。
+  #
+  # Homebrew 7 會對它認識的每一種 (OS, 架構) 組合各求值一次，而一個「完全沒有 url」的組合是載入期
+  # 錯誤——`formula requires at least a URL`——它會讓整個 **tap** 失敗，於是 install 根本輪不到。
+  # 2026-09-18 之前，唯一的 macOS url 住在 `on_macos { on_arm }` 裡面，所以 macOS x86_64 那個情境
+  # 一個都沒有，`brew tap` 對每一個 macOS 版本都拒絕。它從來沒有對過；它在 Homebrew 6 之下仍然能用，
+  # 而中間變的是 brew，不是這個檔案。QP。
+  #
+  # 它寫在**這裡**而不是複製一份進 `on_macos { on_arm }`，因為 publish.zsh 改寫時要求「每個平台
+  # 恰好一個 url 與一個 sha256」，看到兩個就拒絕。每個平台一個位置，是兩邊都需要的安排。
+  url "https://github.com/raliclo/csv2/releases/download/v0.1.2/csv2-0.1.2-macos-arm64.tar.zst"
+  sha256 "83f630d0c3b75c36020610ba987af66838b4deeb71dde7554d0cf59c4dd78712"
+
   # Only the platforms whose archive was built AND verified on that platform.
-  # macOS x86_64 and Linux aarch64 are deliberately absent rather than pointed
-  # at an archive nobody could run where it was made -- see the release notes.
-  # 只列出「封存在該平台上被建置**且**被驗證過」的平台。macOS x86_64 與 Linux aarch64 是
-  # 刻意缺席，而不是指向一份「在產生它的地方沒有人執行得了」的封存——見 release notes。
+  # macOS x86_64 is deliberately absent rather than pointed at an archive nobody
+  # could run where it was made -- and since the default url above is the arm64
+  # one, "absent" has to be said out loud or an Intel Mac would silently fetch a
+  # binary it cannot execute. That is what the requirement below is for.
+  # 只列出「封存在該平台上被建置**且**被驗證過」的平台。macOS x86_64 是刻意缺席，而不是指向一份
+  # 「在產生它的地方沒有人執行得了」的封存——而既然上面那個預設 url 是 arm64 的，「缺席」就必須被
+  # **說出來**，否則一台 Intel Mac 會安靜地抓走一個它執行不了的執行檔。底下那道要求就是為了這件事。
   on_macos do
-    on_arm do
-      url "https://github.com/raliclo/csv2/releases/download/v0.1.2/csv2-0.1.2-macos-arm64.tar.zst"
-      sha256 "83f630d0c3b75c36020610ba987af66838b4deeb71dde7554d0cf59c4dd78712"
-    end
+    depends_on arch: :arm64
   end
 
   on_linux do

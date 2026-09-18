@@ -13308,3 +13308,73 @@ both a relative and a native path. Three sites do it: the two zstd calls and the
 the rest of its range. The line has not changed since it was written, and this machine did build
 v0.1.0's Windows archive with it on 2026-09-08; what changed in between is not established here,
 and is not guessed at.
+
+---
+
+## QP. `Formula/csv2.rb` 在 Homebrew 7 下 **tap 不進去**：對 macOS x86_64 它一個 url 都沒有（2026-09-18 修正，T311a–d）
+
+**2026-09-18 發現，在 v0.1.2 發布之後、第一次實際執行 `brew tap` 時。經親手重現。同日已修。**
+
+修法：把 macOS arm64 那一筆**移到頂層**當預設 url／sha256，並在 `on_macos` 裡加上 `depends_on arch: :arm64`。
+兩件事缺一不可：頂層那一筆讓每一個 (OS, 架構) 組合都有 url 可用（tap 過得去），而那道架構要求讓一台
+Intel Mac 不會安靜地抓走一個它執行不了的 arm64 執行檔。**不能用「複製一份到 `on_macos { on_arm }`」
+來修**：`publish.zsh` 的 `rewrite_pair` 要求每個平台恰好一個 url，看到兩個就拒絕——兩個要求只在這一種
+形狀上相容。
+
+修好之後在一個測試用 tap 上**真的裝過一次**：`brew readall` 無輸出、`brew install` rc=0、
+`csv2 0.1.2 (v0.1.2 / 3a472bb)`、讀得了一個含引號逗號的欄位、`brew test` 通過；之後 uninstall 並
+untap。T311a–d 釘住這個結構，其中 T311d 是負控組（拿掉頂層 url，T311a 必須失敗）。**T311 明白寫著
+它是代理指標**——「brew 載不載得起來」只有 brew 回答得了，而四個節點裡有三個沒有 brew。
+
+```console
+$ brew tap raliclo/csv2 https://github.com/raliclo/csv2
+raliclo/csv2/csv2: formula requires at least a URL
+Error: Invalid formula (monterey): .../Formula/csv2.rb
+raliclo/csv2/csv2: formula requires at least a URL
+Error: Invalid formula (big_sur): .../Formula/csv2.rb
+Error: Cannot tap raliclo/csv2: invalid syntax in tap!
+```
+
+**tap 失敗，所以 `brew install` 連試都試不到。** brew 自己把那個半成品的 tap 目錄回滾掉了。
+
+在一個受控的 tap 裡重現（`brew tap-new raliclo/csv2probe` + `brew trust` + `brew readall`），它對
+**每一個** macOS 版本都報同一件事：`golden_gate`、`tahoe`、`sequoia`、`sonoma`、`ventura`……
+
+成因：這份 formula 只宣告
+
+```ruby
+  on_macos do
+    on_arm do
+      url  ...macos-arm64...
+      sha256 ...
+    end
+  end
+```
+
+沒有頂層的 `url`，`on_macos` 裡也沒有 `on_intel`。Homebrew 7 會對它認識的每一種 (OS, 架構) 組合求值，
+而在「macOS x86_64」那個情境下，這份 formula **沒有任何 url 可用**——那就是那句訊息的字面意思。
+
+### 它從來沒有對過，而它曾經可以用
+
+`git log -S'on_intel' -- Formula/csv2.rb` 只有一個 commit：`4243e51`（0.1.0 那一份）。那個 `on_intel`
+從第一天起就在 **`on_linux` 底下**，不在 `on_macos` 底下。也就是說 macOS x86_64 從來沒有 url。
+
+而 README 記著 2026-09-08 真的跑過 `brew install`（那次找出了缺少 `brew trust`），當時的 brew 是 6。
+現在是 **Homebrew 7.0.2**。**同一份檔案，一邊能用一邊不能用，中間變的是 brew 而不是這棵樹。**
+formula 裡那段註解寫的也還是「Homebrew 6」。
+
+### 為什麼出貨流程沒有抓到
+
+`publish.zsh` 會改寫這個檔案、讀回來、確認 url 與 hash 成對、確認沒有殘留的舊版本號——**那四件事
+全部成立，而且與「這份 formula 載得起來嗎」無關。** 那個問題只有 brew 能回答，而在此之前沒有任何
+一步問過它。這與 QI 是同一個形狀：每一項檢查都通過，而其中沒有一項是那個真正要問的問題。
+
+`Formula/csv2.rb` cannot be tapped under Homebrew 7: it declares a url only inside
+`on_macos { on_arm { ... } }`, so in the simulated macOS x86_64 context it has no url at all, and
+Homebrew evaluates every (OS, arch) it knows. tap fails, so install is never reached. Reproduced
+in a controlled tap with `brew readall`, which reports it for every macOS version. It has never
+been right -- the only `on_intel` in this file's history has always been under `on_linux` -- and
+it nonetheless worked on 2026-09-08 under Homebrew 6; what changed is brew, not this tree, and
+the comment in the file still says Homebrew 6. publish.zsh's four checks all passed and none of
+them was this question: only brew can answer whether a formula loads, and nothing had asked it.
+Same shape as QI.
