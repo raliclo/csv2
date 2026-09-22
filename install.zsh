@@ -367,6 +367,36 @@ target_dir() {
     fi
     local p
     if p=$(brew --prefix 2>/dev/null) && [[ -d $p/bin ]]; then
+        # Refuse when brew already manages csv2. QL is this same defect on the
+        # scoop side; macOS never had the equivalent, and here it is worse,
+        # because the destination IS brew's own bin directory. `cp -f` replaces
+        # brew's symlink with a plain file while brew's database still believes
+        # it owns that path, and the NOTE printed alongside -- "brew list will
+        # not show it", "brew upgrade will never update it" -- is false line by
+        # line in exactly this situation, having been written for the case
+        # where brew does not manage csv2.
+        #
+        # `brew list --formula` and NOT `brew --prefix csv2`: the latter returns
+        # 0 and a plausible path for a formula that is merely KNOWN, so using it
+        # would refuse on every Mac with Homebrew, csv2 installed or not. It
+        # answers "where would this go", not "is it installed". That is the
+        # scoop trap in reverse -- there the wrong probe failed to refuse, here
+        # it would refuse everything. QR.
+        #
+        # brew 已經管理著 csv2 時要拒絕。QL 是 scoop 那一側的同一件事；macOS 從來沒有對應的檢查，
+        # 而這裡更糟，因為目的地**就是 brew 自己的 bin 目錄**。`cp -f` 會把 brew 的 symlink 換成
+        # 一個普通檔案，而 brew 的資料庫仍認為它擁有那條路徑；同一畫面上那段 NOTE（「brew list
+        # 不會列出它」「brew upgrade 不會更新它」）在這個情境下逐行皆假——它是為「brew 沒有管理
+        # csv2」寫的。
+        #
+        # 用 `brew list --formula` 而**不是** `brew --prefix csv2`：後者對一個「只是已知」的 formula
+        # 同樣回傳 0 與一個看起來合理的路徑，拿它當偵測會在每一台裝了 Homebrew 的 Mac 上誤擋，
+        # 不論有沒有裝過 csv2。它回答的是「若安裝會在哪裡」，不是「它裝了沒有」。那是 scoop 那個
+        # 陷阱的反面——那裡是該拒絕時沒拒絕，這裡會變成不該拒絕時拒絕。QR。
+        if command -v brew >/dev/null 2>&1 && brew list --formula csv2 >/dev/null 2>&1; then
+            [[ $MODE == uninstall ]] && die "Homebrew manages csv2 here ($p/bin/csv2). Remove it with \`brew uninstall csv2\`; this script did not put it there. / Homebrew 在這裡管理著 csv2（$p/bin/csv2）。請用 \`brew uninstall csv2\` 移除；它不是這支腳本放的。"
+            die "Homebrew manages csv2 here ($p/bin/csv2). Writing there replaces brew's symlink with a plain file while brew still believes it owns that path. Use \`brew upgrade csv2\` for a release, or --dir DIR to place a development build somewhere brew does not own. / Homebrew 在這裡管理著 csv2（$p/bin/csv2）。寫進去會把 brew 的 symlink 換成一個普通檔案，而 brew 仍認為它擁有那條路徑。要裝正式版請用 \`brew upgrade csv2\`；要放一份開發建置，請用 --dir DIR 指到一個不屬於 brew 的地方。"
+        fi
         print -r -- $p/bin
         return
     fi

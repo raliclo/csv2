@@ -13410,3 +13410,66 @@ it nonetheless worked on 2026-09-08 under Homebrew 6; what changed is brew, not 
 the comment in the file still says Homebrew 6. publish.zsh's four checks all passed and none of
 them was this question: only brew can answer whether a formula loads, and nothing had asked it.
 Same shape as QI.
+
+---
+
+## QR. `install.zsh` 在「Homebrew 管理著 csv2」時不拒絕——它 `cp -f` 蓋掉 brew 的 symlink，而同一畫面上的警告是假的（2026-09-23 修正，T313a–e）
+
+**2026-09-23 發現。母 session 建議「重建並重裝」以跟上 HEAD，我在照做之前先跑了 `--dry-run`。
+經親手重現。同日已修：macOS 分支加上與 scoop 那側對稱的拒絕，偵測用 `brew list --formula csv2`。**
+
+QL 是 scoop 這一側的同一件事，2026-09-17 修掉了。**macOS 這一側從來沒有對應的檢查**，而它更危險：
+`install.zsh` 的目的地就是 `brew --prefix` 加上 `/bin`——也就是 **brew 自己放 symlink 的那個目錄**。
+
+機器狀態：`brew install raliclo/csv2/csv2` 於 2026-09-18 裝好 0.1.2，
+`/opt/homebrew/bin/csv2 -> ../Cellar/csv2/0.1.2/bin/csv2`，`brew list --formula` 列出 csv2。
+
+```console
+$ ./install.zsh --dry-run
+csv2 install / 安裝
+  from    : /Volumes/LinuxCS/sos/csv2/release/csv2 (csv2 0.1.2 (v0.1.2 / 3a472bb))
+  to      : /opt/homebrew/bin/csv2
+  DRY  cp -f /Volumes/LinuxCS/sos/csv2/release/csv2 /opt/homebrew/bin/csv2
+  DRY  chmod 755 /opt/homebrew/bin/csv2
+NOTE: this is NOT a Homebrew install / 注意：這不是 Homebrew 安裝
+  brew list      will not show it / 不會列出它
+  brew upgrade   will never update it / 不會更新它
+```
+
+`cp -f` 會把那個 symlink 換成一個普通檔案。brew 的資料庫仍然認為它擁有 `bin/csv2`，而那個檔案已經
+不是它放的了——`brew upgrade`、`brew uninstall`、`brew doctor` 之後各自會做出一件不對的事。
+
+**而那段 NOTE 在這個情境下每一行都是假的。** 它是為「brew 沒有管理 csv2」寫的：此刻 `brew list`
+**會**列出它、`brew upgrade` **會**更新它（更新的是 Cellar 裡那份，而 bin 裡那個已經被換掉了）。
+一段正確的警告，因為環境變成了它沒有預期的那一種而變成錯的——與 QL 的「一句正確的拒絕訊息掛在一個
+照樣往下跑的程式上」是同一個形狀，只是這次錯的是**警告的內容**而不是它之後的控制流。
+
+### 順手量到的陷阱：不能用 `brew --prefix` 當偵測
+
+照 scoop 那次的修法，直覺會去用 `brew --prefix csv2`。**那是錯的**：
+
+```console
+$ brew list --formula csv2   ; echo $?     → 0   （已安裝）
+$ brew list --formula cowsay ; echo $?     → 1   （未安裝）
+$ brew --prefix csv2         → rc=0  /opt/homebrew/opt/csv2
+$ brew --prefix cowsay       → rc=0  /opt/homebrew/opt/cowsay      ← 根本沒裝
+$ brew --prefix nosuchformula123 → rc=1  Error: No available formula …
+```
+
+`brew --prefix <formula>` 對一個「formula 存在但沒有安裝」的名字回傳 **rc=0 與一個看起來完全合理的
+路徑**。它回答的是「這個 formula 若安裝會在哪裡」，不是「它裝了沒有」。用它當偵測，那道拒絕會在
+**每一台裝了 Homebrew 的 Mac 上**誤擋——包括從來沒碰過 csv2 的。
+
+**這正是 scoop 那條陷阱的 brew 版本**（`scoop prefix` 失敗時也回 0，靠輸出區分），而它的方向相反：
+scoop 那個是「該拒絕時沒拒絕」，這個若照抄會變成「不該拒絕時拒絕」。要問的是「它裝了沒有」，而
+`brew list --formula <name>` 正是那個問題，rc 0／1 乾淨區分。
+
+`install.zsh` does not refuse when Homebrew manages csv2, and its destination IS brew's own bin
+directory, so `cp -f` replaces brew's symlink with a plain file while brew's database still
+believes it owns that path. The NOTE printed alongside is false in this situation, line by line:
+it was written for the case where brew does not manage csv2, and says `brew list` will not show
+it while brew list does. QL is the same defect on the scoop side, fixed 2026-09-17; macOS never
+had the equivalent check. Measured while looking for the detector: `brew --prefix <formula>`
+returns 0 and a plausible path for a formula that is NOT installed -- it answers "where would
+this go", not "is it installed" -- so copying the scoop fix would refuse on every Mac with
+Homebrew. `brew list --formula <name>` is the question that was meant, and its status is clean.

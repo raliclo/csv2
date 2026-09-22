@@ -18905,6 +18905,98 @@ else
 fi
 
 echo
+echo "--- T313: install.zsh stops when Homebrew manages csv2 / T313：Homebrew 管理 csv2 時 install.zsh 會停 ---"
+# QL is this same defect on the scoop side, fixed 2026-09-17. macOS never had
+# the equivalent, and there it is worse: install.zsh's destination IS brew's own
+# bin directory, so `cp -f` replaces brew's symlink with a plain file while
+# brew's database still believes it owns that path -- and the NOTE printed
+# alongside ("brew list will not show it") is false line by line in exactly that
+# situation, having been written for the case where brew does not manage csv2.
+# Found on 2026-09-23 by running --dry-run before acting on a suggestion to
+# rebuild and reinstall. QR.
+#
+# A fake brew early on PATH makes this reachable on every platform: target_dir
+# reaches the brew branch by asking `brew --prefix`, with no uname gate, so no
+# macOS is needed to exercise it.
+#
+# QL 是 scoop 那一側的同一件事，2026-09-17 修掉。macOS 從來沒有對應的檢查，而那裡更糟：install.zsh
+# 的目的地**就是 brew 自己的 bin 目錄**，`cp -f` 會把 brew 的 symlink 換成普通檔案，而 brew 仍認為
+# 它擁有那條路徑——同一畫面上那段 NOTE（「brew list 不會列出它」）在那個情境下逐行皆假。2026-09-23
+# 在照做「重建並重裝」的建議之前先跑 --dry-run 才發現。QR。
+#
+# 一個放在 PATH 前面的假 brew 讓這一支在每個平台都走得到：target_dir 是靠問 `brew --prefix` 進入那一
+# 支的，沒有 uname 關卡，所以不需要一台 macOS 才能測。
+_t313_pfx=$TMP/t313pfx
+mkdir -p "$_t313_pfx/bin"
+_t313_fakebrew() {   # _t313_fakebrew <dir> <managed 0|1>
+    mkdir -p "$1"
+    print -rl -- '#!/bin/sh' \
+        "case \"\$1\" in" \
+        "  --prefix) if [ \$# -eq 1 ]; then printf '%s\\n' '$_t313_pfx'; else printf '%s/opt/%s\\n' '$_t313_pfx' \"\$2\"; fi; exit 0 ;;" \
+        "  list)     exit $(( $2 == 1 ? 0 : 1 )) ;;" \
+        "esac" \
+        'exit 1' > "$1/brew"
+    chmod +x "$1/brew"
+}
+_t313_fakebrew "$TMP/t313-managed" 1
+_t313_fakebrew "$TMP/t313-free"    0
+
+_t313_run() {   # _t313_run <bindir> <args...>
+    local d=$1; shift
+    env PATH="$d:$PATH" "$ROOT/install.zsh" "$@" > "$TMP/t313.out" 2> "$TMP/t313.err"
+}
+
+_t313_run "$TMP/t313-managed" --dry-run --no-rc; _t313_rc=$?
+# Exit status alone is not enough: a tree with no build also exits 1, one step
+# later, at "no binary at ...". So this counts diagnostics AND requires stdout
+# to be empty -- a refusal that stopped plans nothing. Same reasoning as T307b.
+# 單憑退出碼不夠：一棵沒有建置過的樹也會以 1 結束，只是晚一步停在「no binary at …」。所以這裡同時數
+# 診斷訊息並要求 stdout 為空——一道真的停下來的拒絕不會規劃任何事。與 T307b 同一個理由。
+_t313_diags=$(LC_ALL=C grep -a -c 'install\.zsh:' "$TMP/t313.err" | tr -d ' ')
+if (( _t313_rc == 1 )) && [[ ! -s $TMP/t313.out && $_t313_diags == 1 ]]; then
+    ok "T313a it refuses and plans nothing when brew manages csv2 / brew 管理 csv2 時它拒絕，而且什麼都沒規劃"
+else
+    bad "T313a rc=$_t313_rc, $_t313_diags diagnostic(s), stdout: $(head -3 "$TMP/t313.out") / 實得如上"
+fi
+
+if LC_ALL=C grep -qa 'brew upgrade csv2' "$TMP/t313.err" && LC_ALL=C grep -qa -- '--dir' "$TMP/t313.err"; then
+    ok "T313b the refusal names both ways forward / 那道拒絕說出了兩條出路"
+else
+    bad "T313b the refusal named neither brew upgrade nor --dir: $(head -c 200 "$TMP/t313.err") / 兩條出路都沒說"
+fi
+
+_t313_run "$TMP/t313-managed" --uninstall --dry-run; _t313_urc=$?
+if (( _t313_urc == 1 )) && LC_ALL=C grep -qa 'brew uninstall csv2' "$TMP/t313.err"; then
+    ok "T313c --uninstall is refused too, and pointed at brew uninstall / --uninstall 也被拒絕，並被指向 brew uninstall"
+else
+    bad "T313c rc=$_t313_urc, said: $(head -c 200 "$TMP/t313.err") / 實得如上"
+fi
+
+# The control, and the one that matters most. `brew --prefix csv2` returns 0 and
+# a plausible path for a formula that is merely KNOWN, so a check written with
+# it would refuse on every Mac with Homebrew, csv2 installed or not -- the scoop
+# trap in reverse. With brew present and csv2 NOT installed, this must proceed.
+# 負控組，也是最要緊的一個。`brew --prefix csv2` 對一個「只是已知」的 formula 回傳 0 與一個看起來合理
+# 的路徑，用它寫的檢查會在每一台裝了 Homebrew 的 Mac 上誤擋，不論有沒有裝過 csv2——那是 scoop 那個
+# 陷阱的反面。brew 在、而 csv2 沒有被它管理時，這裡必須放行。
+_t313_run "$TMP/t313-free" --dry-run --no-rc; _t313_frc=$?
+if (( _t313_frc == 0 )) && LC_ALL=C grep -qa "$_t313_pfx/bin" "$TMP/t313.out"; then
+    ok "T313d with brew present but csv2 not installed, it proceeds into the brew prefix / brew 在、而 csv2 未被它管理時，它照常走進 brew 的 prefix"
+else
+    bad "T313d rc=$_t313_frc; a Mac that never installed csv2 would now be refused: $(head -3 "$TMP/t313.err") / 一台從沒裝過 csv2 的 Mac 現在會被拒絕"
+fi
+
+# And the detector itself is pinned, because the wrong one passes T313a while
+# failing T313d only on a machine where csv2 happens not to be installed.
+# 偵測方式本身也要釘住：錯的那一種同樣會通過 T313a，而只在「剛好沒裝 csv2」的機器上才會被 T313d 抓到。
+_t313_probe=$(LC_ALL=C grep -n 'brew --prefix csv2' "$ROOT/install.zsh" | LC_ALL=C grep -v ':[[:space:]]*#' || true)
+if [[ -z $_t313_probe ]]; then
+    ok "T313e the detector is not \`brew --prefix csv2\`, which answers a different question / 偵測用的不是 \`brew --prefix csv2\`，那個問的是另一個問題"
+else
+    bad "T313e install.zsh detects with brew --prefix csv2: ${_t313_probe//$'\n'/ } / 它用 brew --prefix csv2 當偵測"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
