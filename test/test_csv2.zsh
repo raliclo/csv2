@@ -18997,6 +18997,94 @@ else
 fi
 
 echo
+echo "--- T314: --headers N says how many header rows, never what separates fields / T314：--headers N 說的是標頭列數，不是欄位靠什麼分開 ---"
+# A file whose suffix declares no format is `.lines`. `--headers N` says how
+# many header ROWS it has; only a suffix says that commas separate fields,
+# which is why `--headers 0` on a `.csv` is a HEADERLESS CSV and not lines.
+#
+# runAppendFast resolved it as `Format.from(path:) ?? headersOverride.map {...}
+# ?? .lines`, and 0 is a value, so on a suffix-less path the map fired and gave
+# `.csv`: `.lines` was unreachable whenever --headers was given at all. The
+# refusal then named "the header" -- a header the flag had just said did not
+# exist. Reading the same file with the same flag was correct throughout; only
+# appending IN PLACE refused, because only that takes the fast path. QS, and
+# QJ's family: QJ's own comment describes this word for word with `.md` in
+# place of `.txt`, and its fix declined one extension by name.
+#
+# 一個「副檔名沒有宣告格式」的檔案是 `.lines`。`--headers N` 說的是它有幾列**標頭**；只有副檔名才說
+# 「逗號是分隔符」——那正是「`--headers 0` 配 `.csv` 是無標頭 CSV 而非 lines」的理由。
+#
+# runAppendFast 原本把它解析成 `Format.from(path:) ?? headersOverride.map {…} ?? .lines`，而 0 是一個
+# 值，於是在沒有宣告格式的副檔名上那個 map 會觸發並給出 `.csv`——只要給了 `--headers`，`.lines` 就
+# 永遠到不了。接著那則拒絕指名了「標頭」，而那正是該旗標剛說不存在的東西。同一個檔案、同一個旗標，
+# 用讀的自始至終正確，只有**就地**追加會拒絕，因為只有它走快路徑。QS，QJ 的同一族。
+_t314=$TMP/t314
+mkdir -p "$_t314"
+
+_t314_try() {   # _t314_try <檔名> <旗標...>  -- 在該檔上就地 append，印 "rc=<rc> lines=<n>"
+    local f=$_t314/$1; shift
+    printf 'alpha\nbeta, gamma, delta\n' > "$f"
+    "$CSV2" "$@" -append 'X=y' -i "$f" --in-place >/dev/null 2>"$_t314/err"
+    print -r -- "rc=$? lines=$(LC_ALL=C grep -c '' "$f" | tr -d ' ')"
+}
+
+_t314_a=$(_t314_try a.txt --headers 0)
+if [[ $_t314_a == "rc=0 lines=3" ]]; then
+    ok "T314a --headers 0 appends to a suffix-less file whose data holds a comma / --headers 0 能追加到一個資料裡有逗號、副檔名未宣告格式的檔案"
+else
+    bad "T314a got [$_t314_a], want [rc=0 lines=3]: $(head -c 150 "$_t314/err") / 實得如上"
+fi
+
+# Not specific to 0. Any --headers made the map fire, so 1 failed the same way,
+# and a case pinned only on 0 would pass against half a fix.
+# 不限於 0。任何 --headers 都會讓那個 map 觸發，所以 1 也一樣失敗；只釘住 0 的案例，對一個修了一半的
+# 修正也會通過。
+_t314_b=$(_t314_try b.txt --headers 1)
+if [[ $_t314_b == "rc=0 lines=3" ]]; then
+    ok "T314b --headers 1 does the same, so the fix is not keyed to the value 0 / --headers 1 亦然，可見修正不是綁在 0 這個值上"
+else
+    bad "T314b got [$_t314_b], want [rc=0 lines=3]: $(head -c 150 "$_t314/err") / 實得如上"
+fi
+
+# The property the report turned on: one file, one flag, two verbs. Reading was
+# always right; appending in place was not. Asserting the pair is what makes a
+# future divergence visible, rather than asserting each alone.
+# 這份回報真正壓住的性質：同一個檔案、同一個旗標、兩個動詞。讀一直是對的，就地追加不是。斷言這一
+# **對**，才能讓將來的分歧看得見；分開斷言各自都不會說話。
+printf 'alpha\nbeta, gamma, delta\n' > "$_t314/c.txt"
+_t314_read=$("$CSV2" --headers 0 -r -i "$_t314/c.txt" 2>/dev/null)
+if [[ $_t314_read == $'alpha\nbeta, gamma, delta' ]]; then
+    ok "T314c reading the same file with the same flag keeps the comma line whole / 同一個檔案、同一個旗標，用讀的時候那行逗號完整無缺"
+else
+    bad "T314c the read path gave [${_t314_read//$'\n'/ | }] / 讀取路徑給的如上"
+fi
+
+# The control, and the direction that must NOT break: a suffix that DOES
+# declare comma separation still declares it. If the fix had made --headers
+# mean "lines", this is where it would show -- `-get 1:2` would answer the
+# whole line instead of the second field.
+# 負控組，也是**不可以**被弄壞的那個方向：一個真的宣告了逗號分隔的副檔名，仍然宣告它。如果這個修正把
+# `--headers` 變成了「lines」，就會在這裡現形——`-get 1:2` 會回整行而不是第二欄。
+printf 'a,b,c\nd,e,f\n' > "$_t314/d.csv"
+_t314_cell=$("$CSV2" --headers 0 -get 1:2 -i "$_t314/d.csv" 2>/dev/null)
+if [[ $_t314_cell == b ]]; then
+    ok "T314d --headers 0 on a .csv is still a HEADERLESS CSV, not lines / .csv 配 --headers 0 仍然是無標頭 CSV，不是 lines"
+else
+    bad "T314d -get 1:2 gave [$_t314_cell], want [b]; commas stopped separating / 逗號不再分欄了"
+fi
+
+# And QJ stays fixed: a .md read as prose still appends.
+# 而 QJ 仍然是修好的：一個當成散文讀的 .md 仍然追加得了。
+printf 'prose, with a comma\nmore prose\n' > "$_t314/e.md"
+"$CSV2" --headers 0 -append 'tail line' -i "$_t314/e.md" --in-place >/dev/null 2>&1
+_t314_md=$?
+if (( _t314_md == 0 )) && [[ $(LC_ALL=C grep -c '' "$_t314/e.md" | tr -d ' ') == 3 ]]; then
+    ok "T314e QJ stays fixed: a .md with --headers 0 still appends / QJ 仍然是修好的：.md 配 --headers 0 仍追加得了"
+else
+    bad "T314e rc=$_t314_md, the .md has $(LC_ALL=C grep -c '' "$_t314/e.md" | tr -d ' ') lines / 實得如上"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

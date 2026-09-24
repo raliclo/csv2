@@ -13473,3 +13473,96 @@ had the equivalent check. Measured while looking for the detector: `brew --prefi
 returns 0 and a plausible path for a formula that is NOT installed -- it answers "where would
 this go", not "is it installed" -- so copying the scoop fix would refuse on every Mac with
 Homebrew. `brew list --formula <name>` is the question that was meant, and its status is clean.
+
+---
+
+## QS. `--headers N` 把一個沒有副檔名宣告的檔案變成 CSV，但**只在 `-append --in-place` 的快路徑上**——而那則拒絕指名了一個該旗標剛說不存在的標頭（2026-09-25 修正，T314a–e）
+
+**2026-09-25 由母專案 session 回報，經親手重現。同日已修。**
+
+修法：`runAppendFast()` 改用與讀取路徑**同一份**解析——`Format.from(path:) ?? .lines`，而 `--headers N` 只
+決定標頭列數。順帶移除底下那道不可能觸發的 guard。沒有把讀取路徑那條規則抄過來第三份：抄第三份正是
+QJ 註解指出的成因。
+
+### 重現
+
+```console
+$ printf 'alpha\nbeta, gamma, delta\n' > f.txt
+
+$ csv2 -append 'X=y' -i f.txt --in-place                 rc=0，檔案長成三行
+$ csv2 --headers 0 -append 'X=y' -i f.txt --in-place
+csv2: record 2 (line 2) has 3 fields but the header has 1; csv2 will not pad or truncate to fit
+                                                          rc=1，檔案逐位元未變
+$ csv2 --headers 0 -r -i f.txt                            rc=0，兩筆紀錄，逗號那行完整
+```
+
+**同一個檔案、同一個旗標**：讀得好好的，追加卻被拒絕。而那則訊息說「標頭有 1 欄」，可是
+`--headers 0` 正是在宣告**沒有標頭**。
+
+### 範圍：只有快路徑，而且不只 `--headers 0`
+
+| | rc | |
+|---|---|---|
+| `--headers 0 -append -o OUT`（正常路徑） | 0 | 輸出正確 |
+| `--headers 0 -insert 2 'X=y' --in-place` | 0 | 正確 |
+| `--headers 0 -append --in-place` | **1** | 拒絕 |
+| `--headers 1 -append --in-place` | **1** | 同樣拒絕 |
+
+不依副檔名：`.txt`、`.zsh`、`.fragment` 行為相同（回報者測的）。旗標前後位置無差別。
+
+### 成因
+
+`src/Run.swift` 的 `runAppendFast()`：
+
+```swift
+guard let fmt = Format.from(path: path) ?? (o.headersOverride.map { $0 == 2 ? .csv2 : .csv }) ?? Format.lines as Format? else {
+```
+
+`.txt` 沒有會宣告格式的副檔名，`Format.from(path:)` 回 `nil`；接著 `o.headersOverride` **非 nil**
+（`0` 也是一個值），於是 `.map` 把它變成 **`.csv`**，而 `.lines` 那個 fallback 永遠輪不到。之後
+`headerRows = 0`，`headers` 陣列是空的，`expected = headers.first?.count ?? 1` 落到 `?? 1`——
+於是 `beta, gamma, delta` 被當成 3 欄、與 1 比對、拒絕，而訊息裡那個「標頭」其實是那個 `?? 1` 預設值。
+
+**讀取路徑解析的是同一個問題，答案卻不同**（`src/main.swift`）：
+
+```swift
+Format.from(path: p) ?? .lines          // headersOverride 不參與選格式
+headerRows = o.headersOverride ?? fmt.headerRows   // 它只決定「幾列標頭」
+```
+
+也就是說 `--headers N` 在讀取路徑上**只決定標頭列數**，在 append 快路徑上**還會決定分隔方式**。
+同一條規則的兩份實作，而它們不一致。
+
+### 這是 QJ 的同一族，而 QJ 的註解已經寫下了它
+
+`canUseAppendFastPath()` 裡那段為 QJ 寫的註解說：「這條路徑自己解析格式、而且先試副檔名，於是那個
+覆寫從來沒有被看到——一個散文裡的逗號，讓 `-append` 拒絕了一個 `-insert` 在同一次執行、同一個旗標
+下接受的檔案。」**這裡是逐字相同的句子，只是檔案從 `.md` 換成了 `.txt`。** QJ 的修法是讓快路徑對
+`.md` 退讓；退讓的名單是列舉式的，而這個缺陷就住在沒有被列舉到的地方。
+
+### 兩件順帶量到的事
+
+1. **那道 guard 是死的。** `?? Format.lines as Format?` 讓整串永遠非 nil，所以底下
+   `throw fault("\(path) declares no format")` 不可能被執行到。它上面的註解已經半承認了這件事
+   （「這道守衛比那件事早」），但守衛本身留著。
+2. **`--headers 0` 對 stdin 的文件說的是另一回事**：`-si` 缺 `--headers` 時的訊息是
+   「0 reads it as lines — one field each, bytes verbatim」。而這個 map 把 0 映成 `.csv`。
+   兩處對同一個旗標值的說法相反。
+
+### 它失敗在對的方向
+
+rc=1、訊息在 stderr、檔案逐位元未變（回報者查過，我也查過）。沒有靜默、沒有寫一半。**這是一則
+令人困惑的拒絕，不是資料風險**，優先序照此判斷。
+
+`--headers N` makes a file whose suffix declares no format parse as CSV, but ONLY on the
+`-append --in-place` fast path, and the refusal names a header the flag has just said does not
+exist. `runAppendFast()` resolves the format as `Format.from(path:) ?? headersOverride.map { ... }
+?? .lines`, and since `0` is a value the map fires and yields `.csv`, so `.lines` is unreachable.
+The read path resolves the same question as `Format.from(path:) ?? .lines`, using the override
+only for the header COUNT -- two implementations of one rule, disagreeing. This is QJ's family,
+and QJ's own comment describes it word for word with `.md` in place of `.txt`; that fix declined
+one extension by name, and this defect lives where the enumeration does not reach. Two things
+noted while measuring: the guard below that line is dead, because the chain cannot be nil; and
+`--headers 0` on stdin is documented as "reads it as lines", which the map contradicts. It fails
+in the right direction -- rc=1, stderr, file byte-identical -- so this is a confusing refusal,
+not a data risk.

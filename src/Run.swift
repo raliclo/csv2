@@ -2749,16 +2749,39 @@ func canUseAppendFastPath(_ o: Options) -> Bool {
 
 func runAppendFast(_ o: Options) throws {
     let path = o.input!
-    // A suffix-less path is `.lines` now, not "no format". This guard predates
-    // that and turned `-append` on such a file into "t declares no format" --
-    // a sentence that was true when it was written and became false the moment
-    // the format existed. Phase 8b.
-    // 沒有副檔名的路徑現在是 `.lines`，不是「沒有格式」。這道守衛比那件事早，於是對這種檔案下
-    // `-append` 會得到「t declares no format」——那句話在寫下時為真，而在那個格式存在的那一刻
-    // 就成了假的。第 8b 階段。
-    guard let fmt = Format.from(path: path) ?? (o.headersOverride.map { $0 == 2 ? .csv2 : .csv }) ?? Format.lines as Format? else {
-        throw fault("\(path) declares no format", "\(path) 未宣告格式")
-    }
+    // Resolved the way the READ path resolves it, and for the same reason it
+    // does: `--headers N` says how many header ROWS there are. It does not say
+    // what separates fields -- only a suffix does that, which is why
+    // `--headers 0` on a `.csv` is a headerless CSV and not lines.
+    //
+    // This line used to read
+    //
+    //     Format.from(path:) ?? o.headersOverride.map { $0 == 2 ? .csv2 : .csv } ?? .lines
+    //
+    // and `0` is a value, so on a path with no declaring suffix the map fired
+    // and produced `.csv`: `.lines` was unreachable whenever --headers was
+    // given at all. `beta, gamma, delta` then parsed as three fields against a
+    // header of one -- a header the flag had just said did not exist, the `?? 1`
+    // default below wearing that name. Reading the same file with the same flag
+    // was correct throughout; only appending in place refused. QS.
+    //
+    // 用**讀取路徑那一份**的解析，理由也和它相同：`--headers N` 說的是「有幾列標頭」，它不說
+    // 「欄位靠什麼分開」——那是副檔名的事，也正是「`--headers 0` 配 `.csv` 是無標頭 CSV 而不是
+    // lines」的理由。
+    //
+    // 這一行原本是上面那個形狀，而 `0` 是一個值，所以在一個沒有宣告格式的副檔名上，那個 map 會
+    // 觸發並給出 `.csv`——只要給了 `--headers`，`.lines` 就永遠到不了。於是 `beta, gamma, delta`
+    // 被解析成三欄、去和「一欄的標頭」比對，而那個標頭正是該旗標剛說不存在的東西（底下 `?? 1`
+    // 那個預設值頂著它的名字）。同一個檔案、同一個旗標，用讀的自始至終正確，只有就地追加會拒絕。QS。
+    //
+    // The dead guard that stood here went with it: the chain ended in `.lines`,
+    // so it could never be nil and `"declares no format"` could never be
+    // thrown. A refusal that cannot fire reads, to anyone maintaining this, as
+    // a case that has been considered.
+    // 原本立在這裡的那道守衛一併移除：那一串以 `.lines` 結尾，不可能是 nil，所以
+    // 「declares no format」永遠丟不出來。一道不可能觸發的拒絕，對後來維護的人而言，讀起來像是
+    // 「這個情況已經被考慮過了」。
+    let fmt = Format.from(path: path) ?? .lines
     let headerRows = o.headersOverride ?? fmt.headerRows
 
     guard FileManager.default.fileExists(atPath: path) else {
