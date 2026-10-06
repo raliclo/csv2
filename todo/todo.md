@@ -1057,7 +1057,26 @@ in the first minute -- `./compile_csv2_linux.zsh` exited 126, the file having ne
 executable bit (QE) -- and then caught a second thing, that the fix was not in the commit that
 claimed it while the guard passed anyway.
 
-## 已安裝的那一份沒有東西讓它跟上 / Nothing keeps the installed copy current
+## ~~已安裝的那一份沒有東西讓它跟上 / Nothing keeps the installed copy current~~ 已決定
+
+> **2026-10-07：使用者做了「什麼時候」的決定——每次出貨都要升級 WSL。** 底下一直寫著「`install.zsh`
+> 應該在什麼時候被呼叫是母專案的決定，不是這棵樹的」，而這一節開著就是在等那個決定。現在有了：
+>
+> | 節點 | 怎麼跟上 |
+> |---|---|
+> | macOS | `brew upgrade raliclo/csv2/csv2`，由 brew 管理 |
+> | Windows | `scoop update csv2`，由 scoop 管理 |
+> | **WSL** | **每次出貨**都在原地取代 `/usr/local/bin/csv2`（那裡沒有套件管理員；經 `wsl.exe -u root`，使用者選的做法） |
+> | guest | 跑的是在 tag 上建的 `/workspace/csv2/release/csv2`，映像裡刻意沒有 csv2 |
+>
+> 為了讓那一步不會是被跳過的那一步，`publish.zsh` 發布完成時印出的「接下來」清單現在列著四個節點，
+> 並明寫 WSL 是**每次**。實際執行那一步（要用這台機器的 multissh 設定）屬於母專案的 `helper/`，與
+> `collect_release.zsh` 同一個分工；已向母專案 session 提議。
+>
+> 2026-10-07: the user made the "when" decision -- WSL is upgraded on every release. publish.zsh's
+> closing checklist now names all four nodes and says "every release" for WSL. Performing the step
+> needs this machine's multissh setup, so the script for it belongs in the mother project's
+> helper/, the same split as collect_release.zsh; proposed to that session.
 
 **2026-09-10 加入，由另一個 session 回報。**
 

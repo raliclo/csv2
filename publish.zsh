@@ -655,6 +655,26 @@ if (( DO_PUBLISH )); then
     say "接下來是刻意留給人做的：release notes。套件檔裡的版本號，上面已經改寫並讀回確認過了。"
     say "then run ./test/test_csv2.zsh -- the package files are checked by it"
     say "然後跑 ./test/test_csv2.zsh——那些套件檔由它檢查"
+    # The release is not finished until the copy each node RUNS is the new one.
+    # A suite passing on a node says nothing about this: it tests release/csv2,
+    # not the csv2 on PATH. On 2026-10-07 WSL's PATH still resolved to a
+    # root-owned 0.1.0 placed a month earlier, two releases behind, while its
+    # suite had passed repeatedly. brew and scoop keep their nodes current;
+    # WSL has no package manager, so the user decided it is upgraded on EVERY
+    # release. This line exists so that step is not the one that is skipped.
+    # 一次出貨，要到每個節點**實際執行**的那一份換成新版才算結束。某個節點的套件通過，對這件事什麼
+    # 也沒說：它測的是 release/csv2，不是 PATH 上的 csv2。2026-10-07 WSL 的 PATH 仍然解析到一個月前
+    # 以 root 放進去的 0.1.0，落後兩個版本，而那段期間它的套件一再通過。brew 與 scoop 會讓它們的
+    # 節點跟上；WSL 沒有套件管理員，所以使用者決定**每次出貨**都要升級它。這幾行存在，是為了讓那一步
+    # 不會是被跳過的那一步。
+    say "then upgrade the copy each node RUNS, and read its --version on PATH:"
+    say "  macOS   brew update && brew upgrade raliclo/csv2/csv2"
+    say "  Windows scoop update csv2"
+    say "  WSL     every release, in place: /usr/local/bin/csv2 (no package manager there)"
+    say "  guest   runs /workspace/csv2/release/csv2, the build made at the tag"
+    say "然後升級每個節點**實際執行**的那一份，並讀 PATH 上那一份的 --version："
+    say "  macOS 用 brew、Windows 用 scoop、WSL **每次出貨**都在原地取代 /usr/local/bin/csv2、"
+    say "  guest 跑的是在 tag 上建的 /workspace/csv2/release/csv2"
 else
     say "nothing was changed. Re-run with --publish to do the above."
     say "什麼都沒有改動。加上 --publish 才會真的執行。"
