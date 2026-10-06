@@ -13484,6 +13484,22 @@ Homebrew. `brew list --formula <name>` is the question that was meant, and its s
 決定標頭列數。順帶移除底下那道不可能觸發的 guard。沒有把讀取路徑那條規則抄過來第三份：抄第三份正是
 QJ 註解指出的成因。
 
+四節點驗證（`200b35e`，T314a–e 在每個節點都按名字確認通過）：
+
+| 節點 | 日期 | 結果 |
+|---|---|---|
+| macOS | 2026-09-25 | 1432 / 0 / 1 |
+| guest（aarch64） | 2026-09-26 `20260926T210602Z` | 1384 / 0 / 15，T47 十二組逐位元相同 |
+| WSL2 | 2026-10-07 | 1431 / 0 / 1 |
+| Windows | 2026-10-07 | 1397 / 0 / 16 |
+
+wsl／win 晚了十二天，因為那台 Windows 在 9/25 起關機。這段期間 guest 映像又換了三次（09-27、10-02、
+10-06），三輪 guest 套件的結果逐案與上一輪相同。
+
+Four-node verification at `200b35e`: macOS 1432/0/1, guest 1384/0/15, WSL2 1431/0/1, Windows
+1397/0/16, with T314a-e confirmed by name on each. wsl and win came twelve days late because the
+Windows machine was off from 2026-09-25.
+
 ### 重現
 
 ```console
