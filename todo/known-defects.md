@@ -12291,7 +12291,7 @@ all four forms were exercised. Three wrong versions of one check, each one enume
 shapes that string can take instead of anchoring it, which is why T299 pins it by EXTRACTING
 the expression from release.zsh rather than copying it.
 
-## QD. 內嵌的 build id 不可重現：同一份原始碼，兩次建置給出不同的版本字串
+## QD. 內嵌的 build id 不可重現：同一份原始碼，兩次建置給出不同的版本字串（2026-09-10 修正，T303a–d）
 
 **2026-09-10 發現，同日已修。** 它需要的是一個決定而不是一個 patch，而那個決定在同一天下了
 （「兩者都印」，見底下）。
@@ -12465,7 +12465,17 @@ check passed while the value was wrong, which is why T303d now compares the valu
 
 
 
-### 2026-09-10 的決定
+### 2026-09-10 的決定（已被取代：同一天稍晚改成「兩者都印」並修好，見上方）
+
+> **2026-10-07 加註。** 這一節是修好**之前**的決定，卻排在修好之後，於是從底下往上讀的人會讀到
+> 「維持不修」而以為 QD 仍然開著——2026-10-07 盤點時就是這樣被讀錯，並回報給使用者說「QD 仍然開著」。
+> 標題現在帶著修正標記，這一節保留原文作為當時的紀錄。v0.1.1、v0.1.2、v0.1.3 都以「兩者都印」的格式
+> 出貨（例如 `v0.1.3 / fa2e792`）。
+>
+> Note added 2026-10-07: this section is the decision from BEFORE the fix, placed after it, so a
+> reader working upward meets "leave QD unfixed" and concludes it is still open -- which is how it
+> was misread during the 2026-10-07 stocktake. The heading now carries the fix marker; the text
+> below is kept as the record of that moment.
 
 **維持不修**，等下一次出貨前一併決定。同時決定 **aarch64 不補進 v0.1.0，改在 v0.1.1 與另外三個
 平台一起出**——那時四份都在同一個 tag 上、用修好的 `release.zsh` 建，版本字串自然一致，也就不必
