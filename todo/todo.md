@@ -832,7 +832,7 @@ booted at the time.
 | 平台 | 建置於 | build id | 套件 | 升級後 PATH 上的那一份 |
 |---|---|---|---|---|
 | macOS arm64 | 本機 | `v0.1.3 / fa2e792` | 1432/0/1 | `brew upgrade` → `Cellar/csv2/0.1.3`，`brew test` 通過 |
-| Linux aarch64 | guest VM | `v0.1.3 / fa2e792` | 1384/0/15，T47 逐位元相同 | guest 映像裡的 csv2 屬於母專案，已通知 |
+| Linux aarch64 | guest VM | `v0.1.3 / fa2e792` | 1384/0/15，T47 逐位元相同 | rootfs 裡刻意沒有 csv2；guest 的 `csv2` 解析到 `/workspace/csv2/release/csv2`，也就是在 tag 上建的那一份，已是 0.1.3 |
 | Linux x86_64 | WSL2 | `v0.1.3 / fa2e792b` | 1431/0/1 | `/usr/local/bin/csv2` 0.1.0 → 0.1.3（經 `wsl.exe -u root`，使用者選的） |
 | Windows x86_64 | Ralic-W11 | `v0.1.3 / fa2e792` | 1397/0/16 | `scoop update` → 0.1.3，bash／cmd.exe／zsh 一致 |
 
