@@ -14,3 +14,10 @@
 # 產生大多數素材，而已進版控的那一份在此一併保護。
 *.csv  -text
 *.csv2 -text
+
+# The Unicode data files are hashed into the generated region of src/Width.swift, and
+# T315 regenerates the table from them and compares byte for byte. A checkout
+# that rewrote their line endings would change the hash on that one machine.
+# Unicode 資料檔的 sha256 寫在 src/Width.swift 產生的那一段裡，T315 會從它們重新產生表格並逐位元比對。
+# 任何一個會改寫換行的 checkout，都會讓那一台機器上的雜湊不同。
+unicode/** -text

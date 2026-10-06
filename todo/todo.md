@@ -385,9 +385,48 @@ finished rather than dropped.
 | `-debug` had one of five levels | T50. A TRACE line was added first; a flag lowering the threshold to a level nothing logs at would be an option that does nothing / T50。先加了一行 TRACE 才加旗標——把門檻降到沒有東西記錄的層級，會是一個什麼也不做的選項 |
 | an index only appeared as a side effect | `--build-index`, T51, with the rule intact: it changes no output and never fails the operation / `--build-index`、T51，並守住規則：不改變輸出、絕不使操作失敗 |
 
-## 3. The UAX #11 width table is a hand-written subset / UAX #11 寬度表是手寫的子集
+## ~~3. The UAX #11 width table is a hand-written subset / UAX #11 寬度表是手寫的子集~~ 已完成
 
-**Status: accepted, and now pinned by a test. / 狀態：接受現狀，且已有測試釘住。**
+> **2026-10-07 關閉：表格現在由 Unicode 17.0.0 的資料產生。**
+>
+> 底下那段說「真正關閉它的做法是從 Unicode 字元資料庫產生，但那是本專案不該引入的建置期依賴」。
+> **前半句對，後半句不必成立。** `unicode/17.0.0/` 放著固定版本的 `EastAsianWidth.txt` 與
+> `DerivedGeneralCategory.txt`（附 `LICENSE-UNICODE.txt`），`unicode/gen_width.zsh` 只在升級 Unicode
+> 時執行一次，把表格寫進 `src/Width.swift` 裡 `BEGIN GENERATED`／`END GENERATED` 之間那一段。
+> 建置看到的仍然只是一個已提交的 `.swift` 檔，沒有任何新依賴。T315a 檢查那一段正好等於產生器從
+> 那兩個檔案產生的結果（那一段帶著兩個檔案的 sha256），T315b 是負控組，T315c 用 `--pretty` 量五個
+> 新舊表結果不同的樣本。
+>
+> 切換前，先拿產生的表與手寫表做完整的差集，而不是只挑幾個樣本：
+>
+> | | 區間 | 碼位 | 對輸出的實際影響 |
+> |---|---|---|---|
+> | 新增為寬 | 15 | 372 | **有**：手寫表落後的那些，例如 U+1F6D5..1F6D8、U+1F6DC..1F6DF（Unicode 12–15 的 emoji）、易經卦象 4DC0..4DFF |
+> | 不再是寬 | 34 | 372 | 幾乎全是手寫表整塊包進來的**未指派**空位；唯一的真實字元是 U+3248..324F（East Asian Ambiguous），改成與其他 Ambiguous 字元一致的 1 |
+> | 新增為零寬 | 360 | 1686 | **幾乎沒有**：cluster 寬度取各 scalar 的最大值，記號接在基底後面時算 0 或 1 結果都一樣 |
+> | 不再是零寬 | 2 | 22 | 全是未指派的空位 |
+>
+> 差集同時抓到一件必須處理的事：**區域指示符號 1F1E6..1F1FF 在資料裡是 `N`**，嚴格照資料產生會
+> 把每一面國旗量成 1，而計畫實測 🇹🇼 是 2、T48 釘住它。產生器因此把它們列為一條**明文的例外**。
+> 這是切換前做差集時發現的，不是事後靠測試失敗發現的。
+>
+> 第一版把表格放在獨立的 `src/WidthTable.swift`，T212 拒絕了它：`Width.swift` 是
+> `verifications/module_api.zsh` 替一個 GUI 呼叫端建成 library 的六個檔案之一，多一個依賴檔會改變
+> 別人依賴的檔案清單。所以表格改寫進 `Width.swift` 本身。
+>
+> 底下保留原本的紀錄。
+>
+> Closed on 2026-10-07: the table is now generated from Unicode 17.0.0. Generating it never had to
+> be a build-time dependency -- the pinned data and a zsh generator live in unicode/, the generator
+> runs only when the version is raised, and it rewrites a marked region of src/Width.swift that
+> T315 checks byte for byte. Diffing the generated table against the hand-written one before
+> switching found 372 code points newly wide (emoji from Unicode 12-15, Yijing hexagrams), one real
+> narrowing (U+3248..324F, East Asian Ambiguous), and that Regional Indicators are N in the data,
+> which would have measured every flag as 1 -- so they are a written exception. A separate table
+> file was refused by T212, because Width.swift is one of the six files a GUI caller builds as a
+> library.
+
+**Status (before 2026-10-07): accepted, and now pinned by a test. / 狀態（2026-10-07 之前）：接受現狀，且已有測試釘住。**
 
 `src/Width.swift` carries about 90 ranges chosen to cover what this project
 actually stores: Han, Hangul, fullwidth forms and the emoji blocks. It is not

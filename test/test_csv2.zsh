@@ -19085,6 +19085,86 @@ else
 fi
 
 echo
+echo "--- T315: the width table is generated from Unicode, and still is / T315：寬度表由 Unicode 資料產生，而且仍然是 ---"
+# Todo section 3 kept the hand-written width table open for weeks because
+# "generate it from the Unicode character database" looked like a build-time
+# dependency. It is not one: unicode/gen_width.zsh runs only when the Unicode
+# version is raised, and the build compiles the committed region of src/Width.swift.
+# The hand table had lagged -- U+1F6D5..1F6D8 and U+1F6DC..1F6DF are East Asian
+# Wide since Unicode 12-15 and measured 1 -- and nothing reported it.
+# todo 第 3 節讓手寫的寬度表開了好幾週，因為「從 Unicode 字元資料庫產生」看起來像建置期依賴。其實
+# 不是：unicode/gen_width.zsh 只在升級 Unicode 時執行，建置編譯的是 src/Width.swift 裡已提交的那一段。
+# 手寫表一直落後——U+1F6D5..1F6D8 與 U+1F6DC..1F6DF 自 Unicode 12–15 起就是 East Asian Wide，
+# 卻被量成 1——而沒有任何東西回報這件事。
+if [[ -x $ROOT/unicode/gen_width.zsh ]]; then
+# The committed region of src/Width.swift must be exactly what the generator
+# makes from the committed data. The region carries each input's sha256, so
+# this also catches a data file changed without regenerating, and a checkout
+# that rewrote line endings (unicode/** is -text in .gitattributes for that).
+# src/Width.swift 裡已提交的那一段，必須正好等於產生器從已提交的資料產生的結果。那一段帶著每個輸入檔
+# 的 sha256，所以這也會抓到「改了資料卻沒重新產生」，以及會改寫換行的 checkout（.gitattributes 因此
+# 把 unicode/** 設成 -text）。
+sed -n '/^    \/\/ BEGIN GENERATED/,/^    \/\/ END GENERATED/p' "$ROOT/src/Width.swift" > "$TMP/t315.region"
+if [[ -s $TMP/t315.region ]] && "$ROOT/unicode/gen_width.zsh" - 2>"$TMP/t315.err" | cmp -s - "$TMP/t315.region"; then
+    ok "T315a the generated region of src/Width.swift is exactly what unicode/gen_width.zsh makes from the committed data / Width.swift 裡產生的那一段正好等於產生器從已提交資料產生的結果"
+else
+    bad "T315a the committed region differs from a fresh generation, or is missing; run unicode/gen_width.zsh and commit: $(head -c 200 "$TMP/t315.err") / 已提交的那一段與重新產生的不同，或不存在"
+fi
+# The control: a region one range off must fail the same comparison, or T315a
+# passes against a generator that prints nothing comparable.
+# 負控組：差一個區間的那一段必須讓同一個比對失敗，否則 T315a 對一個什麼可比的東西都不印的產生器也會通過。
+sed 's/(0x1100, 0x115F)/(0x1100, 0x115E)/' "$TMP/t315.region" > "$TMP/t315.mutant"
+if ! cmp -s "$TMP/t315.mutant" "$TMP/t315.region" && \
+   ! "$ROOT/unicode/gen_width.zsh" - 2>/dev/null | cmp -s - "$TMP/t315.mutant"; then
+    ok "T315b a table one range off is caught by the same comparison / 差一個區間的表格會被同一個比對抓到"
+else
+    bad "T315b the mutated table was not caught, so T315a proves nothing / 被改過的表格沒被抓到，T315a 什麼都沒證明"
+fi
+else
+    T315_SKIPPED=1
+    skipt "T315a/b the width table matches its generator / 寬度表與產生器一致 (unicode/ does not travel in the guest payload / unicode/ 不在 guest 的 payload 裡)"
+fi
+
+# Measured, not asserted from the table: --pretty pads each cell to the column
+# width, so the padding against an 8-column cell IS the width (T48's method).
+# Each sample changed between the hand table and the generated one, and each
+# expectation was checked against both binaries before this case was written.
+# 用量的，不是從表格斷言：--pretty 會把每格補到欄寬，所以相對一個 8 欄寬儲存格的補白就是寬度（T48 的方法）。
+# 每個樣本在手寫表與產生的表之間都有變化，每個預期值在寫這個案例之前都用兩份執行檔量過。
+{
+  print -r -- 'w,note'
+  print -r -- '寬,註'
+  printf '\xe5\xa5\x97\xe4\xbb\xb6\xe5\x90\x8d\xe7\xa8\xb1,widest\n'
+  printf '\xf0\x9f\x9b\x9c,1F6DC\n'
+  printf '\xf0\x9f\x9b\x95,1F6D5\n'
+  printf '\xe4\xb7\x80,4DC0\n'
+  printf '\xe3\x89\x88,3248\n'
+  printf '\xf0\x9f\x87\xb9\xf0\x9f\x87\xbc,flag\n'
+} > "$TMP/t315.csv2"
+"$CSV2" -r -t -md --pretty -i "$TMP/t315.csv2" > "$TMP/t315.md" 2>/dev/null
+_t315_pad() { local c=${1#| }; c=${c%% |*}; local t=${c##*[! ]}; print -r -- ${#t} }
+typeset -a _t315_w
+while IFS= read -r _t315_l; do
+    [[ $_t315_l == '| '* ]] || continue
+    _t315_w+=($(( 8 - $(_t315_pad "$_t315_l") )))
+done < <(tail -n +3 "$TMP/t315.md")
+# rows: widest, 1F6DC, 1F6D5, 4DC0, 3248, flag
+_t315_want=(8 2 2 2 1 2)
+_t315_name=('套件名稱' 'U+1F6DC wireless (Unicode 15)' 'U+1F6D5 hindu temple (Unicode 12)'
+            'U+4DC0 hexagram (W since Unicode 16)' 'U+3248 circled ten (East Asian Ambiguous)' 'flag 🇹🇼 (regional indicators)')
+if (( ${#_t315_w} != 6 )); then
+    bad "T315c expected 6 measured rows, got ${#_t315_w} / 預期量到 6 列，實得 ${#_t315_w}"
+else
+    for i in {2..6}; do
+        if [[ ${_t315_w[i]} == ${_t315_want[i]} ]]; then
+            ok "T315c/$i ${_t315_name[i]} measures ${_t315_w[i]} / 量得 ${_t315_w[i]}"
+        else
+            bad "T315c/$i ${_t315_name[i]} measures ${_t315_w[i]}, want ${_t315_want[i]} / 量得 ${_t315_w[i]}，預期 ${_t315_want[i]}"
+        fi
+    done
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -19315,6 +19395,7 @@ fi
 (( ${T310_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T311_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T312_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T315_SKIPPED:-0} )) && (( want_skip += 1 ))
 
 # T219 -- content-anchored updates. The match is a whole data cell, and the
 # refusal must happen before the destination is created.
