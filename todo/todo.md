@@ -823,6 +823,35 @@ after that first one was sound and faithfully inherited a false premise. The
 lesson is one sentence: ask the machine, not the file that describes it. It was
 booted at the time.
 
+## ~~v0.1.3~~ 已出貨
+
+### 2026-10-07：v0.1.3 出了，四個平台，四個節點的安裝都升級了
+
+`https://github.com/raliclo/csv2/releases/tag/v0.1.3`，tag 指向 `fa2e792`。
+
+| 平台 | 建置於 | build id | 套件 | 升級後 PATH 上的那一份 |
+|---|---|---|---|---|
+| macOS arm64 | 本機 | `v0.1.3 / fa2e792` | 1432/0/1 | `brew upgrade` → `Cellar/csv2/0.1.3`，`brew test` 通過 |
+| Linux aarch64 | guest VM | `v0.1.3 / fa2e792` | 1384/0/15，T47 逐位元相同 | guest 映像裡的 csv2 屬於母專案，已通知 |
+| Linux x86_64 | WSL2 | `v0.1.3 / fa2e792b` | 1431/0/1 | `/usr/local/bin/csv2` 0.1.0 → 0.1.3（經 `wsl.exe -u root`，使用者選的） |
+| Windows x86_64 | Ralic-W11 | `v0.1.3 / fa2e792` | 1397/0/16 | `scoop update` → 0.1.3，bash／cmd.exe／zsh 一致 |
+
+與 v0.1.2 那次相比，**這次 tag 一次都沒有移動**。差別在於先在三個遠端節點不打 tag 預演 `release.zsh`，產物丟棄，
+確認沒問題才打 tag。封存由 `helper/collect_release.zsh` 收集，`publish.zsh` 在上傳前用 `archive_commit_ok`
+讀了每份封存內嵌的 build id。這兩支工具都是 v0.1.2 出貨之後才寫的，這是它們第一次正式用在出貨上。
+
+封存在發布前另外複製了一份到內接磁碟的 `~/backup/csv2-release-0.1.3/`，因為 `dist/` 所在的外接磁碟兩週內
+掉了三次。
+
+WSL 上原本那份是 2026-09-08 以 root 放進 `/usr/local/bin` 的 0.1.0，比另外兩台落後兩個版本，而且沒有任何
+東西會回報這件事。`install.zsh` 預設會裝到 `~/.local/bin`（一般使用者寫不進 `/usr/local/bin`），但那裡不在
+PATH 上，結果會留下兩份，而實際跑到的仍是舊的。所以這次改成在原地取代。
+
+v0.1.3 shipped on 2026-10-07, tag at `fa2e792`, never moved: release.zsh was rehearsed untagged on
+the three remote nodes first. It is the first release to use collect_release.zsh and publish.zsh's
+build-id check. The installed copy on every node was upgraded; WSL's had been a root-owned 0.1.0
+in /usr/local/bin, two releases behind, which nothing reported.
+
 ## ~~v0.1.2~~ 已出貨
 
 ### 2026-09-18：v0.1.2 出了，四個平台
