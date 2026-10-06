@@ -34,7 +34,16 @@ guest 比對吞掉 csv2 的結束狀態（已修——csv2 單獨執行、檢查
 
 ---
 
-## 1. Install into the package manager's bin directory / 安裝到套件管理員的 bin 目錄
+## ~~1. Install into the package manager's bin directory / 安裝到套件管理員的 bin 目錄~~ 已完成
+
+> **2026-10-07 關閉。** 最後那一件「實際跑一次安裝」在 2026-09-17（scoop）與 2026-09-18（brew）都跑過了，
+> 而且兩次各找出一個只有跑了才看得到的缺陷（QL、QP）。2026-10-07 v0.1.3 出貨時，四個節點上安裝的那一份
+> 都再升級一次：brew、scoop、WSL 的 `/usr/local/bin`，以及 guest 的 `/workspace/csv2`。底下保留原本的
+> 紀錄。
+>
+> Closed on 2026-10-07: the remaining item -- actually running an install -- was done for scoop on
+> 2026-09-17 and brew on 2026-09-18, each finding a defect only running could find (QL, QP), and every
+> node's installed copy was upgraded again with v0.1.3.
 
 > **狀態（2026-09-10 逐項重測）：五件全部完成。剩下的不是「做」，是「跑一次」。**
 >
@@ -1049,7 +1058,33 @@ is to make the gap announce itself -- install.zsh printing which version is alre
 which is about to replace it -- but that changes an outward-facing output and is not implemented
 today.
 
-## 出貨流程只有一半是腳本 / Half the release is scripted
+### 2026-10-07：又一次，這次是落後兩個版本
+
+v0.1.3 出貨後盤點四個節點的 PATH，WSL 上跑到的是 `/usr/local/bin/csv2` → `csv2 0.1.0 (4e25ee2c)`，
+2026-09-08 以 root 放進去的。macOS 與 Windows 由 brew、scoop 管理，都跟上了 0.1.2；這一份沒有套件管理員，
+於是停在 0.1.0 將近一個月，而那段期間 WSL 跑了好幾輪完整的測試套件——**測的是 `release/csv2`，不是 PATH 上的
+那一份**，所以全部綠燈也說明不了什麼。已以原地取代升到 0.1.3（使用者選的做法）。
+
+這是這一節記下的形狀第二次發生，而且這次沒有人回報，是盤點時才看到的。**「什麼時候升級」仍然是母專案的
+決定**；這裡多了一個事實可以帶給那個決定：由套件管理員管理的兩台跟上了，沒有套件管理員的那一台沒有。
+
+On 2026-10-07 WSL's PATH still resolved to a root-owned 0.1.0 placed on 2026-09-08, two releases
+behind, while the suite ran green there repeatedly -- against release/csv2, not the copy on PATH.
+The two package-managed nodes had kept up; the unmanaged one had not. Upgraded in place; WHEN to
+upgrade remains the mother project's decision.
+
+## ~~出貨流程只有一半是腳本 / Half the release is scripted~~ 已完成
+
+> **2026-10-07 關閉。** 底下刻意留在外面的第 2 步（從各節點收集封存）現在由母專案的
+> `helper/collect_release.zsh csv2 <版本>` 負責：它從 `helper/run_remote.zsh` 讀 host 表（不複製）、
+> 每份封存由節點與本機各算一次 sha256、兩者一致才落地。放在 `helper/` 而不是這棵樹，理由正是底下寫的那一句：
+> 收集用的是這台機器的 multissh 設定。能不能出貨則由 `publish.zsh` 的 `archive_commit_ok` 把關，它讀每份
+> 封存內嵌的 build id。v0.1.3 是第一次用這兩支出貨，tag 一次都沒有移動。
+>
+> Closed on 2026-10-07: step 2, collection, is now `helper/collect_release.zsh` in the mother
+> project, which reads the host table from run_remote.zsh rather than copying it and requires the
+> node's and this machine's sha256 to agree; publish.zsh's archive_commit_ok decides whether an
+> archive may ship. v0.1.3 was the first release to use both.
 
 **加入於 2026-09-08，出完 v0.1.0 之後。2026-09-10 由 `publish.zsh` 做掉了第 1、3–7 步；
 第 2 步（收集）刻意留在外面，理由見下。**
