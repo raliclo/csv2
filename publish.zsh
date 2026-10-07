@@ -675,6 +675,17 @@ if (( DO_PUBLISH )); then
     say "然後升級每個節點**實際執行**的那一份，並讀 PATH 上那一份的 --version："
     say "  macOS 用 brew、Windows 用 scoop、WSL **每次出貨**都在原地取代 /usr/local/bin/csv2、"
     say "  guest 跑的是在 tag 上建的 /workspace/csv2/release/csv2"
+    # The mother project does all four and reads each one back; its exit
+    # status is the answer (0 = every node's PATH says this version, 3 = some
+    # node skipped on purpose, 1 = not finished). It lives there because node
+    # and permission knowledge does: the root install on WSL goes through the
+    # Windows node's wsl.exe.
+    # 母專案那支腳本把四個節點都做掉並一一讀回；它的退出碼就是答案（0 = 每個節點 PATH 上都是這個
+    # 版本，3 = 有節點被刻意略過，1 = 還沒結束）。它放在母專案，因為節點與權限的知識在那裡：WSL 上
+    # 的 root 安裝是經由 Windows 節點的 wsl.exe 做的。
+    say ""
+    say "all of the above, with the read-back, from the parent project / 以上全部連同讀回，在母專案執行："
+    say "  helper/install_release.zsh csv2 $VERSION            (--verify: read only / 只讀不裝)"
 else
     say "nothing was changed. Re-run with --publish to do the above."
     say "什麼都沒有改動。加上 --publish 才會真的執行。"

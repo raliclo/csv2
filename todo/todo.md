@@ -1131,6 +1131,25 @@ behind, while the suite ran green there repeatedly -- against release/csv2, not 
 The two package-managed nodes had kept up; the unmanaged one had not. Upgraded in place; WHEN to
 upgrade remains the mother project's decision.
 
+### 2026-10-07：工具已有，安裝路徑在真機上跑過
+
+母專案的 `helper/install_release.zsh csv2 <版本>`（linuxcs-0a 維護）會升級四個節點 PATH 上的那一份，
+再讀回來比對；`--verify` 只讀不裝。2026-10-07 經使用者同意實際跑過一次安裝，四個節點都通過。
+
+**附帶一件事：build id 的雜湊長度不一致——已決定固定為 8 碼（QT）。** WSL 的那一份印 `(v0.1.3 / fa2e792b)`，另外三份印
+`fa2e792`——同一個 commit。原因不是損壞：`build_id.zsh` 用 `git rev-parse --short`，長度由 git 依該 clone
+的物件數自動決定，而 WSL 那份 clone 有約 56k 個物件（macOS 約 3.5k）。`publish.zsh` 的 `archive_commit_ok`
+是前綴比對，`install_release.zsh` 只比 `(v<版本> / `，所以目前沒有東西壞；但任何跨節點把雜湊當字串比的
+東西都會誤判。使用者決定**固定為 8 碼**（"Fix 8"）：`describe --abbrev=8`、`rev-parse --short=8`，
+`.bat` 的副本相同。已發布的 0.1.3 不重建；下一個版本起生效。見 known-defects.md QT。
+
+The installed-copy tool now exists (`helper/install_release.zsh`, mother project) and its install
+path ran for real on 2026-10-07. Decided (QT): WSL's build id carries an 8-character hash
+(`fa2e792b`) where the other three carry 7, because `rev-parse --short` scales with the clone's
+object count (WSL ~56k, macOS ~3.5k). Nothing breaks today -- the comparisons are prefix-based --
+but a string comparison across nodes would. The user decided on a fixed 8 characters; the
+published 0.1.3 is left alone and the fix applies from the next release.
+
 ## ~~出貨流程只有一半是腳本 / Half the release is scripted~~ 已完成
 
 > **2026-10-07 關閉。** 底下刻意留在外面的第 2 步（從各節點收集封存）現在由母專案的
