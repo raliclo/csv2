@@ -18114,7 +18114,7 @@ else
     # commit**，於是形狀檢查通過而值是錯的——建置說 `(97e3908)`，而規則說 `v0.1.0-34-g97e3908`。
     if [[ -r $ROOT/build_id.zsh ]]; then
         _t303_want=$(zsh -c "source '$ROOT/build_id.zsh'; csv2_build_id '$ROOT'" 2>/dev/null)
-        _t303_hd=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null)
+        _t303_hd=$(git -C "$ROOT" rev-parse --short=8 HEAD 2>/dev/null)
         # Only when the tree is CLEAN. A dirty tree makes the rule say
         # `-dirty` while a binary built a moment earlier does not, and that
         # difference is about the tree's state, not about the rule -- the same
@@ -18163,10 +18163,13 @@ else
     # property: it must ask for the short hash as well as describe.
     # batch 那一份 source 不了它。能要求它的是同一個性質：它必須除了 describe 之外，也去問短雜湊。
     if [[ -r $ROOT/compile_csv2_win.bat ]]; then
-        if LC_ALL=C grep -q 'rev-parse --short HEAD' "$ROOT/compile_csv2_win.bat"; then
+        # And at 8 characters, like build_id.zsh (QT): the copy must not drift back to git's default.
+        # 而且是 8 碼，與 build_id.zsh 相同（QT）：副本不得漂回 git 的預設值。
+        if LC_ALL=C grep -q 'rev-parse --short=8 HEAD' "$ROOT/compile_csv2_win.bat" &&
+           LC_ALL=C grep -q 'describe --always --dirty --abbrev=8' "$ROOT/compile_csv2_win.bat"; then
             ok "T303c and the batch copy asks for the short hash too / 而 batch 那一份也去問了短雜湊"
         else
-            bad "T303c compile_csv2_win.bat does not ask for the short hash, so a tagged Windows build would drop it / batch 那一份沒有問短雜湊，於是在 tag 上的 Windows 建置會把它弄丟"
+            bad "T303c compile_csv2_win.bat does not ask for the 8-character short hash (QT), so a tagged Windows build would drop it or differ / batch 那一份沒有問 8 碼的短雜湊（QT），於是在 tag 上的 Windows 建置會把它弄丟或長度不同"
         fi
     fi
 fi
@@ -19165,6 +19168,60 @@ else
 fi
 
 echo
+echo "--- T316: the build id's hash is 8 characters on every machine / T316：build id 的雜湊在每台機器上都是 8 碼 ---"
+# git's default abbreviation grows with the clone's object count and follows
+# each machine's core.abbrev, so the published 0.1.3 reads `fa2e792b` on WSL and
+# `fa2e792` elsewhere -- one commit, two strings. The user chose a fixed 8. QT.
+# The repository here is built from scratch, and every git call runs from
+# inside it (cd in a subshell, not -C or a path argument: QN).
+# git 的預設縮寫隨 clone 的物件數成長、也跟著每台機器的 core.abbrev，於是已發布的 0.1.3 在 WSL 上說
+# `fa2e792b`、其他地方說 `fa2e792`——同一個 commit、兩種字串。使用者選了固定 8 碼。QT。
+# 這裡的 repository 是從零建的，每一個 git 呼叫都在它裡面執行（子 shell 裡 cd，不用 -C 也不傳路徑：QN）。
+if command -v git >/dev/null 2>&1 && [[ -r $ROOT/build_id.zsh ]]; then
+    # t316_hash <build_id.zsh> -- the hash part of the id built from $TMP/t316.
+    t316_hash() {
+        local id
+        id=$(cd "$TMP/t316" && zsh -c "source '$1'; csv2_build_id ." 2>/dev/null)
+        id=${id%-dirty}
+        if [[ $id == *' / '* ]]; then print -r -- ${id##* / }
+        elif [[ $id == *-g[0-9a-f]* ]]; then print -r -- ${id##*-g}
+        else print -r -- $id
+        fi
+    }
+    mkdir -p "$TMP/t316"
+    ( cd "$TMP/t316" && git -c init.defaultBranch=develop init -q && print a > a &&
+      git add a && git -c user.name=t -c user.email=t@t commit -q -m one &&
+      git -c user.name=t -c user.email=t@t tag -a v9.9.9 -m t &&
+      print b > b && git add b && git -c user.name=t -c user.email=t@t commit -q -m two ) >/dev/null 2>&1
+    _t316_cases=("7 past-tag" "12 past-tag" "7 at-tag" "12 at-tag")
+    for _t316_c in $_t316_cases; do
+        _t316_ab=${_t316_c%% *} _t316_where=${_t316_c#* }
+        ( cd "$TMP/t316" && git config core.abbrev $_t316_ab &&
+          if [[ $_t316_where == at-tag ]]; then git checkout -q v9.9.9; else git checkout -q develop; fi ) >/dev/null 2>&1
+        _t316_h=$(t316_hash "$ROOT/build_id.zsh")
+        if [[ $_t316_h == [0-9a-f](#c8) ]]; then
+            ok "T316a core.abbrev=$_t316_ab, $_t316_where: hash [$_t316_h] is 8 characters / 雜湊是 8 碼"
+        else
+            bad "T316a core.abbrev=$_t316_ab, $_t316_where: hash [$_t316_h] is not 8 characters / 雜湊不是 8 碼"
+        fi
+    done
+    # The control: the rule without the pin must fail the same check, or T316a
+    # passes against a repository where git's default happens to be 8.
+    # 負控組：拿掉固定長度的規則必須讓同一個檢查失敗，否則 T316a 對一個「git 預設剛好是 8」的 repository 也會通過。
+    sed -e 's/ --abbrev=8//' -e 's/--short=8/--short/' "$ROOT/build_id.zsh" > "$TMP/t316.mutant.zsh"
+    ( cd "$TMP/t316" && git config core.abbrev 12 && git checkout -q develop ) >/dev/null 2>&1
+    _t316_h=$(t316_hash "$TMP/t316.mutant.zsh")
+    if ! cmp -s "$ROOT/build_id.zsh" "$TMP/t316.mutant.zsh" && [[ $_t316_h != [0-9a-f](#c8) ]]; then
+        ok "T316b without the pin, core.abbrev=12 gives [$_t316_h], and T316a would catch it / 拿掉固定長度時得到如上，T316a 抓得到"
+    else
+        bad "T316b the unpinned rule also gave 8 characters [$_t316_h], so T316a proves nothing / 未固定的規則也給出 8 碼，T316a 什麼都沒證明"
+    fi
+else
+    T316_SKIPPED=1
+    skipt "T316a/b the build id's hash is 8 characters / build id 的雜湊是 8 碼 (no git or no build_id.zsh here, as in the guest payload / 這裡沒有 git 或 build_id.zsh，guest 的 payload 就是這樣)"
+fi
+
+echo
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -19396,6 +19453,7 @@ fi
 (( ${T311_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T312_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T315_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T316_SKIPPED:-0} )) && (( want_skip += 1 ))
 
 # T219 -- content-anchored updates. The match is a whole data cell, and the
 # refusal must happen before the destination is created.

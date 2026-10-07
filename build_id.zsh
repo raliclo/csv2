@@ -35,6 +35,19 @@
 # 三份 v0.1.0 封存說的是 `(8d5600e)`，因為它們是在 tag 被打之前建的，而同一個 commit 之後建出來
 # 說的是 `(v0.1.0)`。同一份原始碼、兩種字串，而重建改不了——於是那個 id 回答不了它存在所要回答的
 # 唯一問題：「這是哪一個 commit」。QD。
+#
+# The hash is ALWAYS 8 characters (`--abbrev=8`, `--short=8`), never git's
+# default. That default grows with the clone's object count and follows each
+# machine's `core.abbrev`, so the published 0.1.3 reads `fa2e792b` on WSL --
+# a clone of ~56k objects -- and `fa2e792` on the other three: one commit, two
+# strings, from a property of the build machine. The user chose 8. git still
+# lengthens it if 8 would be ambiguous, which is the one case where a longer
+# hash is the right answer. QT.
+#
+# 雜湊**一律 8 碼**（`--abbrev=8`、`--short=8`），不用 git 的預設值。那個預設值隨 clone 的物件數
+# 成長、也跟著每台機器的 `core.abbrev`，於是已發布的 0.1.3 在 WSL（約 56k 個物件的 clone）上說
+# `fa2e792b`、在另外三台說 `fa2e792`：同一個 commit、兩種字串，來自建置機器的一個屬性。使用者選了
+# 8。若 8 碼會有歧義，git 仍會加長——那是唯一一種「較長才對」的情況。QT。
 # `cd` in a subshell rather than `git -C`, because the shell and git do not
 # agree about what a path is on Windows. There, zsh's `pwd` is MSYS-style
 # `/c/Users/...` -- so `${0:A:h}` is too -- and git for Windows answers
@@ -46,8 +59,8 @@
 # 不需要路徑了。QN。
 csv2_build_id() {   # csv2_build_id <repo-dir>
     local dir=$1 described short
-    described=$(cd "$dir" 2>/dev/null && git describe --always --dirty 2>/dev/null) || described=""
-    short=$(cd "$dir" 2>/dev/null && git rev-parse --short HEAD 2>/dev/null) || short=""
+    described=$(cd "$dir" 2>/dev/null && git describe --always --dirty --abbrev=8 2>/dev/null) || described=""
+    short=$(cd "$dir" 2>/dev/null && git rev-parse --short=8 HEAD 2>/dev/null) || short=""
     # No git at all: the guest builds from a tar payload with no .git, and
     # `unknown` is a true thing to say about that build rather than a guess.
     #
@@ -68,7 +81,7 @@ csv2_build_id() {   # csv2_build_id <repo-dir>
         if [[ -e $dir/.git ]]; then
             print -u2 -- "csv2_build_id: $dir has a .git but git answered nothing; the question was malformed, not the tree"
             print -u2 -- "csv2_build_id：$dir 有 .git，而 git 什麼都沒回答；問題出在提問方式，不在那棵樹"
-            print -u2 -- "$(cd "$dir" 2>/dev/null && git describe --always --dirty 2>&1 | head -2)"
+            print -u2 -- "$(cd "$dir" 2>/dev/null && git describe --always --dirty --abbrev=8 2>&1 | head -2)"
             return 1
         fi
         print -r -- unknown

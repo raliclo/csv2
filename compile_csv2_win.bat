@@ -98,8 +98,8 @@ if errorlevel 1 (
 set "_build=unknown"
 set "_described="
 set "_short="
-for /f "usebackq tokens=* delims=" %%G in (`git describe --always --dirty 2^>nul`) do set "_described=%%G"
-for /f "usebackq tokens=* delims=" %%G in (`git rev-parse --short HEAD 2^>nul`) do set "_short=%%G"
+for /f "usebackq tokens=* delims=" %%G in (`git describe --always --dirty --abbrev=8 2^>nul`) do set "_described=%%G"
+for /f "usebackq tokens=* delims=" %%G in (`git rev-parse --short=8 HEAD 2^>nul`) do set "_short=%%G"
 :: `if errorlevel 1` rather than `||`. Inside a parenthesised block, after a
 :: redirected command, `||` in batch binds in ways that are hard to predict and
 :: harder to test from another machine -- and this branch is the one that only

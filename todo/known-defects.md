@@ -13592,3 +13592,41 @@ noted while measuring: the guard below that line is dead, because the chain cann
 `--headers 0` on stdin is documented as "reads it as lines", which the map contradicts. It fails
 in the right direction -- rc=1, stderr, file byte-identical -- so this is a confusing refusal,
 not a data risk.
+
+---
+
+## QT. build id 裡的雜湊長度由「建置那份 clone 的物件數」決定，而不是由程式決定（2026-10-07 回報）
+
+**回報**：linuxcs-0a 在 2026-10-07 以 `install_release.zsh --verify` 讀四個節點時發現，WSL 的那一份印
+`csv2 0.1.3 (v0.1.3 / fa2e792b)`，另外三份印 `fa2e792`——同一個 commit，長度不同。使用者的決定：
+**固定為 8 碼**（原話 "Fix 8"）。
+
+**成因**：`build_id.zsh` 用 `git describe --always --dirty` 與 `git rev-parse --short HEAD`，兩者都不指定
+長度，於是交給 git 的自動縮寫：它隨該 clone 的物件數成長，也受各機器的 `core.abbrev` 設定影響。WSL 那份
+clone 約 56k 個物件，macOS 約 3.5k。`compile_csv2_win.bat` 裡的副本同一形狀。
+
+**重現**（2026-10-07，macOS，對同一棵樹的一份 clone）：
+
+```
+$ git clone -q . /tmp/abbrev && cd /tmp/abbrev
+$ git config core.abbrev 7;  zsh -c 'source ./build_id.zsh; csv2_build_id .'
+v0.1.3-8-g03ad16a
+$ git config core.abbrev 12; zsh -c 'source ./build_id.zsh; csv2_build_id .'
+v0.1.3-8-g03ad16accc8d
+$ git checkout -q v0.1.3;    zsh -c 'source ./build_id.zsh; csv2_build_id .'
+v0.1.3 / fa2e792b3f17
+```
+
+同一份原始碼，三種長度，沒有任何東西報錯。
+
+**為什麼現在沒有東西壞**：`publish.zsh` 的 `archive_commit_ok` 用 `[0-9a-f]{7,40}` 並以前綴比對；
+`install_release.zsh` 只比 `(v<版本> / `。壞的會是**任何跨節點把雜湊當字串比的東西**——而那正是一個
+build id 存在的用途。
+
+**已發布的 0.1.3 不動**：封存已散出去，sha256 已在 Formula 與 scoop manifest 裡；重建它們會換掉使用者
+已下載的東西的雜湊。下一個版本起一律 8 碼。
+
+QT. The hash in the build id is as long as the building clone's object count (and its
+`core.abbrev`) makes it, not as the program says: WSL's 0.1.3 reads `fa2e792b`, the other three
+`fa2e792`. Reproduced above with core.abbrev 7 and 12 and at the tag. The user decided on a fixed
+8. Published 0.1.3 archives are left as they are; the fix applies from the next release.
