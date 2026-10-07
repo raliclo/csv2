@@ -13614,7 +13614,12 @@ not a data risk.
 
 ---
 
-## QT. build id 裡的雜湊長度由「建置那份 clone 的物件數」決定，而不是由程式決定（2026-10-07 回報）
+## QT. build id 裡的雜湊長度由「建置那份 clone 的物件數」決定，而不是由程式決定（2026-10-07 修正，T316a–b、T303a／c）
+
+**狀態：已修（2026-10-07，`d50aab9` 與 `bc28f6f`），四個節點驗證過**：macOS 1444/0/1、WSL 1443/0/1、
+Windows 1409/0/16（`.bat` 建出 `v0.1.3-11-gbc28f6f9`，T303d 確認與 `build_id.zsh` 相同）、guest 1389/0/17。
+已發布的 0.1.3 不重建；從下一個版本起生效。
+Fixed 2026-10-07 and verified on all four nodes; the published 0.1.3 is left as it is.
 
 **回報**：linuxcs-0a 在 2026-10-07 以 `install_release.zsh --verify` 讀四個節點時發現，WSL 的那一份印
 `csv2 0.1.3 (v0.1.3 / fa2e792b)`，另外三份印 `fa2e792`——同一個 commit，長度不同。使用者的決定：
