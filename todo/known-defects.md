@@ -12444,6 +12444,25 @@ git tag -d ztmp-buildid
 > worth keeping is not which slash but the SHAPE: a command that did nothing exited 0 while the
 > caller was using the exit status to judge a build. What caught it was the next line --
 > `./release/csv2.exe --version` naming the previous commit -- not the status.
+>
+> **2026-10-07 再更正：這次 `cmd /c` 也不成立了，失敗方式同樣是 rc=0。** 那台的遠端 shell 環境現在是
+> `MSYSTEM=MINGW64`，會做路徑轉換，於是 `/c` 被改寫成 `C:/`，`cmd` 又開了一個互動 shell 就離開：
+>
+> ```console
+> $ cmd /c ver                              ← 印出開場橫幅，ver 沒有執行
+> Microsoft Windows [Version 10.0.26200.9457]
+> $ MSYS2_ARG_CONV_EXCL="*" cmd /c ver      ← 執行了
+> Microsoft Windows [Version 10.0.26200.9457]
+> ```
+>
+> `//c` 與 `/c` 各自只在其中一種 shell 下成立，而兩種都出現過。**`MSYS2_ARG_CONV_EXCL="*" cmd /c` 兩種下都
+> 成立**（不轉換的 shell 會忽略那個變數）。比斜線更重要的仍是同一句：建置後要讀 `--version`，**而且要它含
+> HEAD 的雜湊**——這次那一行也抓到了 QT 的 `.bat` 退化（`unknown`，見 QT）。
+>
+> Corrected again, 2026-10-07: `cmd /c` now fails the same way. The remote shell runs with
+> `MSYSTEM=MINGW64`, which path-converts `/c` into `C:/`. `//c` and `/c` each work under only one
+> of the two shells, and both have occurred; `MSYS2_ARG_CONV_EXCL="*" cmd /c` works under both.
+> After a build, read `--version` and require HEAD's hash in it.
 
 **而在那之前先抓到了一個真的錯誤，是那台機器抓的，不是推理抓的。** 那台機器建置後回報
 `csv2 0.1.0 (97e3908)`，而同一份 checkout 在 MSYS 下的 `git describe` 說 `v0.1.0-34-g97e3908`。

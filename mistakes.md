@@ -1412,7 +1412,7 @@ the rewrite reported success. It did report success.
 
 ## 7. 相信一段自己剛寫下的說明，因為它讀起來像已經查證過的結論
 
-**4 次 / 2 天**（2026-09-08、2026-09-10 三次）。
+**5 次 / 3 天**（2026-09-08、2026-09-10 三次、2026-10-07）。
 
 | 日期 | 那段文字 | 它被當成前提之後 |
 |---|---|---|
@@ -1568,6 +1568,28 @@ that from", and one's own from five minutes ago does not. There is nothing to sc
 is harmless when written; the danger is the next step treating it as a premise. The one
 operational rule: when a comment says why X is unnecessary, do X once and see. Two of the three
 would have fallen to a single smallest-input run.
+
+### 第五次（2026-10-07）：檢查要求的，正是同一次編輯寫壞的那個寫法
+
+QT 把 `compile_csv2_win.bat` 改成 `--abbrev=8`、`--short=8`，同一次編輯也把 T303c 改成「batch 必須含
+`rev-parse --short=8 HEAD`」。在 `for /f` 的命令裡，未跳脫的 `=` 會被 cmd 換成空白，所以那個寫法是壞的。
+**而那個檢查是照著我剛寫下的程式碼寫的，不是照著那條規則寫的**：它要求的是我打出來的字，於是它替壞掉的
+寫法背書。macOS、WSL、guest 都過了，因為它們根本不會執行 `.bat`。
+
+Windows 上建出來的是 `(unknown)`，`build_rc=0`。T303a 也會放過它：它把 `unknown` 當成「沒有 .git」，而
+T303 只在有 `.git` 時才執行，那條分支只可能替一次壞掉的建置開脫。抓到它的是建置後我加上的一行「`--version`
+必須含 HEAD 的雜湊」。那一行是同一天稍早才加的，因為第一次 Windows 執行根本沒有建置（`cmd /c` 在 MINGW64
+下被路徑轉換，以 rc=0 結束），而執行檔停在上一個 commit。
+
+判準與這一條的矯正措施相同，只是換了物件：**一個檢查若是從剛寫下的實作抄出來的，它驗證的就只是「實作等於
+實作」。** 要讓它變成證據，得在它唯一會執行的那個地方，對產物跑一次。
+
+Fifth: QT wrote `--short=8` into the batch file, and the same edit made T303c require that exact
+spelling. Inside `for /f` an unescaped `=` becomes a space, so the spelling was broken and the
+check, copied from the implementation rather than the rule, vouched for it. Three nodes passed
+because they never run the batch file. Windows built `(unknown)` with rc=0, which T303a would also
+have excused. A post-build line requiring HEAD's hash in `--version` caught it; that line had been
+added earlier the same day after `cmd /c` built nothing at all under MINGW64 path conversion.
 
 ---
 
