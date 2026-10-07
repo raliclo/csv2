@@ -24,8 +24,8 @@ judgement the owning session is best placed to make.
 
 ## 1. 測試碰到的不是被測物（環境、工具，或 fixture 弄丟了那個屬性）
 
-**22 次 / 11 天**（2026-08-20、2026-08-27、2026-08-29、2026-09-02、2026-09-03、2026-09-06、
-2026-09-07、2026-09-08、2026-09-09、2026-09-10、2026-09-18），單日最多 3 次（2026-08-27）。
+**23 次 / 12 天**（2026-08-20、2026-08-27、2026-08-29、2026-09-02、2026-09-03、2026-09-06、
+2026-09-07、2026-09-08、2026-09-09、2026-09-10、2026-09-18、2026-10-07），單日最多 3 次（2026-08-27）。
 
 *這一行直到 2026-09-08 為止寫的是「9 次 / 6 天」，而 `mistakes_counter.csv2` 當時已經是 17 次 / 8 天。
 數字的權威來源是那個檔案；這裡是它的副本，而副本會漂。* **這一條本身就是第 1 類**——比對的不是被測物
@@ -546,6 +546,30 @@ there, `|| true` turned that into an empty result, and three cases reported succ
 the file's absence, not its contents. T308 and T309 FAILED there, which is the better failure --
 a red line gets read. Same shape as T218a, whose guard is written in this file, rewritten the
 same day beside a commit message saying not to do it.
+
+### 第二十三次（2026-10-07）：替身讓每個節點都印兩行，而真的 guest 只印一行
+
+母專案的 `helper/install_release.zsh`（我寫、交給 linuxcs-0a 審）以 `${${(M)${(f)OUT}:#csv2 *}[1]}`
+取版本行。只有一行時巢狀展開的結果是**純量**，`[1]` 取到的是第一個**字元**——真的 guest 回報成
+`PATH reports [c]`。密封測試 23 條全綠，因為替身對每個節點都先印 `command -v` 的路徑、再印版本：
+**兩行**。guest 的讀法只有 `--version`，只印一行——那正是觸發這個錯的屬性，而替身把它弄丟了。
+是對真機唯讀跑一次 `--verify` 才看到的。
+
+同一個形狀，我在**同一個 session** 稍早的 `publish.zsh` `archive_commit_ok` 已經犯過一次
+（`${${(f)ids}[1]}` 取到第一個字元），那次修好了，沒有往外搜。
+
+修的時候第二層也露出來：把變數取名 `LINES`（zsh 的特殊整數參數）讓腳本一開始就崩潰，而測試裡
+「暫存目錄已清掉」「--verify 沒送出安裝命令」兩條**照樣打勾**——腳本沒跑，自然什麼都沒建、什麼
+都沒送。那兩條現在要求「先發生過」：暫存目錄建立過、四個節點都在摘要裡被判定過，才去看「之後
+沒有東西」。
+
+Twenty-third: a stub printed two lines for every node; the real guest prints one. A nested
+`${${(f)OUT}[1]}` collapses to a scalar on one line and `[1]` takes its first character, so the
+guest was reported as `[c]`. 23 hermetic checks were green because the stub lost exactly the
+property that triggers it; a read-only live `--verify` showed it. I had made the same mistake in
+publish.zsh earlier in this session and did not search outward. While fixing it, naming an array
+`LINES` (a zsh special) crashed the script at start-up, and two "nothing happened afterwards"
+checks still passed -- they now require that the thing happened first.
 
 ---
 
