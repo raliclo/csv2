@@ -18086,7 +18086,14 @@ else
     setopt local_options extended_glob
     _t303_ver=$("$CSV2" --version 2>/dev/null)
     _t303_id=${${_t303_ver##*\(}%%\)*}
-    if [[ $_t303_id == unknown ]]; then
+    if [[ $_t303_id == unknown && ( -d $ROOT/.git || -f $ROOT/.git ) ]]; then
+        # `unknown` is true only where there is no .git. Here there is one, so the
+        # build failed to ask git -- QT's batch copy did exactly that on Windows
+        # (an unescaped = inside for /f) and this case used to pass it.
+        # `unknown` 只在沒有 .git 的地方是真話。這裡有，所以是建置沒問到 git——QT 的 batch 副本在
+        # Windows 上正是如此（for /f 裡未跳脫的 =），而這個案例原本會讓它通過。
+        bad "T303a the build id is \"unknown\" although $ROOT has a .git; the build failed to ask git / 這裡有 .git，build id 卻是 unknown：建置沒有問到 git"
+    elif [[ $_t303_id == unknown ]]; then
         # A build with no .git says so rather than guessing. That is the guest,
         # which builds from a tar payload.
         # 一次沒有 .git 的建置會直說，而不是用猜的。那就是 guest：它從 tar payload 建置。
@@ -18164,9 +18171,15 @@ else
     # batch 那一份 source 不了它。能要求它的是同一個性質：它必須除了 describe 之外，也去問短雜湊。
     if [[ -r $ROOT/compile_csv2_win.bat ]]; then
         # And at 8 characters, like build_id.zsh (QT): the copy must not drift back to git's default.
-        # 而且是 8 碼，與 build_id.zsh 相同（QT）：副本不得漂回 git 的預設值。
-        if LC_ALL=C grep -q 'rev-parse --short=8 HEAD' "$ROOT/compile_csv2_win.bat" &&
-           LC_ALL=C grep -q 'describe --always --dirty --abbrev=8' "$ROOT/compile_csv2_win.bat"; then
+        # The = is written ^= there: inside `for /f` an unescaped = becomes a space, git got
+        # `--abbrev 8`, failed with its error sent to nul, and the build said `unknown`. The first
+        # version of this check asked for `--short=8` -- the broken spelling -- and passed it.
+        # 而且是 8 碼，與 build_id.zsh 相同（QT）：副本不得漂回 git 的預設值。那裡的 = 寫成 ^=：在
+        # `for /f` 裡未跳脫的 = 會變成空白，git 收到 `--abbrev 8` 而失敗、錯誤被送進 nul，建置說
+        # `unknown`。這個檢查的第一版要求的是 `--short=8`——正是那個壞掉的寫法——而且讓它通過了。
+        if LC_ALL=C grep -qF 'rev-parse --short^=8 HEAD' "$ROOT/compile_csv2_win.bat" &&
+           LC_ALL=C grep -qF 'describe --always --dirty --abbrev^=8' "$ROOT/compile_csv2_win.bat" &&
+           ! LC_ALL=C grep -qE -- '--(short|abbrev)=8' "$ROOT/compile_csv2_win.bat"; then
             ok "T303c and the batch copy asks for the short hash too / 而 batch 那一份也去問了短雜湊"
         else
             bad "T303c compile_csv2_win.bat does not ask for the 8-character short hash (QT), so a tagged Windows build would drop it or differ / batch 那一份沒有問 8 碼的短雜湊（QT），於是在 tag 上的 Windows 建置會把它弄丟或長度不同"

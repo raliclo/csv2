@@ -13630,3 +13630,28 @@ QT. The hash in the build id is as long as the building clone's object count (an
 `core.abbrev`) makes it, not as the program says: WSL's 0.1.3 reads `fa2e792b`, the other three
 `fa2e792`. Reproduced above with core.abbrev 7 and 12 and at the tag. The user decided on a fixed
 8. Published 0.1.3 archives are left as they are; the fix applies from the next release.
+
+### QT 的修正本身弄壞了 Windows 的 build id，而測試會放過它（2026-10-07，未出貨，發現於四節點驗證）
+
+`d50aab9` 在 `compile_csv2_win.bat` 寫了 `git describe --always --dirty --abbrev=8` 與
+`git rev-parse --short=8 HEAD`。在 `for /f ... in (\`...\`)` 的命令裡，**未跳脫的 `=` 會被 cmd 換成空白**，
+於是 git 收到 `--abbrev 8`、`--short 8`，把 `8` 當成一個 commit 而失敗；`2^>nul` 吞掉錯誤，兩個變數都是空的，
+建置退回 `unknown`。Windows 節點上（`5c2a25e8`）：
+
+```
+build_rc=0
+csv2 0.1.3 (unknown)
+OK: csv2 0.1.3 (unknown) -> release\csv2.exe
+```
+
+**而套件會讓它通過**：T303a 把 `unknown` 當成「沒有 .git 的建置該說的話」（那是 guest），不問這裡有沒有 `.git`；
+T303d 因為 id 不含 HEAD 的雜湊而不比對。抓到它的是建置後的一行「`--version` 必須含 HEAD 的雜湊」。
+
+同一次還有另一個 rc=0 什麼都沒做的形狀，見 QK 那一則更正底下的 2026-10-07 補記：`cmd /c` 這次也不執行批次檔。
+
+Fix: `--abbrev^=8`、`--short^=8`。T303a 改成：有 `.git` 時 `unknown` 判失敗。
+
+QT's own fix broke the Windows build id: inside `for /f` an unescaped `=` becomes a space, so git
+got `--abbrev 8` / `--short 8`, failed silently, and the build fell back to `unknown`. The suite
+would have passed it -- T303a accepted `unknown` without asking whether a .git exists. Caught by
+checking that `--version` carries HEAD's hash after the build.
