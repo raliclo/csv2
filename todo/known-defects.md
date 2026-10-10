@@ -13724,3 +13724,60 @@ Two cases handed `<(…)` to diff as a path; the guest has no /dev/fd, so diff e
 that as "different" and failed falsely; T56i read it as "different" and PASSED, vacuously, on the
 guest every time since it was written. `< <(…)` is unaffected (zsh reads it itself). Both now
 compare temp files and treat only status 1 as a difference.
+
+## QV. T212 把動態載入器的一行訊息算成編譯警告：SwiftPM 第一次在 guest 跑得起來時就失敗（2026-10-10，母專案換映像後回報）
+
+**發現**：母專案的 session（linuxcs-0a）在 2026-10-10 換了 guest 映像（busybox、zsh、git 更新，根檔案系統改為
+唯讀，FoundationXML 現在載得進來），請這棵樹重跑 `run_csv2_test.zsh`。結果 `20261010T074409Z`：
+
+```
+（總數行略去：T69a 不准文件引用會增長的通過數。失敗 1 項、略過 17 項。）
+FAIL  T212 … FAIL  the empty SwiftPM probe emitted a warning / 空的 SwiftPM 探測產生了警告
+  warning: 'spm_probe': …/usr/bin/swiftc: /usr/lib64/libncurses.so.6: no version information available (required by …/usr/bin/swiftc)
+```
+
+與基準 `20261006T194516Z` 逐案比對：**狀態改變的只有 T212**；其餘差異全是那之後新增的案例（T315、T316、T317）。
+
+在 guest 上親手重現（`/workspace/csv2` 所在的那台，新映像）：
+
+```console
+$ swift build -Xswiftc -warnings-as-errors      # 一個空 package
+spm_rc=0
+warning: 'p1': …/swiftc: /usr/lib64/libncurses.so.6: no version information available (required by …/swiftc)
+…
+Build complete! (1.97s)
+$ swiftc --version
+swiftc: /usr/lib64/libncurses.so.6: no version information available (required by swiftc)
+Swift version 6.3.3 (swift-6.3.3-RELEASE)
+```
+
+**那一行不是編譯器說的。** 它是 glibc 的動態載入器印在 stderr 的：Ubuntu 建的 Swift 工具鏈要 `libncurses.so.6` 帶
+符號版本，而 buildroot 建的那一份沒有。它在 10/06 與今天稍早的 console 紀錄裡就已經有了（每一次呼叫 swiftc 都印）。
+SwiftPM 編譯 `Package.swift` 時把子行程的 stderr 轉述成 `warning: '<套件>': …`，於是 `module_api.zsh` 的
+`grep -qi 'warning:'` 命中。
+
+**為什麼今天才失敗**：建置成功（rc=0）才會走到那個 grep。先前的映像上這個探測怎麼結束的，紀錄裡**沒有**——
+T212 通過時不保留 `t212.log`，所以「先前 SwiftPM 建不起空 package、整條 SPM 路徑被略過」是推論，不是量到的；
+依據是母專案今天的 commit 寫著 FoundationXML 現在才載得進來。能確定的只有：今天它建得起來，而且那則訊息被轉述了。
+
+> **同日補記：那個推論由母專案的 session 以二進位檔證實了。** `swift-build` 與 `swift-package` 的 DT_NEEDED 有
+> `libFoundationXML.so`（對 staged 工具鏈跑 `readelf`），`swiftc`／`swift-frontend` 沒有；`libFoundationXML.so` 需要
+> `libxml2.so.2`，而它在 `2777c66` 的 `prebuilt/libxml2.so.2` 之前不存在於任何 guest。所以在今天之前 SwiftPM 在
+> guest 裡連啟動都不行，**T212 的 SPM 那一半在 guest 上每一次都被略過，而每一次都回報 PASS。** 這是對方量的，
+> 不是這棵樹量的；在舊映像上 `swift build` 應以 `libxml2.so.2: cannot open shared object file` 結束。
+
+**這帶出第二件事，而它是這棵樹自己的**：T212 在 SPM 路徑被略過時回報的是 PASS，`SKIP … the SPM path is
+unchecked` 那一行只寫進一個通過後就丟掉的檔案。一條沒有被檢查的路徑，在紀錄上與檢查過的沒有分別。
+
+歸類（母專案問的三選一）：**都不是**。不是 busybox／zsh 的行為，不是唯讀根，也不是 csv2——是「SwiftPM 現在
+跑得起來」讓一則早就存在的載入器訊息第一次被一個把它當成警告的檢查讀到。
+
+Fix: `module_api.zsh` 判斷警告時排除 `no version information available` 這一種載入器訊息，並印出一行 NOTE 說
+排除了幾行（不靜默）；其他任何 `warning:` 照舊判失敗。T212 在 SPM 路徑被略過時，把那一行 SKIP 帶進套件的輸出。
+要不要讓 ncurses 帶符號版本，是映像的事，交給母專案決定。
+
+T212 counted a dynamic-loader line as a compiler warning. The loader has always complained that
+buildroot's libncurses carries no symbol versions; SwiftPM relays a child's stderr as
+`warning: '<pkg>': …`, and today -- the first image on which SwiftPM can build at all -- the
+probe's grep saw it. Not busybox/zsh, not the read-only root, not csv2. Separately, T212 reported
+PASS when the SPM path was skipped, with the SKIP line kept only in a discarded log.

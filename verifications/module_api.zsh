@@ -251,18 +251,44 @@ if ! ( cd $spm_probe && swift build -Xswiftc -warnings-as-errors > $WORK/spm_pro
     exit 0
 fi
 
-if grep -qi 'warning:' $WORK/spm_probe.log; then
+# What counts as a warning here. glibc's loader prints
+#   <prog>: <lib>: no version information available (required by <prog>)
+# on stderr when a library built without symbol versions meets a binary that
+# asks for them -- the guest's buildroot ncurses under an Ubuntu-built Swift.
+# SwiftPM relays a child's stderr as `warning: '<package>': ...`, so that line
+# arrives looking like a compiler warning. It says nothing about the code
+# being compiled, and counting it failed T212 on the first image where
+# SwiftPM could build at all. QV. It is excluded by its exact wording and
+# COUNTED OUT LOUD; every other warning still fails.
+# 這裡什麼算警告。glibc 的載入器在「沒有符號版本的函式庫」遇上「要求符號版本的執行檔」時，會在
+# stderr 印出上面那一行——guest 裡 buildroot 建的 ncurses 配上 Ubuntu 建的 Swift。SwiftPM 把子
+# 行程的 stderr 轉述成 `warning: '<套件>': ...`，於是那一行看起來像編譯警告。它對被編譯的程式碼
+# 什麼都沒說，而把它算進去，讓 T212 在第一個 SwiftPM 跑得起來的映像上失敗。QV。它以確切的字句
+# 排除，而且**說出排除了幾行**；其他任何警告照舊判失敗。
+_loader_noise='no version information available'
+real_warnings() {   # real_warnings <log>  -- prints the warnings that are about the code
+    LC_ALL=C grep -i 'warning:' "$1" | LC_ALL=C grep -v -- "$_loader_noise"
+}
+note_loader_noise() {   # note_loader_noise <log> <what>
+    local n
+    n=$(LC_ALL=C grep -i 'warning:' "$1" | LC_ALL=C grep -c -- "$_loader_noise")
+    (( n == 0 )) || print -r -- "NOTE  $2: $n relayed loader line(s) (\"$_loader_noise\") not counted as warnings / $2：有 $n 行被轉述的載入器訊息，不算警告"
+}
+
+if [[ -n $(real_warnings $WORK/spm_probe.log) ]]; then
     print -u2 -r -- "FAIL  the empty SwiftPM probe emitted a warning / 空的 SwiftPM 探測產生了警告"
-    grep -i 'warning:' $WORK/spm_probe.log >&2
+    real_warnings $WORK/spm_probe.log >&2
     exit 1
 fi
+note_loader_noise $WORK/spm_probe.log "the empty probe"
 
 if spm_build; then
-    if grep -qi 'warning:' $WORK/spm_v6.log; then
+    if [[ -n $(real_warnings $WORK/spm_v6.log) ]]; then
         print -u2 -r -- "FAIL  the SwiftPM module build emitted a warning / SwiftPM module 建置產生了警告"
-        grep -i 'warning:' $WORK/spm_v6.log >&2
+        real_warnings $WORK/spm_v6.log >&2
         exit 1
     fi
+    note_loader_noise $WORK/spm_v6.log "the module build"
     print -r -- "PASS  and it builds through SPM in Swift 6 language mode / 而它以 Swift 6 語言模式經 SPM 建得起來"
 else
     print -u2 -r -- "FAIL  the SPM build in Swift 6 language mode does not work"

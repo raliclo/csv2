@@ -12652,9 +12652,47 @@ if (( ! $+commands[swiftc] )); then
     T212_SKIPPED=1
 else
     if "$ROOT/verifications/module_api.zsh" > "$TMP/t212.log" 2>&1; then
-        ok "T212 the six-file subset builds as a module and a client can use it / 那六個檔案的子集建得成 module，而一個客戶端用得了它"
+        # Say whether the SwiftPM half ran. module_api.zsh exits 0 when SwiftPM
+        # cannot build here, and its SKIP line used to stay in a log that was
+        # thrown away on success -- so a path nobody checked read exactly like
+        # one that passed. QV.
+        # 說出 SwiftPM 那一半有沒有跑。SwiftPM 在這裡建不起來時 module_api.zsh 以 0 結束，而它那一行
+        # SKIP 原本留在一個通過後就丟掉的紀錄裡——於是一條沒人檢查的路徑，讀起來與通過的一模一樣。QV。
+        if LC_ALL=C grep -q '^SKIP .*SPM path is unchecked' "$TMP/t212.log"; then
+            _t212_spm="SwiftPM path NOT checked here / SwiftPM 那條路徑在這裡沒有檢查"
+        elif LC_ALL=C grep -q '^PASS  and it builds through SPM' "$TMP/t212.log"; then
+            _t212_spm="SwiftPM path checked / SwiftPM 那條路徑檢查過"
+            _t212_n=$(LC_ALL=C grep -c '^NOTE ' "$TMP/t212.log" | tr -d ' ')
+            (( _t212_n == 0 )) || _t212_spm+="; $_t212_n loader note(s), see QV / 有 $_t212_n 則載入器附註"
+        else
+            _t212_spm="SwiftPM path: no verdict line found / SwiftPM 那條路徑：找不到判定行"
+        fi
+        ok "T212 the six-file subset builds as a module and a client can use it / 那六個檔案的子集建得成 module，而一個客戶端用得了它 ($_t212_spm)"
     else
         bad "T212 $(tail -3 "$TMP/t212.log" | tr '\n' ' ') / 實得如上"
+    fi
+fi
+
+# T212w: what module_api.zsh counts as a warning. The loader line is excluded
+# by its wording; this shows a real warning beside it is still reported, and
+# that the exclusion is not simply "nothing matches".
+# T212w：module_api.zsh 把什麼算成警告。載入器那一行以字句排除；這裡證明它旁邊一則真的警告仍然
+# 會被回報，而且那個排除不是「什麼都不符合」。
+_t212w_fn=$TMP/t212w-fn.zsh
+LC_ALL=C sed -n -e '/^_loader_noise=/p' -e '/^real_warnings() {/,/^}/p' "$ROOT/verifications/module_api.zsh" > "$_t212w_fn"
+if (( $(LC_ALL=C grep -cE '^(_loader_noise=|real_warnings\(\) \{)' "$_t212w_fn") != 2 )); then
+    bad "T212w could not extract real_warnings from module_api.zsh / 無法從 module_api.zsh 抽出 real_warnings"
+else
+    {
+        print -r -- "warning: 'p': /x/swiftc: /usr/lib64/libncurses.so.6: no version information available (required by /x/swiftc)"
+        print -r -- "/w/Sources/P/P.swift:3:9: warning: variable 'x' was never used"
+        print -r -- "Build complete!"
+    } > "$TMP/t212w.log"
+    _t212w_got=$(zsh -c 'source $1; real_warnings $2' t212w "$_t212w_fn" "$TMP/t212w.log" 2>&1)
+    if [[ $_t212w_got == "/w/Sources/P/P.swift:3:9: warning: variable 'x' was never used" ]]; then
+        ok "T212w a real warning beside a relayed loader line is still reported, alone / 轉述的載入器訊息旁邊那則真的警告仍被回報，而且只有它"
+    else
+        bad "T212w real_warnings gave [$_t212w_got] / real_warnings 給出的不是那一則真的警告"
     fi
 fi
 
