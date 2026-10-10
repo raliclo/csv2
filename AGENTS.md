@@ -53,8 +53,13 @@ cost a `build: FAILED` on 2026-08-19 with the file sitting one `ls` away.
 This is worth stating because the instruction to run the batch file directly is
 what produced KY on 2026-09-03: the request came from the macOS session, the
 node followed it, and the dispatcher that already knew all of this was stepped
-around. If you must invoke it by hand, the form is
-`cmd.exe //c "<absolute path>"` -- but there is no reason to.
+around. If you must invoke it by hand, copy the dispatcher's line exactly --
+and there is no reason to. Do not reach for `cmd //c` or a bare `cmd /c`: each
+works under only one of the two MSYS shells this node has had, and each failed
+with exit status 0 under the other (2026-09-18 and 2026-10-07, QK). The form
+above works under both, because a shell that does not convert ignores the
+variable. That a remote command needs a working directory does not change
+this: `cd ~/proj/csv2 && ./compile_csv2.zsh`.
 
 **在 Windows 上，用 `./compile_csv2.zsh` 建置，與其他平台一樣。不要自己去叫
 `compile_csv2_win.bat`。** dispatcher 的 Windows 分支已經帶著那個呼叫所需要的兩件事，
@@ -67,7 +72,10 @@ around. If you must invoke it by hand, the form is
 
 這件事值得寫下來，是因為 **KY 的成因正是「叫人直接跑那個批次檔」這個指示**：要求來自 macOS
 的 session，節點照做了，而那個早就知道這一切的 dispatcher 被繞了過去。若非得手動呼叫不可，
-形式是 `cmd.exe //c "<絕對路徑>"`——但沒有理由那樣做。
+就**原樣照抄 dispatcher 那一行**——而沒有理由那樣做。不要改用 `cmd //c` 或裸的 `cmd /c`：
+這台節點有過兩種 MSYS shell，這兩種寫法各只在其中一種下成立，在另一種下都以退出碼 0 失敗過
+（2026-09-18 與 2026-10-07，QK）。上面那個形式在兩種下都成立，因為不做轉換的 shell 會忽略那個
+變數。遠端命令需要工作目錄也不改變這一點：`cd ~/proj/csv2 && ./compile_csv2.zsh`。
 
 **On WSL2, run the suite from the native filesystem, not from `/mnt/c`.**
 Measured on 2026-09-03, same machine and same build: on native ext4 the suite

@@ -12456,7 +12456,9 @@ git tag -d ztmp-buildid
 > ```
 >
 > `//c` 與 `/c` 各自只在其中一種 shell 下成立，而兩種都出現過。**`MSYS2_ARG_CONV_EXCL="*" cmd /c` 兩種下都
-> 成立**（不轉換的 shell 會忽略那個變數）。比斜線更重要的仍是同一句：建置後要讀 `--version`，**而且要它含
+> 成立**（不轉換的 shell 會忽略那個變數）。**而那一行早就寫在 `compile_csv2.zsh` 的 Windows 分支裡，AGENTS.md
+> 也早就說「不要自己叫批次檔，跑 `./compile_csv2.zsh`」。** 兩次更正都在教人怎麼繞過 dispatcher，而真正的
+> 答案是不要繞。AGENTS.md 那句「手動的形式是 `cmd.exe //c`」也已改成「原樣照抄 dispatcher 那一行」。比斜線更重要的仍是同一句：建置後要讀 `--version`，**而且要它含
 > HEAD 的雜湊**——這次那一行也抓到了 QT 的 `.bat` 退化（`unknown`，見 QT）。
 >
 > Corrected again, 2026-10-07: `cmd /c` now fails the same way. The remote shell runs with

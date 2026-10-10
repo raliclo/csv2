@@ -678,8 +678,8 @@ discarded there by `&&`, discarded here by an explicit redirect. What caught it 
 
 ## 3. 一條規則只套用到它成立範圍的一部分
 
-**22 次 / 9 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
-2026-09-08、2026-09-10、2026-09-18），單日最多 5 次（2026-09-03）。
+**23 次 / 10 天**（2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-06、2026-09-07、
+2026-09-08、2026-09-10、2026-09-18、2026-10-07），單日最多 5 次（2026-09-03）。
 
 *數字的權威來源是 `mistakes_counter.csv2`；這一行是它的副本。副本會漂，而那本身是第 1 類——
 2026-09-08 第 1 條的這一行就被抓到落後了八次。*
@@ -997,6 +997,26 @@ cd into the directory, use a bare filename. The practice had been found, written
 once, and never carried to the rest of its range. The shape here is harder than the usual one:
 not a wrong pattern repeated N times and fixed N-1, but a correct practice growing only where it
 was first needed. grep finds a wrong pattern; it does not find the absence of a right one.
+
+### 第二十三次（2026-10-07）：dispatcher 早就知道，而我兩次替「繞過它」寫更正
+
+QT 的四節點驗證，我對 Windows 下的遠端命令是 `cmd /c ".\\compile_csv2_win.bat"`——照 09-18 我自己寫在 QK 底下的
+那則更正抄的。在 MINGW64 的路徑轉換下 `/c` 變成 `C:/`，批次檔沒有執行，rc=0。我接著寫了**第二則**更正，說
+「`MSYS2_ARG_CONV_EXCL="*" cmd /c` 兩種 shell 下都成立」。
+
+那一行一字不差地寫在 `compile_csv2.zsh` 的 Windows 分支裡，從 KY 之後就在；AGENTS.md 用粗體寫著「不要自己叫
+`compile_csv2_win.bat`，跑 `./compile_csv2.zsh`」，並說明 KY 的成因**正是**「叫節點直接跑批次檔」。兩則更正都
+在改進繞路的方式，沒有一則說「不要繞」。而 AGENTS.md 自己的最後一句（「手動的形式是 `cmd.exe //c`」）也是
+只在一種 shell 下成立的寫法——規則對了，它附帶的例外寫法沒跟上。
+
+是使用者要求「第 3 項也做」時，去搜尋誰在說明這個呼叫，才看到的。現在 AGENTS.md 的例外改成「原樣照抄
+dispatcher 那一行」，遠端命令一律 `cd ~/proj/csv2 && ./compile_csv2.zsh`，已在 Windows 上驗證會建出新的執行檔。
+
+Twenty-third: I built on Windows with a hand-written `cmd /c`, copied from my own correction of
+09-18, and when it built nothing I wrote a second correction improving the bypass -- while the
+dispatcher had carried the working line since KY, and AGENTS.md said in bold not to invoke the
+batch file at all. AGENTS.md's own fallback (`cmd.exe //c`) was shell-dependent too. Found only
+when searching for every place that explains the call.
 
 ---
 
