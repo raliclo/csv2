@@ -888,12 +888,13 @@ tag `v0.1.4` 指向 `7ce19e1d`，已推送。**沒有任何東西從它發布過
 T212 因此在 `7ce19e1d` 上失敗（QV，測試的缺陷，已於 `0d679b8` 修正）。封存必須在 tag 上建、而且那個 commit 的套件
 要通過，所以 tag 要移到含 QV 修正的 commit；`7ce19e1d` 上建的 macOS 封存屆時作廢重建。**刻意還不移**：WSL 與
 Windows 還沒預演，等它們預演過再移，才只需要移一次。移之前照例先確認 `gh release view v0.1.4` 仍查不到。
-QV 的修正在 macOS 上通過；在 guest 上**還沒驗證**——重跑時母專案正在重建 workspace 映像（`e2fsck rc=8`），要等
-它通知映像可用。
+QV 的修正在 macOS 與 guest 上都驗證過了：`run_csv2_test.zsh` 在新映像上 0 FAIL（紀錄 `20261010T083932Z`，報告
+27 項全過），T212 那一行寫著「SwiftPM path checked; 2 loader note(s)」——那是它的 SwiftPM 那一半第一次在 guest 裡
+真的執行。（第一次重跑停在 `e2fsck rc=8`，是母專案當時正在重建 workspace 映像，與 csv2 無關。）
 
 剩下的步驟，依序：
 
-0. 等母專案通知後，`run_csv2_test.zsh` 在新映像上要 0 FAIL；WSL 與 Windows 回來後在 develop 上預演。都通過才把
+0. WSL 與 Windows 回來後在 develop 上預演（guest 已過）。都通過才把
    tag 移到那個 commit，macOS 重建封存。
 1. guest：`git fetch --tags && git checkout --detach v0.1.4`，`./compile_csv2.zsh`，確認 `--version` 是
    `csv2 0.1.4 (v0.1.4 / 7ce19e1d)`，跑套件，`./release.zsh`。
