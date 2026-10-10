@@ -871,6 +871,36 @@ after that first one was sound and faithfully inherited a false premise. The
 lesson is one sentence: ask the machine, not the file that describes it. It was
 booted at the time.
 
+## v0.1.4：tag 已打，**尚未發布**（2026-10-10）
+
+tag `v0.1.4` 指向 `7ce19e1d`，已推送。**沒有任何東西從它發布過**（`gh release view v0.1.4` 查不到），所以它
+還可以移動；一旦發布就不行。使用者的決定：先打 tag，四份封存齊了才發布，不出只有兩個平台的版本——
+`publish.zsh` 會把 Formula 的版本改成 0.1.4，而 linux-x86_64 那一段的網址若沒有對應封存會留在 0.1.3。
+
+| 平台 | 在 tag 上 | 狀態 |
+|---|---|---|
+| macOS arm64 | `v0.1.4 / 7ce19e1d`，1446/0/1 | **封存已建**，`dist/` 與 `~/backup/csv2-release-0.1.4/` 各一份，sha256 `175c5cd1…` |
+| Linux aarch64（guest） | 未建 | 預演已過（未打 tag 的 `7ce19e1d`：clone 內 1434/0/5、`release.zsh` 驗證通過；`run_csv2_test.zsh` 1391/0/17、T47 27 項全過）。要在 tag 上重建時，母專案的 session 正在重建 VM 映像，VM 是關的 |
+| Linux x86_64（WSL） | 未建，**也沒預演過** | 主機 `192.168.213.118` 沒有回應；使用者說先跳過 |
+| Windows x86_64 | 未建，**也沒預演過** | 同上 |
+
+剩下的步驟，依序：
+
+1. guest：`git fetch --tags && git checkout --detach v0.1.4`，`./compile_csv2.zsh`，確認 `--version` 是
+   `csv2 0.1.4 (v0.1.4 / 7ce19e1d)`，跑套件，`./release.zsh`。
+2. WSL 與 Windows：同上（Windows 一律 `./compile_csv2.zsh`，見 AGENTS.md）。**這兩台沒有預演過**——若在那裡
+   發現缺陷，tag 要移動，macOS 與 guest 的封存作廢重建。移動前先確認 release 仍查不到。
+3. 母專案：`helper/collect_release.zsh csv2 0.1.4`，備份到 `~/backup/csv2-release-0.1.4/`。
+4. `./publish.zsh 0.1.4`（預演），看過再 `--publish`。
+5. 母專案：`helper/install_release.zsh csv2 0.1.4`，退出碼 0 才算結束。
+6. 把這一節改寫成出貨紀錄。
+
+v0.1.4 is tagged at 7ce19e1d and NOT published; nothing has been released from the tag, so it may
+still move. The user decided to publish only when all four archives exist. macOS is built and
+backed up. The guest was rehearsed untagged and must be rebuilt at the tag (its VM was down for
+an image rebuild by the mother session). WSL and Windows are neither built nor rehearsed: their
+host was unreachable.
+
 ## ~~v0.1.3~~ 已出貨
 
 ### 2026-10-07：v0.1.3 出了，四個平台，四個節點的安裝都升級了
