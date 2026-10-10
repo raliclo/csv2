@@ -884,8 +884,17 @@ tag `v0.1.4` 指向 `7ce19e1d`，已推送。**沒有任何東西從它發布過
 | Linux x86_64（WSL） | 未建，**也沒預演過** | 主機 `192.168.213.118` 沒有回應；使用者說先跳過 |
 | Windows x86_64 | 未建，**也沒預演過** | 同上 |
 
+**2026-10-10 稍晚：tag 必須移動一次，還沒移。** 母專案同日換了 guest 映像，SwiftPM 第一次在 guest 裡跑得起來，
+T212 因此在 `7ce19e1d` 上失敗（QV，測試的缺陷，已於 `0d679b8` 修正）。封存必須在 tag 上建、而且那個 commit 的套件
+要通過，所以 tag 要移到含 QV 修正的 commit；`7ce19e1d` 上建的 macOS 封存屆時作廢重建。**刻意還不移**：WSL 與
+Windows 還沒預演，等它們預演過再移，才只需要移一次。移之前照例先確認 `gh release view v0.1.4` 仍查不到。
+QV 的修正在 macOS 上通過；在 guest 上**還沒驗證**——重跑時母專案正在重建 workspace 映像（`e2fsck rc=8`），要等
+它通知映像可用。
+
 剩下的步驟，依序：
 
+0. 等母專案通知後，`run_csv2_test.zsh` 在新映像上要 0 FAIL；WSL 與 Windows 回來後在 develop 上預演。都通過才把
+   tag 移到那個 commit，macOS 重建封存。
 1. guest：`git fetch --tags && git checkout --detach v0.1.4`，`./compile_csv2.zsh`，確認 `--version` 是
    `csv2 0.1.4 (v0.1.4 / 7ce19e1d)`，跑套件，`./release.zsh`。
 2. WSL 與 Windows：同上（Windows 一律 `./compile_csv2.zsh`，見 AGENTS.md）。**這兩台沒有預演過**——若在那裡
