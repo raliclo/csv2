@@ -13681,3 +13681,46 @@ QT's own fix broke the Windows build id: inside `for /f` an unescaped `=` become
 got `--abbrev 8` / `--short 8`, failed silently, and the build fell back to `unknown`. The suite
 would have passed it -- T303a accepted `unknown` without asking whether a .git exists. Caught by
 checking that `--version` carries HEAD's hash after the build.
+
+## QU. 兩個案例把 `<(…)` 當路徑交給 `diff`，而 guest 沒有 `/dev/fd`：一個假失敗、一個空過（2026-10-10 發現於 v0.1.4 預演）
+
+**發現**：v0.1.4 出貨前在三個遠端節點不打 tag 預演。guest 的 `/workspace/csv2`（完整的 git clone，不是
+`run_csv2_test.zsh` 的 payload）在 `9612d1c7` 上：
+
+```
+通過 1430   失敗 2   略過 5
+FAIL  T308b csv2.rb: the rewrite changed prose:  / 改寫動到了散文
+FAIL  T308b csv2.json: the rewrite changed prose:  / 改寫動到了散文
+```
+
+失敗訊息裡該印 diff 的地方是空的。在 guest 上親手重現：
+
+```console
+$ diff <(echo a) <(echo a); echo rc=$?
+diff: can't stat '/dev/fd/11': No such file or directory
+rc=2
+$ ls /dev/fd
+ls: /dev/fd: No such file or directory
+```
+
+zsh 把 `<(…)` 展開成 `/dev/fd/N` 這個**路徑**，而 guest 的 devtmpfs 沒有 `/dev/fd` 這個連結。`< <(…)`（由 zsh
+自己讀）不受影響——T232、T239、T315 在 guest 上都真的讀到了資料，逐一看過紀錄。受影響的是把那個路徑交給
+外部程式的兩處，而它們壞的方向相反：
+
+| 案例 | 寫法 | guest 上的結果 |
+|---|---|---|
+| T308b | `if diff -q <(a) <(b); then ok; else bad` | rc=2 被當成「不同」→ **假失敗** |
+| T56i | `if diff -q <(--en) <(無旗標); then bad; else ok` | rc=2 被當成「不同」→ **空過**，從這個案例存在起，guest 上每一次都是 |
+
+T56i 是比較糟的那個：它在 guest 上從來沒有量過 `--en`，而每一次都回報 PASS。T308b 先前沒有失敗，是因為 payload
+裡沒有 `publish.zsh`，整段被略過；這次是它第一次在 guest 的完整 clone 上執行。
+
+兩者是同一個缺陷：**`diff` 的退出碼有三個值（0 相同、1 不同、2 出錯），而兩個案例都只分成兩類。**
+
+Fix: 兩處都先把兩邊寫進 `$TMP` 的檔案再比，並且只有 rc=1 才算「不同」，rc≥2 一律判失敗並說出來。T317 掃描
+套件本身：不得再把 `<(…)` 交給 `diff`／`cmp`／`comm`，附負控組。
+
+Two cases handed `<(…)` to diff as a path; the guest has no /dev/fd, so diff exits 2. T308b read
+that as "different" and failed falsely; T56i read it as "different" and PASSED, vacuously, on the
+guest every time since it was written. `< <(…)` is unaffected (zsh reads it itself). Both now
+compare temp files and treat only status 1 as a difference.

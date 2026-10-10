@@ -2003,11 +2003,23 @@ assert_eq "$n" "1" "T56h header hits are addressed 0a / 0b, not both 0 / 標頭�
 
 # 6. The lighter ones, all silent at rc=0.
 # 6. 較輕的幾項，同樣都在 rc=0 下靜默。
-if diff -q <("$CSV2" -head 1 -t -md --en -i "$TMP/idx.csv2" 2>/dev/null) \
-           <("$CSV2" -head 1 -t -md -i "$TMP/idx.csv2" 2>/dev/null) >/dev/null 2>&1; then
+# Files, not `diff <(..) <(..)`: the guest has no /dev/fd, diff exited 2, and
+# this case read that as "they differ" and passed there without ever having
+# compared anything. Only status 1 means different. QU.
+# 用檔案，不用 `diff <(..) <(..)`：guest 沒有 /dev/fd，diff 以 2 結束，而這個案例把它讀成
+# 「兩者不同」，於是在那裡什麼都沒比就通過了。只有退出碼 1 才代表不同。QU。
+"$CSV2" -head 1 -t -md --en -i "$TMP/idx.csv2" > "$TMP/t56i_en.out" 2>/dev/null
+"$CSV2" -head 1 -t -md      -i "$TMP/idx.csv2" > "$TMP/t56i_no.out" 2>/dev/null
+diff -q "$TMP/t56i_en.out" "$TMP/t56i_no.out" >/dev/null 2>&1
+_t56i_rc=$?
+if [[ ! -s $TMP/t56i_en.out || ! -s $TMP/t56i_no.out ]]; then
+    bad "T56i one side printed nothing, so there is nothing to compare / 有一邊什麼都沒印，沒有東西可比"
+elif (( _t56i_rc == 1 )); then
+    ok "T56i --en selects the English title only / --en 只取英文標題"
+elif (( _t56i_rc == 0 )); then
     bad "T56i --en is byte-identical to giving no flag, so it does nothing / --en 與不給旗標逐位元相同，等於什麼都沒做"
 else
-    ok "T56i --en selects the English title only / --en 只取英文標題"
+    bad "T56i diff itself failed (status $_t56i_rc); nothing was compared / diff 本身失敗（退出碼 $_t56i_rc），什麼都沒比"
 fi
 rm -f "$TMP/t56.log"
 "$CSV2" -r -i "$PKG" -log "$TMP/t56.log" >/dev/null 2>&1
@@ -18517,11 +18529,22 @@ for _t308_pair in "Formula/csv2.rb rb" "scoop/csv2.json json"; do
     cp "$ROOT/$_t308_src" "$_t308_orig"
     cp "$ROOT/$_t308_src" "$_t308_new"
     _t308_rewrite "$_t308_new"
-    if diff -q <(_t308_prose_of "$_t308_orig" "$_t308_kind") \
-               <(_t308_prose_of "$_t308_new"  "$_t308_kind") >/dev/null 2>&1; then
+    # Files, not `diff <(..) <(..)`: with no /dev/fd (the guest) diff exits 2,
+    # and this reported "the rewrite changed prose" with an empty diff. QU.
+    # 用檔案，不用 `diff <(..) <(..)`：沒有 /dev/fd 時（guest）diff 以 2 結束，而這裡回報
+    # 「改寫動到了散文」，附的 diff 是空的。QU。
+    _t308_prose_of "$_t308_orig" "$_t308_kind" > "$TMP/t308-prose-orig"
+    _t308_prose_of "$_t308_new"  "$_t308_kind" > "$TMP/t308-prose-new"
+    diff "$TMP/t308-prose-orig" "$TMP/t308-prose-new" > "$TMP/t308-prose.diff" 2>&1
+    _t308_drc=$?
+    if [[ ! -s $TMP/t308-prose-orig ]]; then
+        bad "T308b ${_t308_src:t}: no prose lines were extracted, so nothing was compared / 沒有抽出任何散文行，什麼都沒比"
+    elif (( _t308_drc == 0 )); then
         ok "T308b ${_t308_src:t}: every prose line survives the rewrite byte for byte / 每一行散文逐位元存活"
+    elif (( _t308_drc == 1 )); then
+        bad "T308b ${_t308_src:t}: the rewrite changed prose: $(head -4 "$TMP/t308-prose.diff") / 改寫動到了散文"
     else
-        bad "T308b ${_t308_src:t}: the rewrite changed prose: $(diff <(_t308_prose_of "$_t308_orig" "$_t308_kind") <(_t308_prose_of "$_t308_new" "$_t308_kind") | head -4) / 改寫動到了散文"
+        bad "T308b ${_t308_src:t}: diff itself failed (status $_t308_drc): $(head -2 "$TMP/t308-prose.diff") / diff 本身失敗"
     fi
     # And it must have done SOMETHING. A rewrite that silently changed nothing
     # also leaves the prose untouched, which is the passing answer above.
@@ -19232,6 +19255,38 @@ if command -v git >/dev/null 2>&1 && [[ -r $ROOT/build_id.zsh ]]; then
 else
     T316_SKIPPED=1
     skipt "T316a/b the build id's hash is 8 characters / build id 的雜湊是 8 碼 (no git or no build_id.zsh here, as in the guest payload / 這裡沒有 git 或 build_id.zsh，guest 的 payload 就是這樣)"
+fi
+
+echo
+echo "--- T317: no case hands a process substitution to diff, cmp or comm / T317：沒有案例把行程替換交給 diff、cmp 或 comm ---"
+# zsh expands `<(cmd)` to the PATH /dev/fd/N. The guest's /dev has no fd link,
+# so an external program given that path exits with an error -- and a case
+# that sorts diff's status into two classes reads the error as "different".
+# T308b failed falsely that way and T56i passed vacuously, on the guest, every
+# run since it was written (QU). `< <(cmd)` is not this: zsh reads that itself.
+# zsh 把 `<(cmd)` 展開成 /dev/fd/N 這個**路徑**。guest 的 /dev 沒有 fd 連結，於是拿到那個路徑的
+# 外部程式會以錯誤結束——而一個把 diff 的退出碼只分成兩類的案例，會把錯誤讀成「不同」。T308b
+# 因此假失敗，T56i 因此在 guest 上從寫下那天起每一次都空過（QU）。`< <(cmd)` 不是這個：那是 zsh
+# 自己讀的。
+_t317_scan() {   # _t317_scan <file>  -- prints offending line numbers
+    LC_ALL=C grep -nE '(^|[^[:alnum:]_])(diff|cmp|comm)([[:space:]]+-[[:alnum:]-]+)*[[:space:]]+<[(]' "$1" |
+        LC_ALL=C grep -vE '^[0-9]+:[[:space:]]*#' | LC_ALL=C cut -d: -f1 | tr '\n' ' '
+}
+_t317_hits=$(_t317_scan "$0")
+if [[ -z ${_t317_hits// /} ]]; then
+    ok "T317a the suite gives diff, cmp and comm files, not /dev/fd paths / 套件交給 diff、cmp、comm 的是檔案，不是 /dev/fd 路徑"
+else
+    bad "T317a process substitution handed to diff/cmp/comm at line(s) $_t317_hits/ 這幾行把行程替換交給了 diff／cmp／comm"
+fi
+# The planted line is assembled from two pieces so that this file does not
+# contain the shape it scans itself for.
+# 種下的那一行由兩段拼起來，這個檔案本身才不會含有它掃描自己時要找的形狀。
+_t317_ps='<(one) <(two)'
+print -r -- "if diff -q $_t317_ps >/dev/null; then :; fi" > "$TMP/t317.zsh"
+if [[ -n ${$(_t317_scan "$TMP/t317.zsh")// /} ]]; then
+    ok "T317b and the scan catches one when it is there / 而那個掃描在它存在時抓得到"
+else
+    bad "T317b the scan missed the planted line, so T317a proves nothing / 掃描漏掉了種下的那一行，T317a 什麼都沒證明"
 fi
 
 echo
