@@ -386,18 +386,7 @@ final class CSVIndex {
             announceDiscard("index \(p): version mismatch, ignoring and scanning", for: p, reason: "written by a different INDEX_VERSION", reasonZh: "由不同的 INDEX_VERSION 寫出")
             return nil
         }
-        let flags = getU32(b, 12)
-        let stride = Int(getU64(b, 16))
-        guard stride > 0 else { return nil }
-        let dataSize = getU64(b, 24)
-        let mtimeSec = Int64(bitPattern: getU64(b, 32))
-        let mtimeNsec = Int64(bitPattern: getU64(b, 40))
-        let headEnd = getU64(b, 48)
-        let records = getU64(b, 56)
-        let hashHead = Array(b[64..<72])
-        let hashTail = Array(b[72..<80])
-
-        // The stamp checks above all describe the DATA file. Nothing described
+        // The stamp checks all describe the DATA file. Nothing described
         // the index itself, so a flipped bit in an offset passed every one of
         // them: the stamp still matched, the entry count still matched, and the
         // wrong offset was used. On 2026-08-18 a reader corrupted a single byte
@@ -406,7 +395,7 @@ final class CSVIndex {
         // does not consult the index. That is the case the design calls "far
         // worse than no index", produced by the one thing nothing was checking.
         //
-        // 上面那些戳記檢查描述的全是「資料檔」。沒有任何東西描述索引本身，因此偏移量裡
+        // 那些戳記檢查描述的全是「資料檔」。沒有任何東西描述索引本身，因此偏移量裡
         // 一個翻轉的位元能通過其中每一項：戳記仍然相符、項目數仍然相符，於是那個錯誤的
         // 偏移量被採用了。2026-08-18，一位讀者改動了一個位元組，`-mid 1,1` 便回傳了一段
         // 從欄位中間開始的碎片，並以「一筆紀錄」的身分呈現，rc=0——而同一個檔案的 `-r`
@@ -416,6 +405,25 @@ final class CSVIndex {
             announceDiscard("index \(p): checksum mismatch, ignoring and scanning", for: p, reason: "its own checksum does not match (damaged)", reasonZh: "它自己的檢查碼不符（已損毀）")
             return nil
         }
+
+        // Check integrity before converting untrusted integers; a valid checksum
+        // still does not guarantee that the values fit this process's Int.
+        // 先驗證完整性再轉換不可信整數；檢查碼有效仍不保證數值可放進本行程的 Int。
+        guard let stride = Int(exactly: getU64(b, 16)), stride > 0,
+              let recordCount = Int(exactly: getU64(b, 56)) else {
+            announceDiscard("index \(p): invalid integer range, ignoring and scanning", for: p,
+                            reason: "stride or record count is out of range",
+                            reasonZh: "stride 或紀錄數超出範圍")
+            return nil
+        }
+        let flags = getU32(b, 12)
+        let dataSize = getU64(b, 24)
+        let mtimeSec = Int64(bitPattern: getU64(b, 32))
+        let mtimeNsec = Int64(bitPattern: getU64(b, 40))
+        let headEnd = getU64(b, 48)
+        let records = UInt64(recordCount)
+        let hashHead = Array(b[64..<72])
+        let hashTail = Array(b[72..<80])
 
         guard let now = FileStamp.of(path: dataPath) else { return nil }
         guard now.size == dataSize, now.mtimeSec == mtimeSec, now.mtimeNsec == mtimeNsec,
@@ -436,7 +444,7 @@ final class CSVIndex {
             return nil
         }
 
-        let want = (Int(records) + stride - 1) / stride
+        let want = recordCount / stride + (recordCount % stride == 0 ? 0 : 1)
         let have = (b.count - INDEX_HEADER_SIZE) / 16
         guard have >= want else {
             // Truncated. Same treatment: discard, scan. Not an error.

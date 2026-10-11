@@ -13781,3 +13781,46 @@ buildroot's libncurses carries no symbol versions; SwiftPM relays a child's stde
 `warning: '<pkg>': …`, and today -- the first image on which SwiftPM can build at all -- the
 probe's grep saw it. Not busybox/zsh, not the read-only root, not csv2. Separately, T212 reported
 PASS when the SPM path was skipped, with the SKIP line kept only in a discarded log.
+
+## QW. 平行搜尋把超過 64 KiB 的最後一列標頭當成資料（2026-10-12 修正，T318）
+
+最後一列標頭長 70,000 位元組時，單執行緒搜尋回報 `1:1`，平行搜尋卻回報 `2:1`，兩者皆以 0
+結束。`runParallelSearch` 從最後一列標頭起點只重讀一次 64 KiB；找不到 LF 時仍用原起點切塊。
+修正為使用 `RecordParser` 停止時的精確已讀位移，包含紀錄終止符。T318 比對 LF 與 CRLF 的超長
+引號標頭下，單執行緒與平行 JSON 搜尋的完整輸出、首筆資料位址與總筆數，並確認平行路徑確實執行。
+
+Parallel search counted a header longer than 64 KiB as data and shifted record addresses by one.
+It now uses the parser's exact consumed position. T318 compares long quoted LF/CRLF headers,
+addresses and counts, and verifies that the parallel path ran on multi-core hosts.
+
+## QX. Markdown 就地編輯取代 symlink 而未改到目標（2026-10-12 修正，T320）
+
+對 `link.md`（指向 `target.md`）執行 `-update 1:2 changed -md -t --in-place`，原本會以 0 結束，
+把連結替換成一般檔案，而 `target.md` 保持未變。驗證階段已將 `o.output` 解析成目標，Markdown
+驅動路徑卻仍寫入 `input`。現在使用已解析的輸出目標；T320 確認連結保留、目標更新，並且
+`--backup` 保留目標的原始位元組。
+
+Markdown in-place edits used the input spelling rather than the resolved output and replaced a
+symlink while leaving its target unchanged. T320 checks the link, edited target and backup bytes.
+
+## QY. 損毀索引在檢查碼驗證前觸發整數轉換 trap（2026-10-12 修正，T319）
+
+將 sidecar 位移 16 的 stride 八個位元組寫成 `FF`，`--verify-index` 原本以 133 結束：程式在驗證
+檢查碼之前先將 `UInt64` 轉成 `Int`。現在先驗證檢查碼，再用可失敗的整數轉換檢查 stride 與
+紀錄數；格點數的向上除法也改為不會因加法溢位的形式。T319 涵蓋損毀檢查碼、檢查碼有效但
+超出範圍的 stride／紀錄數、正常掃描後備路徑，以及接近 `Int.max` 的合法 stride。
+
+Corrupt stride metadata trapped before checksum validation. Integrity is now checked before
+bounded integer conversion, and ceiling division avoids overflow. T319 exercises both damaged
+and checksum-valid out-of-range metadata, fallback reads and a large valid stride.
+
+## QZ. 檢視器循序讀取 stdout／stderr 造成雙管線死鎖（2026-10-12 修正，檢視器 T94）
+
+兩個各長 100,000 位元組的重複欄名，讓 csv2 產生約 200 KB 的 JSON 錯誤。直接執行正常以 1
+結束，但檢視器先等 stdout EOF 才讀 stderr，子行程在 stderr 填滿後停止，兩邊互相等待。
+現在離開 main actor 後，同時讀取兩條管線，再等待子行程。檢視器 T94 使用真實 csv2 驗證大型
+錯誤及退出碼，並驗證大型 stdout 仍完整讀取；逾時會明確判失敗。
+
+The viewer drained stdout before stderr and deadlocked on a real csv2 error larger than the pipe.
+It now drains both concurrently before waiting. Viewer T94 checks large stderr errors with a
+timeout and complete large stdout using the real binary.

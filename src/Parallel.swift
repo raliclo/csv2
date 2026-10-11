@@ -496,20 +496,14 @@ func runParallelSearch(_ o: Options) throws {
         let src = try ByteSource(path: path, chunkSize: 1 << 16)
         defer { src.close() }
         var n = 0
-        let p = RecordParser(format: plan.format) { r in
+        let p = RecordParser(format: plan.format) { _ in
             n += 1
-            if n == plan.headerRows { headEnd = UInt64(r.offset) + 0 }
             return n < plan.headerRows
         }
         while n < plan.headerRows, let c = src.next() { try p.feed(c) }
-        // r.offset is the START of the last header row; advance past its line.
-        // r.offset 是最後一列標頭的起點，往後推過它那一行。
-        if let h = FileHandle(forReadingAtPath: path) {
-            defer { try? h.close() }
-            h.seek(toFileOffset: headEnd)
-            let d = [UInt8](h.readData(ofLength: 1 << 16))
-            if let nl = d.firstIndex(of: BYTE_LF) { headEnd += UInt64(nl) + 1 }
-        }
+        // Use the parser's end position even when a header spans many read chunks.
+        // 即使標頭跨越多個讀取區塊，也使用解析器的結束位置。
+        headEnd = UInt64(p.bytesConsumed)
     }
 
     let spans = try planChunks(path: path, from: headEnd, size: st.size)

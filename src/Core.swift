@@ -522,6 +522,9 @@ public final class RecordParser {
     private var recordDirty = false
 
     private var offset = 0
+    // Exact consumed position, including the record terminator when the sink stops.
+    // sink 停止時的精確已讀位置，包含紀錄終止符。
+    var bytesConsumed: Int { offset }
     private var line = 1
     private var recOffset = 0
     private var recLine = 1

@@ -19328,6 +19328,93 @@ else
 fi
 
 echo
+# T318 -- header boundaries come from the parser, including long quoted CRLF rows.
+# T318 —— 標頭邊界取自解析器，包含超長的引號 CRLF 標頭列。
+for _t318_ending in lf crlf; do
+    awk -v crlf="$_t318_ending" 'BEGIN {
+        end = crlf == "crlf" ? "\r\n" : "\n"
+        printf "name%s", end
+        for (i = 0; i < 70000; i++) title = title "z"
+        printf "\"%s\"%sneedle%sother%s", title, end, end, end
+    }' > "$TMP/t318.csv2"
+    CSV2_PARALLEL_MIN_BYTES=999999999 "$CSV2" -contains needle -i "$TMP/t318.csv2" \
+        --json > "$TMP/t318_single" 2> "$TMP/t318_single.err"
+    _t318_single_rc=$?
+    CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=1024 "$CSV2" \
+        -contains needle -i "$TMP/t318.csv2" --json -debug \
+        > "$TMP/t318_parallel" 2> "$TMP/t318_debug"
+    _t318_parallel_rc=$?
+    if (( _t318_single_rc == 0 && _t318_parallel_rc == 0 )); then
+        assert_same "$TMP/t318_single" "$TMP/t318_parallel" \
+            "T318a/$_t318_ending long headers give identical search addresses and counts / 超長標頭的搜尋位址與筆數一致"
+        assert_contains "$(cat "$TMP/t318_parallel")" '"record":1' \
+            "T318b/$_t318_ending the first data record is still record 1 / 首筆資料仍是第 1 筆"
+        if [[ ${workers:-1} -ge 2 ]]; then
+            assert_contains "$(cat "$TMP/t318_debug")" 'parallel:' \
+                "T318c/$_t318_ending the comparison exercised parallel search / 比對確實執行平行搜尋"
+        else
+            ok "T318c/$_t318_ending single-core fallback checked / 已檢查單核後備路徑"
+        fi
+    else
+        bad "T318/$_t318_ending search failed: single=$_t318_single_rc parallel=$_t318_parallel_rc / 搜尋失敗"
+    fi
+done
+
+# T319 -- damaged integer metadata must be discarded before it can trap.
+# T319 —— 損毀的整數中繼資料必須被丟棄，不可造成 trap。
+printf 'a,b\nx,y\nz,w\n' > "$TMP/t319.csv"
+CSV2_INDEX_MIN_BYTES=0 "$CSV2" --build-index -i "$TMP/t319.csv" >/dev/null
+cp "$TMP/t319.csv.index" "$TMP/t319.index.orig"
+printf '\377\377\377\377\377\377\377\377' | \
+    dd of="$TMP/t319.csv.index" bs=1 seek=16 conv=notrunc 2>/dev/null
+CSV2_INDEX_MIN_BYTES=0 "$CSV2" --verify-index -i "$TMP/t319.csv" \
+    > "$TMP/t319.out" 2> "$TMP/t319.err"
+assert_eq "$?" 1 "T319a corrupted stride is refused with rc=1, not a trap / 損毀 stride 以 1 拒絕，不造成 trap"
+assert_contains "$(cat "$TMP/t319.err")" 'checksum' \
+    "T319b integrity is checked before converting the stride / 轉換 stride 前先驗證完整性"
+CSV2_INDEX_MIN_BYTES=0 "$CSV2" -mid 1,1 -i "$TMP/t319.csv" > "$TMP/t319.read"
+assert_eq "$?" 0 "T319c a corrupt index falls back to a successful scan / 損毀索引退回成功的掃描"
+assert_eq "$(cat "$TMP/t319.read")" 'x,y' \
+    "T319d fallback returns the correct data / 後備路徑回傳正確資料"
+
+# Recompute the checksum to exercise range checks independently of integrity.
+# 重算檢查碼，讓範圍檢查獨立於完整性檢查被執行。
+_t319_patch() {
+    local f=$1 off=$2 value=$3
+    local -a b
+    b=(${=$(od -A n -v -t u1 < "$f")})
+    local -i n=${#b} i h byte
+    [[ $n == $(wc -c < "$f" | tr -d ' ') ]] || return 1
+    for i in {0..7}; do b[off+i+1]=$(( (value >> (8*i)) & 255 )); done
+    h=$(( (0xcbf29ce4 << 32) | 0x84222325 ))
+    for (( i = 0; i < n; i++ )); do
+        byte=${b[i+1]}
+        (( i >= 80 && i < 88 )) && byte=0
+        h=$(( (h ^ byte) * 0x1000000001b3 ))
+    done
+    for i in {0..7}; do b[81+i]=$(( (h >> (8*i)) & 255 )); done
+    printf -- "$(printf '\\x%02x' $b)" > "$f"
+}
+for _t319_offset in 16 56; do
+    cp "$TMP/t319.index.orig" "$TMP/t319.csv.index"
+    if _t319_patch "$TMP/t319.csv.index" $_t319_offset -1; then
+        CSV2_INDEX_MIN_BYTES=0 "$CSV2" --verify-index -i "$TMP/t319.csv" \
+            > "$TMP/t319.out" 2> "$TMP/t319.err"
+        assert_eq "$?" 1 "T319e/$_t319_offset oversized integer with valid checksum is refused / 檢查碼有效的超大整數被拒絕"
+        assert_contains "$(cat "$TMP/t319.err")" 'out of range' \
+            "T319f/$_t319_offset the refusal identifies the range / 拒絕指出範圍問題"
+    else
+        bad "T319/$_t319_offset could not construct the index fixture / 無法建立索引 fixture"
+    fi
+done
+cp "$TMP/t319.index.orig" "$TMP/t319.csv.index"
+if _t319_patch "$TMP/t319.csv.index" 16 9223372036854775807; then
+    assert_succeeds "T319g ceiling division handles a large valid stride without overflow / 大型合法 stride 的向上除法不溢位" -- \
+        "$CSV2" --verify-index -i "$TMP/t319.csv"
+else
+    bad "T319g could not construct the large-stride fixture / 無法建立大型 stride fixture"
+fi
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -19759,6 +19846,22 @@ if ln -s "$TMP/t229_target.csv" "$TMP/t229_link.csv" 2>/dev/null; then
     else
         bad "T229e the input symlink was replaced / 輸入 symlink 被替換"
     fi
+    # T320 -- the Markdown driver must use the same resolved output as CSV edits.
+    # T320 —— Markdown 驅動路徑須使用與 CSV 編輯相同的已解析輸出目標。
+    printf '| a | b |\n|---|---|\n| x | y |\n' > "$TMP/t320_target.md"
+    cp "$TMP/t320_target.md" "$TMP/t320_before.md"
+    ln -s "$TMP/t320_target.md" "$TMP/t320_link.md"
+    assert_succeeds "T320a Markdown in-place edit through a symlink succeeds / Markdown 經 symlink 就地編輯成功" -- \
+        "$CSV2" -update 1:2 changed -md -t -i "$TMP/t320_link.md" --in-place --backup
+    if [[ -L "$TMP/t320_link.md" ]]; then
+        ok "T320b the Markdown symlink survives / Markdown symlink 仍存在"
+    else
+        bad "T320b the Markdown symlink was replaced / Markdown symlink 被替換"
+    fi
+    assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t320_target.md")" changed \
+        "T320c the target receives the edit / 目標收到編輯"
+    assert_same "$TMP/t320_before.md" "$TMP/t320_link.md.bak" \
+        "T320d the backup contains the target's original bytes / 備份包含目標原始位元組"
 else
     T229_SKIPPED=1
     skipt "T229 symlink backup semantics / symlink 備份語意 (symlinks unavailable / 無法建立 symlink)"

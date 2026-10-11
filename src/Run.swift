@@ -200,7 +200,7 @@ func runMarkdownEdit(_ o: Options) throws {
     var combined = Array(oldLines[..<start]) + newLines + Array(oldLines[end...])
     while combined.last == "" { combined.removeLast() }
     if o.backup { try makeInPlaceBackup(input) }
-    let sink = try ByteSink(atomicPath: input)
+    let sink = try ByteSink(atomicPath: o.output ?? resolved(input))
     sink.write(Array((combined.joined(separator: "\n") + "\n").utf8))
     try sink.close()
 }

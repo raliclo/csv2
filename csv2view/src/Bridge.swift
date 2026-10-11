@@ -139,7 +139,7 @@ struct CSV2Bridge: Sendable {
     }
 
     func run(_ args: [String]) async -> QueryResult {
-        await withCheckedContinuation { (k: CheckedContinuation<QueryResult, Never>) in
+        await Task.detached(priority: .userInitiated) {
             // Off the main actor. The checkbox for this phase names it, and the
             // reason is not politeness: `-count` on a file with no sidecar is
             // O(n), and a scroll that blocks the main actor for a full scan is
@@ -147,38 +147,32 @@ struct CSV2Bridge: Sendable {
             // 離開 main actor。這個階段的核取方塊點名了它，而理由不是禮貌：在沒有 sidecar 的檔案
             // 上 `-count` 是 O(n)，而一次「讓 main actor 卡住整趟掃描」的捲動，會在一次按鍵上
             // 變成一顆彩球。
-            DispatchQueue.global(qos: .userInitiated).async {
-                let p = Process()
-                p.executableURL = URL(fileURLWithPath: binary)
-                p.arguments = args
-                let out = Pipe(), err = Pipe()
-                p.standardOutput = out
-                p.standardError = err
-                do {
-                    try p.run()
-                } catch {
-                    k.resume(returning: QueryResult(
-                        status: 127,
-                        stdout: "",
-                        stderr: "cannot run \(binary): \(error.localizedDescription)"))
-                    return
-                }
-                // Both pipes are drained BEFORE waitUntilExit. A child that
-                // fills a pipe buffer blocks writing to it, and a parent that
-                // waits first deadlocks with it -- the viewer would hang on
-                // exactly the large outputs it exists to show.
-                // 兩條 pipe 都在 waitUntilExit **之前**被讀空。一個把 pipe buffer 填滿的子行程會
-                // 卡在寫入上，而一個先 wait 的父行程會與它死鎖——那個檢視器會正好在「它存在所要
-                // 顯示的大輸出」上掛住。
-                let o = out.fileHandleForReading.readDataToEndOfFile()
-                let e = err.fileHandleForReading.readDataToEndOfFile()
-                p.waitUntilExit()
-                k.resume(returning: QueryResult(
-                    status: p.terminationStatus,
-                    stdout: decodeShowingInvalidBytes(o),
-                    stderr: decodeShowingInvalidBytes(e)))
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: binary)
+            p.arguments = args
+            let out = Pipe(), err = Pipe()
+            p.standardOutput = out
+            p.standardError = err
+            do {
+                try p.run()
+            } catch {
+                return QueryResult(
+                    status: 127,
+                    stdout: "",
+                    stderr: "cannot run \(binary): \(error.localizedDescription)")
             }
-        }
+            // Drain both pipes concurrently before waiting: a child blocked
+            // on stderr cannot close stdout for a sequential reader.
+            // 等待之前同時讀取兩條管線：卡在 stderr 的子行程無法替循序讀取者關閉 stdout。
+            async let output = out.fileHandleForReading.readDataToEndOfFile()
+            async let errors = err.fileHandleForReading.readDataToEndOfFile()
+            let (o, e) = await (output, errors)
+            p.waitUntilExit()
+            return QueryResult(
+                status: p.terminationStatus,
+                stdout: decodeShowingInvalidBytes(o),
+                stderr: decodeShowingInvalidBytes(e))
+        }.value
     }
 }
 

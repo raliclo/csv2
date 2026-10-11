@@ -378,6 +378,51 @@ else
     bad "T93c ContentView.swift is missing or too small to be the view / ContentView.swift 不存在，或小到不可能是那個 view"
 fi
 
+# T94 -- real csv2 errors larger than a pipe must complete through the bridge.
+# T94 —— 真實 csv2 錯誤超過管線容量時，bridge 仍須完成。
+awk 'BEGIN {
+    for (i = 0; i < 100000; i++) name = name "a"
+    print name "," name
+    print "x,y"
+}' > "$TMP/t94.csv"
+"$CSV2" -mid 1,1 --json -i "$TMP/t94.csv" > "$TMP/t94_direct.out" 2> "$TMP/t94_direct.err"
+_t94_direct_rc=$?
+"$VIEW" --probe window "$CSV2" "$TMP/t94.csv" 1 1 > "$TMP/t94_view.out" 2> "$TMP/t94_view.err" &
+_t94_pid=$!
+for _t94_poll in {1..100}; do
+    kill -0 $_t94_pid 2>/dev/null || break
+    sleep 0.1
+done
+if kill -0 $_t94_pid 2>/dev/null; then
+    kill -TERM $_t94_pid 2>/dev/null
+    wait $_t94_pid 2>/dev/null
+    bad "T94a bridge hung while reading a large stderr / bridge 在讀取大型 stderr 時掛住"
+else
+    wait $_t94_pid
+    _t94_rc=$?
+    if (( _t94_rc == 1 && _t94_direct_rc == 1 )) \
+       && (( $(wc -c < "$TMP/t94_direct.err") > 100000 )) \
+       && LC_ALL=C grep -q '^ERROR 1:' "$TMP/t94_view.out"; then
+        ok "T94a bridge returns the real large error and exit status / bridge 回傳真實的大型錯誤與退出碼"
+    else
+        bad "T94a bridge returned rc=$_t94_rc, direct rc=$_t94_direct_rc / bridge 與直接執行結果如上"
+    fi
+fi
+
+awk 'BEGIN {
+    print "name"
+    for (i = 0; i < 1000; i++) text = text "x"
+    for (i = 1; i <= 200; i++) print text i
+}' > "$TMP/t94_large.csv"
+_t94_large=$("$VIEW" --probe window "$CSV2" "$TMP/t94_large.csv" 1 200 2>&1)
+_t94_rc=$?
+if (( _t94_rc == 0 )) && [[ $_t94_large == *'200@L201'* ]] \
+   && (( ${#_t94_large} > 200000 )); then
+    ok "T94b large stdout is still read completely / 大型 stdout 仍完整讀取"
+else
+    bad "T94b large output was incomplete or failed: rc=$_t94_rc / 大型輸出不完整或失敗"
+fi
+
 print -r -- ""
 print -r -- "PASS $pass   FAIL $fail"
 (( fail == 0 ))
