@@ -892,6 +892,12 @@ QV 的修正在 macOS 與 guest 上都驗證過了：`run_csv2_test.zsh` 在新�
 27 項全過），T212 那一行寫著「SwiftPM path checked; 2 loader note(s)」——那是它的 SwiftPM 那一半第一次在 guest 裡
 真的執行。（第一次重跑停在 `e2fsck rc=8`，是母專案當時正在重建 workspace 映像，與 csv2 無關。）
 
+**2026-10-12：v0.1.4 也要包含 QW、QX、QY、QZ（使用者決定）。** 這四個修正是使用者以 Codex 寫的，由本 session
+審閱後提交。tag 因此要移到含它們的 commit，而不只是含 QV 的那一個；移動仍然只做一次，仍然等 WSL 與 Windows 預演過。
+驗證到哪裡：macOS 套件與檢視器套件 0 FAIL；guest 上 `run_csv2_test.zsh` 0 FAIL（紀錄 `20261011T222118Z`，映像
+LinuxCS `383700e`，busybox `45ad4ce5`），先前的每一個案例狀態都沒變。QW、QX、QY 以已安裝的 0.1.3 重現過
+（`2:1` 對 `1:1`、symlink 被換掉、rc=133）；QZ 只有檢視器 T94 通過，沒有用舊版重現。**WSL 與 Windows 還沒跑過這些修正。**
+
 剩下的步驟，依序：
 
 0. WSL 與 Windows 回來後在 develop 上預演（guest 已過）。都通過才把
