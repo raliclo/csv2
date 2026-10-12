@@ -13824,3 +13824,160 @@ and checksum-valid out-of-range metadata, fallback reads and a large valid strid
 The viewer drained stdout before stderr and deadlocked on a real csv2 error larger than the pipe.
 It now drains both concurrently before waiting. Viewer T94 checks large stderr errors with a
 timeout and complete large stdout using the real binary.
+
+---
+
+# v0.1.4 的 Windows／WSL 預演（2026-10-12，`796fdb9b`）
+# The Windows / WSL rehearsal for v0.1.4 (2026-10-12, at `796fdb9b`)
+
+WSL：0 FAIL、1 SKIP（T47）。Windows：1 FAIL、16 SKIP，失敗的是 T212（見 RA）。通過的數量刻意不寫
+——T69a 會擋下它，而它擋得對：那個數字每加一個案例就過期一次（這一段的第一版就寫了，被 T69a 抓到）。
+Windows 的第一次執行不算數：它在 T90 被中斷，因為 scoop 在 17:57 把 zsh 換成
+`5.9.999.3-test.20261012v1`，執行中的 shell 被抽走；第二次是在那個新 zsh 上量的。
+
+WSL: 0 FAIL, 1 SKIP. Windows: 1 FAIL (T212, see RA), 16 SKIP. The first Windows run does not
+count -- scoop replaced zsh underneath it at 17:57 and it stopped at T90.
+
+## RA. T212 在 Windows 上失敗：SwiftPM 為工具鏈自己的 `WinSDK.swiftmodule` 印出警告（2026-10-12 修正，T212、T212x）
+
+```console
+$ ./verifications/module_api.zsh        # rc=1
+PASS  the six-file subset builds as a module and a client can use it
+FAIL  the SwiftPM module build emitted a warning / SwiftPM module 建置產生了警告
+…\Windows.sdk\usr\lib\swift\windows\WinSDK.swiftmodule\x86_64-unknown-windows-msvc.swiftmodule:1:1:
+  warning: reference to type 'wchar_t' broken by a context change; 'wchar_t' was expected to be
+  in '_Builtin_stddef', but now a candidate is found only in 'SwiftShims'
+```
+
+**它與 csv2 的原始碼無關，這是量過的，不是推論：** 一個只有兩行的套件
+（`import WinSDK` 加上一個呼叫 `GetCurrentProcessId()` 的函式，`swiftLanguageMode(.v6)`）
+以 `swift build` 建置，得到同一則警告（`grep -c 'warning:' build.log` → 2），而它 `Build complete!`、
+rc=0。同一個檔案以 `swiftc -swift-version 6 -emit-module` 直接編譯則沒有任何輸出。附註行寫著
+「the module 'WinSDK' was built with a Swift language version set to 5.10 while the current
+invocation uses 6.4」。所以：只有 SwiftPM 那條路徑、只有在 import WinSDK 時。`module_api.zsh` 的
+空套件探測不 import WinSDK，因此探測通過、真正的建置失敗。
+
+**還不知道的：** 這個節點上 T212 先前是否通過過（工具鏈目錄的時間是 2026-10-07 02:01，v0.1.3
+的 Windows 封存是同日 03:56 建的；`Swift\Toolchains` 與 `Swift\Platforms` 的父目錄 mtime 是
+今天 16:11–16:12，原因不明）。也沒有試過清 module cache。**在這兩件事查清楚之前不要選修法**——
+把這則警告加進 `_loader_noise` 那一類的排除名單，與 QV 的排除是同一個動作，而 QV 的排除有
+T212w 證明它旁邊的真警告仍被回報；這一則還沒有那樣的證明。
+
+T212 fails on Windows because SwiftPM relays a warning about the toolchain's own
+WinSDK.swiftmodule. Measured, not inferred: a two-line package that only imports WinSDK
+reproduces it under `swift build`, and plain `swiftc` on the same file is silent. Unknown: whether
+T212 ever passed on this node with this toolchain, and whether a stale module cache is involved.
+Not fixed; do not pick a fix before those two are answered.
+
+### 那兩件事的答案（同日稍後）
+
+**上面「還不知道的」那一段保留原樣，因為它記的是當時真的不知道；下面是量到的答案。**
+
+**一、它先前通過，是因為先前用的是另一個工具鏈。** 這台機器的 PATH（`reg query HKCU\Environment /v Path`）
+仍然把 `Swift\Toolchains\6.3.3+Asserts\usr\bin` 排在 6.4.0 之前，而那個目錄已經不存在：
+`Swift\Toolchains`、`Runtimes`、`Platforms` 三個目錄的 mtime 都是 2026-10-12 16:11–16:12，裡面只剩
+6.4.0。也就是說直到今天 16:11 為止，這個節點的 `swiftc` 是 6.3.3；6.4.0 自 10-07 起就裝著，但從未被
+用到。v0.1.3 的 Windows 封存是 6.3.3 建的（見 RC，那是量到的）。6.3.3 已經不在，所以「6.3.3 不印這則
+警告」本身**無法再量**，是從上面這些推出來的。
+
+**二、與 module cache 無關，成因是一個旗標。** 把 `swift build -v` 傳給 swiftc 的旗標逐一加到一行直接
+的 `swiftc` 上（每次用全新的 `-module-cache-path`），十九個旗標裡只有一個引出警告：
+
+```console
+$ swiftc -swift-version 6 -parse-as-library -emit-module -module-cache-path mc P.swift            # 0 則
+$ swiftc -swift-version 6 -parse-as-library -emit-module -module-cache-path mc \
+         -index-store-path idx P.swift                                                            # 2 則
+$ swift build                          # 警告
+$ swift build --disable-index-store    # 0 則
+$ swift build -c release               # 0 則
+```
+
+`P.swift` 是 `import WinSDK` 加一個呼叫 `GetCurrentProcessId()` 的函式。全新的 cache 照樣重現，所以
+清 cache 不會有用。那則警告的附註指出型別「預期在 clang 的 `_Builtin_stddef`、實際在 SDK 的
+`SwiftShims`」——是工具鏈在「邊建置邊索引」時解讀它自己預建的 `WinSDK.swiftmodule` 的問題。
+
+### 修法，以及沒有選的那一個
+
+`module_api.zsh` 的 `real_warnings` 現在以確切字句排除這一則，並由 `note_loader_noise` 說出排除了幾行
+（這個節點上是 12 行），與 QV 對載入器訊息的處理相同。**沒有選** `--disable-index-store`：它更短，但它
+會讓這項檢查不再建置「客戶端 `swift build` 真的會拿到的那種建置」，而且在三個不受影響的平台上也一併
+關掉。T212x 以兩種形式的那則訊息加上一則同樣提到 WinSDK 的真警告，斷言被回報的只有後者——所以
+「凡是提到 WinSDK 就丟掉」過不了。
+
+Answers. (1) It passed before because this node compiled with Swift 6.3.3 until 16:11 today,
+when 6.3.3 was removed and the already-installed 6.4.0 became the only toolchain; 6.3.3 is gone,
+so its silence is inferred, not re-measured. (2) Not a cache: of nineteen flags SwiftPM passes,
+`-index-store-path` alone produces the warning, with a fresh module cache, in one `swiftc` line.
+Fixed by excluding the exact wording and counting it out loud, as QV did; `--disable-index-store`
+was rejected because it stops checking the build a client actually gets. T212x proves a real
+warning naming WinSDK beside it is still reported.
+
+## RB. `release.zsh` 與 `publish.zsh` 都沒有 `--help` 分支，而前者因此真的打包了一份封存（2026-10-12 修正，T321a–g）
+
+```console
+$ ./release.zsh --help
+…/dist/csv2-0.1.4-windows-x86_64.tar.zst
+6954e746…  *csv2-0.1.4-windows-x86_64.tar.zst
+verified: extracted, ran, and read a CSV / 已驗證：解開、執行過，而且讀得了一個 CSV
+
+$ ./publish.zsh --help
+no dist/csv2---help-*.tar.zst; each node runs ./release.zsh and the archives are collected here first
+```
+
+`release.zsh` 不看引數，所以 `--help` 等於「打包」。當時 `release\csv2.exe` 是
+`csv2 0.1.4 (v0.1.4-6-g796fdb9b)`——**不在 tag 上**——於是 `dist/` 裡多了一份名字與正式封存
+一模一樣、內容卻來自未打 tag commit 的檔案，而它說「已驗證」，那也是真的。那份封存已刪除。
+`publish.zsh` 把 `--help` 當成版本號，報錯結束，沒有動到東西。`install.zsh --help` 是好的。
+
+這是全域 `CLAUDE.md` 記過的同一個形狀（`test_P6.zsh --help` 落進啟動器、卡了五分鐘）：
+一個想看一頁說明的人，付出的是一次真的執行。
+
+Neither script has a `--help` branch. `release.zsh` ignores its arguments, so `--help` packaged an
+archive from an untagged build under the release name and called it verified; that archive was
+deleted. `publish.zsh` took `--help` as a version and stopped without touching anything.
+
+**修正：** 兩支腳本都在做任何事之前回答 `-h`／`--help`（印出自己的檔頭）。`release.zsh` 對任何其他
+引數以 2 拒絕，而不是忽略；`publish.zsh` 對「版本位置上的選項」以 2 拒絕。T321 從一份**複本**執行
+它們，那個目錄沒有 `release/` 也沒有 `dist/`——help 分支若再消失，複本無物可打包而失敗，不會讓套件
+每跑一次就往真正的 `dist/` 寫一份封存。
+
+Fixed: both answer `-h`/`--help` before anything else; `release.zsh` refuses any other argument
+with 2, `publish.zsh` refuses an option in the version's place. T321 runs copies in a directory
+with nothing to package, so a regression fails instead of writing into the real dist/.
+
+## RC. Windows 的封存只有 `csv2.exe`，而它需要「建置它的那一版」Swift runtime——少了就靜默地起不來（2026-10-12 發現，**未修，待決定**）
+
+```console
+$ csv2 --version ; echo rc=$?            # scoop 安裝的 0.1.3，從 bash 與 zsh
+rc=127                                   # 沒有任何輸出
+
+> csv2.exe --version & echo rc=!errorlevel!        # cmd /v:on
+rc=-1073741511                           # 0xC0000139，STATUS_ENTRYPOINT_NOT_FOUND
+
+$ zstd -dc dist/csv2-0.1.3-windows-x86_64.tar.zst | tar -tf -
+csv2-0.1.3-windows-x86_64/csv2.exe
+csv2-0.1.3-windows-x86_64/LICENSE
+csv2-0.1.3-windows-x86_64/README.md
+csv2-0.1.3-windows-x86_64/README.zh-TW.md
+```
+
+`csv2.exe` 動態連結 `swiftCore.dll`、`Foundation.dll` 等十餘個 DLL（`objdump -p … | grep 'DLL Name'`），
+而它們由 PATH 上的 Swift runtime 提供。今天 16:11 這台機器的 Swift 6.3.3 被移除、只剩 6.4.0，
+於是 6.3.3 建的 0.1.3（以及 10-08 建的 `release\csv2.exe`）在 6.4.0 的 DLL 上找不到進入點；
+同一棵樹用 6.4.0 重建後 `--version` 正常。**沒有任何訊息**：shell 只看到 127，而那讀起來像
+「找不到指令」。
+
+**這不只是這台機器的事：** 封存不帶 runtime，`scoop/csv2.json` 沒有 `depends`，README 也沒有說
+Windows 需要安裝 Swift runtime、更沒有說需要哪一版。一台沒裝 Swift 的 Windows 上 `scoop install csv2`
+會成功，而 `csv2` 起不來。（「沒裝 Swift 的機器」這一半**沒有量過**——這個節點一直裝著 Swift；
+量到的是「版本不符」那一半。）
+
+待決定的修法，各有代價，沒有選：把 runtime DLL 一起打包（封存變大，且要確認再散布條款）；
+在 scoop manifest 與 README 寫明所需的 runtime 版本；或靜態連結（Windows 上 Foundation 的靜態
+連結是否可行，沒有試過）。在 0.1.4 發布之前，這台機器上已安裝的 0.1.3 會一直是壞的。
+
+The Windows archive ships csv2.exe alone, dynamically linked against the Swift runtime of the
+version that built it. With 6.3.3 removed today the installed 0.1.3 exits 0xC0000139 with no
+output (127 from a shell). Nothing in the archive, the scoop manifest or the README states the
+dependency. Measured: the version-mismatch half. Not measured: a machine with no Swift at all.
+Not fixed -- bundling the DLLs, declaring the dependency, or static linking is a decision.

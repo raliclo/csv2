@@ -5,6 +5,7 @@
 #
 #    ./publish.zsh 0.1.1              say what would happen, change nothing
 #    ./publish.zsh 0.1.1 --publish    do it
+#    ./publish.zsh --help             print this and do nothing / 印出這段說明，什麼都不做
 #
 #  release.zsh makes ONE archive on ONE node and is strict about it. Getting
 #  from those archives to a release was seven manual steps for v0.1.0, and the
@@ -44,6 +45,14 @@ HERE=${0:A:h}
 cd -- "$HERE"
 
 REPO=raliclo/csv2
+# --help answers before the version is read. Until 2026-10-12 it WAS read as
+# the version, and the run went looking for dist/csv2---help-*.tar.zst. RB.
+# --help 在讀取版本之前就回答。直到 2026-10-12 為止它**被當成**版本，於是這次執行去找
+# dist/csv2---help-*.tar.zst。RB。
+case ${1:-} in
+    -h|--help) sed -n '3,24p' ${0:A} | sed 's/^# \{0,2\}//'; exit 0 ;;
+    -*) print -r -u2 -- "the first argument is the version, not an option (got: $1); see --help / 第一個引數是版本，不是選項（收到：$1），請見 --help"; exit 2 ;;
+esac
 VERSION=${1:-}
 DO_PUBLISH=0
 for arg in "${@:2}"; do

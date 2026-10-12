@@ -9,10 +9,27 @@
 #  the version inside it can be checked by running it.
 #  在每個節點上各跑一次；每一次產生「它所在平台」的一份封存。這裡沒有交叉打包：一份封存
 #  來自「在打包的地方建置並測試過」的執行檔——那是唯一能以「執行它」來檢查版本的方式。
+#
+#    ./release.zsh           package release/csv2[.exe] into dist/ / 把 release/csv2[.exe] 打包進 dist/
+#    ./release.zsh --help    print this and do nothing / 印出這段說明，什麼都不做
+#
+#  It takes no other argument, and refuses one rather than ignoring it: until
+#  2026-10-12 nothing here read "$@", so `./release.zsh --help` PACKAGED -- an
+#  untagged build, under the release's own name, reported as verified. RB.
+#  它不收其他引數，而且會拒絕而不是忽略：直到 2026-10-12 為止這裡沒有任何東西讀 "$@"，於是
+#  `./release.zsh --help` 真的**打包**了——一份未打 tag 的建置，掛著正式封存的名字，並回報已驗證。RB。
 # =====================================================================
 
 emulate -L zsh
 setopt no_unset pipe_fail errexit
+
+# Before anything else runs: a wrong flag costs a line of output, not an archive.
+# 在任何事情執行之前：打錯一個旗標，代價是一行輸出，不是一份封存。
+case ${1:-} in
+    '') ;;
+    -h|--help) sed -n '3,20p' ${0:A} | sed 's/^# \{0,2\}//'; exit 0 ;;
+    *) print -r -u2 -- "release.zsh takes no argument (got: $1); see --help / release.zsh 不收引數（收到：$1），請見 --help"; exit 2 ;;
+esac
 
 # A release script that dies quietly leaves a half-written archive with a
 # plausible name. Say where it stopped.

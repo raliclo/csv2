@@ -266,13 +266,36 @@ fi
 # 什麼都沒說，而把它算進去，讓 T212 在第一個 SwiftPM 跑得起來的映像上失敗。QV。它以確切的字句
 # 排除，而且**說出排除了幾行**；其他任何警告照舊判失敗。
 _loader_noise='no version information available'
+# A second line of the same kind, from the toolchain rather than the loader.
+# Swift 6.4.0 on Windows prints
+#   …\WinSDK.swiftmodule\…:1:1: warning: reference to type 'wchar_t' broken by
+#   a context change; 'wchar_t' was expected to be in '_Builtin_stddef', …
+# whenever a file that imports WinSDK is compiled with `-index-store-path`,
+# which a debug `swift build` always passes. One command shows it, with no
+# package and none of this project's code:
+#   swiftc -swift-version 6 -parse-as-library -emit-module -index-store-path idx P.swift
+# where P.swift is `import WinSDK` and one call; drop the flag and it is silent.
+# It is about the SDK's own prebuilt module, and it failed T212 on the day this
+# node's Swift 6.3.3 was removed and 6.4.0 became the only toolchain. RA.
+# Excluded by its exact wording and counted out loud, like the line above --
+# NOT by passing --disable-index-store, which would stop checking the build a
+# client actually gets.
+# 同一類的第二行，來自工具鏈而不是載入器。Windows 上的 Swift 6.4.0，只要以 `-index-store-path`
+# 編譯一個 import WinSDK 的檔案就會印出上面那則警告，而 debug 的 `swift build` 一律帶那個旗標。
+# 上面那一行指令就能重現，不需要套件，也不含本專案的任何程式碼；拿掉那個旗標就沒有聲音。它說的是
+# SDK 自己預先建好的 module，而它在這個節點的 Swift 6.3.3 被移除、只剩 6.4.0 的那天讓 T212 失敗。
+# RA。與上面那一行一樣：以確切的字句排除，並說出排除了幾行——**不是**改傳
+# --disable-index-store，那會讓這裡不再檢查「客戶端真的會拿到的那種建置」。
+_winsdk_index_noise="broken by a context change; 'wchar_t' was expected to be in '_Builtin_stddef'"
 real_warnings() {   # real_warnings <log>  -- prints the warnings that are about the code
-    LC_ALL=C grep -i 'warning:' "$1" | LC_ALL=C grep -v -- "$_loader_noise"
+    LC_ALL=C grep -i 'warning:' "$1" | LC_ALL=C grep -v -- "$_loader_noise" | LC_ALL=C grep -vF -- "$_winsdk_index_noise"
 }
 note_loader_noise() {   # note_loader_noise <log> <what>
     local n
     n=$(LC_ALL=C grep -i 'warning:' "$1" | LC_ALL=C grep -c -- "$_loader_noise")
     (( n == 0 )) || print -r -- "NOTE  $2: $n relayed loader line(s) (\"$_loader_noise\") not counted as warnings / $2：有 $n 行被轉述的載入器訊息，不算警告"
+    n=$(LC_ALL=C grep -i 'warning:' "$1" | LC_ALL=C grep -cF -- "$_winsdk_index_noise")
+    (( n == 0 )) || print -r -- "NOTE  $2: $n toolchain line(s) about WinSDK.swiftmodule under -index-store-path not counted as warnings, see RA / $2：有 $n 行工具鏈對 WinSDK.swiftmodule 的訊息（-index-store-path 引起），不算警告，見 RA"
 }
 
 if [[ -n $(real_warnings $WORK/spm_probe.log) ]]; then

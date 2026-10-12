@@ -12663,7 +12663,7 @@ else
         elif LC_ALL=C grep -q '^PASS  and it builds through SPM' "$TMP/t212.log"; then
             _t212_spm="SwiftPM path checked / SwiftPM 那條路徑檢查過"
             _t212_n=$(LC_ALL=C grep -c '^NOTE ' "$TMP/t212.log" | tr -d ' ')
-            (( _t212_n == 0 )) || _t212_spm+="; $_t212_n loader note(s), see QV / 有 $_t212_n 則載入器附註"
+            (( _t212_n == 0 )) || _t212_spm+="; $_t212_n NOTE line(s) of excluded non-code warnings, see QV and RA / 有 $_t212_n 行 NOTE（被排除的非程式碼警告），見 QV 與 RA"
         else
             _t212_spm="SwiftPM path: no verdict line found / SwiftPM 那條路徑：找不到判定行"
         fi
@@ -12679,10 +12679,30 @@ fi
 # T212w：module_api.zsh 把什麼算成警告。載入器那一行以字句排除；這裡證明它旁邊一則真的警告仍然
 # 會被回報，而且那個排除不是「什麼都不符合」。
 _t212w_fn=$TMP/t212w-fn.zsh
-LC_ALL=C sed -n -e '/^_loader_noise=/p' -e '/^real_warnings() {/,/^}/p' "$ROOT/verifications/module_api.zsh" > "$_t212w_fn"
-if (( $(LC_ALL=C grep -cE '^(_loader_noise=|real_warnings\(\) \{)' "$_t212w_fn") != 2 )); then
+LC_ALL=C sed -n -e '/^_loader_noise=/p' -e '/^_winsdk_index_noise=/p' -e '/^real_warnings() {/,/^}/p' "$ROOT/verifications/module_api.zsh" > "$_t212w_fn"
+if (( $(LC_ALL=C grep -cE '^(_loader_noise=|_winsdk_index_noise=|real_warnings\(\) \{)' "$_t212w_fn") != 3 )); then
     bad "T212w could not extract real_warnings from module_api.zsh / 無法從 module_api.zsh 抽出 real_warnings"
+    bad "T212x could not extract real_warnings from module_api.zsh / 無法從 module_api.zsh 抽出 real_warnings"
 else
+    # T212x: the same proof for the second excluded line (RA). Both forms the
+    # toolchain prints are here -- the one carrying the path and the indented
+    # repeat under the source excerpt -- beside a real warning that also names
+    # WinSDK, so "anything mentioning WinSDK is dropped" would fail this.
+    # T212x：對第二條被排除的訊息（RA）做同樣的證明。工具鏈印出的兩種形式都在這裡——帶路徑的那一行，
+    # 以及原始碼摘錄底下縮排重複的那一行——旁邊放一則同樣提到 WinSDK 的真警告，因此「凡是提到
+    # WinSDK 就丟掉」過不了這一條。
+    {
+        print -r -- "C:\\S\\WinSDK.swiftmodule\\x86_64-unknown-windows-msvc.swiftmodule:1:1: warning: reference to type 'wchar_t' broken by a context change; 'wchar_t' was expected to be in '_Builtin_stddef', but now a candidate is found only in 'SwiftShims'"
+        print -r -- "  | |- warning: reference to type 'wchar_t' broken by a context change; 'wchar_t' was expected to be in '_Builtin_stddef', but now a candidate is found only in 'SwiftShims'"
+        print -r -- "C:\\w\\Sources\\P\\P.swift:4:5: warning: 'GetVersion()' is deprecated in WinSDK"
+        print -r -- "Build complete!"
+    } > "$TMP/t212x.log"
+    _t212x_got=$(zsh -c 'source $1; real_warnings $2' t212x "$_t212w_fn" "$TMP/t212x.log" 2>&1)
+    if [[ $_t212x_got == "C:\\w\\Sources\\P\\P.swift:4:5: warning: 'GetVersion()' is deprecated in WinSDK" ]]; then
+        ok "T212x a real warning beside the toolchain's WinSDK index line is still reported, alone / 工具鏈那則 WinSDK 索引訊息旁邊的真警告仍被回報，而且只有它"
+    else
+        bad "T212x real_warnings gave [$_t212x_got] / real_warnings 給出的不是那一則真的警告"
+    fi
     {
         print -r -- "warning: 'p': /x/swiftc: /usr/lib64/libncurses.so.6: no version information available (required by /x/swiftc)"
         print -r -- "/w/Sources/P/P.swift:3:9: warning: variable 'x' was never used"
@@ -19415,6 +19435,47 @@ else
     bad "T319g could not construct the large-stride fixture / 無法建立大型 stride fixture"
 fi
 
+echo
+echo "--- T321: release.zsh and publish.zsh answer --help before doing anything / T321：release.zsh 與 publish.zsh 在做任何事之前先回答 --help ---"
+# release.zsh read no argument at all, so `./release.zsh --help` packaged an
+# archive -- from an untagged build, under the release's name, and reported it
+# verified. publish.zsh took `--help` as the version. RB.
+#
+# Both run here from a COPY in a directory with no release/ and no dist/. That
+# is what makes the case safe to keep: if the help branch ever goes missing
+# again, the copy has no binary to package and fails, instead of this suite
+# writing an archive into the real dist/ on every run.
+# release.zsh 完全不讀引數，於是 `./release.zsh --help` 打包了一份封存——來自未打 tag 的建置、掛著
+# 正式封存的名字，並回報已驗證。publish.zsh 則把 `--help` 當成版本。RB。
+# 兩者在這裡都從一份**複本**執行，那個目錄裡沒有 release/ 也沒有 dist/。這是這個案例可以安心留著的
+# 原因：help 分支若再次消失，複本沒有執行檔可打包、會失敗，而不是讓這個套件每跑一次就往真正的
+# dist/ 寫一份封存。
+if [[ ! -r $ROOT/release.zsh || ! -r $ROOT/publish.zsh ]]; then
+    T321_SKIPPED=1
+    skipt "T321 release.zsh and publish.zsh answer --help before doing anything / release.zsh 與 publish.zsh 在做任何事之前先回答 --help (no release.zsh or publish.zsh in this tree / 這棵樹裡沒有 release.zsh 或 publish.zsh)"
+else
+    _t321=$TMP/t321
+    mkdir -p "$_t321"
+    cp "$ROOT/release.zsh" "$ROOT/publish.zsh" "$_t321/"
+    _t321_out=$(zsh "$_t321/release.zsh" --help 2>&1)
+    assert_eq "$?" 0 "T321a release.zsh --help exits 0 / release.zsh --help 以 0 結束"
+    assert_contains "$_t321_out" './release.zsh --help' \
+        "T321b and prints the usage from its own header / 並印出它自己檔頭的用法"
+    if [[ -e $_t321/dist ]]; then
+        bad "T321c release.zsh --help created dist/ / release.zsh --help 建立了 dist/"
+    else
+        ok "T321c and creates no dist/ / 而且沒有建立 dist/"
+    fi
+    zsh "$_t321/release.zsh" --bogus > /dev/null 2>&1
+    assert_eq "$?" 2 "T321d an argument release.zsh does not know is refused with 2, not ignored / release.zsh 不認得的引數以 2 拒絕，而不是被忽略"
+    _t321_out=$(zsh "$_t321/publish.zsh" --help 2>&1)
+    assert_eq "$?" 0 "T321e publish.zsh --help exits 0 / publish.zsh --help 以 0 結束"
+    assert_contains "$_t321_out" '--publish' \
+        "T321f and prints the usage, rather than taking --help as the version / 並印出用法，而不是把 --help 當成版本"
+    zsh "$_t321/publish.zsh" --bogus > /dev/null 2>&1
+    assert_eq "$?" 2 "T321g an option where the version belongs is refused with 2 / 在版本的位置放一個選項，以 2 拒絕"
+fi
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -19582,6 +19643,7 @@ fi
 (( ${T302_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T303_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T304_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T321_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode
