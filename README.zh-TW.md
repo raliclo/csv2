@@ -73,6 +73,10 @@ where swiftCore.dll
 
 它應該指向一個 `Runtimes\6.4.0` 目錄。完全沒有安裝 Swift 的機器沒有測過；請預期它同樣起不來。
 
+runtime 跟著「那一版 release」走，不是跟著最新的 Swift。v0.1.3 與更早的版本是用 Swift 6.3.3 建置的，
+需要 `Runtimes\6.3.3`；如果 `csv2 --version` 回報的是 0.1.3——在 v0.1.4 發布之前，Scoop 的 manifest
+裝的就是它——那麼安裝 6.4.0 是錯的解法。
+
 ## 從原始碼建置與安裝
 
 需求：Swift 6，並將警告視為錯誤。建置使用純 Swift 原始檔、Foundation 與

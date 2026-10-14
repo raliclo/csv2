@@ -10471,11 +10471,35 @@ if (( IS_WINDOWS )); then
 elif (( $+commands[mkfifo] )); then
     rm -f "$TMP/t181.fifo.csv"
     if mkfifo "$TMP/t181.fifo.csv" 2>/dev/null; then
+        # Bounded. On 2026-10-12 one WSL run stopped right after this case's
+        # heading and sat there until the harness killed it an hour later; the
+        # next run passed, and 300 repetitions of exactly these three lines
+        # then gave no hang at all, so the cause is not known. What IS known is
+        # the cost: a suite that hangs reports nothing, which is the reason
+        # Windows is excluded above. So the reader runs in the background and
+        # is given 30 seconds; past that both ends are killed and the case
+        # FAILS by name instead of taking the suite with it.
+        # 有上限。2026-10-12 有一次 WSL 的執行停在這個案例的標題之後，直到一小時後被執行環境中止；
+        # 緊接著的下一次通過了，而把這三行原樣重複 300 次也完全沒有卡住，所以成因不明。已知的是代價：
+        # 一個卡住的套件什麼都回報不了——那正是上面排除 Windows 的理由。因此讀取端放到背景並給它
+        # 30 秒；超過就把兩端都殺掉，讓這個案例**指名失敗**，而不是把整個套件一起帶走。
         { sleep 0.2; printf 'a,b\n1,x\n2,y\n' > "$TMP/t181.fifo.csv" } &
-        _t181_out=$("$CSV2" -r -t "-i" "$TMP/t181.fifo.csv" 2>&1)
-        wait
-        assert_eq "$_t181_out" "$(printf 'a,b\n1,x\n2,y')" \
-            "T181a a FIFO reads as the stream it carries / 一個 FIFO 讀出來就是它承載的那條串流"
+        _t181_w=$!
+        "$CSV2" -r -t "-i" "$TMP/t181.fifo.csv" > "$TMP/t181.out" 2>&1 &
+        _t181_r=$!
+        { sleep 30; kill $_t181_r $_t181_w 2>/dev/null; : > "$TMP/t181.hung" } &
+        _t181_k=$!
+        rm -f "$TMP/t181.hung"
+        wait $_t181_r 2>/dev/null
+        kill $_t181_k 2>/dev/null
+        wait 2>/dev/null
+        _t181_out=$(cat "$TMP/t181.out")
+        if [[ -e $TMP/t181.hung ]]; then
+            bad "T181a the FIFO read did not finish in 30 s and was killed / FIFO 的讀取 30 秒內沒有結束，已被中止"
+        else
+            assert_eq "$_t181_out" "$(printf 'a,b\n1,x\n2,y')" \
+                "T181a a FIFO reads as the stream it carries / 一個 FIFO 讀出來就是它承載的那條串流"
+        fi
         rm -f "$TMP/t181.fifo.csv"
     else
         skipt "T181a mkfifo is not permitted here / 此處不允許 mkfifo"
@@ -19476,6 +19500,101 @@ else
     assert_eq "$?" 2 "T321g an option where the version belongs is refused with 2 / 在版本的位置放一個選項，以 2 拒絕"
 fi
 
+echo
+echo "--- T322: release.zsh names the archive from the binary, whatever VERSION says / T322：release.zsh 以執行檔為封存命名，不管 VERSION 說什麼 ---"
+# `VERSION=9.9.9 ./release.zsh` packaged a 0.1.4 binary as csv2-9.9.9-… and
+# reported it verified: an exported VERSION skipped the block that asks the
+# binary. RE -- QI through another door, and T304a ("no version literal is
+# assigned") went on passing throughout.
+#
+# Run from a copy beside a STUB binary, for the reason T321 gives. The stub
+# reports 1.2.3, so the three outcomes are distinguishable: a disagreeing
+# VERSION is refused BEFORE anything is written; an agreeing one and none at
+# all both get past the version check and stop later, at the first check that
+# needs a real repository -- which is how this case knows they got past it.
+# `VERSION=9.9.9 ./release.zsh` 把一個 0.1.4 的執行檔打包成 csv2-9.9.9-…，並回報已驗證：一個被
+# export 的 VERSION 跳過了「去問執行檔」的那一段。RE——QI 從另一扇門回來，而 T304a（「沒有版本
+# 字面值被指派」）從頭到尾都在通過。
+# 與 T321 相同的理由：從一份複本執行，旁邊放一個**假的**執行檔。它回報 1.2.3，於是三種結果分得開：
+# 不相符的 VERSION 在寫入任何東西**之前**就被拒絕；相符的與完全沒設的都通過版本檢查，停在後面第一道
+# 需要真 repository 的檢查——這個案例就是靠那一點知道它們通過了。
+if [[ ! -r $ROOT/release.zsh ]]; then
+    T322_SKIPPED=1
+    skipt "T322 release.zsh names the archive from the binary, whatever VERSION says / release.zsh 以執行檔為封存命名 (no release.zsh in this tree / 這棵樹裡沒有 release.zsh)"
+else
+    _t322=$TMP/t322
+    mkdir -p "$_t322/release"
+    cp "$ROOT/release.zsh" "$_t322/"
+    print -rl -- '#!/bin/sh' 'echo "csv2 1.2.3 (stub)"' > "$_t322/release/csv2"
+    chmod +x "$_t322/release/csv2"
+    _t322_err=$(VERSION=9.9.9 zsh "$_t322/release.zsh" 2>&1 >/dev/null)
+    assert_eq "$?" 1 "T322a a VERSION that disagrees with the binary is refused / 與執行檔不符的 VERSION 被拒絕"
+    assert_contains "$_t322_err" 'VERSION=9.9.9' \
+        "T322b and the refusal names the value it was given / 而那則拒絕指出它收到的值"
+    assert_contains "$_t322_err" '1.2.3' \
+        "T322c and the version the binary reports / 以及執行檔回報的版本"
+    if [[ -e $_t322/dist ]]; then
+        bad "T322d the refused run created dist/ / 被拒絕的那次執行建立了 dist/"
+    else
+        ok "T322d and nothing was written / 而且沒有寫入任何東西"
+    fi
+    _t322_err=$(VERSION=1.2.3 zsh "$_t322/release.zsh" 2>&1 >/dev/null)
+    if [[ $_t322_err == *'VERSION='* ]]; then
+        bad "T322e a VERSION that AGREES was refused: $_t322_err / 一個相符的 VERSION 被拒絕了"
+    else
+        ok "T322e a VERSION that agrees with the binary is not refused for it / 與執行檔相符的 VERSION 不會因此被拒絕"
+    fi
+    _t322_err=$(unset VERSION; zsh "$_t322/release.zsh" 2>&1 >/dev/null)
+    if [[ $_t322_err == *'VERSION='* || $_t322_err == *'refusing to name an archive by guessing'* ]]; then
+        bad "T322f with no VERSION set the version check stopped the run: $_t322_err / 沒有設 VERSION 時版本檢查擋下了這次執行"
+    else
+        ok "T322f and with none set the binary's version is simply used / 而沒有設的時候，直接用執行檔的版本"
+    fi
+fi
+
+echo
+echo "--- T323: install.zsh says what it is about to replace / T323：install.zsh 說出它即將取代的是什麼 ---"
+# Twice a stale csv2 sat on a PATH unnoticed -- a day in September, a month
+# before 2026-10-07 -- because finding out meant comparing `csv2 --version`
+# with HEAD and nobody did. install.zsh now asks the copy at the destination
+# for its version by running it, and says so before writing. A copy that will
+# not run is reported as THAT, not as absent (RC).
+# 有兩次，一份過期的 csv2 待在 PATH 上沒有人發現——九月的一天、2026-10-07 之前的一個月——因為要
+# 發現它得有人去比對 `csv2 --version` 與 HEAD，而沒有人比。install.zsh 現在靠「執行它」去問目的地
+# 那一份的版本，並在寫入之前說出來。一份跑不起來的複本要照實回報，而不是說它不存在（RC）。
+# install.zsh installs the binary in ITS tree's release/, which is not
+# necessarily the $CSV2 under test, so that file is the one copied and asked.
+# install.zsh 裝的是**它那棵樹**的 release/ 裡的執行檔，不一定是受測的 $CSV2，所以被複製與被問的是那個檔案。
+_t323_bin=
+[[ -x $ROOT/release/csv2 ]] && _t323_bin=$ROOT/release/csv2
+[[ -z $_t323_bin && -x $ROOT/release/csv2.exe ]] && _t323_bin=$ROOT/release/csv2.exe
+if [[ ! -r $ROOT/install.zsh || -z $_t323_bin ]]; then
+    T323_SKIPPED=1
+    skipt "T323 install.zsh says what it is about to replace / install.zsh 說出它即將取代的是什麼 (no install.zsh, or no release/ binary for it to install, in this tree / 這棵樹裡沒有 install.zsh，或沒有可供它安裝的 release/ 執行檔)"
+else
+    _t323=$TMP/t323
+    mkdir -p "$_t323/none" "$_t323/same" "$_t323/dead"
+    _t323_out=$(zsh "$ROOT/install.zsh" --dry-run --no-rc --dir "$_t323/none" 2>&1)
+    assert_contains "$_t323_out" 'replaces: nothing' \
+        "T323a an empty destination is reported as empty / 空的目的地被回報為空的"
+    cp "$_t323_bin" "$_t323/same/${_t323_bin:t}"
+    _t323_out=$(zsh "$ROOT/install.zsh" --dry-run --no-rc --dir "$_t323/same" 2>&1)
+    assert_contains "$_t323_out" "replaces: $("$_t323_bin" --version | tr -d '\r')" \
+        "T323b an installed copy is reported by the version it prints / 已安裝的複本以它印出的版本回報"
+    assert_contains "$_t323_out" 'the same build' \
+        "T323c and a copy of this very build is called the same build / 而同一個建置的複本被稱為同一個建置"
+    print -rl -- '#!/bin/sh' 'exit 127' > "$_t323/dead/${_t323_bin:t}"
+    chmod +x "$_t323/dead/${_t323_bin:t}"
+    _t323_out=$(zsh "$ROOT/install.zsh" --dry-run --no-rc --dir "$_t323/dead" 2>&1)
+    assert_contains "$_t323_out" 'replaces: a csv2 that does not run' \
+        "T323d a copy that prints nothing is reported as not running, not as absent / 什麼都不印的複本被回報為跑不起來，而不是不存在"
+    if [[ -e $_t323/none/${_t323_bin:t} ]]; then
+        bad "T323e --dry-run wrote a binary / --dry-run 寫入了執行檔"
+    else
+        ok "T323e and --dry-run still writes nothing / 而 --dry-run 仍然不寫入任何東西"
+    fi
+fi
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -19644,6 +19763,8 @@ fi
 (( ${T303_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T304_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T321_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T322_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T323_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode

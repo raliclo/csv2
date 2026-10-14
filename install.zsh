@@ -632,6 +632,35 @@ BUILT_VERSION=${BUILT_VERSION%$'\r'}
 say "csv2 install / 安裝"
 say "  from    : $BIN ($BUILT_VERSION)"
 say "  to      : $DEST"
+# What is already there, asked by RUNNING it. Without this line the gap between
+# an installed copy and the tree announced itself only to someone who went and
+# compared `csv2 --version` against HEAD -- and twice nobody did: a 0.1.0 sat on
+# a PATH for a day in September and for a month before 2026-10-07 (todo.md,
+# "Nothing keeps the installed copy current"). This is the moment somebody is
+# looking, so it is said here. A copy that will not RUN is reported as that,
+# not as absent: on 2026-10-12 an installed 0.1.3 printed nothing and exited
+# 127 once its Swift runtime was removed (RC), and "nothing installed" would
+# have been the wrong thing to tell its owner.
+# 那裡已經有的是什麼，靠**執行它**問出來。少了這一行，「已安裝的那一份」與「這棵樹」之間的落差，
+# 只會對主動去比對 `csv2 --version` 與 HEAD 的人現身——而有兩次沒有人去比：一份 0.1.0 在九月待在
+# PATH 上一整天，又在 2026-10-07 之前待了一個月（todo.md，「已安裝的那一份沒有東西讓它跟上」）。
+# 這裡正是有人在看的時刻，所以在這裡說。一份**跑不起來**的複本要照實說它跑不起來，而不是說它不存在：
+# 2026-10-12 一份已安裝的 0.1.3 在它的 Swift runtime 被移除後什麼都不印、以 127 結束（RC），
+# 而對它的主人說「這裡沒有安裝任何東西」會是錯的。
+if [[ -e $DEST ]]; then
+    if OLD_VERSION=$($DEST --version 2>/dev/null) && [[ -n $OLD_VERSION ]]; then
+        OLD_VERSION=${OLD_VERSION%$'\r'}
+        if [[ $OLD_VERSION == "$BUILT_VERSION" ]]; then
+            say "  replaces: $OLD_VERSION (the same build / 同一個建置)"
+        else
+            say "  replaces: $OLD_VERSION"
+        fi
+    else
+        say "  replaces: a csv2 that does not run (--version gave nothing) / 一份跑不起來的 csv2（--version 沒有任何輸出）"
+    fi
+else
+    say "  replaces: nothing; no csv2 at that path yet / 沒有；那個路徑上還沒有 csv2"
+fi
 (( DRY )) && say "  (dry run — nothing will be written / 預演，不會寫入任何東西)"
 say ""
 

@@ -13993,3 +13993,100 @@ Decided 2026-10-14: document it and ship as usual. Both READMEs and the scoop no
 the required runtime version, the symptom and the check. Behaviour is unchanged, and cannot be
 changed from inside csv2 -- the loader fails before any of its code runs. The version named in
 the docs (6.4.0) goes stale the next time the build toolchain changes and must be edited then.
+
+### RC 的複測，以及一個差點推翻它的觀察（2026-10-14）
+
+2026-10-14 `csv2 --version` 在這台機器上印出了 `csv2 0.1.3 (v0.1.3 / fa2e792)`，而 runtime 仍然只有 6.4.0。
+那讀起來像 RC 整條不成立。**不是**：scoop 目錄裡的那個檔案被換過了。
+
+```console
+$ ls -la --time-style=long-iso ~/scoop/apps/csv2/current/csv2.exe
+-rwxr-xr-x … 676352 2026-10-12 20:52 csv2.exe        # 10-12 稍早是 678400 位元組、10-07 03:56
+$ sha256sum ~/scoop/apps/csv2/current/csv2.exe
+bfd68a06…
+$ zstd -dc dist/csv2-0.1.3-windows-x86_64.tar.zst | tar -xOf - csv2-0.1.3-windows-x86_64/csv2.exe | sha256sum
+34a9b6dc…                                             # 已發布的那一份，不是同一個檔案
+```
+
+把**已發布**的那一份從封存解出來、以明確路徑執行：bash 下 `rc=127`、沒有輸出；`cmd /v:on` 下
+`.\csv2.exe --version` 得到 `rc=-1073741511`（`0xC0000139`）。所以 RC 原樣成立，而今天能跑的是一份
+10-12 20:52 被放進 scoop 目錄、同樣回報 `v0.1.3 / fa2e792` 的另一個建置——不是這個 session 放的，
+是誰放的沒有查到。**scoop 不知道這件事**：`scoop-manifest.json` 仍記著原本的 hash。
+
+值得記下的是那個差點發生的錯誤：「它現在跑得起來」加上「runtime 沒變」，足以讓人把 RC 與 README 裡
+那段說明一起撤掉；而兩者都沒有錯，錯的是「那還是同一個檔案」這個沒有被問的前提。**同一個版本字串
+不等於同一個執行檔**——這是 NN，第二次。
+
+RC re-measured. The installed csv2 ran on 2026-10-14 with only the 6.4.0 runtime present, which
+looked like a refutation; it was not. The file in scoop's directory had been replaced on 10-12
+20:52 (different size, different sha256, same version string, not by this session). The PUBLISHED
+0.1.3 binary, extracted from its archive, still exits 0xC0000139. Same version string, different
+executable: NN again.
+
+## RD. scoop 的 notes 說「需要 Swift 6.4.0」，而那份 manifest 下載的仍是 6.3.3 建的 0.1.3（2026-10-14 修正；使用者的審查回報，我在寫 RC 文件時造成）
+
+`scoop/csv2.json` 在 `a1bf7f98` 上：
+
+```console
+$ grep -n '"version"\|needs Swift\|releases/download' scoop/csv2.json
+    "version": "0.1.3",
+        "install: v0.1.4 needs Swift 6.4.0 (Runtimes\\6.4.0\\usr\\bin on PATH, from the",
+            "url": "https://github.com/raliclo/csv2/releases/download/v0.1.3/csv2-0.1.3-windows-x86_64.tar.zst",
+```
+
+那份 manifest 是從 `develop` 直接被安裝的（README 教的就是那個網址），而 `publish.zsh` 要到發布時才把版本
+改成 0.1.4。在那之前照著 notes 裝 6.4.0 的人，拿到的是需要 6.3.3 的 0.1.3——RC 記的那個靜默失敗，由一則
+為了避免它而寫的說明引過去。**這是 CN 那個形狀的又一次**：我加了一句對「下一版」為真的話，放在一個描述
+「現在這一版」的檔案裡。
+
+（0.1.3 是 6.3.3 建的，這一點是推論：它在 6.4.0 的 runtime 上找不到進入點，而這個節點的 PATH 把 6.3.3
+排在前面直到它被移除。6.3.3 已不在，無法直接量。）
+
+The scoop notes said v0.1.4 needs Swift 6.4.0 while the manifest, installed straight from
+develop, still downloads the 0.1.3 built with 6.3.3 -- until publish.zsh rewrites the version.
+A reader following the note installs the wrong runtime for what they get. Introduced by the RC
+documentation; reported by the user's review.
+
+**修正：** notes 不再只說「下一版」需要什麼，而是把兩個版本各自需要的 runtime 並列，並叫讀者先看
+這份 manifest 裝的是哪一版——於是這段話在 `publish.zsh` 把版本改成 0.1.4 之前與之後都為真。兩份
+README 補上同一件事：runtime 跟著那一版 release 走，`csv2 --version` 回報 0.1.3 時裝 6.4.0 是錯的解法。
+沒有斷言：`publish.zsh` 刻意不改寫 notes（T308），所以沒有機制能讓它自動跟上，**下一次換工具鏈時
+要手動加一行**。
+
+Fixed by listing the runtime each version needs and telling the reader to look at which version
+the manifest installs, so the note is true both before and after publish.zsh rewrites the
+version. No assertion: publish.zsh deliberately leaves notes alone, so a line must be added by
+hand when the toolchain next changes.
+
+## RE. `VERSION=…` 環境變數讓 `release.zsh` 用任意版本號為封存命名，而且照樣說「已驗證」（2026-10-14 修正，T322a–f；使用者的審查回報）
+
+```console
+$ ./release/csv2.exe --version
+csv2 0.1.4 (v0.1.4 / a1bf7f98)
+$ VERSION=9.9.9 ./release.zsh ; echo rc=$?
+…/dist/csv2-9.9.9-windows-x86_64.tar.zst
+dd2ff6ee…  *csv2-9.9.9-windows-x86_64.tar.zst
+verified: extracted, ran, and read a CSV / 已驗證：解開、執行過，而且讀得了一個 CSV
+rc=0
+```
+
+`release.zsh` 寫的是 `VERSION=${VERSION:-}`，然後 `if [[ -z $VERSION ]]` 才去問執行檔：環境裡只要有一個
+`VERSION`，那段「從執行檔讀版本、並要求它長得像版本號」的程式就整段被跳過。後面三道拒絕比對的是
+build id（commit），沒有一道比對版本號，所以它們全部成立。那份 9.9.9 封存已刪除。
+
+**這就是 QI，從另一扇門回來。** QI 是「版本來自一個寫死的常數」，修法把常數換成「空的預設值」，而
+`${VERSION:-}` 的另一半——「如果環境裡已經有了就用它」——原封不動留著。T304a 檢查的是「沒有版本
+字面值被指派給 VERSION」，那句話到今天都為真。`VERSION` 又是一個再普通不過的環境變數名稱，CI 與
+許多建置腳本都會 export 它。
+
+`VERSION` in the environment names the archive and skips the check that reads the version from
+the binary; the three later refusals compare the build id, never the version, so all hold and the
+run says "verified". This is QI through another door: QI replaced a constant with an empty default
+and left the "use the environment's value" half of `${VERSION:-}` in place. T304a still passes.
+
+**修正：** 每一次都去問執行檔。環境裡的 `VERSION` 若與執行檔相符就沒事；不相符則以 1 拒絕並指出兩個值，
+而不是靜默覆蓋——設定它的人預期的是一個這次執行不會產生的東西。T322 用一個回報 1.2.3 的假執行檔，
+從複本執行：不符的被拒且沒有寫入任何東西，相符的與沒設的都通過版本檢查。
+
+Fixed: the binary is asked every time; a VERSION that agrees is harmless and one that disagrees
+is refused with both values named. T322 runs a copy beside a stub reporting 1.2.3.

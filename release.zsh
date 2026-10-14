@@ -96,20 +96,39 @@ case "$(uname -s)" in
     MSYS*|MINGW*|CYGWIN*|Windows*) OS=windows ;;
     *)                             OS=$(uname -s | tr '[:upper:]' '[:lower:]') ;;
 esac
-VERSION=${VERSION:-}
-if [[ -z $VERSION ]]; then
-    _rv=$("$BIN" --version 2>/dev/null)
-    # `csv2 <version> (<id>)`. Taken as the second field and then REQUIRED to
-    # look like a version, so a changed format gives a refusal rather than a
-    # plausible wrong name.
-    # `csv2 <版本> (<id>)`。取第二個欄位，然後**要求**它長得像一個版本號——這樣一來，格式改變會
-    # 得到一則拒絕，而不是一個看起來合理的錯名字。
-    VERSION=${${(z)_rv}[2]}
-    if [[ $VERSION != <->.<->.<-> ]]; then
-        print -u2 -- "cannot read a version out of [$_rv]; refusing to name an archive by guessing"
-        print -u2 -- "從 [$_rv] 讀不出版本號；拒絕用猜的方式為封存命名"
-        exit 1
-    fi
+# The binary is asked EVERY time, whatever the environment holds. This was
+# `VERSION=${VERSION:-}` followed by `if [[ -z $VERSION ]]`, so a VERSION that
+# happened to be exported -- a common name; CI sets it -- skipped the whole
+# block: `VERSION=9.9.9 ./release.zsh` packaged a 0.1.4 binary as
+# csv2-9.9.9-…, and said "verified". QI replaced a constant with an empty
+# default and left the "or take the environment's" half standing. RE.
+#
+# An inherited VERSION that AGREES is harmless; one that disagrees is refused
+# rather than silently overridden, because whoever set it expected something
+# this run is not going to produce.
+# **每一次**都去問執行檔，不管環境裡有什麼。這裡原本是 `VERSION=${VERSION:-}` 再接
+# `if [[ -z $VERSION ]]`，於是一個碰巧被 export 的 VERSION——很常見的名字，CI 會設——就跳過整段：
+# `VERSION=9.9.9 ./release.zsh` 把一個 0.1.4 的執行檔打包成 csv2-9.9.9-…，並說「已驗證」。QI 把
+# 常數換成了空的預設值，卻讓「否則用環境裡的」那一半原樣留著。RE。
+# 繼承來的 VERSION 若**相符**則無害；不相符時是拒絕而不是靜默覆蓋，因為設定它的人預期的是一個
+# 這次執行不會產生的東西。
+_env_version=${VERSION:-}
+_rv=$("$BIN" --version 2>/dev/null)
+# `csv2 <version> (<id>)`. Taken as the second field and then REQUIRED to
+# look like a version, so a changed format gives a refusal rather than a
+# plausible wrong name.
+# `csv2 <版本> (<id>)`。取第二個欄位，然後**要求**它長得像一個版本號——這樣一來，格式改變會
+# 得到一則拒絕，而不是一個看起來合理的錯名字。
+VERSION=${${(z)_rv}[2]}
+if [[ $VERSION != <->.<->.<-> ]]; then
+    print -u2 -- "cannot read a version out of [$_rv]; refusing to name an archive by guessing"
+    print -u2 -- "從 [$_rv] 讀不出版本號；拒絕用猜的方式為封存命名"
+    exit 1
+fi
+if [[ -n $_env_version && $_env_version != "$VERSION" ]]; then
+    print -r -u2 -- "VERSION=$_env_version is set in the environment but the binary reports $VERSION; the archive is named from the binary, so unset VERSION or rebuild"
+    print -r -u2 -- "環境裡設了 VERSION=$_env_version，而執行檔回報的是 $VERSION；封存以執行檔為準命名，請取消 VERSION 或重新建置"
+    exit 1
 fi
 ARCH=$(uname -m)
 STEM=csv2-$VERSION-$OS-$ARCH

@@ -898,6 +898,25 @@ QV 的修正在 macOS 與 guest 上都驗證過了：`run_csv2_test.zsh` 在新�
 LinuxCS `383700e`，busybox `45ad4ce5`），先前的每一個案例狀態都沒變。QW、QX、QY 以已安裝的 0.1.3 重現過
 （`2:1` 對 `1:1`、symlink 被換掉、rc=133）；QZ 只有檢視器 T94 通過，沒有用舊版重現。**WSL 與 Windows 還沒跑過這些修正。**
 
+**2026-10-14 稍晚：下面這一段（「tag 還沒移」「RC 未修」「被權限規則擋下」）已經過期，保留是因為它記的是
+當時的事。現況如下。**
+
+- **tag 移過兩次，都是使用者親手執行的**：先到 `1e87d2f0`，再到 `a1bf7f98`（含 RC 的文件）。之後使用者的
+  審查又找到兩條（RD、RE），連同 T181 的逾時保護與 `install.zsh` 的「replaces」那一行，都在 `a1bf7f98`
+  **之後**的 commit 裡——所以 **tag 還要再移一次**，移到含這些修正的 commit，而那個 commit 要先在四個
+  節點上通過。`release.zsh` 本身被改了（RE），所以這一次不能說「只是文件」。
+- **RC 已決定**（使用者）：寫進文件，照常發布，行為不變。
+- **Windows 與 WSL 已預演**；macOS 與 guest 還沒跑過 `a1bf7f98` 之後的任何 commit。
+- 這台 Windows 上 scoop 目錄裡的 `csv2.exe` 在 10-12 20:52 被換成另一個建置，scoop 並不知情
+  （見 `known-defects.md` RC 的複測）。0.1.4 發布後的 `scoop update csv2` 會把它蓋掉，那正是想要的結果；
+  在那之前不要拿「它現在跑得起來」當成任何事情的證據。
+
+Later on 2026-10-14: the paragraph below is stale and kept as the record of that moment. The tag
+was moved twice by the user (to 1e87d2f0, then a1bf7f98). RD, RE, the T181 time limit and
+install.zsh's "replaces" line landed AFTER a1bf7f98, so the tag must move once more, to a commit
+all four nodes have passed; release.zsh itself changed, so this is not a docs-only move. RC is
+decided: documented, shipped as usual. macOS and the guest have run nothing past a1bf7f98.
+
 **2026-10-14：WSL 與 Windows 預演過了，tag 還沒移。** 兩台都在 `1e87d2f0` 上 0 FAIL（Windows 16 SKIP、
 WSL 1 SKIP）。預演找到三條，記在 `known-defects.md` 的 RA、RB、RC：RA（T212 在 Swift 6.4.0 的 Windows 上
 失敗）與 RB（`release.zsh --help` 會真的打包）已修並含在 `1e87d2f0` 裡；**RC 未修，是出貨前要決定的事**——
@@ -1172,6 +1191,16 @@ session 用它做了一整天的文件編輯——包括寫下那些關於「工
 需要任何排程，而且它出現的時機正是有人在意這件事的時機。
 
 **尚未實作，因為它會改變一個對外可見的輸出**，而今天已經有一次「順手改掉一個訊息」的教訓。
+
+> **2026-10-14：已實作（使用者要求），T323a–e。** 上面那一句保留，因為它記的是當時為什麼沒做。
+> `install.zsh` 現在在 `to :` 之後多印一行 `replaces:`，內容是靠**執行**目的地那一份問出來的版本；
+> 目的地是空的就說空的，同一個建置就說同一個建置，**跑不起來的就說跑不起來**——最後這一種是 RC
+> 帶來的：一份什麼都不印的 csv2 若被回報成「這裡沒有東西」，是錯的。`--dry-run` 同樣會印，那是
+> 不寫入任何東西就能看到落差的方式。它**沒有**解決「什麼時候該升級」，那仍然是母專案的決定。
+>
+> 2026-10-14: implemented at the user's request, T323a-e. install.zsh prints a `replaces:` line
+> with the version the copy at the destination reports when run -- or that the destination is
+> empty, or that the copy there does not run. It does not answer WHEN to upgrade.
 
 Nothing keeps `/usr/local/bin/csv2` in step with the submodule. On the machine that reported
 this it sat at `v0.1.0-4-g3515258` all day while being used for documentation edits, including

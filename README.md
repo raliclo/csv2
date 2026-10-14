@@ -90,6 +90,11 @@ where swiftCore.dll
 It should name a `Runtimes\6.4.0` directory. A machine with no Swift installed
 at all has not been tested; expect it not to start either.
 
+The runtime follows the release, not the latest Swift. v0.1.3 and earlier were
+built with Swift 6.3.3 and need `Runtimes\6.3.3`; if `csv2 --version` reports
+0.1.3 — which is what the Scoop manifest installs until v0.1.4 is published —
+installing 6.4.0 is the wrong fix.
+
 ## Build and install from source
 
 Requirements: Swift 6 with warnings treated as errors. The build uses plain
