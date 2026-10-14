@@ -19595,6 +19595,61 @@ else
     fi
 fi
 
+echo
+echo "--- T324: the history is linear / T324：歷史是線性的 ---"
+# 478 commits and not one merge, and until 2026-10-14 nothing said so or kept
+# it so. Four checkouts on four machines push to one branch; a single
+# `git pull` without --rebase on any of them records a merge commit, and the
+# next push carries it out with nothing reporting it. Local config
+# (pull.rebase) only reaches the machine it was set on, and AGENTS.md only
+# reaches whoever reads it. This case is the part that runs everywhere the
+# suite does.
+# 478 個 commit、沒有一個 merge，而在 2026-10-14 之前沒有任何東西說出這件事、也沒有任何東西
+# 維持它。四台機器上的四份 checkout 推向同一條分支；其中任何一台少了 --rebase 的一次 `git pull`
+# 就會記下一個 merge commit，下一次 push 就把它帶出去，沒有任何東西回報。本機設定（pull.rebase）
+# 只到得了設定它的那台機器，AGENTS.md 只到得了讀它的人。這個案例是「套件跑到哪裡、它就跑到哪裡」
+# 的那一部分。
+if ! command -v git >/dev/null 2>&1 || [[ ! -d $ROOT/.git && ! -f $ROOT/.git ]]; then
+    T324_SKIPPED=1
+    skipt "T324 the history is linear / 歷史是線性的 (not a git checkout here / 這裡不是一個 git checkout)"
+else
+    _t324_merges=$(git -C "$ROOT" rev-list --merges HEAD 2>/dev/null)
+    _t324_all=$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || print 0)
+    # Zero commits means the query failed, not that the history is clean. T218a.
+    # 零個 commit 代表那個查詢失敗了，不代表歷史是乾淨的。T218a。
+    if (( _t324_all < 2 )); then
+        bad "T324a git rev-list counted $_t324_all commits, so nothing was checked / git rev-list 只數到 $_t324_all 個 commit，等於什麼都沒檢查"
+    elif [[ -z $_t324_merges ]]; then
+        ok "T324a none of the $_t324_all commits in HEAD is a merge / HEAD 的 $_t324_all 個 commit 沒有一個是 merge"
+    else
+        bad "T324a merge commit(s) in HEAD: $(print -r -- "$_t324_merges" | head -3 | tr '\n' ' ')/ HEAD 裡有 merge commit，如上；照 AGENTS.md 的「線性歷史」改寫成 rebase"
+    fi
+    # The query must bite: the same rev-list on a repository holding exactly
+    # one --no-ff merge has to name it. Any global pull/merge setting is
+    # overridden on the command line so this machine's config cannot decide it.
+    # 這個查詢必須會咬：同一個 rev-list，對著一個恰好有一個 --no-ff merge 的 repo，必須把它指出來。
+    # 全域的 pull/merge 設定在命令列上覆寫，這台機器的設定才決定不了結果。
+    _t324=$TMP/t324 && mkdir -p "$_t324"
+    _t324_g=(git -C "$_t324" -c user.name=t324 -c user.email=t324@invalid
+             -c commit.gpgsign=false -c init.defaultBranch=main -c merge.ff=true)
+    if "${_t324_g[@]}" init -q >/dev/null 2>&1 &&
+       "${_t324_g[@]}" commit -q --allow-empty -m base >/dev/null 2>&1 &&
+       "${_t324_g[@]}" checkout -q -b side >/dev/null 2>&1 &&
+       "${_t324_g[@]}" commit -q --allow-empty -m side >/dev/null 2>&1 &&
+       "${_t324_g[@]}" checkout -q main >/dev/null 2>&1 &&
+       "${_t324_g[@]}" commit -q --allow-empty -m main >/dev/null 2>&1 &&
+       "${_t324_g[@]}" merge -q --no-ff --no-edit side >/dev/null 2>&1; then
+        _t324_n=$(git -C "$_t324" rev-list --merges HEAD 2>/dev/null | LC_ALL=C grep -c . || true)
+        if [[ $_t324_n == 1 ]]; then
+            ok "T324b and a repository with one merge is reported as having one / 而一個有一次 merge 的 repo 被回報為有一次"
+        else
+            bad "T324b a repository with one merge reported $_t324_n / 一個有一次 merge 的 repo 回報了 $_t324_n 次"
+        fi
+    else
+        bad "T324b could not build the one-merge repository, so the query was never shown to bite / 建不出那個有一次 merge 的 repo，查詢從未被證明會咬"
+    fi
+fi
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -19765,6 +19820,7 @@ fi
 (( ${T321_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T322_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T323_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T324_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode

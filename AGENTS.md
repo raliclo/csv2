@@ -443,3 +443,33 @@ because there is nothing to fork.
 本 repo 是**我們自己的**，沒有上游。`origin` 即 `raliclo/csv2`，同時是拉取來源與推送
 目標。母專案的 fork 規則（`origin` 為上游唯讀、`ralic` 為我們的 fork）在此**不適用**，
 因為沒有東西可 fork。
+
+## Linear history / 線性歷史
+
+`develop` has no merge commits, and it is to stay that way (the user's
+decision, 2026-10-14). Four checkouts on four machines push to this one branch,
+so a single `git pull` without `--rebase` on any of them records a merge and
+the next push publishes it. In every checkout, once:
+
+```zsh
+git config pull.rebase true     # git pull rebases instead of merging
+git config merge.ff only        # a plain git merge refuses to create a merge commit
+```
+
+Before pushing, `git pull --rebase`; if the push is rejected, rebase again, never
+merge. Do not force-push `develop` to "fix" a merge that already went out --
+ask the user. T324 fails when HEAD contains a merge commit; local config only
+reaches the machine it was set on, and the suite reaches every node.
+
+`develop` 沒有 merge commit，而且要維持如此（使用者決定，2026-10-14）。四台機器上的四份
+checkout 推向同一條分支，其中任何一台少了 `--rebase` 的一次 `git pull` 就會記下一個 merge，
+下一次 push 就把它發布出去。每一份 checkout 設定一次：
+
+```zsh
+git config pull.rebase true     # git pull 改用 rebase，不做 merge
+git config merge.ff only        # 單純的 git merge 拒絕產生 merge commit
+```
+
+推送前先 `git pull --rebase`；push 被拒就再 rebase 一次，不要 merge。已經推出去的 merge 不要
+用 force-push `develop` 去「修」——先問使用者。HEAD 含 merge commit 時 T324 會失敗；本機設定
+只到得了設定它的那台機器，而套件到得了每一個節點。
