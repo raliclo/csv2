@@ -14090,3 +14090,25 @@ and left the "use the environment's value" half of `${VERSION:-}` in place. T304
 
 Fixed: the binary is asked every time; a VERSION that agrees is harmless and one that disagrees
 is refused with both values named. T322 runs a copy beside a stub reporting 1.2.3.
+
+## RF. `install.zsh` 在一台沒有 Homebrew 的 Linux 上，說「這不是 Homebrew 安裝」並教人別用 `brew uninstall`（2026-10-14 發現，**未修**）
+
+在 WSL 上以 root 把 0.1.4 裝進 `/usr/local/bin`（`install.zsh --no-rc --dir /usr/local/bin`）時，輸出裡有：
+
+```console
+NOTE: this is NOT a Homebrew install / 注意：這不是 Homebrew 安裝
+  brew list      will not show it / 不會列出它
+  brew upgrade   will never update it / 不會更新它
+  brew doctor    will report it as an unbrewed file / 會回報它是 unbrewed 檔案
+  …
+```
+
+那台機器沒有 `brew`。條件是 `[[ $DEST_DIR == */homebrew/bin || $DEST_DIR == /usr/local/bin || … ]]`——
+`/usr/local/bin` 只在 Intel macOS 上是 Homebrew 的 prefix，條件卻不看平台、也不看 `brew` 存不存在。
+安裝本身正確（`verified: a fresh bash runs /usr/local/bin/csv2`）；錯的是那段說明，它對一個不存在的
+套件管理員發出警告。與 CN 同一族：一句只在某些機器上為真的話，被印在所有機器上。修法大概是加上
+`command -v brew` 的條件，**還沒做**，記在這裡等決定。
+
+On WSL, installing into /usr/local/bin printed the "NOT a Homebrew install" note on a machine with
+no brew: /usr/local/bin is Homebrew's prefix only on Intel macOS, and the condition checks
+neither the platform nor whether brew exists. The install itself was correct. Not fixed.
