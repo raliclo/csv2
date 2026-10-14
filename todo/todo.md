@@ -898,6 +898,28 @@ QV 的修正在 macOS 與 guest 上都驗證過了：`run_csv2_test.zsh` 在新�
 LinuxCS `383700e`，busybox `45ad4ce5`），先前的每一個案例狀態都沒變。QW、QX、QY 以已安裝的 0.1.3 重現過
 （`2:1` 對 `1:1`、symlink 被換掉、rc=133）；QZ 只有檢視器 T94 通過，沒有用舊版重現。**WSL 與 Windows 還沒跑過這些修正。**
 
+**2026-10-14：WSL 與 Windows 預演過了，tag 還沒移。** 兩台都在 `1e87d2f0` 上 0 FAIL（Windows 16 SKIP、
+WSL 1 SKIP）。預演找到三條，記在 `known-defects.md` 的 RA、RB、RC：RA（T212 在 Swift 6.4.0 的 Windows 上
+失敗）與 RB（`release.zsh --help` 會真的打包）已修並含在 `1e87d2f0` 裡；**RC 未修，是出貨前要決定的事**——
+Windows 封存只有 `csv2.exe`，需要「建置它的那一版」Swift runtime，而這個節點現在只有 6.4.0。
+`1e87d2f0` 已推送。**macOS 與 guest 還沒跑過 `1e87d2f0`**：它改了 `test_csv2.zsh`、`module_api.zsh`、
+`release.zsh`、`publish.zsh`，沒有動 `src/`。
+
+所以下面第 0 步的「移 tag」現在要移到 `1e87d2f0`（或更後面、macOS 與 guest 也通過的那個 commit）。
+Windows 節點的 session 試過 `git tag -f` 加 `git push --force origin v0.1.4`，被該 session 的權限規則擋下
+（強制更新已推送的 tag），**沒有執行**；遠端的 tag 仍指向 `7ce19e1d`，`gh release view v0.1.4` 仍查不到。
+
+一件沒有重現的事，記下來是為了下次看到時認得：WSL 在 `1e87d2f0` 上的第一次執行停在
+`--- T181: -i on a FIFO ---` 的標題之後，直到一小時上限被中止，沒有留下任何 FAIL；同一棵樹緊接著再跑一次
+完整通過，`796fdb9b` 上也通過。只發生過一次，沒有查到成因。
+
+2026-10-14: WSL and Windows are rehearsed at 1e87d2f0, 0 FAIL on both, and the tag has NOT moved.
+RA and RB (found by the rehearsal) are fixed in that commit; RC -- the Windows archive needs the
+Swift runtime of the version that built it -- is open and is a decision to make before shipping.
+macOS and the guest have not run 1e87d2f0. The tag move was attempted from the Windows session
+and blocked by its permission rules, so nothing was force-pushed. One unreproduced hang: the first
+WSL run stopped after T181's heading until its one-hour limit; the next run passed.
+
 剩下的步驟，依序：
 
 0. WSL 與 Windows 回來後在 develop 上預演（guest 已過）。都通過才把
