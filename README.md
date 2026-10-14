@@ -66,6 +66,30 @@ With Scoop:
 scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.json
 ```
 
+**On Windows, csv2 needs the Swift runtime of the version that built it, and
+neither the archive nor Scoop installs that for you.** The Windows archive
+holds `csv2.exe` and nothing else; it loads `swiftCore.dll`, `Foundation.dll`
+and about a dozen siblings from `PATH`. v0.1.4 was built with **Swift 6.4.0**,
+so it needs the Swift 6.4.0 runtime — the directory
+`%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.0\usr\bin`, which the Swift 6.4.0
+installer from [swift.org](https://www.swift.org/install/windows/) creates and
+puts on `PATH`.
+
+A different runtime version is not close enough, and the failure says nothing.
+Measured on 2026-10-12, when the machine that built v0.1.3 had its Swift 6.3.3
+removed and only 6.4.0 left: the installed v0.1.3 printed nothing at all, and
+exited `0xC0000139` (entry point not found) under `cmd.exe` and `127` under
+bash and zsh — which reads like "command not found" for a file that is sitting
+right there. If `csv2 --version` prints nothing, check this before anything
+else:
+
+```bat
+where swiftCore.dll
+```
+
+It should name a `Runtimes\6.4.0` directory. A machine with no Swift installed
+at all has not been tested; expect it not to start either.
+
 ## Build and install from source
 
 Requirements: Swift 6 with warnings treated as errors. The build uses plain

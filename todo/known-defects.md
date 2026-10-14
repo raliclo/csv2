@@ -13945,7 +13945,7 @@ Fixed: both answer `-h`/`--help` before anything else; `release.zsh` refuses any
 with 2, `publish.zsh` refuses an option in the version's place. T321 runs copies in a directory
 with nothing to package, so a regression fails instead of writing into the real dist/.
 
-## RC. Windows 的封存只有 `csv2.exe`，而它需要「建置它的那一版」Swift runtime——少了就靜默地起不來（2026-10-12 發現，**未修，待決定**）
+## RC. Windows 的封存只有 `csv2.exe`，而它需要「建置它的那一版」Swift runtime——少了就靜默地起不來（2026-10-12 發現；2026-10-14 決定：寫進文件，行為不變）
 
 ```console
 $ csv2 --version ; echo rc=$?            # scoop 安裝的 0.1.3，從 bash 與 zsh
@@ -13981,3 +13981,15 @@ version that built it. With 6.3.3 removed today the installed 0.1.3 exits 0xC000
 output (127 from a shell). Nothing in the archive, the scoop manifest or the README states the
 dependency. Measured: the version-mismatch half. Not measured: a machine with no Swift at all.
 Not fixed -- bundling the DLLs, declaring the dependency, or static linking is a decision.
+
+**2026-10-14，使用者的決定：寫進文件，照常發布。** 兩份 README 的「Install a release」在 Scoop 段落之後
+說明了所需的 runtime 版本、版本不符時的症狀與 `where swiftCore.dll` 這個檢查；`scoop/csv2.json` 的
+`notes` 帶著同一個要求，安裝時會顯示。**行為沒有變**：版本不符時 csv2 仍然什麼都不說就結束——那發生在
+載入器裡，csv2 自己的任何一行程式都還沒執行，所以它無法替自己報錯。沒有斷言編號，因為沒有東西可斷言：
+這是一段文件，而文件裡寫的版本（6.4.0）在下一次換工具鏈建置時會過期，**屆時要一起改**。打包 DLL 與
+靜態連結都沒有試過，仍然是日後可以做的事。
+
+Decided 2026-10-14: document it and ship as usual. Both READMEs and the scoop notes now state
+the required runtime version, the symptom and the check. Behaviour is unchanged, and cannot be
+changed from inside csv2 -- the loader fails before any of its code runs. The version named in
+the docs (6.4.0) goes stale the next time the build toolchain changes and must be edited then.

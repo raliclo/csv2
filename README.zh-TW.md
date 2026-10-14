@@ -56,6 +56,23 @@ brew install raliclo/csv2/csv2
 scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.json
 ```
 
+**在 Windows 上，csv2 需要「建置它的那一版」Swift runtime，而封存與 Scoop 都不會替你安裝它。**
+Windows 的封存裡只有 `csv2.exe`；它從 `PATH` 載入 `swiftCore.dll`、`Foundation.dll` 以及另外十來個
+DLL。v0.1.4 是用 **Swift 6.4.0** 建置的，所以它需要 Swift 6.4.0 的 runtime——也就是
+`%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.0\usr\bin` 這個目錄，由
+[swift.org](https://www.swift.org/install/windows/) 的 Swift 6.4.0 安裝程式建立並加進 `PATH`。
+
+版本不同的 runtime 不算數，而且失敗時什麼都不說。這是 2026-10-12 量到的：建置 v0.1.3 的那台機器
+移除了 Swift 6.3.3、只剩 6.4.0，結果已安裝的 v0.1.3 完全沒有輸出，在 `cmd.exe` 下以 `0xC0000139`
+（找不到進入點）結束，在 bash 與 zsh 下則是 `127`——讀起來像「找不到指令」，而那個檔案明明就在那裡。
+如果 `csv2 --version` 什麼都沒印，先檢查這件事：
+
+```bat
+where swiftCore.dll
+```
+
+它應該指向一個 `Runtimes\6.4.0` 目錄。完全沒有安裝 Swift 的機器沒有測過；請預期它同樣起不來。
+
 ## 從原始碼建置與安裝
 
 需求：Swift 6，並將警告視為錯誤。建置使用純 Swift 原始檔、Foundation 與
