@@ -24,8 +24,8 @@ judgement the owning session is best placed to make.
 
 ## 1. 測試碰到的不是被測物（環境、工具，或 fixture 弄丟了那個屬性）
 
-**23 次 / 12 天**（2026-08-20、2026-08-27、2026-08-29、2026-09-02、2026-09-03、2026-09-06、
-2026-09-07、2026-09-08、2026-09-09、2026-09-10、2026-09-18、2026-10-07），單日最多 3 次（2026-08-27）。
+**24 次 / 13 天**（2026-08-20、2026-08-27、2026-08-29、2026-09-02、2026-09-03、2026-09-06、
+2026-09-07、2026-09-08、2026-09-09、2026-09-10、2026-09-18、2026-10-07、2026-10-14），單日最多 3 次（2026-08-27）。
 
 *這一行直到 2026-09-08 為止寫的是「9 次 / 6 天」，而 `mistakes_counter.csv2` 當時已經是 17 次 / 8 天。
 數字的權威來源是那個檔案；這裡是它的副本，而副本會漂。* **這一條本身就是第 1 類**——比對的不是被測物
@@ -45,6 +45,7 @@ judgement the owning session is best placed to make.
 | 2026-09-06 | **「沒有管道」** | 一份流程文件說 Windows 是撥接端 | **四天沒有連 Windows**，而設定檔就在那裡、檔頭寫著相反的事 |
 | 2026-09-08 | **交錯量測第 2 輪** | 量尺是那支腳本自己 | 我在迴圈**正在執行** `measure.zsh` 的時候改了它。那一輪的兩個寫入列回報 `0`，而 `0` 在一張時間表裡看起來像「這一列沒跑」，不像「量尺在跑到一半時被換掉了」 |
 | 2026-09-09 | **guest 有沒有 zstd** | 量尺是一份**描述那台機器的檔案**——而且是上游自帶的範例 | 那台機器**當時開著**。`command -v zstd` 一行就能問。我讀了 24 行 defconfig，得到相反的答案，然後把它寫進 tag、release notes、兩份 README，還據此請另一個 session 改他們的設定 |
+| 2026-10-14 | **「沒有 root」** | 量尺是 `sudo -n true`——問的是「sudo 要不要密碼」 | 問題是「這個 session 能不能以 root 寫 WSL 的 `/usr/local/bin`」。`wsl.exe -u root` 不需要密碼就能做到，而我沒有試；據此告訴另一個 session 與使用者「做不到」，由使用者指正 |
 
 ### 第六次發生在「為了防這條錯誤而寫的那個檢查」裡
 
@@ -570,6 +571,39 @@ property that triggers it; a read-only live `--verify` showed it. I had made the
 publish.zsh earlier in this session and did not search outward. While fixing it, naming an array
 `LINES` (a zsh special) crashed the script at start-up, and two "nothing happened afterwards"
 checks still passed -- they now require that the thing happened first.
+
+### 第二十四次：問了 sudo，而問題是 root（2026-10-14）
+
+Multissh-Win 請 csv2-win 重新安裝 WSL 的 `/usr/local/bin/csv2`（root 擁有）。我只問了一件事：
+
+```console
+$ wsl.exe -- zsh -lc 'sudo -n true'
+sudo: interactive authentication is required
+```
+
+然後回覆對方、也告訴使用者：「這個 session 沒有 root，無法寫入 `/usr/local/bin`。」使用者指正：
+`wsl.exe -u root` 直接以 root 進 WSL，不需要任何密碼。之後的安裝就是這樣做完的。
+
+**量尺問的是「sudo 要不要密碼」，我以為它在問「我能不能成為 root」。** 在一台 WSL 上這兩件事
+不相等：Windows 這一端的使用者本來就能用 `-u` 指定 WSL 的任何帳號。同一個工作階段稍早我已經用
+`wsl.exe -- …` 叫過 WSL 十幾次，`-u` 這個選項一直就在同一支程式上——這與「guest 有沒有 zstd」
+是同一個形狀：可以直接問那台機器的方法就在手邊，而我讀了一個代理的答案。
+
+這次的結論還被**往外送了**：一則訊息給另一個 session、一段回覆給使用者，兩者都說「做不到」。
+另一個 session 若照單全收，會去找一個不需要的 sudo 密碼。
+
+**這次的矯正**：要宣稱「做不到 X」之前，那個否定句必須來自**對 X 本身**的嘗試，不是對某一條通往
+X 的路徑的嘗試。`sudo -n` 失敗只證明「這條路要密碼」；要說「沒有 root」，得先問過所有手邊的路——
+在 WSL 上那包括 `wsl.exe -u root`。「做不到」是最難被事後發現的結論，因為沒有人會去重試一件
+被告知做不到的事。
+
+Twenty-fourth: asked to reinstall WSL's root-owned /usr/local/bin/csv2, I probed `sudo -n true`,
+got "interactive authentication is required", and told another session and the user that this
+session had no root. `wsl.exe -u root` enters WSL as root with no password; the user pointed it
+out. The probe measured "does sudo need a password", not "can I become root" -- on WSL those
+differ. The wrong negative was sent outward twice. A claim that something cannot be done must
+come from attempting the thing itself, not one path to it; a "cannot" is the conclusion least
+likely ever to be retried.
 
 ---
 
