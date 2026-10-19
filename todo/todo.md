@@ -880,7 +880,7 @@ booted at the time.
 | 平台 | 建置於 | build id | 套件 | 封存 sha256 | 升級後 PATH 上的那一份 |
 |---|---|---|---|---|---|
 | macOS arm64 | M4 | `v0.1.4 / 95e1d719` | 1485/0/1 | `a458b9dc…` | M4 與 M6 都 `brew upgrade` → 0.1.4 |
-| Linux aarch64 | guest VM | `v0.1.4 / 95e1d719` | 1473/0/5；`run_csv2_test.zsh` 27 項全過 | `cc17d479…` | **未讀回**：見下 |
+| Linux aarch64 | guest VM | `v0.1.4 / 95e1d719` | 1473/0/5；`run_csv2_test.zsh` 27 項全過 | `cc17d479…` | 10-20 在重建後的 guest 內依 tag 重建 → 0.1.4（見下） |
 | Linux x86_64 | WSL2 | `v0.1.4 / 95e1d719` | 0 FAIL / 1 SKIP | `1abef927…` | `/usr/local/bin/csv2` → 0.1.4 |
 | Windows x86_64 | Ralic-W11 | `v0.1.4 / 95e1d719` | 0 FAIL / 16 SKIP | `233afab3…` | scoop → 0.1.4 |
 
@@ -890,9 +890,13 @@ URL 重新下載比對。
 - **publish 在一個 detached 於 tag 的 worktree 裡跑**：`publish.zsh` 要求 tag 就是 HEAD，而 develop 已經多了
   T324 與一筆 mistakes。把 tag 移到 develop 會讓 Windows 與 WSL 的封存作廢，所以沒有移；改寫後的 Formula 與
   scoop 檔原樣帶回 develop（`773a177`），那兩個 commit 都沒動到套件檔。
-- **guest 沒有讀回**：`install_release.zsh` 連不上它（`no common host-key algorithm`）。當時跑的 VM 是另一個
-  session 在 10-19 17:47 啟動的另一份映像，不是建封存的那一台，所以沒有去動它。封存本身在 10-14 已於 guest 內
-  建置、`release.zsh` 驗證並收回。
+- **guest 晚一天才讀回**：10-19 `install_release.zsh` 連不上它（`no common host-key algorithm`），當時跑的 VM 是
+  另一個 session 啟動的另一份映像，沒有去動它。10-20 母專案重建 guest（multisshd 換成 multissh `cb5c504`）後連得上，
+  但 **`/workspace/csv2/release/csv2` 是 0.1.0**：prepare 每次都放 LinuxCS 的 `prebuilt/csv2`（2026-08-25 收錄，
+  來源 `50b4e05-dirty`）。所以**每次 guest 重建，那一份都會退回 0.1.0**，而 `install_release.zsh` 只會在下次讀回時
+  說出來。這次在 guest 裡 `git checkout --detach v0.1.4` 重建，讀回 `csv2 0.1.4 (v0.1.4 / 95e1d719)`；
+  `install_release.zsh --verify` 五個節點（含 M6 以外的四個）都是 0.1.4。要不要把 0.1.4 收錄成 prebuilt，
+  由使用者決定（母專案的事）。
 - **M6 是新節點**：`Ralics-Mac-Mini.local`（`192.168.213.177`），Apple M6，csv2 由 brew 的 `raliclo/csv2` tap
   管理，沒有 checkout。`install_release.zsh` 還不知道它，這次以 ssh 手動 `brew upgrade`。`.177` 的 16888 埠開著，
   但那是 M6 的 multissh，不是 Windows——曾經被誤認過一次。
@@ -902,8 +906,9 @@ URL 重新下載比對。
 v0.1.4 shipped on 2026-10-19 from tag `95e1d719`, four platforms, all collected over two channels
 and verified by publish.zsh. It was published from a worktree detached at the tag because develop
 had moved past it; the rewritten package files were brought back verbatim. Every node's PATH now
-reads 0.1.4 except the guest, which could not be reached: the VM running then was another
-session's, booted from a different image, and was left alone. M6 is a new node, upgraded by hand
+reads 0.1.4. The guest was read back a day later: after the parent rebuilt it, its
+release/csv2 was the parent's prebuilt 0.1.0, which every rebuild restores; it was rebuilt
+at the tag in the guest. M6 is a new node, upgraded by hand
 over ssh. The first local `brew upgrade` hung for seven hours in `xcodebuild -find ld`; a rerun
 was fine.
 
