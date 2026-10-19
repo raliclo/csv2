@@ -871,7 +871,43 @@ after that first one was sound and faithfully inherited a false premise. The
 lesson is one sentence: ask the machine, not the file that describes it. It was
 booted at the time.
 
-## v0.1.4：tag 已打，**尚未發布**（2026-10-10）
+## ~~v0.1.4~~ 已出貨
+
+### 2026-10-19：v0.1.4 出了，四個平台
+
+`https://github.com/raliclo/csv2/releases/tag/v0.1.4`，tag 指向 `95e1d719`（移過三次，都是使用者親手移的）。
+
+| 平台 | 建置於 | build id | 套件 | 封存 sha256 | 升級後 PATH 上的那一份 |
+|---|---|---|---|---|---|
+| macOS arm64 | M4 | `v0.1.4 / 95e1d719` | 1485/0/1 | `a458b9dc…` | M4 與 M6 都 `brew upgrade` → 0.1.4 |
+| Linux aarch64 | guest VM | `v0.1.4 / 95e1d719` | 1473/0/5；`run_csv2_test.zsh` 27 項全過 | `cc17d479…` | **未讀回**：見下 |
+| Linux x86_64 | WSL2 | `v0.1.4 / 95e1d719` | 0 FAIL / 1 SKIP | `1abef927…` | `/usr/local/bin/csv2` → 0.1.4 |
+| Windows x86_64 | Ralic-W11 | `v0.1.4 / 95e1d719` | 0 FAIL / 16 SKIP | `233afab3…` | scoop → 0.1.4 |
+
+四份都由 `collect_release.zsh` 以兩條通道收回；`publish.zsh` 上傳前讀了每份封存內嵌的 build id，上傳後從公開
+URL 重新下載比對。
+
+- **publish 在一個 detached 於 tag 的 worktree 裡跑**：`publish.zsh` 要求 tag 就是 HEAD，而 develop 已經多了
+  T324 與一筆 mistakes。把 tag 移到 develop 會讓 Windows 與 WSL 的封存作廢，所以沒有移；改寫後的 Formula 與
+  scoop 檔原樣帶回 develop（`773a177`），那兩個 commit 都沒動到套件檔。
+- **guest 沒有讀回**：`install_release.zsh` 連不上它（`no common host-key algorithm`）。當時跑的 VM 是另一個
+  session 在 10-19 17:47 啟動的另一份映像，不是建封存的那一台，所以沒有去動它。封存本身在 10-14 已於 guest 內
+  建置、`release.zsh` 驗證並收回。
+- **M6 是新節點**：`Ralics-Mac-Mini.local`（`192.168.213.177`），Apple M6，csv2 由 brew 的 `raliclo/csv2` tap
+  管理，沒有 checkout。`install_release.zsh` 還不知道它，這次以 ssh 手動 `brew upgrade`。`.177` 的 16888 埠開著，
+  但那是 M6 的 multissh，不是 Windows——曾經被誤認過一次。
+- **本機 `brew upgrade` 第一次卡了 7 小時**，卡在 Homebrew 呼叫的 `xcodebuild -find ld`。停掉重跑即正常，原因
+  沒查到。`install_release.zsh` 的遠端呼叫沒有逾時。
+
+v0.1.4 shipped on 2026-10-19 from tag `95e1d719`, four platforms, all collected over two channels
+and verified by publish.zsh. It was published from a worktree detached at the tag because develop
+had moved past it; the rewritten package files were brought back verbatim. Every node's PATH now
+reads 0.1.4 except the guest, which could not be reached: the VM running then was another
+session's, booted from a different image, and was left alone. M6 is a new node, upgraded by hand
+over ssh. The first local `brew upgrade` hung for seven hours in `xcodebuild -find ld`; a rerun
+was fine.
+
+## v0.1.4：tag 已打，**尚未發布**（2026-10-10）——以下是當時的紀錄
 
 tag `v0.1.4` 指向 `7ce19e1d`，已推送。**沒有任何東西從它發布過**（`gh release view v0.1.4` 查不到），所以它
 還可以移動；一旦發布就不行。使用者的決定：先打 tag，四份封存齊了才發布，不出只有兩個平台的版本——
