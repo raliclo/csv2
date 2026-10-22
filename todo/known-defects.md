@@ -14276,7 +14276,7 @@ stability on Linux. `-static-stdlib` does -- no Swift dependency, no RPATH, same
 at 57 MB instead of 1 MB. For now a static aarch64 asset was added to v0.1.5 and the guest's
 prebuilt takes it. The regular Linux builds went static the same day; see above.
 
-## RK. 沒有結尾換行的檔案，經 csv2 寫出後被補上一個，而 README 沒有說（2026-10-22 回報；**行為是否要改，未決定**）
+## RK. 沒有結尾換行的檔案，經 csv2 寫出後被補上一個，而 README 沒有說（2026-10-22 回報；同日決定：是缺陷，不補）
 
 使用者回報：`--in-place` 更新時，原本沒有結尾換行的檔案會被加上一個。實測（`csv2 0.1.5 (v0.1.5 / 695d5bd5)`，
 Homebrew 安裝的那一份）：
@@ -14305,12 +14305,37 @@ $ printf 'a,b\n1,2' | csv2 -r -t -i - | od -c          # stdout 也一樣
 的檔案會被補上一個。README 只寫了前者。`grep -ci 'final newline' README.md` 是 0，中文版也沒有對應的句子。
 使用者因此把一個已定的政策當成了程式缺陷，而那正是 OT 對 CRLF 記錄過的同一種落差。
 
-**未決定**：要不要讓 `--in-place` 保留「原本沒有結尾換行」這件事。理由兩邊都有：一次只改一格的編輯，動到
-別的位元組是會讓人意外的；但 CRLF 已經在同一條規則下被改寫，只保留其中一項，會讓「輸出永遠是 LF 結尾」這條
-保證出現例外。
+**決定（使用者，2026-10-22）**：這是缺陷。結尾既沒有 LF 也沒有 CRLF 的檔案，編輯之後也不該多出一個；CRLF
+照舊變成 LF。兩者的差別在於：CRLF → LF 是「把一個行尾換成另一個」，而補上結尾換行是「憑空多出一個行尾」。
+
+修法：編輯路徑（`-update`、`-insert`、`-delete`、`-append` 等，寫到 `--in-place`、`-o` 或 `-so` 都算）的輸出，
+結尾有沒有換行跟著輸入走。解析器記下「最後一筆紀錄是在檔案結束時才結束的」，寫出端把每一筆紀錄的 LF 延到下一筆
+寫出時才補，最後一筆的則看輸入。`.csv2` 不受影響：它缺少結尾換行本來就會被當成撕裂的寫入而拒絕。
+
+**`-append` 是例外，照舊**：它加上的紀錄是新的、由 csv2 寫出，和 csv2 寫出的每一筆一樣帶著行尾；原本缺的那個
+換行則成為舊的最後一筆與新紀錄之間的分隔。這是第 73 回合定的（T202b：最後一筆被切斷的 CRLF 檔案，追加的紀錄
+以 CRLF 結尾）。我一度把 `-append` 也改成不補，T202b 抓到了，於是撤回。單獨的 `-append`（快速路徑）與和其他
+編輯一起的 `-append`（一般路徑）寫出相同的位元組（T330e、T330f）。
+
+**Markdown 就地編輯是同一個缺陷的另一處，而且多一項**：它先丟掉文件結尾所有的空行，再固定補一個 `\n`。
+實測（同一個 0.1.5）：
+
+```console
+$ printf '| a | b |\n|---|---|\n| 1 | 2 |\n\ntext' > m2.md
+$ csv2 -update 1:2 X -i m2.md -md -t --md-table 1 --in-place; od -c m2.md | tail -2
+0000020    -   -   |  \n   |   1   |   X   |  \n  \n   t   e   x   t  \n
+```
+
+表格後面那行沒被動到的 `text` 多了一個換行；以空行結尾的文件則失去那些空行。修法是「怎麼拆開就怎麼接回去」，
+只替換表格那幾行（T330h–j）。
+
+**我先前的判讀是錯的**：我依計畫把它歸為「已定的政策，缺的只是文件」，並且一度寫好了 README 的說明句。計畫裡
+那條「`.csv` 缺少結尾換行時補上 LF」是為了**追加**而定的，它被擴大解讀成了「每一次寫出都補」。
 
 Reported: an in-place update adds a final newline to a file that had none. Measured on the
 Homebrew 0.1.5 build: it is not specific to `--in-place` -- `-o` and stdout do it too, because
 every record is written LF-terminated by decided policy, the same rule that turns CRLF into LF.
 The defect is documentation: plan.md says both costs are in the README, and only the CRLF one
-is. Whether `--in-place` should preserve a missing final newline is not decided.
+is. Decided the same day: it is a defect. An edit's output now ends the way its input
+did; CRLF still becomes LF. The plan's "add an LF to a .csv that lacks one" was decided for
+appending and had been read as "on every write".

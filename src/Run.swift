@@ -198,11 +198,19 @@ func runMarkdownEdit(_ o: Options) throws {
                     "--md-table \(wanted)：找不到要就地替換的那張表")
     }
     let start = starts[wanted - 1], end = ends[wanted - 1]
-    var combined = Array(oldLines[..<start]) + newLines + Array(oldLines[end...])
-    while combined.last == "" { combined.removeLast() }
+    // Joined back exactly as it was split: only the table's lines change. This
+    // used to drop every trailing empty line and then add one "\n", so a
+    // document with no final newline gained one and one ending in blank lines
+    // lost them -- bytes outside the table that nobody asked to touch. The
+    // split keeps a final newline as a last "" element, which this join turns
+    // back into that newline. RK.
+    // 怎麼拆開就怎麼接回去：只有那張表的行會變。原本的寫法是先丟掉結尾所有的空行、再補一個 "\n"，
+    // 於是沒有結尾換行的文件多了一個，而以空行結尾的文件失去了它們——都是表格以外、沒有人要求去動的
+    // 位元組。拆開時，結尾的換行會留成最後一個 "" 元素，而這裡的接合會把它還原成那個換行。RK。
+    let combined = Array(oldLines[..<start]) + newLines + Array(oldLines[end...])
     if o.backup { try makeInPlaceBackup(input) }
     let sink = try ByteSink(atomicPath: o.output ?? resolved(input))
-    sink.write(Array((combined.joined(separator: "\n") + "\n").utf8))
+    sink.write(Array(combined.joined(separator: "\n").utf8))
     try sink.close()
 }
 
@@ -2176,10 +2184,24 @@ func runEdit(_ o: Options) throws {
     // 便說第 1 筆在第 1 行，而 `.csv2` 會把它放在第 3 行。在 --verify-index 學會比對它自己
     // 存的行號之前，沒有任何東西檢查過這件事。
     var dryRunChanges: [String] = []
+    // Each record's closing LF is held back until the next record goes out, so
+    // that the LAST one can end the way the input's last one did. A file with
+    // no final newline came back with one after editing a single cell: an
+    // extra byte nobody wrote. CRLF is a different case -- one line ending
+    // replaced by another -- and still becomes LF. The offset and line counts
+    // include the held byte, which is right for every record after it and
+    // does not matter after the last. RK.
+    // 每一筆紀錄結尾的 LF 先扣著，等下一筆寫出時才補，好讓**最後一筆**以輸入最後一筆的方式結束。
+    // 一個沒有結尾換行的檔案，只改一格之後就多了一個：一個沒有人寫過的位元組。CRLF 是另一回事——
+    // 一個行尾換成另一個——它照舊變成 LF。偏移量與行數都把扣著的那個位元組算進去：對它之後的每一筆
+    // 都是對的，在最後一筆之後則無關緊要。RK。
+    var heldLF = false
     func emit(_ r: Record) {
         if o.dryRun { return }
         let bytes = FieldEncoder.encodeRecord(r, format: plan.format, preserveRaw: true)
-        sink.write(bytes)
+        if heldLF { sink.write([BYTE_LF]) }
+        heldLF = bytes.last == BYTE_LF
+        sink.write(heldLF ? Array(bytes.dropLast()) : bytes)
         outOffset += bytes.count
         outLine += bytes.filter { $0 == BYTE_LF }.count
     }
@@ -2633,6 +2655,12 @@ func runEdit(_ o: Options) throws {
     // 都失敗。它造成了 2026-08-19 首次 Windows 執行中十七條失敗裡的十條，而其中沒有任何一條
     // 在 macOS 或 Linux 上看得見——在那兩個平台上，這個順序確實無關緊要。
     // defer 保留：這是雙保險，而 ByteSource.close 可以安全地被呼叫兩次。
+    // -append is the exception: the records it adds are new, written by csv2,
+    // and end the way every record csv2 writes does -- the same answer the fast
+    // path gives, which T202b pins for a file whose last record was cut off.
+    // -append 是例外：它加上的紀錄是新的、由 csv2 寫出，因此和 csv2 寫出的每一筆一樣帶著行尾——與
+    // 快速路徑給的答案相同，而 T202b 對「最後一筆被切斷」的檔案釘住了那個答案。
+    if heldLF && (!parser.endedWithoutNewline || !appends.isEmpty) { sink.write([BYTE_LF]) }
     plan.source.close()
     try sink.close()
     aborted = false

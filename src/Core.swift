@@ -575,6 +575,12 @@ public final class RecordParser {
     /// 任何一個位元組——那正是它在巨大檔案上最便宜的原因。
     private let sink: (Record) throws -> Bool
     private(set) var stopped = false
+    /// True once finish() has ended a record that the input never terminated:
+    /// the file's last byte was not a newline. An edit uses it to end its output
+    /// the same way rather than add a line ending nobody wrote. RK.
+    /// finish() 結束了一筆輸入從來沒有終止的紀錄時為真：檔案的最後一個位元組不是換行。編輯用它讓
+    /// 輸出以同樣的方式結束，而不是多出一個沒有人寫過的行尾。RK。
+    private(set) var endedWithoutNewline = false
     private let truncatePartial: Bool
 
     /// `firstRecordNumber`, `firstOffset` and `firstLine` let parsing resume
@@ -1214,6 +1220,7 @@ public final class RecordParser {
             // `.csv2` 缺少結尾換行，在解析開始前就由 checkTornAppend 回報過了，
             // 因此走到這裡表示呼叫端選擇繼續；照常吐出，不要再造一個錯誤。
         }
+        endedWithoutNewline = true
         try endRecord()
     }
 }

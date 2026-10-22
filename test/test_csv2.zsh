@@ -19816,6 +19816,68 @@ case "$(uname -s 2>/dev/null)" in
         ;;
 esac
 
+echo
+echo "--- T330: an edit does not add a final newline the file never had / T330：編輯不會補上一個檔案從來沒有的結尾換行 ---"
+# RK. Editing one cell of a file with no final newline added one: a byte
+# nobody wrote. An edit's output now ends the way its input did. CRLF is a
+# different case -- one line ending replaced by another -- and still becomes
+# LF (d). -append is not that case: the records it adds are new and end in
+# LF like every record csv2 writes (T202b pins it for the fast path), alone (e)
+# or beside another edit (f), and the two give the same bytes. A file that
+# did end in LF keeps it (g). Each case states its bytes in full, so an extra
+# or missing LF anywhere shows.
+# RK。在一個沒有結尾換行的檔案裡改一格，結果多了一個：一個沒有人寫過的位元組。編輯的輸出現在以
+# 輸入的方式結束。CRLF 是另一回事——一個行尾換成另一個——它照舊變成 LF（d）。-append 不是這種
+# 情況：它加上的紀錄是新的，和 csv2 寫出的每一筆一樣以 LF 結尾（快速路徑由 T202b 釘住），不論單獨（e）
+# 或與其他編輯一起（f），兩者的位元組相同。原本以 LF 結尾的檔案保留它（g）。每一項都寫出完整的位元組，所以任何地方多一個或少一個 LF 都看得到。
+_t330=$TMP/t330
+mkdir -p "$_t330"
+_t330_bytes() { od -An -c "$1" | tr -s ' \n' ' ' }
+printf 'a,b\n1,2' > "$_t330/a.csv"
+"$CSV2" -update 1:2 X -i "$_t330/a.csv" --in-place 2>/dev/null
+assert_eq "$(_t330_bytes "$_t330/a.csv")" " a , b \\n 1 , X " \
+    "T330a --in-place on a .csv with no final newline: none is added / 沒有結尾換行的 .csv 就地更新後不補"
+printf 'x\ny' > "$_t330/b.txt"
+"$CSV2" -update 1:1 Z -i "$_t330/b.txt" -o "$_t330/b.out.txt" 2>/dev/null
+assert_eq "$(_t330_bytes "$_t330/b.out.txt")" " Z \\n y " \
+    "T330b -o from a lines file with no final newline: none is added / 沒有結尾換行的 lines 檔經 -o 寫出後不補"
+printf 'a,b\n1,2' > "$_t330/c.csv"
+"$CSV2" -update 1:2 X -i "$_t330/c.csv" -so > "$_t330/c.out" 2>/dev/null
+assert_eq "$(_t330_bytes "$_t330/c.out")" " a , b \\n 1 , X " \
+    "T330c -so: none is added on stdout either / -so 的 stdout 也不補"
+printf 'a,b\r\n1,2' > "$_t330/d.csv"
+"$CSV2" -update 1:2 X -i "$_t330/d.csv" --in-place 2>/dev/null
+assert_eq "$(_t330_bytes "$_t330/d.csv")" " a , b \\n 1 , X " \
+    "T330d CRLF still becomes LF, the unedited header too, and no final newline appears / CRLF 照舊變 LF，沒被編輯的標頭也是，且不多出結尾換行"
+printf 'a,b\n1,2' > "$_t330/e.csv"
+"$CSV2" -append 3,4 -append 5,6 -i "$_t330/e.csv" --in-place 2>/dev/null
+assert_eq "$(_t330_bytes "$_t330/e.csv")" " a , b \\n 1 , 2 \\n 3 , 4 \\n 5 , 6 \\n " \
+    "T330e -append alone: the new records end in LF / 單獨 -append：新加的紀錄以 LF 結尾"
+printf 'a,b\n1,2' > "$_t330/f.csv"
+"$CSV2" -append 3,4 -append 5,6 -update 1:1 1 -i "$_t330/f.csv" --in-place 2>/dev/null
+assert_eq "$(_t330_bytes "$_t330/f.csv")" "$(_t330_bytes "$_t330/e.csv")" \
+    "T330f -append beside another edit gives the same bytes as -append alone / 與其他編輯一起的 -append，位元組與單獨 -append 相同"
+printf 'a,b\n1,2\n' > "$_t330/g.csv"
+"$CSV2" -update 1:2 X -i "$_t330/g.csv" --in-place 2>/dev/null
+assert_eq "$(_t330_bytes "$_t330/g.csv")" " a , b \\n 1 , X \\n " \
+    "T330g a file that ended in LF still does / 原本以 LF 結尾的檔案照舊以 LF 結尾"
+# Markdown in place used to drop every trailing empty line and add one LF:
+# (h) a document ending in its table gained one, (i) prose after the table
+# gained one, (j) blank lines at the end were removed.
+# Markdown 就地編輯原本會丟掉結尾所有空行、再補一個 LF：(h) 以表格結尾的文件多了一個，(i) 表格後面
+# 的散文多了一個，(j) 結尾的空行被刪掉。
+_t330_md() {   # _t330_md <name> <printf body> -> the bytes after editing cell 1:2
+    printf "$2" > "$_t330/$1.md"
+    "$CSV2" -update 1:2 X -i "$_t330/$1.md" -md -t --md-table 1 --in-place 2>/dev/null
+    _t330_bytes "$_t330/$1.md"
+}
+assert_eq "$(_t330_md h '# T\n\n| a | b |\n|---|---|\n| 1 | 2 |')" " # T \\n \\n | a | b | \\n | - - - | - - - | \\n | 1 | X | " \
+    "T330h a Markdown document ending in its table, no final newline: none is added / 以表格結尾、沒有結尾換行的 Markdown：不補"
+assert_eq "$(_t330_md i '| a | b |\n|---|---|\n| 1 | 2 |\n\ntext')" " | a | b | \\n | - - - | - - - | \\n | 1 | X | \\n \\n t e x t " \
+    "T330i prose after the table keeps its missing final newline / 表格後面的散文保留它沒有的結尾換行"
+assert_eq "$(_t330_md j '| a | b |\n|---|---|\n| 1 | 2 |\n\n\n')" " | a | b | \\n | - - - | - - - | \\n | 1 | X | \\n \\n \\n " \
+    "T330j blank lines at the end of the document are kept / 文件結尾的空行保留"
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
