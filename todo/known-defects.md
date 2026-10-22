@@ -14221,3 +14221,42 @@ Parallel search assumed each header row is one physical line, so a header with q
 shifted every reported `line` back by the extra lines; record numbers were right. The index's
 one-record-per-line proof covers data, not the header. Fix: count the line feeds in the header
 bytes and use that as the line base.
+
+## RJ. Linux 建置把工具鏈的**絕對路徑**寫進 RPATH，換工具鏈後執行檔就跑不起來（2026-10-22 發現；正式建置要不要改成靜態，**未決定**）
+
+guest 從 Swift 6.3.3 換成 6.4.0、移除 6.3.3 之後，已發布的 `csv2-0.1.5-linux-aarch64` 在 guest 裡無法執行：
+
+```console
+$ readelf -d csv2 | grep RPATH        # csv2 0.1.5 (v0.1.5 / 695d5bd5)，已發布的那份
+ (RPATH)  Library rpath: [/workspace/opt/swift-6.3.3-RELEASE-ubuntu24.04-aarch64/usr/lib/swift/linux]
+```
+
+swiftc 在 Linux 上預設加 RPATH，而且把 `/workspace/opt/swift` 這個 symlink **解開**成帶版本號的真實路徑——在 6.4.0
+上重建，得到的是 `…/swift-6.4.0-RELEASE-…/usr/lib/swift/linux`，下次換工具鏈時會用同樣的方式壞掉。改 RPATH 解決不了：
+Swift 在 Linux 上沒有 ABI 穩定性保證，讓 6.3.3 建的執行檔去載入 6.4.0 的 runtime，最好的情況是載入失敗，最壞的是跑起來、
+結果是錯的。
+
+`-static-stdlib` 解決它（WSL 6.4.1 與 guest 6.4.0 上實測）：
+
+| | 動態（現行） | `-static-stdlib` |
+|---|---|---|
+| Swift／Foundation 依賴 | 15 個 | 0 個（只剩 libc、libm、libstdc++、libgcc_s） |
+| RPATH | 帶版本號的絕對路徑 | 沒有 |
+| `env -i` 下執行 | — | ✅ |
+| 大小 | 約 1 MB | 57–59 MB（strip 後；37 MB 是 FoundationInternationalization 的 ICU 資料） |
+| guest 套件 | 1490/0/5 | 1490/0/5 |
+
+**這次的處理（使用者決定）**：不出新版，在已發布的 v0.1.5 補上傳 `csv2-0.1.5-linux-aarch64-static.tar.zst`（sha256
+`1a3d3ce1…`，guest、本機、公開 URL 三處相同），原本那份不動，release notes 加一段說明。guest 的 prebuilt 改取自它。
+Homebrew 的 Linux arm64 項目仍指向原版。
+
+**未決定**：正式的 Linux 建置（`compile_csv2_linux.zsh`、x86_64 與 aarch64 的封存）要不要改成靜態。若改，要加一個測試確認
+產物沒有 RPATH 也沒有 libswift* 依賴；並另外評估只 `import FoundationEssentials` 能不能拿掉那 37 MB 的 ICU。macOS 不受影響
+（runtime 在系統裡）；Windows 的對應問題是 RC，做法會是把 runtime DLL 一起打包。
+
+The Linux build writes the toolchain's absolute, version-numbered path into RPATH (swiftc
+resolves the /workspace/opt/swift symlink), so the published 0.1.5 aarch64 binary stopped running
+when the guest moved from Swift 6.3.3 to 6.4.0. Changing RPATH cannot fix this: Swift has no ABI
+stability on Linux. `-static-stdlib` does -- no Swift dependency, no RPATH, same suite result --
+at 57 MB instead of 1 MB. For now a static aarch64 asset was added to v0.1.5 and the guest's
+prebuilt takes it; whether the regular Linux builds go static is not decided.
