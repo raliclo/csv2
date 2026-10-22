@@ -505,6 +505,26 @@ func runParallelSearch(_ o: Options) throws {
         // 即使標頭跨越多個讀取區塊，也使用解析器的結束位置。
         headEnd = UInt64(p.bytesConsumed)
     }
+    // The physical line the data starts on is NOT headerRows + 1: a header
+    // cell may hold a quoted newline. The index's one-record-per-line proof
+    // covers the data, not the header, so the header's own line feeds are
+    // counted here. Using headerRows put every reported line too early by the
+    // header's extra lines, while the record numbers stayed right. RI.
+    // 資料起始的實體行號**不是** headerRows + 1：標頭儲存格可以含引號內的換行。索引那份「每筆
+    // 紀錄一行」的證明涵蓋的是資料，不是標頭，所以標頭自己的換行在這裡數。用 headerRows 會讓每一個
+    // 回報的行號早了「標頭多出的行數」，而紀錄號仍然正確。RI。
+    var headerLFs = 0
+    if headEnd > 0, let hh = FileHandle(forReadingAtPath: path) {
+        defer { try? hh.close() }
+        var left = Int(headEnd)
+        while left > 0 {
+            let d = Platform.drainingPool { () -> [UInt8] in [UInt8](hh.readData(ofLength: min(left, 1 << 16))) }
+            if d.isEmpty { break }
+            for b in d where b == BYTE_LF { headerLFs += 1 }
+            left -= d.count
+        }
+    }
+    let headerLines = headerLFs
 
     let spans = try planChunks(path: path, from: headEnd, size: st.size)
     Logger.shared.debug("parallel: \(spans.count) chunks, \(workerCount()) workers, chunk \(PARALLEL_CHUNK_BYTES) bytes")
@@ -605,7 +625,7 @@ func runParallelSearch(_ o: Options) throws {
                 let parser = RecordParser(format: planFormat,
                                           firstRecordNumber: span.firstRecord + headerRows,
                                           firstOffset: Int(span.start),
-                                          firstLine: span.firstRecord + headerRows) { rec in
+                                          firstLine: span.firstRecord + headerLines) { rec in
                     do {
                         var r = rec
                         r.number = rec.number - headerRows

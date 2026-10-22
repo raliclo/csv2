@@ -14113,7 +14113,7 @@ On WSL, installing into /usr/local/bin printed the "NOT a Homebrew install" note
 no brew: /usr/local/bin is Homebrew's prefix only on Intel macOS, and the condition checks
 neither the platform nor whether brew exists. The install itself was correct. Not fixed.
 
-## RG. Markdown 就地編輯，兩張表之間沒有空白行時，刪掉第一張之後的一切（2026-10-22 發現；使用者的審查回報，P1）
+## RG. Markdown 就地編輯，兩張表之間沒有空白行時，刪掉第一張之後的一切（2026-10-22 發現並修正，T325a–e；使用者的審查回報，P1）
 
 重現於 `csv2 0.1.4 (v0.1.4 / 95e1d719)`（已發布、已安裝的那一份）與 `csv2 0.1.4 (v0.1.4-6-gcf413318)`（develop），兩者相同：
 
@@ -14148,7 +14148,7 @@ next table's header; the replacement range in Run.swift was a second, independen
 only checked for a leading `|`. Exit 0. Reproduced on the released 0.1.4 and on develop. Fix:
 one function decides where a table ends, and both callers use it.
 
-## RH. 過長的 A1 欄位字母讓位址解析整數溢位而崩潰（2026-10-22 發現；使用者的審查回報，P2）
+## RH. 過長的 A1 欄位字母讓位址解析整數溢位而崩潰（2026-10-22 發現並修正，T326a–d；使用者的審查回報，P2）
 
 重現於 `csv2 0.1.4 (v0.1.4 / 95e1d719)` 與 `csv2 0.1.4 (v0.1.4-6-gcf413318)`：
 
@@ -14167,7 +14167,19 @@ rc=1                                  ← 短一點的字母正常拒絕
 Too many A1 column letters overflowed `n * 26` in a1ColumnNumber and trapped (rc 133 here, 132
 in the review), with no message. Fix: refuse it as a malformed address.
 
-## RI. 平行搜尋在「標頭含引號內換行」時，回報的實體行號少了標頭多出的行數（2026-10-22 發現；使用者的審查回報，P2）
+### RH 修正時多找到的一件事
+
+只擋住溢位還不夠：`a1ColumnNumber` 回傳 nil 之後，`[ZZ…Z2]` 不再被認作位址裝飾，於是被當成欄名去查，
+訊息成了 `no column named "1 [ZZZZZZZZZZZZZZ2]"`。同樣是溢位、但溢位的是列號的 `[A99999999999999999999999]`
+早就得到正確的說法（「is an address as --physical or --a1 prints it」），因為 `strippedLocation` 認得
+「**一個**字母接數字」——兩個字母以上它就認不得。改成「字母接數字」後，兩種溢位走同一條拒絕（T326b）。
+
+Stopping the overflow was not enough: with a1ColumnNumber returning nil, `[ZZ…Z2]` was no longer
+recognized as a decoration and was looked up as a column name. strippedLocation only knew ONE
+letter followed by digits; it now takes letters then digits, so both overflows get the same
+refusal.
+
+## RI. 平行搜尋在「標頭含引號內換行」時，回報的實體行號少了標頭多出的行數（2026-10-22 發現並修正，T327a–c；使用者的審查回報，P2）
 
 重現於 `csv2 0.1.4 (v0.1.4 / 95e1d719)` 與 `csv2 0.1.4 (v0.1.4-6-gcf413318)`：
 

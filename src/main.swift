@@ -2542,7 +2542,14 @@ func a1ColumnNumber(_ letters: String) -> Int? {
     var n = 0
     for ch in letters {
         guard let a = ch.asciiValue, a >= 65, a <= 90 else { return nil }
-        n = n * 26 + Int(a - 65) + 1
+        // Fourteen Z's pass Int.max, and Swift traps on overflow: the process
+        // died with no message (rc 133). Too many letters names no column. RH.
+        // 十四個 Z 就超過 Int.max，而 Swift 遇到溢位會直接陷阱：行程什麼都沒說就死了（rc 133）。
+        // 字母多到這種程度，指的不是任何一欄。RH。
+        let (times, o1) = n.multipliedReportingOverflow(by: 26)
+        let (plus, o2) = times.addingReportingOverflow(Int(a - 65) + 1)
+        if o1 || o2 { return nil }
+        n = plus
     }
     return n - 1
 }
@@ -2583,7 +2590,14 @@ func strippedLocation(_ token: String) -> String? {
     }
     if token.hasSuffix("]"), let br = token.range(of: " [", options: .backwards) {
         let tail = token[br.upperBound..<token.index(before: token.endIndex)]
-        if !tail.isEmpty, tail.first!.isLetter, tail.dropFirst().allSatisfy({ $0.isNumber }) {
+        // Letters then digits, not ONE letter then digits: `[AA2]` is as much
+        // an A1 decoration as `[A2]`, and parsedLocation refusing one whose
+        // column overflows must not leave it to be looked up as a name. RH.
+        // 字母接數字，而不是「一個」字母接數字：`[AA2]` 和 `[A2]` 一樣是 A1 裝飾；parsedLocation
+        // 因欄位溢位而不認它時，它不可以被留下來當成欄名去查。RH。
+        let letters = tail.prefix(while: { $0.isLetter })
+        let digits = tail.dropFirst(letters.count)
+        if !letters.isEmpty, !digits.isEmpty, digits.allSatisfy({ $0.isNumber }) {
             return String(token[token.startIndex..<br.lowerBound])
         }
     }

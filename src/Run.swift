@@ -186,8 +186,9 @@ func runMarkdownEdit(_ o: Options) throws {
         if oldLines[i].trimmingCharacters(in: .whitespaces).hasPrefix("|") &&
            MarkdownIn.isSeparator(MarkdownIn.cells(of: oldLines[i + 1])) {
             starts.append(i)
-            var end = i + 2
-            while end < oldLines.count && !oldLines[end].trimmingCharacters(in: .whitespaces).isEmpty && oldLines[end].trimmingCharacters(in: .whitespaces).hasPrefix("|") { end += 1 }
+            // The reader's own rule, not a second copy of it. RG.
+            // 用讀取器自己的那條規則，不是它的第二份。RG。
+            let end = MarkdownIn.tableEnd(oldLines, header: i)
             ends.append(end)
             i = end
         } else { i += 1 }

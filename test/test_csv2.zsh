@@ -19650,6 +19650,68 @@ else
     fi
 fi
 
+echo
+echo "--- T325: editing one of two touching Markdown tables keeps the other / T325：兩張相鄰的 Markdown 表，編輯其一不會刪掉另一張 ---"
+# No blank line between the tables. The reader saw two; the in-place writer
+# had its own scan, saw one, and deleted everything after the edited table
+# with exit 0. RG. T325b-d are the bytes, not the exit status: rc 0 was what
+# the defect reported too.
+# 兩張表之間沒有空白行。讀取器看到兩張；就地寫回有它自己的掃描，看到一張，於是以退出碼 0
+# 刪掉了被編輯那張之後的一切。RG。T325b–d 看的是位元組而不是退出碼：那個缺陷回報的也是 rc 0。
+_t325=$TMP/t325.md
+print -rl -- '| a | b |' '|---|---|' '| 1 | 2 |' '| x | y |' '|---|---|' '| 3 | 4 |' > "$_t325"
+assert_succeeds "T325a -update on table 1 of two touching tables, --in-place / 對兩張相鄰表的第 1 張就地 -update" -- \
+    "$CSV2" -update 1:b 9 -md -t --md-table 1 -i "$_t325" --in-place
+assert_eq "$("$CSV2" -r --md-table 2 -i "$_t325" 2>&1)" "3,4" \
+    "T325b table 2 is still there and unchanged / 第 2 張表還在，而且沒變"
+assert_eq "$("$CSV2" -get 1:b --md-table 1 -i "$_t325" 2>&1)" "9" \
+    "T325c and table 1 carries the edit / 而第 1 張表帶著那次修改"
+assert_succeeds "T325d -update on table 2, --in-place / 對第 2 張就地 -update" -- \
+    "$CSV2" -update 1:y 8 -md -t --md-table 2 -i "$_t325" --in-place
+assert_eq "$("$CSV2" -get 1:b --md-table 1 -i "$_t325" 2>&1)|$("$CSV2" -get 1:y --md-table 2 -i "$_t325" 2>&1)" "9|8" \
+    "T325e both edits stand, each in its own table / 兩次修改都在，各在自己的表裡"
+
+echo
+echo "--- T326: an A1 column too long for an Int is refused, not a crash / T326：長到超過 Int 的 A1 欄位被拒絕，而不是崩潰 ---"
+# `n * 26` overflowed and Swift trapped: rc 133 here, 132 in the review, no
+# message. assert_fails alone would have PASSED that -- a trap is non-zero --
+# so the exit status is pinned to 1 and the refusal must say what it is. RH.
+# `n * 26` 溢位，Swift 直接陷阱：這裡 rc 133、審查時 132，沒有任何訊息。單用 assert_fails 會讓它
+# **通過**——陷阱也是非零——所以退出碼釘死為 1，而且那則拒絕必須說出它是什麼。RH。
+print -rl -- k,v a,1 > "$TMP/t326.csv"
+_t326=$("$CSV2" -get '1:1 [ZZZZZZZZZZZZZZ2]' -i "$TMP/t326.csv" 2>&1); _t326_rc=$?
+assert_eq "$_t326_rc" 1 "T326a fourteen Z's exit 1, not a signal / 十四個 Z 以 1 結束，不是一個訊號"
+assert_contains "$_t326" 'is an address as --physical or --a1 prints it' \
+    "T326b and it is named as an A1 decoration, not looked up as a column name / 而它被認作 A1 裝飾，不是被當成欄名去查"
+_t326=$("$CSV2" -get '1:1 [AB2]' -i "$TMP/t326.csv" 2>&1)
+assert_contains "$_t326" 'says column AB' \
+    "T326c a two-letter column that fits is still checked against the address / 放得下的兩個字母欄位仍與位址比對"
+assert_eq "$("$CSV2" -get '1:2 [B2]' -i "$TMP/t326.csv" 2>&1)" "1" \
+    "T326d and a decoration that agrees is still accepted / 而一致的裝飾仍被接受"
+
+echo
+echo "--- T327: parallel search reports the physical line past a multi-line header / T327：標頭跨行時，平行搜尋回報的實體行號正確 ---"
+# The index proves one record per line for the DATA; the header is not in
+# that proof. The parallel path used headerRows as the line base, so a header
+# holding two quoted newlines put every line two too early. RI. Compared
+# against the single-threaded path, which was right all along, and T327a
+# checks the parallel path was the one taken.
+# 索引證明的是**資料**每筆一行；標頭不在那份證明裡。平行路徑用 headerRows 當行號基底，於是一個
+# 含兩個引號內換行的標頭，讓每一個行號早了兩行。RI。比對的對象是一直都正確的單執行緒路徑，而
+# T327a 確認走的真的是平行路徑。
+_t327=$TMP/t327.csv
+printf '"a\nb\nc",v\nx,hit\ny,hit\n' > "$_t327"
+"$CSV2" --build-index -i "$_t327" >/dev/null 2>&1
+_t327_par=$(CSV2_PARALLEL_MIN_BYTES=1 "$CSV2" -contains hit --json -debug -i "$_t327" 2>"$TMP/t327.err")
+_t327_one=$(CSV2_PARALLEL_MIN_BYTES=999999999 "$CSV2" -contains hit --json -i "$_t327" 2>/dev/null)
+if [[ $(<"$TMP/t327.err") == *"parallel: "*chunks* ]]; then
+    ok "T327a the parallel path ran / 平行路徑確實執行了"
+else
+    bad "T327a the parallel path did not run, so T327b compared nothing: $(head -c 200 "$TMP/t327.err") / 平行路徑沒有執行，T327b 等於什麼都沒比"
+fi
+assert_contains "$_t327_par" '"value":"hit","line":4}' "T327b the first hit is on line 4, after a three-line header / 第一個命中在第 4 行，接在三行的標頭之後"
+assert_eq "$_t327_par" "$_t327_one" "T327c and the parallel report equals the single-threaded one / 而平行報告與單執行緒的完全相同"
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

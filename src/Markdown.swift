@@ -178,6 +178,35 @@ enum MarkdownIn {
         }
         return true
     }
+
+    /// The index of the first line AFTER the table whose header is at
+    /// `header` (its separator is at `header + 1`). Rows run until a blank
+    /// line, a line that is not a row, or a separator -- and a separator
+    /// means the line above it was the NEXT table's header, so that line is
+    /// handed back rather than kept as a record of this one.
+    ///
+    /// The reader and the in-place writer both call this. Until RG they each
+    /// had their own scan, and only the reader's knew the separator rule: with
+    /// no blank line between two tables the reader saw two, the writer saw
+    /// one, and editing the first deleted the second with exit 0. The writer
+    /// is the one that decides which bytes are removed.
+    ///
+    /// 標頭在 `header`（分隔列在 `header + 1`）的那張表之後的第一行的索引。資料列一直延伸到
+    /// 空白行、不是一列的行、或一列分隔列為止——而分隔列表示它上面那一行是**下一張表**的標頭，
+    /// 因此那一行要還回去，不能當成這一張的紀錄。
+    /// 讀取器與就地寫回都呼叫這一個。在 RG 之前它們各有一份掃描，而只有讀取器的那一份知道分隔列
+    /// 這條規則：兩張表之間沒有空白行時，讀取器看到兩張、寫回器看到一張，於是編輯第一張就以
+    /// 退出碼 0 刪掉了第二張。決定哪些位元組被刪掉的，是寫回器。
+    static func tableEnd(_ lines: [String], header: Int) -> Int {
+        var i = header + 2
+        while i < lines.count {
+            let r = lines[i].trimmingCharacters(in: .whitespaces)
+            if r.isEmpty || !r.hasPrefix("|") { break }
+            if isSeparator(cells(of: lines[i])) { return i > header + 2 ? i - 1 : i }
+            i += 1
+        }
+        return i
+    }
 }
 
 extension MarkdownIn {
@@ -244,6 +273,7 @@ extension MarkdownIn {
             var headerLine = ""; var separatorLine = ""; var rowLines: [String] = []
         }
         var tables: [Table] = []
+        let texts = lines.map { $0.text }
         var i = 0
         while i < lines.count {
             let l = lines[i].text.trimmingCharacters(in: .whitespaces)
@@ -274,23 +304,12 @@ extension MarkdownIn {
             var t = Table(headerAt: lines[i].no, header: header, rows: [])
             t.headerLine = lines[i].text
             t.separatorLine = lines[i+1].text
-            i += 2
-            while i < lines.count {
-                let r = lines[i].text.trimmingCharacters(in: .whitespaces)
-                if r.isEmpty || !r.hasPrefix("|") { break }
-                let cs = MarkdownIn.cells(of: lines[i].text)
-                // A separator here means the line above it was another
-                // table's header, not a record of this one.
-                // 出現在這裡的分隔列，表示它上面那一行是「另一張表的標頭」，不是這一張的紀錄。
-                if MarkdownIn.isSeparator(cs) {
-                    if !t.rowLines.isEmpty { t.rowLines.removeLast() }
-                    if let last = t.rows.last { t.rows.removeLast(); i = lines.firstIndex(where: { $0.no == last.0 })! }
-                    break
-                }
-                t.rows.append((lines[i].no, cs))
-                t.rowLines.append(lines[i].text)
-                i += 1
+            let end = MarkdownIn.tableEnd(texts, header: i)
+            for j in (i + 2)..<end {
+                t.rows.append((lines[j].no, MarkdownIn.cells(of: texts[j])))
+                t.rowLines.append(texts[j])
             }
+            i = end
             tables.append(t)
         }
 
