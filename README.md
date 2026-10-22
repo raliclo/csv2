@@ -23,14 +23,20 @@ the packaging script ends by extracting the archive, running the extracted
 binary and having it read a CSV.
 
 ```sh
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.5/csv2-0.1.5-macos-arm64.tar.zst
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.5/csv2-0.1.5-macos-arm64.tar.zst.sha256
-sha256sum -c csv2-0.1.5-macos-arm64.tar.zst.sha256
-zstd -d csv2-0.1.5-macos-arm64.tar.zst -c | tar -x
-./csv2-0.1.5-macos-arm64/csv2 --version
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.6/csv2-0.1.6-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.6/csv2-0.1.6-macos-arm64.tar.zst.sha256
+sha256sum -c csv2-0.1.6-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.1.6-macos-arm64.tar.zst -c | tar -x
+./csv2-0.1.6-macos-arm64/csv2 --version
 ```
 
 Substitute `linux-x86_64`, `linux-aarch64` or `windows-x86_64` for the others.
+
+**The Linux archives are statically linked from v0.1.6 on.** They need libc,
+libm, libstdc++ and libgcc_s and no Swift toolchain, so they keep running when
+the machine's Swift changes. The v0.1.5 aarch64 binary did not: it named its
+toolchain by version in its RPATH and stopped starting when that toolchain was
+replaced. The price is size, 57 to 59 MB unpacked instead of about 1 MB.
 
 **aarch64 Linux joined the published set in v0.1.1.** It was absent from v0.1.0
 not for want of testing — T47 compares twelve invocations byte for byte against
@@ -69,7 +75,7 @@ scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.
 **On Windows, csv2 needs the Swift runtime of the version that built it, and
 neither the archive nor Scoop installs that for you.** The Windows archive
 holds `csv2.exe` and nothing else; it loads `swiftCore.dll`, `Foundation.dll`
-and about a dozen siblings from `PATH`. v0.1.5 was built with **Swift 6.4.1**,
+and about a dozen siblings from `PATH`. v0.1.6 was built with **Swift 6.4.1**,
 so install the Swift 6.4.1 runtime — the directory
 `%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.1\usr\bin`, which the Swift 6.4.1
 installer from [swift.org](https://www.swift.org/install/windows/) creates and
@@ -97,7 +103,8 @@ running: `--version` and reading a CSV both exited 0. So one patch-level step
 has been seen to work and one minor-level step to fail; nothing else has been
 measured, and the safe choice is still the runtime that built the release.
 
-The runtime follows the release, not the latest Swift: v0.1.4 was built with
+The runtime follows the release, not the latest Swift: v0.1.5 and v0.1.6 were
+built with 6.4.1, v0.1.4 with
 6.4.0, and v0.1.3 and earlier with Swift 6.3.3. If `csv2 --version` reports
 0.1.3, installing 6.4.x is the wrong fix.
 

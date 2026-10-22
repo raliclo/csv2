@@ -19,14 +19,19 @@ English documentation: [README.md](README.md)。
 那台機器上打包，而打包腳本的結尾是**解開封存、執行解開後的執行檔、並讓它讀一個 CSV**。
 
 ```sh
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.5/csv2-0.1.5-macos-arm64.tar.zst
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.5/csv2-0.1.5-macos-arm64.tar.zst.sha256
-sha256sum -c csv2-0.1.5-macos-arm64.tar.zst.sha256
-zstd -d csv2-0.1.5-macos-arm64.tar.zst -c | tar -x
-./csv2-0.1.5-macos-arm64/csv2 --version
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.6/csv2-0.1.6-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.6/csv2-0.1.6-macos-arm64.tar.zst.sha256
+sha256sum -c csv2-0.1.6-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.1.6-macos-arm64.tar.zst -c | tar -x
+./csv2-0.1.6-macos-arm64/csv2 --version
 ```
 
 其餘三個把 `macos-arm64` 換成 `linux-x86_64`、`linux-aarch64` 或 `windows-x86_64`。
+
+**從 v0.1.6 起，Linux 的封存是靜態連結的。** 它們只需要 libc、libm、libstdc++ 與 libgcc_s，
+不需要 Swift 工具鏈，因此機器上的 Swift 換了版本也照樣能跑。v0.1.5 的 aarch64 執行檔做不到：它在
+RPATH 裡以版本號指名自己的工具鏈，那份工具鏈一被換掉它就起不來了。代價是大小：解開後 57 到 59 MB，
+原本約 1 MB。
 
 **aarch64 Linux 從 v0.1.1 起加入已發布的那一組。** 它在 v0.1.0 缺席，不是因為缺少測試——**T47**
 每一次執行都拿十二組呼叫與 macOS 逐位元比對——而是因為一份「在那個 tag 打完之後才建的」封存，
@@ -58,7 +63,7 @@ scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.
 
 **在 Windows 上，csv2 需要「建置它的那一版」Swift runtime，而封存與 Scoop 都不會替你安裝它。**
 Windows 的封存裡只有 `csv2.exe`；它從 `PATH` 載入 `swiftCore.dll`、`Foundation.dll` 以及另外十來個
-DLL。v0.1.5 是用 **Swift 6.4.1** 建置的，所以請安裝 Swift 6.4.1 的 runtime——也就是
+DLL。v0.1.6 是用 **Swift 6.4.1** 建置的，所以請安裝 Swift 6.4.1 的 runtime——也就是
 `%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.1\usr\bin` 這個目錄，由
 [swift.org](https://www.swift.org/install/windows/) 的 Swift 6.4.1 安裝程式建立並加進 `PATH`。
 
@@ -78,7 +83,7 @@ where swiftCore.dll
 CSV 都以 0 結束。所以目前看過的是：差一個修補版號能跑、差一個次版號不能跑；其餘都沒量過，穩妥的
 選擇仍然是「建置那一版 release 的 runtime」。
 
-runtime 跟著「那一版 release」走，不是跟著最新的 Swift：v0.1.4 用 6.4.0 建置，v0.1.3 與更早的版本
+runtime 跟著「那一版 release」走，不是跟著最新的 Swift：v0.1.5 與 v0.1.6 用 6.4.1，v0.1.4 用 6.4.0 建置，v0.1.3 與更早的版本
 用 Swift 6.3.3。如果 `csv2 --version` 回報的是 0.1.3，那麼安裝 6.4.x 是錯的解法。
 
 ## 從原始碼建置與安裝
