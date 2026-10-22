@@ -871,6 +871,33 @@ after that first one was sound and faithfully inherited a false premise. The
 lesson is one sentence: ask the machine, not the file that describes it. It was
 booted at the time.
 
+## ~~v0.1.5~~ 已出貨
+
+### 2026-10-22：v0.1.5 出了，四個平台，五個節點都升級了
+
+`https://github.com/raliclo/csv2/releases/tag/v0.1.5`，tag 指向 `695d5bd5`（csv2-win 依使用者要求打的，沒有移過）。
+內容：RG（Markdown 就地編輯刪掉相鄰的表）、RH（過長 A1 欄位崩潰）、RI（平行搜尋行號）、RF（Homebrew 說明誤印）。
+
+| 平台 | 建置於 | build id | 套件 | 封存 sha256 | 升級後 PATH 上的那一份 |
+|---|---|---|---|---|---|
+| macOS arm64 | M4 | `v0.1.5 / 695d5bd5` | 1502/0/1 | `93750d70…` | M4、M6 `brew upgrade` → 0.1.5 |
+| Linux aarch64 | guest VM | `v0.1.5 / 695d5bd5` | 1490/0/5 | `0f993ae4…` | `/workspace/csv2/release/csv2`，在 tag 上建 → 0.1.5 |
+| Linux x86_64 | WSL2 | `v0.1.5 / 695d5bd5` | 1501/0/1 | `8b839dd6…` | `/usr/local/bin/csv2` → 0.1.5 |
+| Windows x86_64 | Ralic-W11，Swift 6.4.1 | `v0.1.5 / 695d5bd5` | 1467/0/16 | `ccabe669…` | scoop → 0.1.5（見下） |
+
+- **Windows 第一次沒升上去**：scoop 的 csv2 是從 csv2-win 暫存目錄裡的一份本機 manifest 裝的，`scoop update` 重讀那份
+  0.1.4，回報「已是最新」，而 `install_release.zsh` 讀回 0.1.4、以 1 結束——那正是它存在的理由。csv2-win 改用已發布的
+  manifest 重裝後讀回 0.1.5。**下次預演若又用本機 manifest，出貨後要記得換回來。**
+- **Windows 的 runtime**：那台在 10-19 換成只有 Swift 6.4.1。一個在那之前啟動的 shell 仍帶著指向已刪除的 6.4.0 的
+  PATH，在那裡 csv2 會印 `error while loading shared libraries`、rc 127；新登入與 ssh 讀的是登錄檔裡的 6.4.1，正常。
+- **guest 的 prebuilt**：母專案 `prebuilt/csv2` 仍是 0.1.4，已請 LinuxCS-M4 換成 0.1.5 的發布封存；換之前，guest
+  每重建一次就會退回 0.1.4。
+
+v0.1.5 shipped on 2026-10-22 from tag 695d5bd5 with RG, RH, RI and RF. All four archives were built at
+the tag on their own nodes and collected over two channels; every node, M6 included, reads 0.1.5.
+Windows first stayed on 0.1.4 because scoop had been installed from a local manifest; it was
+reinstalled from the published one. The parent's guest prebuilt is still 0.1.4 until LinuxCS replaces it.
+
 ## ~~v0.1.4~~ 已出貨
 
 ### 2026-10-19：v0.1.4 出了，四個平台
