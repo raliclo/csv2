@@ -23,11 +23,11 @@ the packaging script ends by extracting the archive, running the extracted
 binary and having it read a CSV.
 
 ```sh
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.4/csv2-0.1.4-macos-arm64.tar.zst
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.4/csv2-0.1.4-macos-arm64.tar.zst.sha256
-sha256sum -c csv2-0.1.4-macos-arm64.tar.zst.sha256
-zstd -d csv2-0.1.4-macos-arm64.tar.zst -c | tar -x
-./csv2-0.1.4-macos-arm64/csv2 --version
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.5/csv2-0.1.5-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.5/csv2-0.1.5-macos-arm64.tar.zst.sha256
+sha256sum -c csv2-0.1.5-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.1.5-macos-arm64.tar.zst -c | tar -x
+./csv2-0.1.5-macos-arm64/csv2 --version
 ```
 
 Substitute `linux-x86_64`, `linux-aarch64` or `windows-x86_64` for the others.
@@ -69,31 +69,37 @@ scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.
 **On Windows, csv2 needs the Swift runtime of the version that built it, and
 neither the archive nor Scoop installs that for you.** The Windows archive
 holds `csv2.exe` and nothing else; it loads `swiftCore.dll`, `Foundation.dll`
-and about a dozen siblings from `PATH`. v0.1.4 was built with **Swift 6.4.0**,
-so it needs the Swift 6.4.0 runtime — the directory
-`%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.0\usr\bin`, which the Swift 6.4.0
+and about a dozen siblings from `PATH`. v0.1.5 was built with **Swift 6.4.1**,
+so install the Swift 6.4.1 runtime — the directory
+`%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.1\usr\bin`, which the Swift 6.4.1
 installer from [swift.org](https://www.swift.org/install/windows/) creates and
 puts on `PATH`.
 
-A different runtime version is not close enough, and the failure says nothing.
-Measured on 2026-10-12, when the machine that built v0.1.3 had its Swift 6.3.3
-removed and only 6.4.0 left: the installed v0.1.3 printed nothing at all, and
-exited `0xC0000139` (entry point not found) under `cmd.exe` and `127` under
-bash and zsh — which reads like "command not found" for a file that is sitting
-right there. If `csv2 --version` prints nothing, check this before anything
-else:
+A different runtime version may not be close enough, and the failure says
+nothing. Measured on 2026-10-12, when the machine that built v0.1.3 had its
+Swift 6.3.3 removed and only 6.4.0 left: the installed v0.1.3 printed nothing
+at all, and exited `0xC0000139` (entry point not found) under `cmd.exe` and
+`127` under bash and zsh — which reads like "command not found" for a file that
+is sitting right there. If `csv2 --version` prints nothing, check this before
+anything else:
 
 ```bat
 where swiftCore.dll
 ```
 
-It should name a `Runtimes\6.4.0` directory. A machine with no Swift installed
+It should name a `Runtimes\6.4.1` directory. A machine with no Swift installed
 at all has not been tested; expect it not to start either.
 
-The runtime follows the release, not the latest Swift. v0.1.3 and earlier were
-built with Swift 6.3.3 and need `Runtimes\6.3.3`; if `csv2 --version` reports
-0.1.3 — which is what the Scoop manifest installs until v0.1.4 is published —
-installing 6.4.0 is the wrong fix.
+Until v0.1.5 this section said "a different runtime version is not close
+enough", from that one measurement across 6.3 → 6.4. On 2026-10-22 the same
+machine had 6.4.0 replaced by 6.4.1, and the v0.1.4 built with 6.4.0 kept
+running: `--version` and reading a CSV both exited 0. So one patch-level step
+has been seen to work and one minor-level step to fail; nothing else has been
+measured, and the safe choice is still the runtime that built the release.
+
+The runtime follows the release, not the latest Swift: v0.1.4 was built with
+6.4.0, and v0.1.3 and earlier with Swift 6.3.3. If `csv2 --version` reports
+0.1.3, installing 6.4.x is the wrong fix.
 
 ## Build and install from source
 

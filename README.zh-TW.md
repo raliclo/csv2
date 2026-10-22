@@ -15,15 +15,15 @@ English documentation: [README.md](README.md)。
 
 ## 安裝發行版
 
-每個版本發布三份封存，各屬於一個「既建得出、也驗得了自己」的平台——每一份都在它的執行檔被建置的
+每個版本發布四份封存，各屬於一個「既建得出、也驗得了自己」的平台——每一份都在它的執行檔被建置的
 那台機器上打包，而打包腳本的結尾是**解開封存、執行解開後的執行檔、並讓它讀一個 CSV**。
 
 ```sh
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.4/csv2-0.1.4-macos-arm64.tar.zst
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.4/csv2-0.1.4-macos-arm64.tar.zst.sha256
-sha256sum -c csv2-0.1.4-macos-arm64.tar.zst.sha256
-zstd -d csv2-0.1.4-macos-arm64.tar.zst -c | tar -x
-./csv2-0.1.4-macos-arm64/csv2 --version
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.5/csv2-0.1.5-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.5/csv2-0.1.5-macos-arm64.tar.zst.sha256
+sha256sum -c csv2-0.1.5-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.1.5-macos-arm64.tar.zst -c | tar -x
+./csv2-0.1.5-macos-arm64/csv2 --version
 ```
 
 其餘三個把 `macos-arm64` 換成 `linux-x86_64`、`linux-aarch64` 或 `windows-x86_64`。
@@ -58,11 +58,11 @@ scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.
 
 **在 Windows 上，csv2 需要「建置它的那一版」Swift runtime，而封存與 Scoop 都不會替你安裝它。**
 Windows 的封存裡只有 `csv2.exe`；它從 `PATH` 載入 `swiftCore.dll`、`Foundation.dll` 以及另外十來個
-DLL。v0.1.4 是用 **Swift 6.4.0** 建置的，所以它需要 Swift 6.4.0 的 runtime——也就是
-`%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.0\usr\bin` 這個目錄，由
-[swift.org](https://www.swift.org/install/windows/) 的 Swift 6.4.0 安裝程式建立並加進 `PATH`。
+DLL。v0.1.5 是用 **Swift 6.4.1** 建置的，所以請安裝 Swift 6.4.1 的 runtime——也就是
+`%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.1\usr\bin` 這個目錄，由
+[swift.org](https://www.swift.org/install/windows/) 的 Swift 6.4.1 安裝程式建立並加進 `PATH`。
 
-版本不同的 runtime 不算數，而且失敗時什麼都不說。這是 2026-10-12 量到的：建置 v0.1.3 的那台機器
+版本不同的 runtime 可能不算數，而且失敗時什麼都不說。這是 2026-10-12 量到的：建置 v0.1.3 的那台機器
 移除了 Swift 6.3.3、只剩 6.4.0，結果已安裝的 v0.1.3 完全沒有輸出，在 `cmd.exe` 下以 `0xC0000139`
 （找不到進入點）結束，在 bash 與 zsh 下則是 `127`——讀起來像「找不到指令」，而那個檔案明明就在那裡。
 如果 `csv2 --version` 什麼都沒印，先檢查這件事：
@@ -71,11 +71,15 @@ DLL。v0.1.4 是用 **Swift 6.4.0** 建置的，所以它需要 Swift 6.4.0 的 
 where swiftCore.dll
 ```
 
-它應該指向一個 `Runtimes\6.4.0` 目錄。完全沒有安裝 Swift 的機器沒有測過；請預期它同樣起不來。
+它應該指向一個 `Runtimes\6.4.1` 目錄。完全沒有安裝 Swift 的機器沒有測過；請預期它同樣起不來。
 
-runtime 跟著「那一版 release」走，不是跟著最新的 Swift。v0.1.3 與更早的版本是用 Swift 6.3.3 建置的，
-需要 `Runtimes\6.3.3`；如果 `csv2 --version` 回報的是 0.1.3——在 v0.1.4 發布之前，Scoop 的 manifest
-裝的就是它——那麼安裝 6.4.0 是錯的解法。
+在 v0.1.5 之前，這一段寫的是「版本不同的 runtime 不算數」，依據只有那一次跨 6.3 → 6.4 的量測。
+2026-10-22 同一台機器的 6.4.0 被換成 6.4.1，而用 6.4.0 建置的 v0.1.4 照樣能跑：`--version` 與讀一個
+CSV 都以 0 結束。所以目前看過的是：差一個修補版號能跑、差一個次版號不能跑；其餘都沒量過，穩妥的
+選擇仍然是「建置那一版 release 的 runtime」。
+
+runtime 跟著「那一版 release」走，不是跟著最新的 Swift：v0.1.4 用 6.4.0 建置，v0.1.3 與更早的版本
+用 Swift 6.3.3。如果 `csv2 --version` 回報的是 0.1.3，那麼安裝 6.4.x 是錯的解法。
 
 ## 從原始碼建置與安裝
 
