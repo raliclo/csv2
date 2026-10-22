@@ -19712,6 +19712,47 @@ fi
 assert_contains "$_t327_par" '"value":"hit","line":4}' "T327b the first hit is on line 4, after a three-line header / 第一個命中在第 4 行，接在三行的標頭之後"
 assert_eq "$_t327_par" "$_t327_one" "T327c and the parallel report equals the single-threaded one / 而平行報告與單執行緒的完全相同"
 
+echo
+echo "--- T328: the Homebrew note appears only where brew owns the directory / T328：只有 brew 擁有那個目錄時，才印 Homebrew 的說明 ---"
+# /usr/local/bin is Homebrew's only on Intel macOS. The note was printed on a
+# WSL with no brew, about a package manager that was not there. RF. Three
+# PATHs: a brew whose prefix is /usr/local (the note is right), one whose
+# prefix is /opt/homebrew (it is not), and none at all -- built by dropping
+# every PATH entry that holds a brew, since this machine may have a real one.
+# /usr/local/bin 只有在 Intel macOS 上才是 Homebrew 的。那段說明曾印在一台沒有 brew 的 WSL 上，
+# 對一個不存在的套件管理員發出警告。RF。三種 PATH：prefix 是 /usr/local 的 brew（說明是對的）、
+# prefix 是 /opt/homebrew 的 brew（不對），以及完全沒有 brew——做法是拿掉 PATH 裡每一個含有 brew
+# 的項目，因為這台機器上可能有真的 brew。
+if [[ ! -r $ROOT/install.zsh ]]; then
+    T328_SKIPPED=1
+    skipt "T328 the Homebrew note appears only where brew owns the directory / 只有 brew 擁有那個目錄時才印說明 (no install.zsh in this tree / 這棵樹裡沒有 install.zsh)"
+else
+    _t328=$TMP/t328
+    for _t328_p in usrlocal:/usr/local opt:/opt/homebrew; do
+        mkdir -p "$_t328/${_t328_p%%:*}"
+        print -rl -- '#!/bin/sh' \
+            "if [ \"\$1\" = --prefix ] && [ \$# -eq 1 ]; then echo ${_t328_p#*:}; exit 0; fi" \
+            'exit 1' > "$_t328/${_t328_p%%:*}/brew"
+        chmod +x "$_t328/${_t328_p%%:*}/brew"
+    done
+    _t328_nobrew=()
+    for _d in $path; do [[ -x $_d/brew ]] || _t328_nobrew+=$_d; done
+    _t328_note() {   # _t328_note <PATH> -> how many times the note was printed
+        env PATH="$1" zsh "$ROOT/install.zsh" --dry-run --no-rc --dir /usr/local/bin 2>&1 \
+            | LC_ALL=C grep -c 'NOT a Homebrew install' || true
+    }
+    assert_eq "$(_t328_note "$_t328/usrlocal:$PATH")" 1 \
+        "T328a brew says its prefix is /usr/local: the note is printed / brew 說 prefix 是 /usr/local：印出說明"
+    assert_eq "$(_t328_note "$_t328/opt:$PATH")" 0 \
+        "T328b brew says /opt/homebrew: /usr/local/bin is not its, no note / brew 說是 /opt/homebrew：/usr/local/bin 不是它的，不印"
+    if env PATH="${(j.:.)_t328_nobrew}" zsh -c 'command -v brew' >/dev/null 2>&1; then
+        bad "T328c a PATH without brew could not be built, so the no-brew case was not tested / 建不出沒有 brew 的 PATH，沒有 brew 的情況沒被測到"
+    else
+        assert_eq "$(_t328_note "${(j.:.)_t328_nobrew}")" 0 \
+            "T328c no brew on PATH: no note, as on the WSL that reported it / PATH 上沒有 brew：不印，與回報它的那台 WSL 相同"
+    fi
+fi
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -19883,6 +19924,7 @@ fi
 (( ${T322_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T323_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T324_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T328_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode

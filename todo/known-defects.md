@@ -9097,7 +9097,7 @@ verified. Print what `uname -sm` measures.
 
 ---
 
-## LB. Windows 上「父路徑是一個檔案」被說成「目錄不存在」（2026-09-03，Windows 節點回報，**尚未定位**）
+## LB. Windows 上「父路徑是一個檔案」被說成「目錄不存在」（2026-09-03，Windows 節點回報；2026-09-06 結案：**不是 csv2 的缺陷**，是 T145g 遞給它的路徑，修正在測試）
 
 | 情況 | Linux／macOS | Windows |
 |---|---|---|
@@ -14091,7 +14091,7 @@ and left the "use the environment's value" half of `${VERSION:-}` in place. T304
 Fixed: the binary is asked every time; a VERSION that agrees is harmless and one that disagrees
 is refused with both values named. T322 runs a copy beside a stub reporting 1.2.3.
 
-## RF. `install.zsh` 在一台沒有 Homebrew 的 Linux 上，說「這不是 Homebrew 安裝」並教人別用 `brew uninstall`（2026-10-14 發現，**未修**）
+## RF. `install.zsh` 在一台沒有 Homebrew 的 Linux 上，說「這不是 Homebrew 安裝」並教人別用 `brew uninstall`（2026-10-14 發現；2026-10-22 修正，T328a–c）
 
 在 WSL 上以 root 把 0.1.4 裝進 `/usr/local/bin`（`install.zsh --no-rc --dir /usr/local/bin`）時，輸出裡有：
 
@@ -14112,6 +14112,21 @@ NOTE: this is NOT a Homebrew install / 注意：這不是 Homebrew 安裝
 On WSL, installing into /usr/local/bin printed the "NOT a Homebrew install" note on a machine with
 no brew: /usr/local/bin is Homebrew's prefix only on Intel macOS, and the condition checks
 neither the platform nor whether brew exists. The install itself was correct. Not fixed.
+
+### 修正（2026-10-22）
+
+`/usr/local/bin` 那個情況改成問 brew：`command -v brew` 找得到、而且 `brew --prefix` 回報 `/usr/local` 時才印。
+`*/homebrew/bin` 與 `*/linuxbrew/*/bin` 兩個名字只有 Homebrew 會用，維持原樣。這同時修掉了一個記錄時沒寫到的情況：
+**Apple silicon** 上 brew 的 prefix 是 `/opt/homebrew`，`/usr/local/bin` 在那裡也只是普通目錄，舊的條件一樣會印。
+
+T328 用三種 PATH：一個回報 `/usr/local` 的假 brew（說明是對的，T328a）、一個回報 `/opt/homebrew` 的（T328b），
+以及一條拿掉所有含 brew 項目的 PATH（T328c）——這台機器上有真的 brew，不拿掉就測不到「沒有 brew」。
+舊的 `install.zsh` 在 T328b、T328c 失敗，新的三項全過。
+
+Fixed: the /usr/local/bin case now asks brew, and prints the note only when `brew --prefix` says
+/usr/local. That also covers a case the record did not mention: on Apple silicon the prefix is
+/opt/homebrew and the old condition printed the note there too. T328b and T328c fail on the old
+install.zsh.
 
 ## RG. Markdown 就地編輯，兩張表之間沒有空白行時，刪掉第一張之後的一切（2026-10-22 發現並修正，T325a–e；使用者的審查回報，P1）
 

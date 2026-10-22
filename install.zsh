@@ -680,7 +680,22 @@ run chmod 755 $DEST
 # 把執行檔複製進 brew 的 bin，是放進 Homebrew 的目錄而 Homebrew 對它一無所知。
 # 以為 `brew upgrade` 會維護它的人，會在不知情的狀況下用著舊版本很久。
 # ---------------------------------------------------------------------
-if [[ $DEST_DIR == */homebrew/bin || $DEST_DIR == /usr/local/bin || $DEST_DIR == */linuxbrew/*/bin ]]; then
+#
+# /usr/local/bin is Homebrew's only where brew SAYS its prefix is /usr/local
+# (Intel macOS). On a Linux with no brew, and on Apple silicon where the prefix
+# is /opt/homebrew, it is an ordinary directory, and this note warned about a
+# package manager that was not there. So that case asks brew; the two names
+# that only Homebrew uses still answer for themselves. RF.
+# /usr/local/bin 只有在 brew **自己說**它的 prefix 是 /usr/local 時（Intel macOS）才是 Homebrew 的。
+# 在一台沒有 brew 的 Linux、以及 prefix 是 /opt/homebrew 的 Apple silicon 上，它只是普通目錄，而這段
+# 說明對一個不存在的套件管理員發出了警告。所以那個情況去問 brew；只有 Homebrew 會用的那兩個名字，
+# 仍然自己就說明了自己。RF。
+_brew_bin=""
+if command -v brew >/dev/null 2>&1; then
+    _brew_bin=$(brew --prefix 2>/dev/null) && _brew_bin=$_brew_bin/bin || _brew_bin=""
+fi
+if [[ $DEST_DIR == */homebrew/bin || $DEST_DIR == */linuxbrew/*/bin ||
+      ( -n $_brew_bin && $DEST_DIR == $_brew_bin ) ]]; then
     say "NOTE: this is NOT a Homebrew install / 注意：這不是 Homebrew 安裝"
     say "  brew list      will not show it / 不會列出它"
     say "  brew upgrade   will never update it / 不會更新它"
