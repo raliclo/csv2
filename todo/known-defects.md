@@ -14112,3 +14112,85 @@ NOTE: this is NOT a Homebrew install / 注意：這不是 Homebrew 安裝
 On WSL, installing into /usr/local/bin printed the "NOT a Homebrew install" note on a machine with
 no brew: /usr/local/bin is Homebrew's prefix only on Intel macOS, and the condition checks
 neither the platform nor whether brew exists. The install itself was correct. Not fixed.
+
+## RG. Markdown 就地編輯，兩張表之間沒有空白行時，刪掉第一張之後的一切（2026-10-22 發現；使用者的審查回報，P1）
+
+重現於 `csv2 0.1.4 (v0.1.4 / 95e1d719)`（已發布、已安裝的那一份）與 `csv2 0.1.4 (v0.1.4-6-gcf413318)`（develop），兩者相同：
+
+```console
+$ print -rl -- '| a | b |' '|---|---|' '| 1 | 2 |' '| x | y |' '|---|---|' '| 3 | 4 |' > two.md
+$ csv2 -r --md-table 2 -i two.md
+3,4                                   ← 讀取器分得出兩張表
+$ csv2 -update 1:b 9 -md -t --md-table 1 -i two.md --in-place; echo rc=$?
+rc=0
+$ cat two.md
+| a | b |
+|---|---|
+|1|9|
+$ csv2 -r --md-table 2 -i two.md
+csv2: --md-table 2: two.md has 1 table(s)
+```
+
+第二張表的標頭、分隔列與資料全部消失，退出碼 0。審查說「第二張表消失」；實際上被刪的是第一張表
+**之後的一切**，直到第一個空白行或非表格行。
+
+成因：同一件事寫了兩份。`MarkdownIn.translate`（`Markdown.swift`）找表時，遇到分隔列就知道「它上面那一行是
+另一張表的標頭」——這條規則本身就是為了「兩張表被讀成一張」那個缺陷加的。`runMarkdownEdit` 的替換範圍
+（`Run.swift`）是**另一份獨立的掃描**，只看「這一行是否以 `|` 開頭」，沒有那條規則。讀取器對、寫回器錯，
+而寫回器決定哪些位元組被刪掉。
+
+修法：把「一張表在哪一行結束」抽成一個函式，讀取器與替換範圍都呼叫它；不在 `Run.swift` 補第二份規則，
+因為兩份規則正是這次的成因。
+
+Markdown in-place editing deleted everything after the edited table when two tables were not
+separated by a blank line. The reader already knew a separator means the line above it is the
+next table's header; the replacement range in Run.swift was a second, independent scan that
+only checked for a leading `|`. Exit 0. Reproduced on the released 0.1.4 and on develop. Fix:
+one function decides where a table ends, and both callers use it.
+
+## RH. 過長的 A1 欄位字母讓位址解析整數溢位而崩潰（2026-10-22 發現；使用者的審查回報，P2）
+
+重現於 `csv2 0.1.4 (v0.1.4 / 95e1d719)` 與 `csv2 0.1.4 (v0.1.4-6-gcf413318)`：
+
+```console
+$ print -rl -- k,v a,1 > a.csv
+$ csv2 -get '1:1 [ZZZZZZZZZZZZZZ2]' -i a.csv; echo rc=$?
+rc=133                                ← macOS arm64 上是 SIGTRAP；審查在另一個平台看到 132
+$ csv2 -get '1:1 [ZZZZ2]' -i a.csv; echo rc=$?
+csv2: -get: the address names column 1 and  [ZZZZ2] says column ZZZZ; they cannot both be right
+rc=1                                  ← 短一點的字母正常拒絕
+```
+
+`a1ColumnNumber`（`main.swift`）做 `n = n * 26 + …`，沒有溢位檢查；14 個 Z 超過 `Int.max`，Swift 的算術溢位
+是陷阱，行程直接死掉，什麼都沒印。修法：溢位時回報參數錯誤並以非零結束，與其他壞位址一樣。
+
+Too many A1 column letters overflowed `n * 26` in a1ColumnNumber and trapped (rc 133 here, 132
+in the review), with no message. Fix: refuse it as a malformed address.
+
+## RI. 平行搜尋在「標頭含引號內換行」時，回報的實體行號少了標頭多出的行數（2026-10-22 發現；使用者的審查回報，P2）
+
+重現於 `csv2 0.1.4 (v0.1.4 / 95e1d719)` 與 `csv2 0.1.4 (v0.1.4-6-gcf413318)`：
+
+```console
+$ printf '"a\nb\nc",v\nx,hit\ny,hit\n' > h.csv
+$ csv2 --build-index -i h.csv
+$ CSV2_PARALLEL_MIN_BYTES=1 csv2 -contains hit --json -i h.csv
+{"record":1,"field":2,"header_en":"v","value":"hit","line":2}
+{"record":2,"field":2,"header_en":"v","value":"hit","line":3}
+$ CSV2_PARALLEL_MIN_BYTES=999999999 csv2 -contains hit --json -i h.csv
+{"record":1,"field":2,"header_en":"v","value":"hit","line":4}
+{"record":2,"field":2,"header_en":"v","value":"hit","line":5}
+```
+
+單執行緒正確（標頭佔第 1–3 行，`x,hit` 在第 4 行）；平行路徑少了 2。審查的例子標頭只有一個換行，所以差 1
+（2、3 對 3、4）。
+
+成因：`runParallelSearch`（`Parallel.swift`）把每個區塊的起始行號算成 `span.firstRecord + headerRows`，
+也就是假設「標頭每一列恰好一行」。平行路徑的前提「每筆紀錄一行」由索引的 `noEmbeddedNewlines` 證明，
+而它說的是**資料**；標頭不在那個證明裡。紀錄號是對的，只有行號錯——正是「在錯誤的位址回報正確的儲存格」
+那一類，`planChunks` 上方的註解警告的就是它。修法：數標頭位元組裡的換行，以它取代 `headerRows` 作為行號的基底。
+
+Parallel search assumed each header row is one physical line, so a header with quoted newlines
+shifted every reported `line` back by the extra lines; record numbers were right. The index's
+one-record-per-line proof covers data, not the header. Fix: count the line feeds in the header
+bytes and use that as the line base.
