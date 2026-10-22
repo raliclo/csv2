@@ -14222,7 +14222,7 @@ shifted every reported `line` back by the extra lines; record numbers were right
 one-record-per-line proof covers data, not the header. Fix: count the line feeds in the header
 bytes and use that as the line base.
 
-## RJ. Linux 建置把工具鏈的**絕對路徑**寫進 RPATH，換工具鏈後執行檔就跑不起來（2026-10-22 發現；正式建置要不要改成靜態，**未決定**）
+## RJ. Linux 建置把工具鏈的**絕對路徑**寫進 RPATH，換工具鏈後執行檔就跑不起來（2026-10-22 發現；同日決定正式的 Linux 建置一律靜態，T329a–c）
 
 guest 從 Swift 6.3.3 換成 6.4.0、移除 6.3.3 之後，已發布的 `csv2-0.1.5-linux-aarch64` 在 guest 裡無法執行：
 
@@ -14250,13 +14250,28 @@ Swift 在 Linux 上沒有 ABI 穩定性保證，讓 6.3.3 建的執行檔去載�
 `1a3d3ce1…`，guest、本機、公開 URL 三處相同），原本那份不動，release notes 加一段說明。guest 的 prebuilt 改取自它。
 Homebrew 的 Linux arm64 項目仍指向原版。
 
-**未決定**：正式的 Linux 建置（`compile_csv2_linux.zsh`、x86_64 與 aarch64 的封存）要不要改成靜態。若改，要加一個測試確認
-產物沒有 RPATH 也沒有 libswift* 依賴；並另外評估只 `import FoundationEssentials` 能不能拿掉那 37 MB 的 ICU。macOS 不受影響
-（runtime 在系統裡）；Windows 的對應問題是 RC，做法會是把 runtime DLL 一起打包。
+**決定（使用者，2026-10-22）**：正式的 Linux 建置一律靜態。`compile_csv2.zsh` 的 Linux 分支與 `compile_csv2_linux.zsh`
+都加 `-static-stdlib`，`-O` 建置在連結後 strip（WSL 6.4.1 實測：未 strip 71674008 bytes，strip 後 58678560），
+所以測試跑的就是要封存的那一份。`--debug` 不 strip，留給要看符號的人。
+
+WSL 那台的 RUNPATH 是 `/usr/local/swift/usr/lib/swift/linux`，不帶版本號，所以 6.4 → 6.4.1 時沒有出事；但那是
+那台機器的安裝方式碰巧對了，不是建置保證的。下一次不相容的 Swift 更新會在那裡用同樣的方式壞掉。
+
+T329（只在 Linux 上執行）用 `readelf -d` 讀受測的執行檔：沒有 RPATH／RUNPATH（T329a）、沒有任何 libswift*、
+libFoundation*、libdispatch、libBlocksRuntime 依賴（T329b），並在 `env -i` 下執行（T329c）。舊的動態建置在
+T329a、T329b 失敗。
+
+仍未做：評估只 `import FoundationEssentials` 能不能拿掉那 37 MB 的 ICU。macOS 不受影響（runtime 在系統裡）；
+Windows 的對應問題是 RC，做法會是把 runtime DLL 一起打包。
+
+Decided the same day: every regular Linux build is static. Both Linux build paths pass
+`-static-stdlib` and an `-O` build is stripped right after linking, so the suite runs the binary
+that gets archived. WSL's unversioned RUNPATH survived 6.4 -> 6.4.1 by how that machine installed
+Swift, not by anything the build guarantees. T329 (Linux only) pins it.
 
 The Linux build writes the toolchain's absolute, version-numbered path into RPATH (swiftc
 resolves the /workspace/opt/swift symlink), so the published 0.1.5 aarch64 binary stopped running
 when the guest moved from Swift 6.3.3 to 6.4.0. Changing RPATH cannot fix this: Swift has no ABI
 stability on Linux. `-static-stdlib` does -- no Swift dependency, no RPATH, same suite result --
 at 57 MB instead of 1 MB. For now a static aarch64 asset was added to v0.1.5 and the guest's
-prebuilt takes it; whether the regular Linux builds go static is not decided.
+prebuilt takes it. The regular Linux builds went static the same day; see above.

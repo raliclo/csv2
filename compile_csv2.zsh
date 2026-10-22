@@ -148,7 +148,14 @@ mkdir -p release
 
 echo "Building csv2 for $HOST_KERNEL ($OPT) / 正在為 $HOST_KERNEL 建置 csv2（$OPT）"
 
-swiftc -swift-version 6 -warnings-as-errors $OPT -o release/csv2 $SOURCES
+# Linux only; macOS ships its Swift runtime in the OS. The reason is RJ, written
+# out beside the same line in compile_csv2_linux.zsh.
+# 只限 Linux；macOS 的 Swift runtime 在作業系統裡。理由是 RJ，寫在 compile_csv2_linux.zsh 的同一行旁邊。
+LINK=()
+[[ $HOST_KERNEL == Linux ]] && LINK=(-static-stdlib)
+
+swiftc -swift-version 6 -warnings-as-errors $OPT $LINK -o release/csv2 $SOURCES
+[[ $HOST_KERNEL == Linux && $OPT == -O ]] && strip release/csv2
 
 # Verify by RUNNING it, not by checking the file exists. Whether the binary
 # landed proves nothing about whether it works; this is the same reasoning as

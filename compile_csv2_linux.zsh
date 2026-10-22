@@ -116,7 +116,22 @@ mkdir -p release
 # 說出**量到**的，而不是假設的。見檔首的 LA。
 HOST_UNAME=$(uname -sm)
 print -- "Building csv2 for $HOST_UNAME ($OPT) / 正在為 $HOST_UNAME 建置 csv2（$OPT）"
-"$SWIFTC" -swift-version 6 -warnings-as-errors $OPT -o release/csv2 $SOURCES
+# RJ. Static, always. swiftc on Linux writes the toolchain's RESOLVED,
+# version-numbered path into RPATH, and Swift has no ABI stability there, so a
+# dynamic binary is tied to the exact toolchain that built it: the published
+# 0.1.5 aarch64 binary stopped running when the guest moved from 6.3.3 to
+# 6.4.0. -static-stdlib leaves only libc, libm, libstdc++ and libgcc_s. The
+# price is size -- about 59 MB stripped against 1 MB, 37 MB of it ICU data.
+# An -O build is stripped HERE rather than at packaging, so the suite runs the
+# binary that gets archived; --debug keeps its symbols. T329 pins all of it.
+# RJ。一律靜態。swiftc 在 Linux 上把工具鏈「解開後、帶版本號」的路徑寫進 RPATH，而 Swift 在
+# Linux 上沒有 ABI 穩定性，所以動態的執行檔被綁死在建置它的那一份工具鏈上：guest 從 6.3.3 換到
+# 6.4.0 時，已發布的 0.1.5 aarch64 執行檔就跑不起來了。-static-stdlib 之後只剩 libc、libm、
+# libstdc++、libgcc_s。代價是大小——strip 後約 59 MB，原本 1 MB，其中 37 MB 是 ICU 資料。
+# -O 建置在**這裡** strip，而不是封存時，所以測試跑的就是要封存的那一份；--debug 保留符號。
+# T329 釘住這一切。
+"$SWIFTC" -swift-version 6 -warnings-as-errors $OPT -static-stdlib -o release/csv2 $SOURCES
+[[ $OPT == -O ]] && strip release/csv2
 
 # Verify by RUNNING it, not by checking the file exists -- the same rule the
 # macOS build follows. Here it also proves the Swift runtime resolves: a binary

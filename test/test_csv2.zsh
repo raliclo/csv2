@@ -19753,6 +19753,69 @@ else
     fi
 fi
 
+echo
+echo "--- T329: the binary names no toolchain to find its runtime in / T329：執行檔不指望任何工具鏈目錄提供 runtime ---"
+# RJ. On Linux swiftc wrote the toolchain's version-numbered path into RPATH,
+# and the published 0.1.5 aarch64 binary stopped running when the guest's Swift
+# moved on. Linux builds are static now: no RPATH or RUNPATH (a), no Swift
+# runtime library among the dependencies (b), and it runs with an empty
+# environment (c). macOS asks the same question of its own format: no LC_RPATH,
+# and every dependency under /usr/lib or /System, which the OS owns. Windows is
+# RC, a different answer (ship the DLLs), so it is not asked here.
+# RJ。Linux 上 swiftc 把工具鏈帶版本號的路徑寫進 RPATH，guest 的 Swift 一換，已發布的 0.1.5
+# aarch64 執行檔就跑不起來了。Linux 建置現在是靜態的：沒有 RPATH／RUNPATH（a）、依賴裡沒有任何
+# Swift runtime 函式庫（b）、環境變數全空也能執行（c）。macOS 用它自己的格式問同一個問題：沒有
+# LC_RPATH，而且每一個依賴都在作業系統擁有的 /usr/lib 或 /System 底下。Windows 是 RC，答案不同
+# （把 DLL 一起帶上），所以這裡不問。
+case "$(uname -s 2>/dev/null)" in
+    Linux)
+        if ! command -v readelf >/dev/null 2>&1; then
+            T329_SKIPPED=1
+            skipt "T329 the binary names no toolchain / 執行檔不指望工具鏈目錄 (no readelf on this system / 這個系統沒有 readelf)"
+        else
+            _t329=$(LC_ALL=C readelf -d "$CSV2" 2>&1)
+            if [[ $_t329 != *"(NEEDED)"* ]]; then
+                bad "T329 readelf printed no dependencies at all, so nothing was checked: ${_t329[1,200]} / readelf 一個依賴都沒印，等於什麼都沒查"
+            else
+                assert_eq "$(print -r -- "$_t329" | grep -cE '\((RPATH|RUNPATH)\)' || true)" 0 \
+                    "T329a no RPATH or RUNPATH / 沒有 RPATH 或 RUNPATH"
+                assert_eq "$(print -r -- "$_t329" | grep '(NEEDED)' | grep -cE 'libswift|libFoundation|lib_Foundation|libdispatch|libBlocksRuntime' || true)" 0 \
+                    "T329b no Swift runtime among the dependencies / 依賴裡沒有 Swift runtime"
+            fi
+            if env -i "$CSV2" --version >/dev/null 2>&1; then
+                ok "T329c it runs with an empty environment / 環境變數全空也能執行"
+            else
+                bad "T329c it does not run with an empty environment / 環境變數全空時無法執行"
+            fi
+        fi
+        ;;
+    Darwin)
+        if ! command -v otool >/dev/null 2>&1; then
+            T329_SKIPPED=1
+            skipt "T329 the binary names no toolchain / 執行檔不指望工具鏈目錄 (no otool on this system / 這個系統沒有 otool)"
+        else
+            _t329=$(otool -L "$CSV2" 2>&1)
+            if [[ $_t329 != *libSystem* ]]; then
+                bad "T329 otool printed no dependencies at all, so nothing was checked: ${_t329[1,200]} / otool 一個依賴都沒印，等於什麼都沒查"
+            else
+                assert_eq "$(otool -l "$CSV2" | grep -c LC_RPATH || true)" 0 \
+                    "T329a no LC_RPATH / 沒有 LC_RPATH"
+                assert_eq "$(print -r -- "$_t329" | sed 1d | grep -vcE '^[[:space:]]+(/usr/lib/|/System/)' || true)" 0 \
+                    "T329b every dependency is the OS's own / 每一個依賴都屬於作業系統"
+            fi
+            if env -i "$CSV2" --version >/dev/null 2>&1; then
+                ok "T329c it runs with an empty environment / 環境變數全空也能執行"
+            else
+                bad "T329c it does not run with an empty environment / 環境變數全空時無法執行"
+            fi
+        fi
+        ;;
+    *)
+        T329_SKIPPED=1
+        skipt "T329 the binary names no toolchain / 執行檔不指望工具鏈目錄 (Windows ships its runtime DLLs instead; that is RC / Windows 改為隨附 runtime DLL，那是 RC)"
+        ;;
+esac
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -19925,6 +19988,7 @@ fi
 (( ${T323_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T324_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T328_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T329_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode
