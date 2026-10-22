@@ -871,6 +871,29 @@ after that first one was sound and faithfully inherited a false premise. The
 lesson is one sentence: ask the machine, not the file that describes it. It was
 booted at the time.
 
+## ~~v0.1.6~~ 已出貨
+
+### 2026-10-22：v0.1.6 出了，四個平台，五個節點都升級了
+
+`https://github.com/raliclo/csv2/releases/tag/v0.1.6`，tag 指向 `bc3d502`。
+內容：RJ（Linux 一律靜態建置，T329）、RK（編輯不再補上原本沒有的結尾換行，T330a–j）。
+
+| 平台 | 建置於 | build id | 套件 | 封存 sha256 | 升級後 PATH 上的那一份 |
+|---|---|---|---|---|---|
+| macOS arm64 | M4 | `v0.1.6 / bc3d5024` | 1515/0/1 | `e5909926…` | M4、M6 `brew upgrade` → 0.1.6 |
+| Linux aarch64 | guest VM | `v0.1.6 / bc3d5024` | 1503/0/5 | `8948e512…` | `/workspace/csv2/release/csv2`，在 tag 上建 → 0.1.6 |
+| Linux x86_64 | WSL2 | `v0.1.6 / bc3d5024` | 1514/0/1 | `e286280b…` | `/usr/local/bin/csv2` → 0.1.6 |
+| Windows x86_64 | Ralic-W11，Swift 6.4.1（csv2-win 建置） | `v0.1.6 / bc3d5024` | 1477/0/17 | `07883182…` | scoop → 0.1.6 |
+
+- **Linux 封存變大**：壓縮後約 16 MB（aarch64 16304529、x86_64 16841441 bytes），原本約 0.3 MB；這是 RJ 的代價，已寫進 README 與 release notes。
+- **Windows 多一個 SKIP**：T329 在 Windows 上略過（它檢查的是 ELF／Mach-O），17 個都由 T69b 交代。
+- **guest 的測試不經過 runner 的時限**：`run_csv2_test.zsh` 的 SUITE 1800 秒在 T212 用完，使用者決定保留那個上限，在常駐 guest 裡以 nohup 跑完整套件。
+- **guest 的 prebuilt**：母專案 `prebuilt/csv2` 歸 LinuxCS-M4；在它換成 0.1.6 的發布封存之前，guest 重建後會退回舊版。
+
+v0.1.6 shipped on 2026-10-22 from tag bc3d502 with RJ and RK. All four archives were built at the
+tag on their own nodes (Windows by csv2-win) and collected over two channels; install_release.zsh
+read 0.1.6 back on M4, Windows, WSL and the guest, and M6 read it back after `brew upgrade`.
+
 ## ~~v0.1.5~~ 已出貨
 
 ### 2026-10-22：v0.1.5 出了，四個平台，五個節點都升級了
