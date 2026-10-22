@@ -14275,3 +14275,42 @@ when the guest moved from Swift 6.3.3 to 6.4.0. Changing RPATH cannot fix this: 
 stability on Linux. `-static-stdlib` does -- no Swift dependency, no RPATH, same suite result --
 at 57 MB instead of 1 MB. For now a static aarch64 asset was added to v0.1.5 and the guest's
 prebuilt takes it. The regular Linux builds went static the same day; see above.
+
+## RK. 沒有結尾換行的檔案，經 csv2 寫出後被補上一個，而 README 沒有說（2026-10-22 回報；**行為是否要改，未決定**）
+
+使用者回報：`--in-place` 更新時，原本沒有結尾換行的檔案會被加上一個。實測（`csv2 0.1.5 (v0.1.5 / 695d5bd5)`，
+Homebrew 安裝的那一份）：
+
+```console
+$ printf 'a,b\n1,2' > t.csv
+$ csv2 -update 1:2 X -i t.csv --in-place; echo $?
+0
+$ od -c t.csv
+0000000    a   ,   b  \n   1   ,   X  \n
+$ printf 'x\ny' > t.txt
+$ csv2 -update 2:1 Z -i t.txt --in-place; od -c t.txt
+0000000    x  \n   Z  \n
+$ printf 'x\ny' > u.txt
+$ csv2 -r -t -i u.txt -o u2.txt; od -c u2.txt         # 沒有任何編輯，只是讀進來再寫出去
+0000000    x  \n   y  \n
+$ printf 'a,b\n1,2' | csv2 -r -t -i - | od -c          # stdout 也一樣
+0000000    a   ,   b  \n   1   ,   2  \n
+```
+
+**這不是 `--in-place` 專屬的**：每一條寫出路徑都把每一筆紀錄以 LF 結束，`-o` 與 stdout 也是。它來自
+計畫裡兩個已定的決定——「輸出的紀錄分隔符永遠是 `\n`」，以及「`.csv` 缺少結尾換行時補上 LF」（後者原本是
+為了追加，否則新紀錄會黏在最後一筆的尾巴上）。同一條規則也讓 CRLF 變成 LF，那一項 README 有寫（OT）。
+
+**缺陷是文件**：`plan/plan.md` 第 5 條說「兩個代價，兩個都在 README 裡」——CRLF 變 LF，以及結尾少一個換行
+的檔案會被補上一個。README 只寫了前者。`grep -ci 'final newline' README.md` 是 0，中文版也沒有對應的句子。
+使用者因此把一個已定的政策當成了程式缺陷，而那正是 OT 對 CRLF 記錄過的同一種落差。
+
+**未決定**：要不要讓 `--in-place` 保留「原本沒有結尾換行」這件事。理由兩邊都有：一次只改一格的編輯，動到
+別的位元組是會讓人意外的；但 CRLF 已經在同一條規則下被改寫，只保留其中一項，會讓「輸出永遠是 LF 結尾」這條
+保證出現例外。
+
+Reported: an in-place update adds a final newline to a file that had none. Measured on the
+Homebrew 0.1.5 build: it is not specific to `--in-place` -- `-o` and stdout do it too, because
+every record is written LF-terminated by decided policy, the same rule that turns CRLF into LF.
+The defect is documentation: plan.md says both costs are in the README, and only the CRLF one
+is. Whether `--in-place` should preserve a missing final newline is not decided.
