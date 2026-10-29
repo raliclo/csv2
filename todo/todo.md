@@ -871,6 +871,27 @@ after that first one was sound and faithfully inherited a false premise. The
 lesson is one sentence: ask the machine, not the file that describes it. It was
 booted at the time.
 
+## ~~v0.1.7~~ 已出貨
+
+### 2026-10-29：v0.1.7 出了，四個平台，五個節點都升級了
+
+`https://github.com/raliclo/csv2/releases/tag/v0.1.7`，tag 指向 `f563f75`。
+內容：RL、RU、RO、RM、RN、RY、RP、RZ（見 known-defects.md）。
+
+| 平台 | 建置於 | build id | 套件 | 封存 sha256 | 升級後 PATH 上的那一份 |
+|---|---|---|---|---|---|
+| macOS arm64 | M4 | `v0.1.7 / f563f75d` | 1542/0/1 | `15d7f9d5…` | M4、M6 `brew upgrade` → 0.1.7 |
+| Linux aarch64 | guest VM | `v0.1.7 / f563f75d` | 1530/0/5 | `176c820a…` | `/workspace/csv2/release/csv2`，在 tag 上建 → 0.1.7 |
+| Linux x86_64 | WSL2 | `v0.1.7 / f563f75d` | 1541/0/1 | `bd3d1b31…` | `/usr/local/bin/csv2` → 0.1.7 |
+| Windows x86_64 | Ralic-W11，Swift 6.4.1 | `v0.1.7 / f563f75d` | 1503/0/18 | `798edb1c…` | scoop → 0.1.7 |
+
+- **Windows 由 csv2-M4 建置**：csv2-win 不在線上，所以在另外 clone 的 `C:/Users/lowei/proj/csv2-m4-verify` 建置與測試，
+  封存複製到 `C:/Users/lowei/proj/csv2/dist/` 供 collect_release 收取；csv2-win 的工作樹沒有被動到。
+- **發布由使用者執行**：auto mode 的分類器擋下了 `publish.zsh --publish`，使用者以 `!` 自己跑。
+- **T323 是測試的錯誤**：全新的 Windows clone 裡 msys 對 `-x release/csv2` 回答真，T323d 失敗；1b3d6d0 修正。
+- **guest 的 prebuilt**：母專案 `prebuilt/csv2` 歸 LinuxCS-M4，已請它換成 0.1.7 的封存。
+- **RM–SB 的其餘各項仍待處理**：RQ、RS、RT、RV、RW、RX、SA、SB，以及未給代號的那幾項。
+
 ## ~~v0.1.6~~ 已出貨
 
 ### 2026-10-22：v0.1.6 出了，四個平台，五個節點都升級了
