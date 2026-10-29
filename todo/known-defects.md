@@ -14381,3 +14381,211 @@ writing `""`, which keeps the missing newline but rewrites a field encoding nobo
 
 **測試**：T331a–e 釘住空的最後一筆（單欄、CRLF、stdout、修改後的筆數、lines 檔）；T331f 釘住另一個方向——有自己
 位元組的最後一筆仍不補結尾換行，確認修正沒有過頭。負控組：同一組指令在 Homebrew 的 0.1.6 上，a–e 五項失敗、f 通過。
+
+---
+
+# 2026-10-29 全面程式碼審查的發現（RM–SB）
+
+以下 15 項來自兩個審查 agent 對 `src/` 的唯讀審查，每一項都在記錄前由主 session 親手重現。執行檔是
+`csv2 0.1.6 (v0.1.6-4-g5af6b9d3-dirty)`——程式碼與 5af6b9d 相同（之後的 d9e4290..45bad1e 只改註解與文件）。
+除 RO 外都與 RK/RL 無關；0.1.5 也有的會註明。**全部尚未修。** `n.csv` = `printf 'h\n1\n2\n3\n4\n5\n'`。
+
+The fifteen findings below came from a read-only review of src/ and were each reproduced by hand
+before being written down. None is fixed yet.
+
+## RM. `-delete a,` 與 `-delete ,b` 只刪一筆，不是一個範圍（rc 0；0.1.5 亦同）
+
+```console
+$ csv2 -delete 2, -i n.csv -so | tr '\n' ' '      → h 1 3 4 5
+$ csv2 -delete ,3 -i n.csv -so | tr '\n' ' '      → h 1 2 4 5
+$ csv2 -delete 2,,4 -i n.csv -so | tr '\n' ' '    → h 1 5
+$ csv2 -mid 2,,4 -i n.csv                          → csv2: -mid takes a,b (either side may be empty)
+```
+
+README 說 `-delete a,b` 與 `-mid a,b` 讀法相同，而 `-mid 4,` 是「4 到結尾」。原因：`src/main.swift` 以
+`split(separator: ",")` 切，空的一段被丟掉。應該：與 `-mid` 同樣切法；開放端要嘛照 `-mid` 的意思支援，要嘛拒絕；`2,,4` 拒絕。
+
+## RN. lines 檔的 `-update` 值裡有換行時，安靜地多出紀錄（rc 0；0.1.5 亦同）
+
+```console
+$ printf 'x\ny' > ln.txt
+$ csv2 -update 2:1 "$(printf 'a\nb')" -i ln.txt --in-place; echo $?; csv2 -count -i ln.txt
+0
+3
+$ csv2 -insert 1 "$(printf 'p\nq')" -i ln4.txt -so
+csv2: -insert 1: the value spans more than one record
+```
+
+`-insert`／`-append` 會拒絕，`-update` 不會。另見審查回報：`--value-file` 內容為 `a\r` 時寫出一個 csv2 自己隨後拒讀的檔案。
+應該：`.lines` 的 `-update`（含 `-update-where`、`--value-file`、`--value-stdin`）以與 `-insert` 相同的訊息拒絕。
+
+## RO. 從 stdin 編輯 `.csv2` 時寫出一個被自己判定為撕裂寫入的 `.csv2`（RK 引入的退化）
+
+```console
+$ printf 'a,b\n甲,乙\n1,2' | csv2 -update 1:1 Q -si --headers 2 -o o.csv2; echo $?
+0
+$ tail -c 3 o.csv2 | xxd -p
+512c32
+$ csv2 -r -i o.csv2
+csv2: o.csv2 does not end with a newline; in .csv2 that means the last record is incomplete (a torn append). Pass --truncate-partial to drop it ...
+```
+
+0.1.5 寫出的檔案以 LF 結尾。原因：撕裂檢查只在 `-i` 時跑，`-si` 不跑，於是 RK 把沒有結尾換行的輸入當成「保留沒有結尾換行」。
+應該：`.csv2` 的輸出一律以 LF 結尾；並讓 `-si` 讀 `.csv2` 時也做撕裂檢查。
+
+## RP. 刪掉沒有結尾換行的最後一筆時，前一筆（沒被編輯）失去它的 LF——待決定
+
+```console
+$ printf 'h,k\n1,a\n2,b' > b.csv
+$ csv2 -delete 2 -i b.csv -so | xxd -p
+682c6b0a312c61          # 0.1.5：682c6b0a312c610a
+```
+
+筆數正確；之後的 `-append` 會補回分隔。但一筆沒被編輯的紀錄少了自己的結尾位元組。RK 的規則是「輸出最後一筆照輸入最後一筆
+的方式結束」，沒有測試釘住這種情況的任一種讀法。**需要使用者決定**：保留前一筆原有的 LF，或維持現狀並寫明。
+
+## RQ. 欄名是數字時，`-update-where` 拒絕一個唯一的命中
+
+```console
+$ printf '2,1\na,b\n' > nm.csv
+$ csv2 -update-where b Z -i nm.csv -so
+csv2: "2" is both a column NUMBER and the NAME of a column (position 1); ... address it by a number that is not also a name
+```
+
+`-contains b` 只命中一格。原因：命中的欄位被轉回數字字串再解析一次。使用者沒有打過那個位址，訊息給的建議也無從照做。
+應該：內部直接帶著已解析的欄位編號。
+
+## RS. `-hash --in-place` 仍替沒有結尾換行的檔案補上一個（RK 沒涵蓋到）
+
+```console
+$ printf 'h,k\n1,a' > f.csv; csv2 -hash k -i f.csv --in-place; tail -c 1 f.csv | xxd -p
+0a
+```
+
+它走 `runSelect`，不是 `runEdit`。RK 的決定是「編輯不補結尾換行」；`--in-place` 的改寫算不算編輯，需要確認範圍。
+
+## RT. CRLF 的 Markdown 表讀不了，而且錯誤訊息講錯原因
+
+```console
+$ printf '| a | b |\r\n|---|---|\r\n| 1 | 2 |\r\n' > m4.md
+$ csv2 -r -t -i m4.md
+csv2: m4.md line 2: a Markdown table's second line is the separator (|---|---|), and this is not one. ...
+```
+
+原因：Swift 的 `"\r\n"` 是一個 Character，`String.split(separator: "\n")` 不會在 CRLF 處切開（`src/Markdown.swift`）。
+`--in-place` 編輯同一個檔案則回報「沒有 Markdown 表」。應該：以位元組或 unicodeScalars 切，或先把 CRLF 正規化。
+
+## RU. 平行搜尋在 worker 開不了檔案時安靜地丟掉整段結果，rc 0（嚴重）
+
+```console
+$ sh -c 'ulimit -n 8; CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=2048 csv2 -contains x -i fd.csv2 --json > o.out; echo $?'
+0
+$ tail -1 o.out
+{"meta":{"records":20000,"matched":10401}}     # ulimit -n 64：matched 20000；stderr 兩次都是空的
+```
+
+`fd.csv2` 有 20000 筆含 `x` 的紀錄。原因：`src/Parallel.swift` 的 worker 在 `FileHandle(forReadingAtPath:)` 失敗時 `return`，
+沒有記錄錯誤。應該：存下一個「無法開啟」的錯誤，整次執行以非零結束（或退回單執行緒）。
+
+## RV. `-md` 寫出的 Markdown，資料列像分隔線時讀回來是錯的
+
+```console
+$ printf 'a,b\n1,2\n---,:-:\n3,4\n5,6\n' > dash.csv; csv2 -md -t -i dash.csv -o dash.md; echo $?
+0
+$ csv2 -r -i dash.md --md-table 1; echo $?
+0                                  # 三筆資料一筆都沒有
+$ csv2 -r -i dash.md --md-table 2
+3,4
+5,6                                # "1,2" 成了標頭，"---,:-:" 不見了
+```
+
+`-md` 不跳脫只由 `-`／`:` 組成的儲存格，而讀取端（RG 之後）把它當成新表的分隔線。審查回報另外指出 `-append --md-table 1 --in-place`
+會把新列插在既有資料前面。應該：`-md` 跳脫這種儲存格，讓自己的輸出讀得回來。
+
+## RW. 平行路徑的 `--include-headers` 在 `.csv2` 上丟掉 0a/0b 標記（HG 在平行路徑上重現）
+
+```console
+$ CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=700 csv2 -contains a -i final.csv2 --include-headers | head -1
+0:1	name	name
+$ CSV2_PARALLEL_MIN_BYTES=999999999 csv2 -contains a -i final.csv2 --include-headers | head -1
+0a:1	name	name
+```
+
+原因：`src/Parallel.swift` 設了 `hh.number = 0` 卻沒設 `hh.headerRow`。審查回報另指出 `--a1` 因此指向錯的儲存格。應該：與單執行緒路徑逐位元組相同。
+
+## RX. 平行路徑 `--json` 的 meta `records` 在 `.csv` 沒有結尾換行時少一筆
+
+```console
+$ CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=1024 csv2 -contains x -i nofinal.csv --json | tail -1
+{"meta":{"records":1999,"matched":2000}}
+$ CSV2_PARALLEL_MIN_BYTES=999999999 csv2 -contains x -i nofinal.csv --json | tail -1
+{"meta":{"records":2000,"matched":2000}}
+```
+
+`nofinal.csv` 有 2000 筆、沒有結尾換行、有索引。原因：平行路徑以 LF 計數。
+
+## RY. 暫存檔名可預測，而且開檔時沒有 O_EXCL／O_NOFOLLOW：預先放好的 symlink 會把寫入導到別處（安全）
+
+```console
+$ printf 'a,b\n1,2\n' > in.csv; echo precious > victim.txt
+$ sh -c 'ln -s victim.txt .out.csv.csv2tmp.$$; exec csv2 -r -t -i in.csv -o out.csv'; echo $?
+0
+$ cat victim.txt; ls -l out.csv | cut -c1
+a,b
+1,2                 # victim.txt 被覆寫
+l                   # out.csv 成了指向 victim.txt 的 symlink
+```
+
+暫存名是 `.<base>.csv2tmp.<pid>`（`src/Core.swift`），以 `open(O_WRONLY|O_CREAT|O_TRUNC)` 開（`src/Platform.swift`）。
+應該：`O_CREAT|O_EXCL|O_NOFOLLOW` 加上隨機後綴，遇 EEXIST 重試。
+
+## RZ. 加密的儲存格可以在紀錄之間互換而不被偵測（加密）
+
+```console
+$ cat pay.csv
+name,salary
+alice,100
+bob,999999
+$ # 用 csv2 -encrypt salary 加密後，以 CSV 解析器把兩筆的 salary 密文對調，存成 pay.swap.csv
+$ csv2 -decrypt salary -keyfile key.bin -i pay.swap.csv; echo $?
+name,salary
+alice,999999
+bob,100
+0
+```
+
+原因：AAD 只有欄名（`src/Ops.swift`），沒有綁定紀錄。認證失敗的訊息還說 tag 偵測得到「儲存格被改過」。
+應該：把一個在紀錄間穩定的值綁進 AAD，或在 README 寫明儲存格只按欄認證、不按位置。**需要使用者決定**（改 AAD 會讓既有密文無法解開）。
+
+## SA. 分兩次加密的兩欄，`-decrypt` 一次解時以錯誤的診斷失敗
+
+```console
+$ csv2 -encrypt a ... -o two1.csv; csv2 -encrypt b ... -i two1.csv -o two2.csv
+$ csv2 -decrypt all -keyfile key.bin -i two2.csv; echo $?
+csv2: authentication failed at record 1, column b -- ... the key is not the one this column was encrypted with ...
+1
+```
+
+同一把鑰匙逐欄解開都成功。原因：金鑰只由第一欄的 salt 衍生、只檢查第一欄的指紋，卻套用到每一欄。應該：每欄以自己的 salt 衍生並檢查。
+
+## SB. `--json` 遇到非 UTF-8 的標頭時安靜地失真，紀錄以 "" 為鍵
+
+```console
+$ printf 'caf\xe9,b\n1,2\n' > lh.csv; csv2 -r -t --json -i lh.csv; echo $?
+{"meta":{"format":"csv","headers":1,"fields":2,"header":["caf�","b"]}}
+{"record":1,"line":2,"fields":{"":"1","b":"2"}}
+{"meta":{"records":1,"matched":0}}
+0
+```
+
+非 UTF-8 的**值**會被拒絕（FE），標頭卻會通過。應該：標頭與值同樣拒絕。
+
+### 審查回報、但主 session 尚未親手重現的（不列代號）
+
+- 平行路徑退回單執行緒時，stdout 已送出的部分會再印一次（需要一份「說沒有內嵌換行、其實有」的過期索引才觸發）。
+- 建立索引期間檔案被換掉，索引以新檔的戳記存檔並被信任；`recordBeginsAt` 只檢查欄數。
+- `--pretty` 把只有零寬字元的字素算成寬 1；Markdown 讀取端接受 `\x+f` 與 `\<`；錯誤時平行路徑印出的部分輸出比單執行緒少。
+- 程式碼層面：`src/Platform.swift` 有一個掛到 `processID()` 上的孤立 `@discardableResult`；`install.zsh` 結尾的 bash 區塊
+  假設 PATH 寫進 `.bashrc`，但 `rc_files` 寫的是 `~/.profile`；`verifications/measure_parallel_rss.zsh` 的 Linux 輸出檔名
+  不含架構，guest 與 WSL 會互相覆蓋；`loggedArg` 的說明說它不跳脫，但它呼叫了 `reportEscape`；`RecordParser.endRecord` 的一則
+  錯誤訊息字串仍寫著「until 2026-08-26 ...」。
