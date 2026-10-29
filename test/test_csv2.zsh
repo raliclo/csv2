@@ -27,45 +27,33 @@ set -uo pipefail
 HERE="${0:A:h}"
 ROOT="${HERE:h}"
 
-# What this file looked like when the run began. zsh reads a script AS it
-# executes it, so editing this file mid-run means the second half runs code the
-# first half never saw -- and nothing says so. On 2026-09-01 a rerun started to
-# answer whether T131f was flaky reported a total two higher than the file held
-# when it began, because T232 had been added while it ran. A test whose input
-# changes partway is not answering the question it was started for. KR.
-# 這個檔案在這次執行「開始時」的樣子。zsh 是**邊讀邊執行**一個腳本的，因此在執行中修改它，
-# 意味著後半段跑的是前半段從未見過的程式碼——而沒有任何東西會說出來。2026-09-01，一次為了回答
-# 「T131f 是不是偶發」而啟動的重跑，回報的總數比它啟動時檔案裡的案例數多了兩個，因為 T232 是在
-# 它跑的期間被加進去的。一個「輸入中途改變」的測試，回答的不是它被啟動時要問的那個問題。KR。
+# What this file looked like when the run began. zsh reads a script as it
+# executes it, so editing this file mid-run makes the second half run code the
+# first half never saw, and the totals stop answering the question the run was
+# started for. KR.
+# 這個檔案在執行「開始時」的樣子。zsh 是邊讀邊執行腳本的，執行中修改它，後半段跑的就是前半段
+# 沒見過的程式碼，總數也不再回答這次執行原本要問的問題。KR。
 #
-# size AND mtime: mtime alone is seconds-resolution and an edit inside the same
-# second leaves it unchanged -- measured, when probing this. Together they miss
-# only a same-second edit that also preserves the byte count, which a run
-# lasting minutes makes vanishingly unlikely. Stating the limit beats implying
-# there is none.
-# 用 size **與** mtime：只靠 mtime 的話，它是秒級解析度，同一秒內的編輯不會改變它——這是在
-# 探測這件事時實際量到的。兩者合起來只漏掉「同一秒內、且位元組數不變」的編輯，而在一次持續數
-# 分鐘的執行裡那幾乎不可能發生。說出限界，好過假裝沒有限界。
+# size AND mtime: mtime alone is seconds-resolution, so a same-second edit
+# leaves it unchanged. Together they miss only a same-second edit that also
+# keeps the byte count, which a run lasting minutes makes very unlikely.
+# 用 size **與** mtime：mtime 是秒級解析度，同一秒內的編輯不會改變它。兩者合起來只漏掉
+# 「同一秒內且位元組數不變」的編輯，在持續數分鐘的執行裡幾乎不會發生。
 
-# KZ. The result is CHECKED, and a failure ends the run here. It used to be
-# discarded, and a zsh that cannot load zsh/stat then produced three red cases
-# pointing in three different directions -- T129g, "the suite could not stamp
-# itself", and "the suite called zstat" -- none of which named the cause. The
-# skip count moved too, so even the totals disagreed between runs.
+# KZ. The result is checked, and a failure ends the run here. Ignoring it turns
+# one cause into three unrelated-looking failures (T129g, "could not stamp
+# itself", "called zstat") and makes the skip count vary between runs.
 #
-# `zsh -f` is how it happens: -f reads no start-up files, so the packaged zsh
-# on Windows never builds its module_path and the module is not findable. All
-# four platforms load zsh/stat when started normally, so failing to load it is
-# a broken environment, not a platform difference -- and the honest response to
-# a broken ruler is to refuse to measure, not to publish three readings.
+# The usual cause is `zsh -f`: it reads no start-up files, so the packaged zsh
+# on Windows never builds its module_path. All four platforms load zsh/stat
+# when started normally, so failing to load it is a broken environment, not a
+# platform difference, and the suite refuses to measure.
 #
-# KZ。這裡**檢查**結果，載不進來就在此結束。先前它被丟掉，於是一個載不進 zsh/stat 的 zsh 會
-# 產生三個指向三個不同方向的紅字——T129g、「測試無法為自己蓋章」、「測試呼叫了 zstat」——沒有
-# 一個說得出原因。連略過數都會跟著變，於是不同次執行的總計彼此矛盾。
+# KZ。這裡檢查結果，載不進來就在此結束。忽略它，一個原因會變成三個看似無關的失敗（T129g、
+# 「無法為自己蓋章」、「呼叫了 zstat」），略過數也會隨執行而變。
 #
-# 它的來源是 `zsh -f`：-f 不讀啟動檔，封裝版 zsh 因此沒有建立 module_path，模組找不到。四個
-# 平台在正常啟動時都載得進 zsh/stat，所以載不進來是環境壞了，不是平台差異——而面對一把壞掉的
-# 尺，誠實的做法是拒絕量測，不是發布三個讀數。
+# 常見原因是 `zsh -f`：它不讀啟動檔，Windows 上的封裝版 zsh 因此沒有建立 module_path。四個
+# 平台正常啟動時都載得進 zsh/stat，所以載不進來是環境壞了而非平台差異，這套測試拒絕量測。
 if ! zmodload -F zsh/stat b:zstat 2>/dev/null; then
     echo "NO zsh/stat / 載不進 zsh/stat" >&2
     echo "  this zsh cannot load the zsh/stat module, so the suite cannot stat anything" >&2
@@ -82,14 +70,10 @@ fi
 # `$0` to the FUNCTION NAME inside a function (FUNCTION_ARGZERO), so
 # `zstat -- "${0:A}"` in there stats a file called `suite_stamp` that does not
 # exist -- the stamp comes back empty and the guard reports "could not stamp
-# itself" on every single run. Caught by driving the guard against a stand-in
-# script rather than by running the real suite, where one more FAIL among 1141
-# would have been read as something else entirely.
+# itself" on every single run.
 # 路徑是在**這裡**、在檔案層級取得的，不是在函式內。zsh 在函式內會把 `$0` 設成**函式名稱**
 # （FUNCTION_ARGZERO），因此在裡面寫 `zstat -- "${0:A}"` 會去 stat 一個叫 `suite_stamp` 的
 # 不存在的檔案——戳記回來是空的，而那道守衛會在**每一次**執行都回報「無法為自己取得戳記」。
-# 這是靠「用一個替身腳本去驅動那道守衛」抓到的，而不是靠跑真正的測試——在 1141 個案例裡多一個
-# FAIL，會被讀成完全另一回事。
 SUITE_PATH="${0:A}"
 suite_stamp() {
     local -A _st
@@ -115,53 +99,33 @@ esac
 # This suite hands csv2 absolute paths built from `${0:A:h}`, and on Windows
 # those are POSIX-shaped (`/c/Users/...`). A native Windows binary cannot open
 # such a path; what makes it work is MSYS2 rewriting the argument to `C:/...`
-# on the way to a native process. The suite has depended on that since it first
-# ran there -- T58a/T58b exist because the rewriting shows up in csv2's own
-# error messages -- but nothing said so, and nothing made sure it was on.
+# on the way to a native process (T58a/T58b exist because that rewriting shows
+# up in csv2's own error messages).
 #
-# `MSYS2_ARG_CONV_EXCL=*` turns all of it off. Set it, and every path this
-# suite passes arrives unrewritten: 276 of 454 cases failed, most of them with
-# `cannot open input file`, which reads exactly like a badly broken program.
-# It is set in the environment of a multissh session, so the suite passed from
-# an ordinary shell on that machine and failed over the link -- the same tree,
-# the same binary, the same commit.
-#
-# Unsetting it here scopes the decision to this script and the processes it
-# starts, and removes a dependency on the caller's environment that nobody
-# declared.
+# `MSYS2_ARG_CONV_EXCL=*` turns all of it off, and then most cases fail with
+# `cannot open input file`, which reads like a broken program. A multissh
+# session sets it, so the same tree passes from an ordinary shell and fails
+# over the link. Unsetting it here scopes the decision to this script and the
+# processes it starts, instead of depending on the caller's environment.
 #
 # 這份測試交給 csv2 的是由 `${0:A:h}` 組出的絕對路徑，而在 Windows 上那是 POSIX 形狀的
 # （`/c/Users/...`）。原生 Windows 程式打不開那種路徑；讓它能運作的，是 MSYS2 在把引數
-# 交給原生行程時改寫成 `C:/...`。這份測試從第一次在那裡執行起就依賴這件事——T58a／T58b
-# 的存在正是因為那個改寫會出現在 csv2 自己的錯誤訊息裡——但沒有任何地方說出來，也沒有任何
-# 東西確保它是開著的。
+# 交給原生行程時改寫成 `C:/...`（T58a／T58b 的存在，正是因為那個改寫會出現在 csv2 自己的
+# 錯誤訊息裡）。
 #
-# `MSYS2_ARG_CONV_EXCL=*` 會把它整個關掉。一旦設了，這份測試傳出去的每一個路徑都不會被改寫：
-# 454 條裡有 276 條失敗，多數是 `cannot open input file`，讀起來就像一個壞得很徹底的程式。
-# 它被設在 multissh session 的環境裡，於是同一棵樹、同一個執行檔、同一個 commit，在那台機器
-# 上用普通 shell 跑會通過，經由連線跑就會失敗。
-#
-# 在此 unset，把這個決定的範圍限制在這支腳本與它啟動的行程內，並移除一個「沒有人宣告過」的
-# 對呼叫者環境的依賴。
+# `MSYS2_ARG_CONV_EXCL=*` 會把它整個關掉，於是多數案例以 `cannot open input file` 失敗，讀起來
+# 像是程式壞了。multissh session 會設它，同一棵樹在普通 shell 下通過、經由連線就失敗。在此 unset，
+# 把這個決定限制在這支腳本與它啟動的行程內，而不依賴呼叫者的環境。
 if (( IS_WINDOWS )); then unset MSYS2_ARG_CONV_EXCL; fi
-# `.exe` on Windows, because that is what the build produces there -- and
-# because `release/` on that node holds BOTH, a `csv2.exe` from the current
-# build beside a `csv2` left by something earlier. Defaulting to the extension-
-# less name meant the STALE BINARY check compared the source files against the
-# OLD file and refused to run the suite at all, naming eleven sources as newer
-# than a binary that was not the one under test.
+# `.exe` on Windows, because that is what the build produces there, and
+# `release/` there can hold both a current `csv2.exe` and an older `csv2`. The
+# extension-less default would make the STALE BINARY check compare the sources
+# against the old file and refuse to run. Once a platform has two candidates,
+# every place that names one has to say which.
 #
-# This is the same asymmetry that made install.zsh copy the wrong file this
-# morning: a source and a destination that ask the platform differently. Once
-# one platform has two candidates, every place that names one of them has to
-# say which.
-#
-# Windows 上是 `.exe`，因為那才是那裡的建置產物——而且那個節點的 `release/` 裡**兩個都有**：
-# 這次建置的 `csv2.exe`，旁邊躺著一個更早的什麼東西留下的 `csv2`。預設用那個沒有副檔名的名字，
-# 會讓 STALE BINARY 檢查拿原始檔去和那個**舊**檔案比較，然後根本拒絕執行整份測試，並指名十一個
-# 原始檔「比一個根本不是受測對象的二進位檔還新」。
-# 這與今天早上讓 install.zsh 複製錯檔案的，是同一個不對稱：來源與目的地以不同的方式問了平台。
-# 只要有一個平台會有兩個候選，每一個指名其中之一的地方，就都必須說出是哪一個。
+# Windows 上是 `.exe`，因為那才是那裡的建置產物，而那裡的 `release/` 可能同時有這次建置的
+# `csv2.exe` 與較舊的 `csv2`。預設用沒有副檔名的名字，STALE BINARY 檢查會拿原始檔去比那個
+# 舊檔並拒絕執行。只要一個平台有兩個候選，每一個指名其中之一的地方都必須說出是哪一個。
 case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*|CYGWIN*) : ${CSV2:="$ROOT/release/csv2.exe"} ;;
     *)                    : ${CSV2:="$ROOT/release/csv2"} ;;
@@ -174,29 +138,19 @@ fi
 
 # A binary older than the sources is the worst thing this suite can be handed:
 # every case still runs, most still pass, and the ones that fail look like
-# defects in the program rather than like a build that never happened.
+# defects in the program rather than like a build that never happened (a
+# failed build leaves the previous binary in place).
 #
-# On 2026-08-22 the Windows node did exactly that. A change used
-# `FileHandle.fileDescriptor`, which is marked unavailable there, so the build
-# failed -- and the node kept the binary it already had and ran the NEW tests
-# against it. Five cases failed, all of them pointing at a metrics line that
-# was correct in the source sitting right there. The upgrade helper had printed
-# `build: FAILED`; the command watching it filtered for other lines.
-#
-# So the suite asks the question itself, before anything else, and only when
-# the sources are present -- a node given a binary and no tree is a legitimate
-# way to run this.
+# So the suite checks this itself, before anything else, and only when the
+# sources are present: a node given a binary and no tree is a legitimate way
+# to run it.
 #
 # 一個比原始碼還舊的二進位檔，是這套測試會拿到的最糟的東西：每個案例照樣執行、多數照樣通過，
-# 而失敗的那些看起來像是「程式有缺陷」，而不是「有一次建置根本沒有跑起來」。
+# 而失敗的那些看起來像是「程式有缺陷」，而不是「有一次建置根本沒有跑起來」（建置失敗時舊的
+# 二進位檔會留在原地）。
 #
-# 2026-08-22 的 Windows 節點就是這樣。某個改動用了 `FileHandle.fileDescriptor`，而它在那裡
-# 被標記為不可用，於是建置失敗——那台節點保留了它原本就有的二進位檔，拿「新的測試」去跑它。
-# 五個案例失敗，全都指向一行 metrics，而那一行在旁邊的原始碼裡是對的。升級腳本印過
-# `build: FAILED`；盯著它的那個指令，把那一行濾掉了。
-#
-# 因此這套測試自己問這個問題，在其他一切之前——而且只在「原始碼在場」時問：一台只拿到
-# 二進位檔、沒有整棵樹的節點，也是合法的執行方式。
+# 因此這套測試自己先檢查，在其他一切之前，而且只在原始碼在場時檢查：只拿到二進位檔、沒有
+# 整棵樹的節點，也是合法的執行方式。
 if [[ -d "$ROOT/src" ]]; then
     _stale=""
     for _srcfile in "$ROOT/src"/*.swift; do
@@ -220,27 +174,18 @@ echo "[Info] uname: $(uname -sm)"
 echo
 
 # The trap below catches EXIT, INT and TERM. It cannot catch KILL, and a run
-# killed from outside therefore leaves its whole temp directory behind. One
-# from 2026-08-29 survived that way and was still here on 2026-09-05: 228 MB,
-# 676 entries, inside `test/`.
+# killed from outside therefore leaves its whole temp directory behind, inside
+# `test/`.
 #
-# That is not merely wasted disk. `test_submodules/run_csv2_test.zsh` tars
-# `test/` into the payload it injects into the guest, so from that day every
-# guest run carried a 229 MB payload instead of about one megabyte. The parent
-# project's session measured 131 of them in one day, 4.1 GB. A directory nobody
-# looked at turned into gigabytes a week, in another tree, with the cost landing
-# on someone else. (That session's half -- the harness never deleting its
-# payloads -- was fixed there on 2026-09-05, after this was reported to it.)
+# That is not merely wasted disk: `test_submodules/run_csv2_test.zsh` tars
+# `test/` into the payload it injects into the guest, so a leftover directory
+# inflates every guest run's payload from about a megabyte to hundreds.
 #
 # 底下那個 trap 攔的是 EXIT、INT 與 TERM。它攔不到 KILL，因此一次「從外面被殺掉」的執行會把
-# 整個暫存目錄留在原地。2026-08-29 有一份就是這樣活下來的，到 2026-09-05 還在：228 MB、
-# 676 個項目，就在 `test/` 裡面。
+# 整個暫存目錄留在 `test/` 裡。
 #
-# 那不只是浪費磁碟。`test_submodules/run_csv2_test.zsh` 會把 `test/` 打包成注入 guest 的
-# payload，所以從那天起每一次 guest 執行都帶著一個 229 MB 的 payload、而不是大約一 MB。
-# 母專案的 session 一天量到 131 份、4.1 GB。**一個沒有人看的目錄，在另一棵樹上變成了每週
-# 好幾 GB，而代價落在別人身上。**（那個 session 那一半——harness 從不刪除自己的 payload
-# ——已於 2026-09-05 在那邊修好，就在這件事被回報給它之後。）
+# 那不只是浪費磁碟：`test_submodules/run_csv2_test.zsh` 會把 `test/` 打包成注入 guest 的
+# payload，一個殘留的目錄會讓每一次 guest 執行的 payload 從約一 MB 膨脹到數百 MB。
 #
 # The reaper identifies a live run by the PID written inside, not by age. An
 # age threshold has to guess how long a run may take; a PID answers exactly,
@@ -281,19 +226,11 @@ bad()  { print -r -- "FAIL  $1"; fail=$((fail + 1)) }
 skipt(){ print -r -- "SKIP  $1"; skip=$((skip + 1)) }
 
 # A test that calls something which does not exist must FAIL, not vanish.
+# Otherwise zsh prints "command not found" among hundreds of lines, the case
+# produces neither PASS nor FAIL, and the run still ends 0 FAIL.
 #
-# On 2026-08-21 two new cases were written against `assert_fails_with`, a
-# helper this file has never had. zsh printed "command not found" among 600
-# lines of output, the two cases produced no PASS and no FAIL, and the run
-# ended 0 FAIL. The count went UP, because the cases they replaced were gone
-# too. A suite that can lose a case silently is the same failure it exists to
-# catch, aimed at itself.
-#
-# 一個「呼叫了不存在的東西」的測試必須 FAIL，而不是消失。
-# 2026-08-21 有兩個新案例寫成了 `assert_fails_with`——這個檔案從來沒有過這個 helper。
-# zsh 在六百行輸出裡印了一行 command not found，那兩個案例既沒有 PASS 也沒有 FAIL，
-# 而整份測試以 0 FAIL 結束。數字甚至還變大了，因為它們取代掉的案例也一起不見了。
-# 一份會安靜弄丟案例的測試，就是它自己存在要抓的那種失敗，只是對準了自己。
+# 一個「呼叫了不存在的東西」的測試必須 FAIL，而不是消失。否則 zsh 只在數百行輸出裡印一行
+# command not found，該案例既沒有 PASS 也沒有 FAIL，整份測試仍以 0 FAIL 結束。
 # zsh runs this handler in a SUBSHELL, so `fail=$((fail + 1))` inside it is
 # lost -- the FAIL line prints and the tally does not move, which is a guard
 # that looks like it works. The name goes to a file instead and is added back
@@ -301,47 +238,27 @@ skipt(){ print -r -- "SKIP  $1"; skip=$((skip + 1)) }
 # zsh 是在「子 shell」裡執行這個處理常式的，因此在它裡面做 `fail=$((fail + 1))` 會遺失
 # ——FAIL 那一行印得出來，而計數不動，那是一個「看起來有效」的守衛。改為把名字寫進檔案，
 # 在結算時加回去。
-# zstat, not stat(1). A rule for this tree as of 2026-08-26, and these two
-# lines were what it was aimed at:
-#
-#     m=$(stat -c '%a' "$1")      # GNU / busybox
-#     [[ $m == <-> ]] || m=$(stat -f '%Lp' "$1")   # BSD / macOS
-#
-# `stat(1)` has no portable interface. BSD and GNU both take -f and mean
-# opposite things by it, so a script has to write both and then guess which
-# answer is real -- and the guess is made by looking at the OUTPUT, which is
-# the shape of check this suite exists to distrust. `zstat` is a zsh builtin,
-# identical on every platform, and it returns into an array instead of a string
-# somebody then has to parse.
+# zstat, not stat(1). `stat(1)` has no portable interface: BSD and GNU both
+# take -f and mean opposite things by it, so a script has to write both and
+# guess from the output which answer is real. `zstat` is a zsh builtin,
+# identical on every platform, and returns into an array instead of a string.
 #
 # The mask is `8#777` and not `0777`. zsh does not read a leading zero as
 # octal, so `h[mode] & 0777` is an AND with decimal 777 -- it returns 256 for a
-# 0644 file, a plausible number that is wrong. Found while probing for this
-# change, on the first command written.
+# 0644 file, a plausible number that is wrong.
 #
-# Empty on a platform without the module. No platform here is in that position:
-# macOS, WSL, the Windows MSYS zsh AND the aarch64 guest all load zsh/stat --
-# the guest was measured on 2026-08-26 and T129e runs there. This file said the
-# guest did not carry the module, in a comment inherited from the days when it
-# had no `stat` applet either, and that sentence was copied forward into new
-# comments and into a commit message whose whole subject was measuring before
-# changing. It was never measured. The empty return stays because a caller
-# should not have to assume, but it is not a description of any platform we
-# have.
+# Empty on a platform without the module. No platform here is in that
+# position: macOS, WSL, the Windows MSYS zsh and the aarch64 guest all load
+# zsh/stat (T129e runs on the guest). The empty return stays so a caller does
+# not have to assume.
 #
-# 用 zstat，不用 stat(1)。這是這棵樹 2026-08-26 起的規則，而它針對的正是上面那兩行。
-# `stat(1)` 沒有可攜的介面。BSD 與 GNU 都收 -f，意思卻相反，於是腳本得兩種都寫、再猜哪個
-# 答案是真的——而那個猜法是「看輸出」，那正是這份測試存在所要不信任的那種檢查。`zstat` 是
-# zsh 的內建指令，每個平台都一樣，而且回傳到陣列，不是一個還要有人去剖析的字串。
+# 用 zstat，不用 stat(1)。`stat(1)` 沒有可攜的介面：BSD 與 GNU 都收 -f，意思卻相反，腳本只好
+# 兩種都寫、再從輸出猜哪個是真的。`zstat` 是 zsh 內建指令，每個平台都一樣，而且回傳到陣列而非字串。
 # 遮罩是 `8#777` 而不是 `0777`：zsh 不會把開頭的 0 當成八進位，因此 `h[mode] & 0777` 是與
-# 十進位 777 做 AND——對一個 0644 的檔案會得到 256，一個看起來合理而錯誤的數字。這是在為
-# 這次修改做探測時、在寫下的第一個指令上發現的。
-# 在沒有那個模組的平台上回傳空的。而這裡沒有任何一個平台處在那個位置：macOS、WSL、Windows 的
-# MSYS zsh **以及 aarch64 guest** 都載得進 zsh/stat——guest 是 2026-08-26 量到的，T129e 在那裡
-# 會執行。這個檔案原本說 guest 沒有帶那個模組，那則註解是從「它連 `stat` applet 都沒有」的年代
-# 沿用下來的，而那句話被抄進了新的註解、也抄進了一個「主旨正是『動手前先量』」的 commit message。
-# 它從來沒有被量過。那個「回傳空的」保留下來，是因為呼叫端不該被迫去假設；但它並不是對我們手上
-# 任何一個平台的描述。
+# 十進位 777 做 AND——對一個 0644 的檔案會得到 256，一個看起來合理而錯誤的數字。
+# 在沒有那個模組的平台上回傳空的。這裡沒有任何平台是那樣：macOS、WSL、Windows 的 MSYS zsh
+# 以及 aarch64 guest 都載得進 zsh/stat（T129e 在 guest 上會執行）。保留「回傳空的」，是為了
+# 讓呼叫端不必假設。
 zstat_mode() {   # path -> octal permission bits, or empty when zsh/stat is absent (no platform here is)
     zmodload -F zsh/stat b:zstat 2>/dev/null || return
     local -A h
@@ -349,29 +266,20 @@ zstat_mode() {   # path -> octal permission bits, or empty when zsh/stat is abse
     printf '%o\n' $(( h[mode] & 8#777 ))
 }
 
-# Two capabilities that Windows used to lack and this machine has, asked at
-# RUNTIME rather than inferred from the platform's name.
+# Two capabilities probed at runtime rather than inferred from the platform's
+# name. A Windows node with MSYS=winsymlinks:nativestrict and Developer Mode
+# has real symlinks, so T43h, T129a-d and T130a-c can run there. JT.
 #
-# Eight cases -- T43h, T129a-d, T130a-c -- skipped on Windows saying "no
-# symlinks under MSYS2". That was true of a default MSYS2. It is not true of
-# the node this suite runs on: MSYS is set to winsymlinks:nativestrict,
-# Developer Mode is on, `ln -s` makes a real symlink, and csv2 edits through
-# one and leaves it a symlink. Measured 2026-08-26, JT.
+# A guard on a platform name manufactures the limitation it claims: the cases
+# it skips never run, so nothing can contradict it. The two capabilities are
+# also independent (Windows can have symlinks without POSIX modes), and one
+# flag cannot say that. Probe each.
 #
-# A guard written on a platform NAME is worse than a stale comment, because it
-# manufactures the appearance of the limitation it claims: those eight cases
-# had never run there, so nothing could contradict it. The two capabilities are
-# also independent -- this machine has symlinks and does NOT have POSIX modes
-# -- and one flag cannot say that. Probe each.
-#
-# 兩個「Windows 曾經沒有、而這台機器有」的能力，在**執行期**去問，而不是從平台的名字推論。
-# 八個案例——T43h、T129a-d、T130a-c——在 Windows 上以「MSYS2 下沒有 symlink」跳過。那對一個
-# 預設的 MSYS2 為真，對這份測試實際執行的那個節點不為真：MSYS 設成 winsymlinks:nativestrict、
-# Developer Mode 開著、`ln -s` 產生真正的 symlink，而 csv2 經由它編輯後那個 symlink 還在。
-# 2026-08-26 實測，JT。
-# 一個寫在「平台名字」上的守衛，比一則過期的註解更糟，因為它會製造出它所宣稱的那個限制的外觀：
-# 那八個案例從未在那裡跑過，所以沒有東西能反駁它。而這兩個能力是各自獨立的——這台機器有 symlink、
-# 沒有 POSIX 模式——一個旗標說不出這件事。所以各探測一次。
+# 兩個能力在執行期探測，而不是從平台名字推論。設了 MSYS=winsymlinks:nativestrict 並開啟
+# Developer Mode 的 Windows 節點有真正的 symlink，因此 T43h、T129a-d、T130a-c 在那裡可以執行。JT。
+# 寫在平台名字上的守衛會製造出它所宣稱的限制：被它跳過的案例從不執行，也就沒有東西能反駁它。
+# 而這兩個能力彼此獨立（Windows 可以有 symlink 卻沒有 POSIX 模式），一個旗標說不出這件事。
+# 所以各探測一次。
 _probe=$(mktemp -d "${TMPDIR:-/tmp}/.csv2_probe.XXXXXX")
 : > "$_probe/real"
 HAVE_SYMLINKS=0
@@ -380,17 +288,11 @@ HAVE_POSIX_MODES=0
 chmod 754 "$_probe/real" 2>/dev/null && [[ $(zstat_mode "$_probe/real") == 754 ]] && HAVE_POSIX_MODES=1
 rm -rf "$_probe"
 
-# file_mode and mode_from_ls live HERE, not inside the case that first needed
-# them. They were defined inside T129's branch, and when that branch became
-# conditional on a run-time probe they stopped existing on the platform that
-# skipped it -- so T130c, three thousand lines away, called a function that was
-# not there. The suite reported it correctly ("the suite called file_mode,
-# which does not exist here"), which is the only reason it took a minute
-# instead of an afternoon.
-# file_mode 與 mode_from_ls 放在「這裡」，不是放在第一個需要它們的那個案例裡。它們原本定義在
-# T129 的分支內，而當那個分支改成由執行期探測決定之後，它們在「跳過那個分支的平台」上就不存在了
-# ——於是三千行外的 T130c 呼叫了一個不在那裡的函式。測試正確地回報了這件事（「測試呼叫了
-# file_mode，而它在這個平台上不存在」），那是這件事花一分鐘而不是一個下午的唯一原因。
+# file_mode and mode_from_ls live here, not inside the case that first needed
+# them: T129's branch is conditional on a runtime probe, so a function defined
+# there would not exist where it is skipped, and T130c also calls it.
+# file_mode 與 mode_from_ls 放在這裡，不放在第一個需要它們的案例裡：T129 的分支由執行期探測
+# 決定，定義在裡面的函式在跳過它的平台上不存在，而 T130c 也會呼叫它。
 file_mode() {
     local m
     m=$(zstat_mode "$1")
@@ -438,49 +340,21 @@ assert_eq() {   # actual expected desc
 assert_contains() { # haystack needle desc
     if [[ "$1" == *"$2"* ]]; then ok "$3"; else bad "$3 (missing '$2' in: ${1:0:200})"; fi
 }
-# assert_fails DESC -- cmd...  — the command MUST exit non-zero
-# assert_fails 說明 -- 指令...  —— 該指令必須以非零結束
-# One cell, extracted with csv2 rather than with `cut -d,`.
+# One cell, extracted with csv2's `-get` rather than with `cut -d,`.
+# TARGET_PACKAGES.csv has quoted commas in status_notes, so `cut -d, -f6`
+# returns a fragment that starts mid-value. A suite that proves comma
+# splitting unsafe must not split on commas to check its own results. M.
+# Test scripts are the one place in this tree permitted to invoke csv2 for this.
 #
-# The suite used `cut -d, -fN` on csv2's own output in twelve places. On this
-# project's own fixture that is demonstrably wrong: TARGET_PACKAGES.csv has
-# quoted commas in status_notes, and `cut -d, -f6` on record 1 returns a
-# fragment of prose beginning mid-value. The encrypted variant happened to come
-# out right only because `purpose` has no comma in that one record -- correct by
-# luck, and correct until somebody edits the fixture.
-#
-# A test suite proving that comma splitting is unsafe, while splitting on commas
-# to check its own results, is not a contradiction that can be left standing:
-# the day the fixture changes, the check breaks in exactly the way the tool
-# exists to prevent, and it breaks silently.
-#
-# Implemented by projection -- delete every other column, then take the record.
-# That uses only operations csv2 defines, so the accessor is as correct as the
-# parser it is testing. Test scripts are the one place in this tree permitted to
-# invoke csv2 for this.
-#
-# 用 csv2 而不是 `cut -d,` 取出一格。
-# 這份測試在十二處對 csv2 自己的輸出使用 `cut -d, -fN`。在本專案自己的 fixture 上，那是
-# 可以實證的錯誤：TARGET_PACKAGES.csv 的 status_notes 含有引號內的逗號，對第 1 筆下
-# `cut -d, -f6` 會回傳一段從值中間開始的散文碎片。加密後的版本之所以剛好正確，只因為那一筆
-# 的 purpose 沒有逗號——正確得靠運氣，而且只正確到有人動了 fixture 為止。
-# 一份證明「逗號切割不安全」的測試，自己卻用逗號切割來檢查結果，這個矛盾不能留著：fixture
-# 改動的那一天，這個檢查會以這支工具存在所要防止的那種方式壞掉，而且是靜默地壞掉。
-# 作法是「投影」——刪掉其餘每一欄，再取那一筆。它只用到 csv2 自己定義的操作，因此這個存取子
-# 與它所測試的解析器一樣正確。測試腳本是這棵樹裡唯一被允許為此呼叫 csv2 的地方。
-# One cell, via `-get`. Until 2026-08-18 this needed a two-stage projection --
-# delete every other column into a temp file, then take the record -- because
-# there was no address-based read. The blind testing produced the flag; this is
-# the helper collapsing onto it.
-#
-# 用 `-get` 取出一格。在 2026-08-18 之前，這需要兩階段投影——把其餘每一欄刪進一個暫存檔，
-# 再取那一筆——因為當時沒有「依位址讀取」。盲測催生了那個旗標，而這個輔助函式就此塌縮成它。
+# 用 csv2 的 `-get` 取出一格，而不是 `cut -d,`。TARGET_PACKAGES.csv 的 status_notes 含有
+# 引號內的逗號，`cut -d, -f6` 會回傳一段從值中間開始的碎片。一份證明「逗號切割不安全」的測試，
+# 不能自己用逗號切割來檢查結果。M。測試腳本是這棵樹裡唯一被允許為此呼叫 csv2 的地方。
 #
 # NOTE the difference from CSV output: -get returns the value RAW, so a value
-# containing a comma comes back without quotes. Call sites that used to compare
-# against a CSV-encoded field had to change with it.
+# containing a comma comes back without quotes. Call sites that would compare
+# against a CSV-encoded field must compare against the raw value.
 # 注意它與 CSV 輸出的差別：-get 回傳的是「原始值」，因此含逗號的值不會帶引號回來。
-# 原本拿 CSV 編碼欄位去比較的呼叫點，必須跟著改。
+# 呼叫點要拿原始值比較，而不是 CSV 編碼後的欄位。
 cell() {   # cell <file> <record> <column-number-or-name>
     "$CSV2" -get "$2:$3" -i "$1" 2>/dev/null
 }
@@ -502,13 +376,10 @@ header_cell() {  # header_cell <file> <column-number>
 # Every DATA record's cell in one column, via csv2's own addressing. The
 # alternative that keeps reappearing is `csv2 -r -i f | cut -d, -f1`, which is
 # the practice this project exists to eliminate: it is right until a fixture
-# grows a quoted comma, and then it is wrong without saying so. Defect M
-# removed twelve of those in August and left cell() behind but no guard, and
-# five came back. QF.
+# grows a quoted comma, and then it is wrong without saying so. M, QF.
 # 以 csv2 自己的定址取出「每一筆資料紀錄在某一欄的那一格」。一再回來的替代寫法是
 # `csv2 -r -i f | cut -d, -f1`——那正是這個專案存在所要消滅的作法：它會一直對，直到某個 fixture
-# 長出一個引號內的逗號，然後它就錯了，而且不出聲。缺陷 M 在八月移除了十二處、留下了 cell()，
-# 卻沒有留下守衛，於是回來了五處。QF。
+# 長出一個引號內的逗號，然後它就錯了，而且不出聲。M、QF。
 #
 # `tr -d ' '`: -count's output is padded on some platforms, and zsh expands
 # braces AFTER command substitution, so `{1..$(...)}` with a space in it is not
@@ -524,6 +395,8 @@ column() {   # column <file> <column-number-or-name>
     for r in {1..$n}; do "$CSV2" -get "$r:$c" -i "$f" 2>/dev/null; done
 }
 
+# assert_fails DESC -- cmd...  — the command MUST exit non-zero
+# assert_fails 說明 -- 指令...  —— 該指令必須以非零結束
 assert_fails() {
     local desc="$1"; shift; [[ "$1" == "--" ]] && shift
     local out
@@ -584,8 +457,8 @@ printf 'k,v\n鍵,值\nbad,a\\qb\n' > "$TMP/badesc.csv2"
 
 echo "--- Phase 1: parsing and round-trip / 第 1 階段：解析與 round-trip ---"
 
-# T1 — the single most valuable test: the real file that was corrupted by
-# ${line%,*} on 2026-08-15, asserted byte-identical after a round-trip.
+# T1 — the single most valuable test: the real file that ${line%,*} field
+# splitting once corrupted, asserted byte-identical after a round-trip.
 "$CSV2" -r -t -i "$PKG" -o "$TMP/t1.csv" 2>/dev/null
 assert_same "$PKG" "$TMP/t1.csv" "T1 quoted embedded commas round-trip byte-identical / 引號內嵌逗號 round-trip 逐位元相同"
 
@@ -597,34 +470,25 @@ if [[ -f "$F/artifacts.csv" ]]; then
     bad_ts=$("$CSV2" -contains "" -i "$TMP/t2.csv" 2>/dev/null | true)
     assert_same "$F/artifacts.csv" "$TMP/t2.csv" "T2 field types are not moved between columns / 欄位型別不被搬錯"
 else
-    # NOT a comparison between $PKG and $TMP/t1.csv. T1, the line above, just
-    # asserted those two are BYTE-IDENTICAL -- so any property of them agrees
-    # and this branch could not fail. It never contributed information, and it
-    # is the NORMAL path here, because artifacts.csv lives in the parent
-    # project. Fixing QF corrected the TOOL it counted with (`awk -F','`, used
-    # on the very fixture that shows a quoted comma is data) and left the
-    # SHAPE, without noticing, because it went on passing exactly as before.
-    # QG.
-    # **不是**拿 $PKG 與 $TMP/t1.csv 相比。上面那一行（T1）剛剛斷言了這兩個檔案**逐位元相同**
-    # ——因此它們的任何性質都會相等，這個分支不可能失敗。它從來沒有貢獻過任何資訊，而且它是
-    # 這裡的**常態路徑**，因為 artifacts.csv 在母專案裡。修 QF 時我改對了它用的**工具**
-    # （`awk -F','`，而且是用在「證明引號內逗號是資料」的那個 fixture 上），卻留下了**形狀**，
-    # 而且沒有察覺——因為它照樣通過，一如既往。QG。
+    # NOT a comparison between $PKG and $TMP/t1.csv: T1 just asserted those
+    # two are byte-identical, so any property of them agrees and this branch
+    # could not fail. This is the normal path, because artifacts.csv lives in
+    # the parent project. QF, QG.
+    # **不是**拿 $PKG 與 $TMP/t1.csv 相比：T1 剛斷言這兩個檔案逐位元相同，它們的任何性質都會
+    # 相等，這個分支不可能失敗。這裡是常態路徑，因為 artifacts.csv 在母專案裡。QF、QG。
     #
-    # The general form, named by a peer session: do not let one comparison
-    # claim both AGREEMENT and CORRECTNESS. Byte-identity is T1's claim. This
-    # case asks a different question -- did any value change column -- and asks
-    # it BY ADDRESS, so it stays meaningful even if the round-trip ever stops
-    # being byte-identical.
-    # 一般形式（由一個同儕 session 講出來）：**不要讓一個比對同時宣稱「一致」與「正確」。**
-    # 逐位元相同是 T1 的主張。這個案例問的是另一件事——有沒有任何值換了欄——而且是**依位址**
-    # 問的，因此即使 round-trip 某天不再逐位元相同，它仍然在問它宣稱要問的那件事。
+    # Do not let one comparison claim both agreement and correctness.
+    # Byte-identity is T1's claim. This case asks whether any value changed
+    # column, and asks it by address, so it stays meaningful even if the
+    # round-trip ever stops being byte-identical.
+    # 不要讓一個比對同時宣稱「一致」與「正確」。逐位元相同是 T1 的主張。這個案例問的是有沒有值
+    # 換了欄，而且依位址問，因此即使 round-trip 某天不再逐位元相同，它仍然有意義。
     #
-    # The fixture reproduces the 2026-08-15 incident: a commit string went into
-    # built_utc, a timestamp column, and nothing raised an error. One cell
-    # carries a quoted comma so the round-trip is not trivial.
-    # 這個 fixture 重演 2026-08-15 那次事故：一個 commit 字串被寫進 built_utc 這個時間戳欄位，
-    # 而沒有任何東西報錯。其中一格帶著引號內的逗號，讓 round-trip 不是一件輕鬆的事。
+    # The fixture reproduces a commit string landing in built_utc, a timestamp
+    # column, with no error. One cell carries a quoted comma so the round-trip
+    # is not trivial.
+    # 這個 fixture 重演「commit 字串被寫進 built_utc 這個時間戳欄位而沒有報錯」。其中一格帶著
+    # 引號內的逗號，讓 round-trip 不是輕鬆的事。
     {
       printf 'pkg,built_utc,commit\n'
       printf '套件,建置時間,提交\n'
@@ -722,21 +586,16 @@ else
     bad "T9a streaming RSS (small ${size_small}B→${r_small}B, big ${size_big}B→${r_big}B)"
 fi
 
-# T9a above was the whole test, and it was reporting on nothing. Its big
-# fixture is 3.3 MB against a ~9 MB floor of process and Foundation, so an
-# implementation that retained EVERY byte still fit inside "less than twice
-# the small run". It passed by 6%. On 2026-08-19 a reader measured peak RSS at
-# 1.02x of a 660 MB stream and was right; this suite had been asserting the
-# opposite for months.
+# T9a alone cannot catch retention: its big fixture is 3.3 MB against a ~9 MB
+# floor of process and Foundation, so an implementation that retained every
+# byte still fits inside "less than twice the small run".
 #
-# Two additions, because the defect had two shapes and only one of them is
+# Two more cases, because retention has two shapes and only one of them is
 # visible in a size comparison.
 #
-# T9a 原本就是這個測試的全部，而它什麼都沒在回報。它的大 fixture 是 3.3 MB，而行程與
-# Foundation 的地板約 9 MB——因此一個「保留每一個位元組」的實作，仍然塞得進「不到小的那次
-# 的兩倍」。它通過的餘裕是 6%。2026-08-19 一位讀者量到 660 MB 串流的 peak RSS 是 1.02 倍，
-# 而他是對的；這份測試套件已經斷言相反的事好幾個月。
-# 加兩條，因為那個缺陷有兩種形狀，而只有一種在「比大小」時看得見。
+# 單靠 T9a 抓不到「留住輸入」：它的大 fixture 是 3.3 MB，而行程與 Foundation 的地板約 9 MB，
+# 因此一個保留每一個位元組的實作，仍然塞得進「不到小的那次的兩倍」。
+# 再加兩條，因為「留住」有兩種形狀，而只有一種在比大小時看得見。
 { head -2 "$TMP/m_small.csv2"
   for i in {1..200}; do tail -n +3 "$TMP/m_small.csv2"; done } > "$TMP/m9_many.csv2"
 pad9=$(printf 'x%.0s' {1..880})
@@ -749,24 +608,19 @@ r_many=$(rss_of "$TMP/m9c.txt"); r_few=$(rss_of "$TMP/m9d.txt")
 size_many=$(wc -c < "$TMP/m9_many.csv2" | tr -d ' ')
 size_few=$(wc -c < "$TMP/m9_few.csv2" | tr -d ' ')
 
-# Two large streams, one twice the other, compared against EACH OTHER. The
-# first version of this asserted "peak RSS below the input size", which passed
-# on macOS and failed in the guest at 27 MB for a 15.5 MB stream -- and that
-# told me nothing, because it cannot separate "Linux still retains the stream"
-# from "Linux's floor is simply higher". An absolute comparison against the
-# input size silently assumes a floor, and the floor is a property of the
-# platform's Foundation, not of csv2.
+# Two large streams, one twice the other, compared against EACH OTHER. An
+# absolute bound such as "peak RSS below the input size" silently assumes a
+# floor, and the floor is a property of the platform's Foundation, not of
+# csv2: it cannot tell "the stream is retained" from "the floor is higher".
 #
 # Doubling the input makes the floor cancel: both runs pay it once. If the
 # stream is retained, the larger run costs a whole extra input; the bound here
 # is a QUARTER of that, so an implementation that keeps even half of what it
 # reads cannot pass, on any platform, without knowing what the floor is.
 #
-# 兩條大串流，其中一條是另一條的兩倍，而且是「互相比較」。這一條的第一版斷言的是
-# 「peak RSS 低於輸入大小」，它在 macOS 上通過、在 guest 上以「15.5 MB 的串流用了 27 MB」
-# 失敗——而那個失敗什麼也沒告訴我，因為它分不出「Linux 仍然留住整條串流」與「Linux 的地板
-# 本來就比較高」。拿輸入大小做絕對比較，等於默默假設了一個地板，而那個地板是該平台
-# Foundation 的性質，不是 csv2 的。
+# 兩條大串流，其中一條是另一條的兩倍，而且是「互相比較」。像「peak RSS 低於輸入大小」這種
+# 絕對界線，等於默默假設了一個地板，而地板是該平台 Foundation 的性質，不是 csv2 的：它分不出
+# 「串流被留住」與「地板本來就比較高」。
 # 把輸入加倍會讓地板抵銷：兩次執行各付一次。若串流被留住，較大的那次會多付一整份輸入；
 # 而這裡的界線是那一份的「四分之一」，因此一個「連讀進來的一半都留著」的實作，在任何平台上
 # 都過不了，而且不需要知道地板是多少。
@@ -841,14 +695,12 @@ assert_fails "T14b -mid 0,3 (a<1) is an error / a<1 報錯" -- \
     "$CSV2" -mid 0,3 -i "$PKG" -so
 n=$("$CSV2" -mid 20,999 -i "$PKG" 2>/dev/null | wc -l | tr -d ' ')
 assert_eq "$n" "2" "T14c -mid b past the end runs to EOF without an error / b 超界輸出到檔尾且不報錯"
-# T14d changed with phase 8 item four: a start past the end is now an ERROR.
-# It used to give the header and exit 0, and this case asserted that. The
-# reversal is not a whim -- for a scrolling UI, empty output cannot be told
-# apart from "these rows are genuinely empty", which is the same reason
-# `-get` past the end has been an error since T70f.
-# T14d 隨第 8 階段第四項改變：起點越過檔尾現在是**錯誤**。它先前給出標頭並以 0 結束，而這個
-# 案例斷言的正是那個。這次翻轉不是心血來潮——對一個會捲動的 UI，空輸出與「這幾列真的是空的」
-# 分不出來，而那正是 `-get` 越界自 T70f 起就是錯誤的同一個理由。
+# T14d: a start past the end is an ERROR (phase 8 item four), not the header
+# and exit 0. For a scrolling UI, empty output cannot be told apart from
+# "these rows are genuinely empty" -- the same reason `-get` past the end is
+# an error (T70f).
+# T14d：起點越過檔尾是**錯誤**（第 8 階段第四項），而不是給出標頭並以 0 結束。對一個會捲動的
+# UI，空輸出與「這幾列真的是空的」分不出來——與 `-get` 越界是錯誤（T70f）同一個理由。
 assert_fails "T14d -mid a past the end is an error, not an empty success / a 超界是錯誤，不是一次空的成功" -- \
     "$CSV2" -mid 900,999 -t -i "$PKG"
 _t14d_err=$("$CSV2" -mid 900,999 -t -i "$PKG" 2>&1 >/dev/null)
@@ -866,19 +718,16 @@ assert_eq "$c" "0" "T15b the rownum column is never searched / rownum 欄不參�
 
 # The other half of the same fact, and the half that bites. Addresses stay put
 # BECAUSE the printed row moves: with -rownum, pkg_name is address 1 and
-# physical column 2. Round 16 of the blind testing found this documented
-# nowhere -- the tool did the right thing and never said which numbering
-# applied where, so anything reading the output by position gets everything
-# shifted one right while every address it holds still means the old column.
+# physical column 2, so anything reading the output by position sees every
+# column shifted one right while every address still means the old column.
+# Round 16.
 # 同一件事的另一半，也是會咬人的那一半。位址之所以不動，正是因為印出來的那一列動了：
-# 開了 -rownum 之後，pkg_name 的位址是 1、實體欄位是 2。盲測第 16 回合發現這件事在任何地方
-# 都沒有被記載——工具做的是對的，卻從未說明哪一套編號適用於何處；於是任何「依位置」讀取
-# 輸出的東西，看到的每一欄都往右移了一格，而它手上的每一個位址仍指向原本那一欄。
-# header_cell(), not `cut -d, -f1`. The header row of this fixture happens to
-# carry no quoted comma, so the split was right -- which is the whole problem
-# with it: correct by accident, and silent when the accident ends. QF.
-# 用 header_cell()，不用 `cut -d, -f1`。這個 fixture 的標頭列剛好沒有引號內的逗號，所以那次切割
-# 是對的——而那正是它的問題所在：偶然地正確，而在那個偶然結束時不出聲。QF。
+# 開了 -rownum 之後，pkg_name 的位址是 1、實體欄位是 2；任何依位置讀取輸出的東西，看到的每一欄
+# 都往右移了一格，而每一個位址仍指向原本那一欄。第 16 回合。
+# header_cell(), not `cut -d, -f1`: the split is right only while this header
+# row happens to carry no quoted comma, and silent when that stops. QF.
+# 用 header_cell()，不用 `cut -d, -f1`：那個切割只在這列標頭剛好沒有引號內逗號時才對，而那個
+# 偶然結束時它不會出聲。QF。
 "$CSV2" -head 1 -t -rownum -i "$PKG" -o "$TMP/t15c_rownum.csv" 2>/dev/null
 first_col=$(header_cell "$TMP/t15c_rownum.csv" 1)
 assert_eq "$first_col" "rownum" \
@@ -1054,10 +903,8 @@ fi
 # "is this valid UTF-8": it pins the truncation POINT, not merely the fact
 # that nothing was cut in half.
 #
-# The earlier version used `iconv -f UTF-8 -t UTF-8` as the oracle. That made
-# the case depend on a tool the guest's busybox does not provide, so it turned
-# into a SKIP on the platform where byte-level behaviour matters most -- and a
-# skip is exactly what this case should never be.
+# No `iconv` oracle: the guest's busybox does not provide it, and the case
+# would become a SKIP on the platform where byte-level behaviour matters most.
 # T25 —— 截斷必須落在 grapheme cluster 邊界。
 #
 # 以「構造」來斷言，不依賴任何外部工具。值是 300 個相同的 ZWJ 家庭 emoji，而報告的
@@ -1065,9 +912,8 @@ fi
 # 那個預期字串並比對，比問「這是不是合法的 UTF-8」嚴格得多：它釘住的是截斷的「位置」，
 # 而不只是「沒有把東西切成兩半」這個事實。
 #
-# 先前的版本以 `iconv -f UTF-8 -t UTF-8` 當判準，那讓這個案例依賴一個 guest 的
-# busybox 並不提供的工具，於是它在「位元組層級行為最要緊」的那個平台上變成 SKIP
-# ——而這個案例最不該變成的就是 SKIP。
+# 不用 `iconv` 當判準：guest 的 busybox 沒有它，這個案例會在位元組層級行為最要緊的
+# 那個平台上變成 SKIP。
 family=$(printf '\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x91\xa7\xe2\x80\x8d\xf0\x9f\x91\xa6')
 long=""
 for i in {1..300}; do long+=$family; done
@@ -1182,53 +1028,31 @@ assert_same "$PKG" "$TMP/dec.csv" "T34a encrypt then decrypt restores every byte
 # 在加密的儲存格「內部」改一個字元。改行尾會落在 license 欄，對 AEAD 什麼都
 # 證明不了。
 # The tamper is done with the SHELL, not with csv2, and the difference is the
-# whole case.
-#
-# It used to be `csv2 -update '1:6' "$flip"`, and that write is REFUSED -- a
-# raw value into a column the file declares transformed, a guard added later
-# and rightly. So `tamper.csv` was never created, `-decrypt` failed with
-# `cannot open input file`, and `assert_fails` reported PASS. The case could
-# not fail: with a real ciphertext, with an empty string, with nothing at all,
-# it passed the same way, and it has been passing that way since the guard
-# landed.
-#
-# On macOS it was worse still. The mutation was
-# `sed 's/^A/B/; t; s/^./A/'`, and BSD sed reads the text after `;` as the
-# label of the unlabeled `t`: every run printed `undefined label` and produced
-# an EMPTY string. Two independent reasons for the same green tick, neither of
-# them the AEAD.
+# whole case. `csv2 -update` refuses a raw value into a column the file
+# declares transformed, so a csv2-made tamper file would never exist, -decrypt
+# would fail with `cannot open input file`, and assert_fails would pass
+# regardless of the AEAD. (BSD sed also rejects `s/^A/B/; t; s/^./A/` as
+# `undefined label`, which yields an empty string.)
 #
 # So: build the tampered file here, byte for byte, and assert the MESSAGE.
-# `assert_fails` alone cannot tell an authentication failure from a missing
-# file -- which is exactly how this case spent months proving nothing.
+# assert_fails alone cannot tell an authentication failure from a missing file.
 #
-# 這次竄改是用 shell 做的，不是用 csv2，而那個差別就是這整個案例。
-#
-# 原本是 `csv2 -update '1:6' "$flip"`，而那次寫入會被「拒絕」——把原始值寫進一個「檔案宣告為
-# 已轉換」的欄位，那是後來才加上的守衛，而且是對的。於是 `tamper.csv` 從來沒有被建立，
-# `-decrypt` 以「cannot open input file」失敗，而 `assert_fails` 回報 PASS。這個案例不可能失敗：
-# 給它真的密文、給它空字串、什麼都不給，它都以同一種方式通過。
-#
-# 在 macOS 上更糟：那段 `sed 's/^A/B/; t; s/^./A/'` 會被 BSD sed 讀成「分號後面是那個無標籤 `t`
-# 的標籤」，每次都印出 `undefined label` 並產生一個「空字串」。同一個綠勾有兩個各自獨立的理由，
-# 而其中沒有一個是 AEAD。
+# 這次竄改是用 shell 做的，不是用 csv2，而那個差別就是這整個案例。`csv2 -update` 會拒絕把原始值
+# 寫進檔案宣告為已轉換的欄位，因此用 csv2 造的竄改檔根本不會存在，-decrypt 會以
+# `cannot open input file` 失敗，而 assert_fails 不論 AEAD 如何都會通過。（BSD sed 也會把
+# `s/^A/B/; t; s/^./A/` 當成 `undefined label` 而產生空字串。）
 #
 # 因此：在這裡逐位元組把被竄改的檔案造出來，並且斷言那則「訊息」。單靠 assert_fails 分不出
-# 「認證失敗」與「檔案不存在」——而那正是這個案例好幾個月什麼也沒有證明的原因。
-# A fixture of its own, whose encrypted column is the LAST one and holds no
-# quoted commas -- so the shell can find the ciphertext without parsing CSV,
-# which is the one thing a shell must never do to a csv2 fixture. On
-# TARGET_PACKAGES.csv the encrypted column is the sixth of seven and its
-# neighbours contain quoted commas: splitting that line on the last comma
-# tampers with `license` and `-decrypt status_notes` then SUCCEEDS, which is
-# the first way this rewrite got it wrong.
-# 這個案例有自己的 fixture：被加密的那一欄是「最後一欄」、而且不含帶引號的逗號——這樣 shell
-# 就能在不解析 CSV 的情況下找到密文，而「用 shell 解析 CSV」正是絕對不該對 csv2 的 fixture
-# 做的事。在 TARGET_PACKAGES.csv 上，被加密的是七欄中的第六欄，而它的鄰居含有帶引號的逗號：
-# 以「最後一個逗號」去切那一行，竄改到的是 `license`，而 `-decrypt status_notes` 會成功
-# ——那是這次改寫第一次弄錯的地方。
+# 「認證失敗」與「檔案不存在」。
+# A fixture of its own, small and with no quoted commas, so nothing here has
+# to parse CSV. On TARGET_PACKAGES.csv the encrypted column is the sixth of
+# seven and its neighbours contain quoted commas: splitting on the last comma
+# tampers with `license`, and `-decrypt status_notes` then SUCCEEDS.
+# 這個案例有自己的 fixture，小而且不含帶引號的逗號，因此這裡不必解析 CSV。在
+# TARGET_PACKAGES.csv 上，被加密的是七欄中的第六欄，而它的鄰居含有帶引號的逗號：以最後一個
+# 逗號去切，竄改到的是 `license`，而 `-decrypt status_notes` 會成功。
 # Its own NAMES too: $TMP/enc.csv belongs to T34a, T35 and T39, and writing
-# the small fixture over it made T35b and T39 fail on a file they never asked
+# the small fixture over it makes T35b and T39 fail on a file they never asked
 # for -- a shared name is a shared fixture whether or not anyone meant it to be.
 # 也用自己的「檔名」：$TMP/enc.csv 屬於 T34a、T35 與 T39，把這個小 fixture 寫在它上面，
 # 會讓 T35b 與 T39 對著一個它們從未要求過的檔案失敗——共用的名字就是共用的 fixture，
@@ -1237,16 +1061,13 @@ printf 'id,secret\n1,alpha\n2,beta\n' > "$TMP/t34src.csv"
 "$CSV2" -encrypt secret -keyfile "$KEY" -i "$TMP/t34src.csv" -o "$TMP/t34enc.csv" -t 2>/dev/null
 _t34_enc_line=$(sed -n 2p "$TMP/t34enc.csv")
 # The ciphertext comes from cell(), and the tamper is a BYTE substitution of
-# that one unique string -- no CSV is parsed here at all. This used
-# `${line%,*}` and `${line##*,}` with a comment saying "secret is the last
-# column in this fixture", which is an assumption about a fixture and not a
-# guarantee about the format. That expansion is the shape that rewrote
-# status_notes in TARGET_PACKAGES.csv on 2026-08-15 -- the direct reason this
-# tree exists -- and T301 was not looking for it. QH.
+# that one unique string -- no CSV is parsed here at all. Not `${line%,*}` /
+# `${line##*,}`: "secret is the last column" is an assumption about a fixture,
+# not a guarantee about the format, and that expansion is the shape that once
+# rewrote status_notes in TARGET_PACKAGES.csv. QH.
 # 密文由 cell() 取得，而竄改是對「那一個唯一字串」做**位元組替換**——這裡完全不解析 CSV。
-# 這裡原本用的是 `${line%,*}` 與 `${line##*,}`，旁邊一句註解寫著「secret 是這個 fixture 的最後
-# 一欄」——那是一個對 fixture 的假設，不是對格式的保證。那個展開正是 2026-08-15 改寫
-# TARGET_PACKAGES.csv 中 status_notes 的形狀，也就是這棵樹存在的直接原因，而 T301 沒有在找它。QH。
+# 不用 `${line%,*}`／`${line##*,}`：「secret 是最後一欄」是對 fixture 的假設，不是對格式的保證，
+# 而那個展開正是曾經改寫 TARGET_PACKAGES.csv 中 status_notes 的形狀。QH。
 #
 # It cannot be done with -update: csv2 refuses to write a raw value into a
 # column the file declares transformed, and says why -- the whole column stops
@@ -1409,14 +1230,13 @@ cp "$TMP/good.index" "$TMP/ix.csv2.index"
 # exercises no boundary and would pass on an implementation with no chunking
 # logic at all.
 # The core count is read from csv2's own -debug line, not from `getconf`:
-# busybox does not provide _NPROCESSORS_ONLN, which turned this case into a
-# SKIP inside the guest -- on the platform whose DIFFERENT core count is
-# precisely what the case exists to exercise. csv2 reports the worker count it
-# actually used, which is the number that matters anyway.
+# busybox does not provide _NPROCESSORS_ONLN, so the case would SKIP in the
+# guest, whose different core count is precisely what it exists to exercise.
+# csv2 reports the worker count it actually used, which is the number that
+# matters anyway.
 # 核心數取自 csv2 自己的 -debug 輸出，而非 `getconf`：busybox 不提供
-# _NPROCESSORS_ONLN，那讓這個案例在 guest 內變成 SKIP——而 guest 那個「不同的
-# 核心數」正是本案例存在要測的東西。csv2 回報的是它實際使用的工作者數，那本來
-# 就是真正要緊的數字。
+# _NPROCESSORS_ONLN，這個案例會在 guest 內變成 SKIP，而 guest 那個「不同的核心數」
+# 正是本案例要測的東西。csv2 回報的是它實際使用的工作者數，那本來就是真正要緊的數字。
 CSV2_PARALLEL_MIN_BYTES=999999999 "$CSV2" -contains "comma 42" -i "$TMP/ix.csv2" \
     > "$TMP/p_single.txt" 2>/dev/null
 CSV2_PARALLEL_MIN_BYTES=1000 CSV2_PARALLEL_CHUNK_BYTES=8192 "$CSV2" -contains "comma 42" \
@@ -1464,15 +1284,11 @@ fi
 
 # T43b — writing few bytes and leaving the file alone are different claims.
 # A fast path could write little and still rewrite what was already there; T43
-# would not notice, because it measures the write, not the file. Round 24 of the
-# blind testing checked the prefix with cmp after twenty in-place appends to a
-# 207 MB file and found it byte-identical -- "fast for the reason claimed", as
-# it put it. That check belongs here rather than in one person's transcript.
+# would not notice, because it measures the write, not the file. This checks
+# the prefix with cmp after several in-place appends. Round 24.
 # T43b —— 「寫得少」與「沒動到原有內容」是兩個不同的宣稱。
 # 一條快路徑可以寫得很少，卻仍然重寫了原本就在那裡的東西；T43 不會發現，因為它量的是
-# 「寫入」而不是「檔案」。盲測第 24 回合在對一個 207 MB 的檔案做了二十次就地追加之後，
-# 用 cmp 檢查了前綴，發現逐位元相同——用它的話說，是「因為所宣稱的理由而快」。
-# 那個檢查該放在這裡，而不是留在某一個人的紀錄裡。
+# 「寫入」而不是「檔案」。這裡在數次就地追加後用 cmp 檢查前綴。第 24 回合。
 cp "$TMP/big.csv" "$TMP/big_before.csv"
 before_bytes=$(wc -c < "$TMP/big_before.csv" | tr -d ' ')
 for i in 1 2 3; do
@@ -1490,9 +1306,8 @@ assert_eq "$("$CSV2" -tail 1 -i "$TMP/big.csv" 2>/dev/null)" 'ap3,v,s,src,purpos
 # T43d-T43f — the fast path is scoped to --in-place, and the scope is required
 # by another guarantee rather than being an oversight.
 #
-# The README says "O(1) WHEN WRITING IN PLACE". Round 30 tested the boundary and
-# it holds sharply: -o on a 207 MB file took 5.8 s against 4 ms in place,
-# scaling with size, because it rewrites. That is not a missed optimisation. -o
+# The README says "O(1) WHEN WRITING IN PLACE"; with -o an append rewrites and
+# scales with size (round 30). That is not a missed optimisation. -o
 # promises that a run which fails writes nothing to it, which needs temp+rename;
 # an append that extends the destination directly cannot offer that, because a
 # failure halfway leaves the destination longer than it started.
@@ -1503,8 +1318,7 @@ assert_eq "$("$CSV2" -tail 1 -i "$TMP/big.csv" 2>/dev/null)" 'ap3,v,s,src,purpos
 #
 # T43d–T43f —— 快路徑的適用範圍限於 --in-place，而那個範圍是「另一條保證」所要求的，
 # 不是疏漏。
-# README 寫的是「就地寫入時為 O(1)」。第 30 回合測了那條界線，而它守得很利落：對一個
-# 207 MB 的檔案使用 -o 要 5.8 秒，就地則是 4 毫秒，且隨大小成長——因為它會重寫。
+# README 寫的是「就地寫入時為 O(1)」；用 -o 時追加會重寫，並隨大小成長（第 30 回合）。
 # 那不是一個被漏掉的最佳化。-o 承諾「失敗的執行不會在它上面留下任何東西」，那需要
 # temp+rename；而一個「直接把目的地延長」的追加做不到這件事，因為中途失敗會留下一個
 # 比原本更長的目的地。
@@ -1533,17 +1347,16 @@ fi
 # T43d passes an absolute path that happens to be canonical already. That is
 # not what a caller writes. `--in-place` resolves symlinks on the output path
 # (T129), and resolvingSymlinksInPath() ALSO normalises: a relative path
-# becomes absolute, and on macOS /private/tmp becomes /tmp. The fast path was
-# gated on the two paths being equal STRINGS, so from 9132e66 until this test
-# existed, `-append -i data.csv --in-place` rewrote the whole file -- correct
-# output, O(n) bytes written, and T43d green throughout.
+# becomes absolute, and on macOS /private/tmp becomes /tmp. A fast-path guard
+# that compares the two paths as STRINGS therefore sends
+# `-append -i data.csv --in-place` to a full rewrite -- correct output, O(n)
+# bytes written, and T43d still green.
 #
 # T43g–T43h —— 同一條保證，用人們實際會打的寫法。
 # T43d 傳的是一個剛好已是正規形式的絕對路徑，而那不是呼叫者會寫的東西。`--in-place`
 # 會解析輸出路徑上的 symlink（T129），而 resolvingSymlinksInPath() 同時也會正規化：
-# 相對路徑變絕對，macOS 上 /private/tmp 變 /tmp。快路徑的守衛比的是兩個「字串」是否
-# 相等，因此從 9132e66 起、直到有了這個測試為止，`-append -i data.csv --in-place`
-# 一直在重寫整個檔案——輸出正確、寫入 O(n)，而 T43d 全程是綠的。
+# 相對路徑變絕對，macOS 上 /private/tmp 變 /tmp。若快路徑的守衛以「字串」比較兩個路徑，
+# `-append -i data.csv --in-place` 就會落到全檔重寫——輸出正確、寫入 O(n)，而 T43d 照樣是綠的。
 rm -f "$TMP/a5.log"
 cp "$TMP/big.csv" "$TMP/big_rel.csv"
 ( cd "$TMP" && "$CSV2" -append 'zz,v,s,src,purpose,note,MIT' -i big_rel.csv --in-place \
@@ -1572,13 +1385,11 @@ else
     "$CSV2" -append 'zz,v,s,src,purpose,note,MIT' -i "$TMP/big_sym.csv" --in-place \
         -log "$TMP/a6.log" 2>/dev/null
     _t43_after=$(wc -c < "$TMP/big_target.csv")
-    # The fast-path line is required as well. Without it this case passed even
+    # The fast-path line is required as well. Without it this case passes even
     # with the fast path dead: the rewrite path keeps the link too (T129), so
-    # link-plus-growth alone cannot tell the two apart -- and a test that cannot
-    # tell them apart is not pinning the thing its name claims.
+    # link-plus-growth alone cannot tell the two apart.
     # 也要求那一行「快路徑」。少了它，這個案例在快路徑已死時照樣通過：重寫那條路也會保留
-    # 連結（T129），因此「連結還在且長大了」分不出這兩者——而一個分不出來的測試，並沒有
-    # 釘住它名字所宣稱的東西。
+    # 連結（T129），因此「連結還在且長大了」分不出這兩者。
     if [[ -L "$TMP/big_sym.csv" && $_t43_after -gt $_t43_before ]] \
        && grep -q 'append fast path' "$TMP/a6.log"; then
         ok "T43h an append through a symlink takes the fast path, keeps the link and grows the target / 經 symlink 的追加會走快路徑、保留連結並讓目標長大"
@@ -1635,7 +1446,7 @@ echo "--- Addressing, width and diagnostics / 定位、寬度與診斷 ---"
 # cannot serve as that oracle: it sums the scalars of a ZWJ sequence and calls
 # the family emoji 8, which is the very mistake this table exists to avoid.
 # T48 —— UAX #11 寬度表，以計畫「實測」的數字釘住。
-# --pretty 會把每個儲存格補到欄寬，因此補了幾格就是量到的寬度，不需要我們自己的
+# --pretty 會把每個儲存格補到欄寬，因此補了幾格就是量到的寬度，不需要另一個
 # 寬度判準。zsh 的 ${(m)#s} 不能當那個判準：它會把 ZWJ 序列的各 scalar 加總，說
 # 家庭 emoji 是 8——而那正是這張表要避免的錯誤。
 {
@@ -1660,17 +1471,14 @@ done < "$TMP/w.md"
 # header + 7 samples; column width is 8, set by 套件名稱.
 # widths per the plan: ok 2, 套件名稱 8, and every emoji sample 2.
 #
-# One assertion PER SAMPLE, not one for the table. These eight used to collapse
-# into a single if, so a failure said the table was wrong without saying which
-# row -- and the rows fail for different reasons. A ZWJ family summed per scalar
-# gives 8; a skin-tone pair summed per codepoint gives 4; a flag counted as
-# clusters gives 1. Told which row moved, you know which of those it is; told
-# only "the table is wrong", you start over.
+# One assertion PER SAMPLE, not one for the table, because the rows fail for
+# different reasons. A ZWJ family summed per scalar gives 8; a skin-tone pair
+# summed per codepoint gives 4; a flag counted as clusters gives 1. Told which
+# row moved, you know which of those it is.
 #
-# 一個樣本一個斷言，而不是整張表一個。這八個原本擠在同一個 if 裡，於是失敗時只說「表錯了」
-# 卻不說是哪一列——而各列失敗的原因並不相同：ZWJ 家庭以 scalar 加總會得到 8、膚色配對以
-# 碼位加總會得到 4、旗幟以 cluster 計數會得到 1。知道是哪一列動了，就知道是其中哪一種；
-# 只被告知「表錯了」，就得從頭查起。
+# 一個樣本一個斷言，而不是整張表一個，因為各列失敗的原因並不相同：ZWJ 家庭以 scalar 加總
+# 會得到 8、膚色配對以碼位加總會得到 4、旗幟以 cluster 計數會得到 1。知道是哪一列動了，
+# 就知道是其中哪一種。
 typeset -a wname wwant
 wname=('header 寬' 'ok' '套件名稱' '😀' '👍🏽 skin-tone (2 codepoints, 1 cluster)' \
        '👨‍👩‍👧‍👦 ZWJ family (7 scalars, 1 cluster)' '🇹🇼 flag (2 scalars, 1 cluster)' \
@@ -1700,20 +1508,20 @@ fi
 # 計畫一併訂為在其後附加 ` [F12]`。
 # The A1 ROW is the physical line, not the record number. Record 1 of a
 # one-header-row CSV sits on physical line 2, and every spreadsheet calls that
-# cell A2. This case asserted [A1] until 2026-08-18, which pinned a wrong
-# answer: it also meant a header printed [E0], and A1 notation has no row 0.
+# cell A2. Using the record number would give [A1] here and make a header
+# print [E0], and A1 notation has no row 0.
 # A1 的「列」取物理行號，不是紀錄號。一列標頭的 CSV，其第 1 筆位於實體第 2 行，
-# 任何試算表都會叫那一格 A2。本案例在 2026-08-18 之前斷言的是 [A1]，那釘住了一個
-# 錯誤答案：它同時意味著標頭會印出 [E0]，而 A1 記法沒有第 0 列。
+# 任何試算表都會叫那一格 A2。若用紀錄號，這裡會是 [A1]，標頭會印出 [E0]，而 A1 記法
+# 沒有第 0 列。
 addr=$("$CSV2" -contains busybox --physical --a1 -i "$PKG" 2>/dev/null | head -1 | cut -f1)
 assert_eq "$addr" "1:1@L2 [A2]" "T49a --a1 uses the physical line as the spreadsheet row / --a1 以物理行號作為試算表列號"
 
 plain=$("$CSV2" -contains busybox -i "$PKG" 2>/dev/null | head -1 | cut -f1)
 assert_eq "$plain" "1:1" "T49b neither is on by default / 兩者預設都不啟用"
 
-# Past column Z the notation becomes AA, AB. Nothing had ever run that code:
-# the widest fixture here has 10 columns.
-# 超過 Z 之後記法會變成 AA、AB。那段程式碼從來沒有被跑過：此處最寬的素材只有 10 欄。
+# Past column Z the notation becomes AA, AB. The other fixtures here are at
+# most 10 columns wide, so this one is built 30 wide.
+# 超過 Z 之後記法會變成 AA、AB。此處其他素材最多只有 10 欄，因此這份造成 30 欄。
 {
   hdr=""; zh=""; row=""
   for i in {1..30}; do
@@ -1735,12 +1543,10 @@ else
 fi
 
 # T52 — every refusal the README lists must actually refuse, and the tool must
-# exit non-zero without leaving output behind. Two of the twelve had no test:
-# an unknown flag, and -head with -tail. Documenting a refusal that does not
-# happen is worse than not documenting it, because a reader will rely on it.
+# exit non-zero without leaving output behind. Documenting a refusal that does
+# not happen is worse than not documenting it, because a reader will rely on it.
 # T52 —— README 列出的每一條「拒絕」都必須真的拒絕，且必須以非零結束、不留下輸出。
-# 十二條中有兩條原本沒有測試：未知旗標，以及 -head 與 -tail 併用。記載一條「其實不會
-# 發生」的拒絕，比不記載更糟，因為讀者會依賴它。
+# 記載一條「其實不會發生」的拒絕，比不記載更糟，因為讀者會依賴它。
 assert_fails "T52a an unknown flag is refused, never swallowed / 未知旗標被拒，絕不被吞掉" -- \
     "$CSV2" --nonesuch -i "$PKG" -so
 assert_fails "T52b -head with -tail is refused / -head 與 -tail 併用被拒" -- \
@@ -1761,16 +1567,13 @@ fi
 # T53 — the locating report must survive the values it reports.
 #
 # The report is TAB-separated, one line per matching cell, and a value is
-# arbitrary CSV content. Before this case existed, three matching cells whose
-# values contained a TAB and a newline produced FOUR lines, `cut -f1` returned
-# a fragment of prose where an address belongs, and csv2 exited 0. Found by a
-# fresh agent given only the README, not by these tests -- every case here fed
-# the report values that happened to contain neither character.
+# arbitrary CSV content. An unescaped TAB or newline in a value adds lines and
+# fields, so `cut -f1` returns a fragment of prose where an address belongs
+# while csv2 exits 0. The other cases here use values with neither character.
 # T53 —— 定位報告必須撐得住它所回報的值。
-# 報告以 TAB 分隔、每個命中的儲存格一行，而「值」是任意的 CSV 內容。在這個案例存在
-# 之前，三個值含 TAB 與換行的命中儲存格產生了「四」行，`cut -f1` 在該是位址的地方
-# 回傳一段散文，而 csv2 以 0 結束。這是一個「只讀 README」的全新 agent 發現的，不是
-# 這份測試——此處每一個案例餵給報告的值，恰好都不含那兩個字元。
+# 報告以 TAB 分隔、每個命中的儲存格一行，而「值」是任意的 CSV 內容。值裡未跳脫的 TAB 或
+# 換行會多出行與欄，於是 `cut -f1` 在該是位址的地方回傳一段散文，而 csv2 仍以 0 結束。
+# 此處其他案例的值都不含這兩個字元。
 printf 'k,v\n' > "$TMP/t53.csv"
 printf 'r1,"a|b needle"\n' >> "$TMP/t53.csv"
 printf 'r2,"x\ty needle"\n' >> "$TMP/t53.csv"
@@ -1797,22 +1600,20 @@ else
     bad "T53c report escaping (f3 line2='$v2' line3='$v3')"
 fi
 
-# T54 — a failure prints exactly two lines, English then Chinese. It used to
-# print three: ERROR is above the default WARN threshold, so routing the fatal
-# error through the logger echoed it again with a timestamp even when no -log
-# was asked for, and a script capturing stderr got it twice.
-# T54 —— 失敗恰好印兩行，英文一行、中文一行。它原本印三行：ERROR 高於預設的 WARN
-# 門檻，因此把致命錯誤送進 logger 會帶著時間戳再印一次——即使根本沒有要求 -log——
-# 捕捉 stderr 的腳本會拿到重複的訊息。
+# T54 — a failure prints exactly two lines, English then Chinese. ERROR is
+# above the default WARN threshold, so routing the fatal error through the
+# logger would echo it a third time with a timestamp even with no -log, and a
+# script capturing stderr would get it twice.
+# T54 —— 失敗恰好印兩行，英文一行、中文一行。ERROR 高於預設的 WARN 門檻，因此若把致命
+# 錯誤送進 logger，即使沒有要求 -log 也會帶著時間戳印第三行，捕捉 stderr 的腳本會拿到
+# 重複的訊息。
 n=$("$CSV2" --nonesuch -i "$PKG" 2>&1 >/dev/null | wc -l | tr -d ' ')
 assert_eq "$n" "2" "T54a a failure prints exactly two stderr lines, not a duplicated third / 失敗恰好印兩行，沒有重複的第三行"
 # A RUNTIME error, not an argument error. An unknown flag is thrown while the
 # arguments are still being parsed, so the -log path -- which comes from those
-# same arguments -- has not been read yet and no file is open. That is correct,
-# and the first version of this case asserted the opposite.
+# same arguments -- has not been read yet and no file is open. That is correct.
 # 這裡用的是「執行期」錯誤而非參數錯誤。未知旗標是在參數還在解析時就丟出的，
-# 而 -log 的路徑正來自同一批參數、當時還沒被讀到，檔案根本還沒開。那是正確行為，
-# 而本案例的第一版斷言了相反的事。
+# 而 -log 的路徑正來自同一批參數、當時還沒被讀到，檔案根本還沒開。那是正確行為。
 rm -f "$TMP/t54.log"
 "$CSV2" -update '99:3' 'x' -i "$PKG" -o "$TMP/t54.csv" -log "$TMP/t54.log" >/dev/null 2>&1
 if [[ -s "$TMP/t54.log" ]] && grep -q 'ERROR' "$TMP/t54.log"; then
@@ -1827,14 +1628,13 @@ assert_eq "$n2" "2" "T54c a runtime failure also prints exactly two lines / 執�
 # T55 — masking has to actually mask.
 #
 # `-hash` alone is unsalted SHA-256: deterministic, which is the point, and
-# dictionary-attackable for exactly the same reason. A blind review recovered
-# 3 of 21 licences from the hashed file with nothing but an SPDX word list,
-# because `license` has a handful of possible values -- and low-cardinality
+# dictionary-attackable for exactly the same reason: an SPDX word list
+# recovers licences from a hashed `license` column, and low-cardinality
 # columns are precisely the ones people reach for masking on.
 # T55 —— 遮蔽必須真的能遮蔽。
 # 單獨的 `-hash` 是無鹽的 SHA-256：確定性的（那正是重點），也正因為確定性而可被
-# 字典攻擊。一次盲測僅憑一份 SPDX 詞表就從雜湊後的檔案還原了 21 個 license 中的 3 個
-# ——因為 `license` 只有少數幾種可能值，而低基數欄位正是人們會拿來遮蔽的那種。
+# 字典攻擊：一份 SPDX 詞表就能從雜湊後的 `license` 欄還原出 license，而低基數欄位
+# 正是人們會拿來遮蔽的那種。
 printf 'id,lic\na,MIT\nb,GPL\nc,MIT\n' > "$TMP/t55.csv"
 head -c 64 /dev/urandom > "$TMP/t55.key"
 head -c 64 /dev/urandom > "$TMP/t55b.key"
@@ -1849,12 +1649,9 @@ plain_mit=$(cell "$TMP/t55_plain.csv" 1 2)
 # csv2 would only prove csv2 agrees with itself. It cannot be `cmp` either --
 # this needs a second implementation of the algorithm, not a comparison.
 #
-# NOT `shasum`, which this used until 2026-09-06. On macOS `shasum` is a Perl
-# script -- its shebang is a perl interpreter -- and this project does not
-# depend on Perl; the guest has neither perl nor python, which is why T68 uses
-# `dd` rather than a scripting language. That reason was written beside T68
-# and nowhere else, so it constrained one case and nothing else, and `shasum`
-# came back twice. It is now stated in AGENTS.md, where it is read.
+# NOT `shasum`: on macOS it is a Perl script, and this project does not depend
+# on Perl; the guest has neither perl nor python (the same reason T68 uses
+# `dd`). The rule is stated in AGENTS.md.
 #
 # `sha256sum` first (busybox, coreutils, MSYS2), then `openssl dgst -sha256`,
 # which stock macOS ships at /usr/bin/openssl and which produces the identical
@@ -1864,10 +1661,8 @@ plain_mit=$(cell "$TMP/t55_plain.csv" 1 2)
 # 使用「獨立的」SHA-256，這個斷言才有意義：用 csv2 自己算只能證明它與自己一致。這裡也不能用
 # `cmp`——需要的是這個演算法的**第二份實作**，不是一次比對。
 #
-# **不用 `shasum`**，而它直到 2026-09-06 都還在這裡。在 macOS 上 `shasum` 是一支 Perl 腳本
-# ——它的 shebang 就是一個 perl 直譯器——而本專案不依賴 Perl；guest 上既沒有 perl 也沒有
-# python，那正是 T68 用 `dd` 而不用腳本語言的原因。那個理由只寫在 T126 旁邊、沒有寫在別處，
-# 於是它只約束了一個案例，而 `shasum` 回來了兩次。現在它寫進了 AGENTS.md，那是會被讀到的地方。
+# **不用 `shasum`**：在 macOS 上它是一支 Perl 腳本，而本專案不依賴 Perl；guest 上既沒有 perl
+# 也沒有 python（T68 用 `dd` 也是同一個理由）。這條規則寫在 AGENTS.md。
 #
 # 先 `sha256sum`（busybox、coreutils、MSYS2 都有），再 `openssl dgst -sha256`——原廠 macOS 的
 # /usr/bin/openssl 就有，摘要完全相同。兩者都不是 Perl。若某個節點兩者皆無，這裡回傳空字串，
@@ -1951,15 +1746,14 @@ else
     bad "T55f json protected meta (keyed='${m_keyed:0:90}')"
 fi
 
-# T56 — the six defects a read_easy pass found on 2026-08-16, every one of
-# which happened silently at rc=0. Recorded as cases so they cannot come back;
-# the reproductions are in todo/known-defects.md.
-# T56 —— 2026-08-16 一次 read_easy 檢視找到的六項缺陷，每一項都在 rc=0 下靜默發生。
-# 寫成案例以免它們回來；重現步驟在 todo/known-defects.md。
+# T56 — six defects from a read_easy pass, every one of which happened
+# silently at rc=0. The reproductions are in todo/known-defects.md.
+# T56 —— 一次 read_easy 檢視找到的六項缺陷，每一項都在 rc=0 下靜默發生。
+# 重現步驟在 todo/known-defects.md。
 
 # 1. The salt and key fingerprint live ONLY in the header marker, and the salt
-#    is fresh每run. Emitting ciphertext without its header made data that
-#    nobody -- including its author -- could ever decrypt.
+#    is fresh each run. Ciphertext emitted without its header is data that
+#    nobody -- including its author -- can ever decrypt.
 # 1. salt 與金鑰指紋只存在於標頭標記中，而 salt 每次執行都重新產生。不帶標頭寫出
 #    密文，等於造出「任何人（含作者本人）都永遠解不開」的資料。
 printf 'id,lic\na,MIT\nb,GPL\n' > "$TMP/t56.csv"
@@ -1974,10 +1768,10 @@ fi
 assert_contains "$(cat $TMP/t56_dec.csv)" "MIT" "T56b and the result decrypts back / 而且解得回來"
 
 # 2/3. The suffix DECLARES the format. --headers contradicting it, or an output
-#      suffix wanting a different header-row count, used to be accepted and
-#      silently shifted the data by a row.
+#      suffix wanting a different header-row count, would silently shift the
+#      data by a row, so both are refused.
 # 2/3. 副檔名「宣告」格式。--headers 與之牴觸、或輸出副檔名要求不同的標頭列數，
-#      原本都會被接受，並靜默地把資料錯開一列。
+#      都會靜默地把資料錯開一列，因此兩者都被拒絕。
 assert_fails "T56c --headers contradicting the suffix is refused / --headers 與副檔名牴觸即拒絕" -- \
     "$CSV2" -r --headers 1 -i "$TMP/idx.csv2" -so
 assert_fails "T56d .csv to .csv2 is refused rather than losing a record / .csv 轉 .csv2 即拒絕，而非少一筆" -- \
@@ -1985,29 +1779,29 @@ assert_fails "T56d .csv to .csv2 is refused rather than losing a record / .csv �
 assert_succeeds "T56e a matching suffix still works / 副檔名相符時照常可用" -- \
     "$CSV2" -r -t -i "$PKG" -o "$TMP/t56_same.csv"
 
-# 4. Ending inside a quoted field means the closing quote never arrived. csv2
-#    used to close it itself and emit a record nobody wrote, at rc=0.
-# 4. 在引號欄位內結束，代表收尾的引號從未出現。csv2 原本會自己把它收掉，並在 rc=0
-#    下吐出一筆沒有人寫過的紀錄。
+# 4. Ending inside a quoted field means the closing quote never arrived.
+#    Closing it silently would emit a record nobody wrote, at rc=0.
+# 4. 在引號欄位內結束，代表收尾的引號從未出現。若自行把它收掉，就會在 rc=0 下吐出
+#    一筆沒有人寫過的紀錄。
 printf 'a,b\n1,"unterminated\n' > "$TMP/t56_q.csv"
 assert_fails "T56f an unterminated quote is an error, not an invented record / 未閉合引號是錯誤，不是憑空造出一筆" -- \
     "$CSV2" -r -t -i "$TMP/t56_q.csv" -so
 n=$("$CSV2" -r -t --truncate-partial -i "$TMP/t56_q.csv" -so 2>/dev/null | wc -l | tr -d ' ')
 assert_eq "$n" "1" "T56g --truncate-partial actually discards it / --truncate-partial 真的會丟棄它"
 
-# 5. Both header rows reported as `0`, giving two identical lines no reader
-#    could tell apart.
-# 5. 兩列標頭都回報為 `0`，產生兩行完全相同、讀者無從分辨的輸出。
+# 5. Reporting both header rows as `0` gives two identical lines no reader
+#    can tell apart.
+# 5. 若兩列標頭都回報為 `0`，會產生兩行完全相同、讀者無從分辨的輸出。
 n=$("$CSV2" -contains 值 --include-headers -i "$TMP/idx.csv2" 2>/dev/null | cut -f1 | grep -c '^0[ab]:' || true)
 assert_eq "$n" "1" "T56h header hits are addressed 0a / 0b, not both 0 / 標頭命中以 0a／0b 定址，不是兩個都 0"
 
 # 6. The lighter ones, all silent at rc=0.
 # 6. 較輕的幾項，同樣都在 rc=0 下靜默。
-# Files, not `diff <(..) <(..)`: the guest has no /dev/fd, diff exited 2, and
-# this case read that as "they differ" and passed there without ever having
-# compared anything. Only status 1 means different. QU.
-# 用檔案，不用 `diff <(..) <(..)`：guest 沒有 /dev/fd，diff 以 2 結束，而這個案例把它讀成
-# 「兩者不同」，於是在那裡什麼都沒比就通過了。只有退出碼 1 才代表不同。QU。
+# Files, not `diff <(..) <(..)`: the guest has no /dev/fd, so diff exits 2,
+# which reads as "they differ" without anything compared. Only status 1 means
+# different. QU.
+# 用檔案，不用 `diff <(..) <(..)`：guest 沒有 /dev/fd，diff 會以 2 結束，被讀成「兩者不同」，
+# 其實什麼都沒比。只有退出碼 1 才代表不同。QU。
 "$CSV2" -head 1 -t -md --en -i "$TMP/idx.csv2" > "$TMP/t56i_en.out" 2>/dev/null
 "$CSV2" -head 1 -t -md      -i "$TMP/idx.csv2" > "$TMP/t56i_no.out" 2>/dev/null
 diff -q "$TMP/t56i_en.out" "$TMP/t56i_no.out" >/dev/null 2>&1
@@ -2033,19 +1827,14 @@ assert_fails "T56k -head -1 is a typo, not a request for nothing / -head -1 是�
 assert_fails "T56l --physical without a locating report is refused / 沒有定位報告時 --physical 被拒" -- \
     "$CSV2" -head 1 --physical -i "$PKG" -so
 
-# T50 — -debug has five levels in the plan and had one in the CLI. TRACE was
-# unreachable, so it is asserted here as reachable AND as not firing without it.
-# T50 —— 計畫定義 -debug 有五個層級，CLI 只實作了一個，TRACE 無法達到。此處斷言它
-# 可被達到，也斷言未指定時不會出現。
-# Counting ALL trace lines made this brittle, and it broke the moment trace
-# started reporting the records it does NOT emit (round 38, DD) plus the line
-# saying where the read stops. The property T50 is about is unchanged --
-# reachable with the flag, silent without -- so it now counts the per-record
-# lines specifically instead of everything the level ever prints.
-# 計算「全部的 trace 行」讓這條測試很脆弱，而在 trace 開始回報「沒有被輸出的紀錄」
-# （第 38 回合，DD）以及那行「讀取到此為止」的當下，它就壞了。T50 要測的性質沒有變
-# ——給了旗標就到得了、沒給就沉默——因此它現在只數「逐筆的那種行」，而不是那個層級
-# 曾經印出的每一行。
+# T50 — -debug has five levels in the plan. TRACE is asserted here as
+# reachable AND as not firing without it.
+# T50 —— 計畫定義 -debug 有五個層級。此處斷言 TRACE 可被達到，也斷言未指定時不會出現。
+# It counts the per-record lines only, not every line the level prints: trace
+# also reports records it does NOT emit (round 38, DD) and where the read
+# stops, so a total count is brittle.
+# 這裡只數「逐筆的那種行」，而不是那個層級印出的每一行：trace 也會回報沒有被輸出的紀錄
+# （第 38 回合，DD）以及讀取在哪裡停止，因此數總行數很脆弱。
 t_on=$("$CSV2" -head 2 -i "$PKG" -debug=trace 2>&1 >/dev/null | grep -c 'select: record [0-9]* line')
 t_off=$("$CSV2" -head 2 -i "$PKG" -debug 2>&1 >/dev/null | grep -c 'TRACE')
 if [[ "$t_on" -eq 2 && "$t_off" -eq 0 ]]; then
@@ -2054,10 +1843,10 @@ else
     bad "T50 trace level (with=$t_on want 2, without=$t_off want 0)"
 fi
 
-# T51 — an index used to appear only as a side effect, so a user who only runs
-# -mid never got one. --build-index makes it askable, and must not break the
-# rule that the index is an optimisation: same output with and without.
-# T51 —— 索引原本只以副作用出現，於是只用 -mid 的使用者永遠得不到。--build-index 讓它
+# T51 — an index is otherwise only a side effect of writing, so a user who only
+# runs -mid never gets one. --build-index makes it askable, and must not break
+# the rule that the index is an optimisation: same output with and without.
+# T51 —— 索引否則只是寫入的副作用，只用 -mid 的使用者永遠得不到。--build-index 讓它
 # 可被要求，且不得破壞「索引是最佳化」這條規則：有無索引輸出必須相同。
 export CSV2_INDEX_MIN_BYTES=1000
 cp "$TMP/idx.csv2" "$TMP/bi.csv2"
@@ -2080,7 +1869,7 @@ assert_fails "T51e --build-index with --no-index is refused / --build-index 與 
 unset CSV2_INDEX_MIN_BYTES CSV2_PARALLEL_MIN_BYTES CSV2_PARALLEL_CHUNK_BYTES
 
 # ---------------------------------------------------------------------
-# T57 -- deleting a whole column. Open question 5, decided yes on 2026-08-18.
+# T57 -- deleting a whole column. Open question 5, decided yes.
 #
 # This is the mirror image of the `-insert -cell` refusal: inserting a field
 # mid-record shifts every later field one column along, and removing one does
@@ -2088,7 +1877,7 @@ unset CSV2_INDEX_MIN_BYTES CSV2_PARALLEL_MIN_BYTES CSV2_PARALLEL_CHUNK_BYTES
 # header rows together is the only form of it that keeps alignment, which is
 # why it is a whole-file verb and not a cell modifier.
 #
-# T57 —— 刪除一整欄。待決問題 5，2026-08-18 決定採用。
+# T57 —— 刪除一整欄。待決問題 5，決定採用。
 # 這是 `-insert -cell` 那條拒絕的鏡像：在一列中間插入欄位會讓後面每一欄往後位移一格，
 # 移除一欄則在另一個方向上做同樣的事。唯有「每一筆與兩列標頭一起移除」才能保持對齊，
 # 這也正是它是一個作用於整檔的動詞、而非儲存格修飾詞的原因。
@@ -2128,11 +1917,9 @@ assert_contains "$("$CSV2" -delete -col 2 -delete -col license -i "$TMP/dc.csv2"
     "T57d a quoted field containing a comma survives the shift / 含逗號的引號欄位在位移後仍完好"
 
 # Each name in quotes: a column name can contain the comma this list separates
-# on, and `the columns are: a,b, c` reads as three columns. Round 54 found that
-# on a file whose first column really is called `a,b`.
+# on, and `the columns are: a,b, c` reads as three columns. Round 54.
 # 每個名字都加引號：欄名裡可以含有「這份清單用來分隔的那個逗號」，而
-# 「the columns are: a,b, c」讀起來像三欄。第 54 回合是在一個第一欄真的叫 `a,b` 的檔案上
-# 發現這件事的。
+# 「the columns are: a,b, c」讀起來像三欄。第 54 回合。
 assert_eq "$("$CSV2" -delete -col b -i "$TMP/dc.csv2" -so 2>&1 >/dev/null | head -1)" \
     'csv2: no column named "b"; the columns are: "pkg", "version", "notes", "license"' \
     "T57e an unknown column name names the columns that do exist, each quoted / 未知的欄位名稱會列出實際存在的欄位，每個都加引號"
@@ -2156,11 +1943,11 @@ assert_fails "T57j -delete -col with -append is refused: the literal row would h
 assert_fails "T57k -cell and -col together are refused: they are opposites / -cell 與 -col 併用被拒：兩者是相反的" -- \
     "$CSV2" -delete -cell -col 3 -i "$TMP/dc.csv2" -so
 
-# The modifier belongs to ONE verb. Before this was fixed, the second -delete
-# inherited -col and removed COLUMN 1 while record 1 survived -- wrong in two
+# The modifier belongs to ONE verb. If it leaked, the second -delete would
+# inherit -col and remove COLUMN 1 while record 1 survived -- wrong in two
 # directions, at rc=0. Asserted in both orders, because a fix that only works
 # when the modified verb comes first is not a fix.
-# 修飾詞屬於「一個」動詞。在修正之前，第二個 -delete 會繼承 -col 而移除「第 1 欄」，
+# 修飾詞屬於「一個」動詞。若它外漏，第二個 -delete 會繼承 -col 而移除「第 1 欄」，
 # 那筆紀錄卻還在——在兩個方向上都錯，且 rc=0。兩種順序都斷言，因為一個只在「帶修飾詞的
 # 動詞排前面」時才成立的修正，不算修正。
 printf 'a,b,c\n1,2,3\n4,5,6\n' > "$TMP/dc1.csv"
@@ -2206,24 +1993,19 @@ assert_fails "T57s a ragged record is still refused, not narrowed into agreement
 # ---------------------------------------------------------------------
 # T58 -- the README's worked error example is the REAL message.
 #
-# Found by a README-only reader on 2026-08-18: the console block showed one
-# line ending in a full stop, so it read as the complete message. The real
-# message has two further sentences and a second line in Chinese -- and the
-# README asserts elsewhere that errors are "exactly two lines, English then
-# Chinese", so its own example contradicted its own rule.
+# A truncated example (one line ending in a full stop) reads as the complete
+# message, and contradicts the README's own rule that errors are "exactly two
+# lines, English then Chinese".
 #
-# Nobody would call that dangerous, which is exactly why it needs a test: a
-# quoted example drifts silently every time a message is improved, and each
+# A quoted example drifts silently every time a message is improved, and each
 # drift is individually too small to notice. This asserts the README against
 # the binary rather than against someone remembering to update it.
 #
 # T58 —— README 中那個錯誤訊息範例就是「真正的」訊息。
-# 2026-08-18 由一位只讀 README 的讀者發現：那段 console 區塊只顯示一行、且以句號結尾，
-# 於是讀起來就像是完整的訊息。真正的訊息還有兩句，以及第二行中文——而 README 在別處
-# 主張錯誤「恰好兩行，英文在前中文在後」，因此它自己的範例牴觸了它自己的規則。
-# 沒有人會覺得那很危險，而那正是它需要一個測試的原因：被引用的範例會在每次改善訊息時
-# 靜默地飄移，而每一次飄移單獨看都小到不會被注意。這個案例把 README 對著執行檔斷言，
-# 而不是對著「有沒有人記得更新它」。
+# 一個被截斷的範例（只有一行、以句號結尾）讀起來就像完整的訊息，也牴觸 README 自己
+# 「錯誤恰好兩行，英文在前中文在後」的規則。
+# 被引用的範例會在每次改善訊息時靜默地飄移，而每一次飄移單獨看都小到不會被注意。這個案例
+# 把 README 對著執行檔斷言，而不是對著「有沒有人記得更新它」。
 # ---------------------------------------------------------------------
 echo
 echo "--- T58: the README's error example is the real message / README 的錯誤範例就是真正的訊息 ---"
@@ -2237,10 +2019,9 @@ printf 'pkg,ver\n套件,版本\nzlib,1.3.2\n' > "$TMP/rm.csv2"
 # 本案例所要抓的那種截斷再次矇混過關。
 # Assert the file exists before grepping it. A missing README makes grep return
 # an empty string, and comparing against an empty string is a test that reports
-# on nothing -- which is how this case failed in the guest for a reason that had
-# nothing to do with the README's contents.
+# on nothing; in the guest the failure would then name the wrong cause.
 # 先斷言檔案存在再 grep。README 不存在時 grep 會回傳空字串，而拿空字串去比對，是一個
-# 什麼都沒有回報的測試——這個案例就是這樣在 guest 內以一個與 README 內容毫無關係的理由失敗的。
+# 什麼都沒有回報的測試；在 guest 內，失敗訊息就會指向錯誤的原因。
 if [[ -f "$ROOT/README.md" ]]; then
     ok "T58z the README is present to compare against / 有 README 可供比對"
 else
@@ -2249,12 +2030,12 @@ fi
 readme_en=$(grep -F 'declares 2 header row(s) by its suffix' "$ROOT/README.md" | head -1)
 # Replace whatever path precedes `rm.csv2`, rather than the exact $TMP string.
 # MSYS2 rewrites a POSIX path into a Windows one on the way to a native binary,
-# so the message came back saying C:/Users/... while $TMP held /c/Users/... and
-# the substitution silently matched nothing. Anchoring on the FILENAME works on
+# so the message says C:/Users/... while $TMP holds /c/Users/... and an exact
+# substitution silently matches nothing. Anchoring on the FILENAME works on
 # every platform and does not care who rewrote the directory part.
 # 取代「`rm.csv2` 之前的任何路徑」，而不是那個精確的 $TMP 字串。MSYS2 在把參數交給原生程式
-# 的途中會把 POSIX 路徑改寫成 Windows 形式，因此訊息回來時寫的是 C:/Users/...，而 $TMP 裡是
-# /c/Users/...，於是那個替換靜默地什麼都沒有匹配到。以「檔名」為錨點在每個平台上都有效，
+# 的途中會把 POSIX 路徑改寫成 Windows 形式，因此訊息寫的是 C:/Users/...，而 $TMP 裡是
+# /c/Users/...，精確替換會靜默地什麼都匹配不到。以「檔名」為錨點在每個平台上都有效，
 # 而且不在乎是誰改寫了目錄的部分。
 actual_en=$(head -1 "$TMP/rm_err.txt" | sed -E 's|[^[:space:]：]*/rm\.csv2|vs-sqlite.csv2|')
 assert_eq "$actual_en" "$readme_en" \
@@ -2273,23 +2054,16 @@ assert_eq "$(wc -c < "$TMP/rm_out.txt" | tr -d ' ')" "0" \
 # ---------------------------------------------------------------------
 # T59 -- `-t` gates SELECTIONS, never EDITS.
 #
-# Found by a README-only reader on 2026-08-18. The README documents that `-t`
-# is off by default and that writing headerless rows to a suffixed path is
-# refused, and shows `-head 3 -o out.csv2` being refused for exactly that. From
-# those two statements the reader concluded -- reasonably -- that editing a
-# .csv2 without `-t` would also be refused, and was surprised when it was not.
-# The behaviour was right and undocumented, which is the harder kind of gap to
-# see from the inside: nothing is broken, so nothing draws attention to it.
+# The README says `-t` is off by default and that `-head 3 -o out.csv2` is
+# refused, from which a reader can reasonably conclude that editing a .csv2
+# without `-t` is refused too. It is not, and the README now says so.
 #
 # The asymmetry is deliberate. A selection produces a FRAGMENT, so whether the
 # header goes with it is a question. An edit produces a FILE, so it is not one.
 #
 # T59 —— `-t` 管的是「選取」，從不管「編輯」。
-# 2026-08-18 由一位只讀 README 的讀者發現。README 寫著 `-t` 預設關閉、且把不帶標頭的
-# 資料列寫入有副檔名的路徑會被拒，並示範了 `-head 3 -o out.csv2` 正是因此被拒。讀者從
-# 這兩句推論——而且推得合理——編輯 `.csv2` 而不給 `-t` 也會被拒，結果並沒有，於是感到意外。
-# 行為是對的，只是沒有寫進文件；而那是從內部最難看見的一種缺口：沒有東西壞掉，因此沒有
-# 東西會引起注意。
+# README 寫著 `-t` 預設關閉、`-head 3 -o out.csv2` 會被拒，讀者據此可以合理推論：編輯
+# `.csv2` 而不給 `-t` 也會被拒。其實不會，README 現在也這樣寫明。
 # 這個不對稱是刻意的：選取產生的是「片段」，標頭要不要跟著出去是一個問題；編輯產生的是
 # 一個「檔案」，那就不是問題。
 # ---------------------------------------------------------------------
@@ -2341,22 +2115,15 @@ assert_eq "$(head -2 "$TMP/t59_ap.csv2")" \
 # ---------------------------------------------------------------------
 # T60 -- an error carries as much location as there IS, and the README says so.
 #
-# Round 6 of the blind testing passed, but the reader quoted a README sentence
-# that turned out to be false: "Errors go to stderr as exactly two lines,
-# English then Chinese, and name the record and field." The two-line half is
-# true. The location half was an unconditional promise that one error in eight
-# keeps -- the message the reader had just received named only `record 3`.
-#
-# An overclaim like this is worse than saying nothing, because it is exactly
-# specific enough to write a script against: `cut` the address out of every
-# error and you get a fragment of prose on the majority of them.
+# Not every error has a record and a field: an unconditional "names the record
+# and field" promise holds for only some of them (round 6). Such an overclaim
+# is worse than saying nothing, because it is specific enough to script
+# against: `cut` the address out of every error and most yield prose.
 #
 # T60 —— 錯誤帶的位置資訊「有多少帶多少」，而 README 據實陳述。
-# 盲測第 6 回合通過了，但讀者引用的那句 README 後來證實為假：「錯誤訊息走 stderr，
-# 恰好兩行，並指出是哪一筆、哪一欄。」兩行那半是真的；位置那半是一個無條件的承諾，
-# 而八則錯誤中只有一則守得住——讀者當下收到的那則就只指出了 `record 3`。
-# 這種過度宣稱比什麼都不說更糟，因為它「剛好具體到可以拿來寫腳本」：把位址從每則錯誤
-# 中 cut 出來，多數情況下你會得到一段散文的碎片。
+# 並不是每則錯誤都有紀錄與欄位：無條件地承諾「指出是哪一筆、哪一欄」，只有部分錯誤守得住
+# （第 6 回合）。這種過度宣稱比什麼都不說更糟，因為它具體到可以拿來寫腳本：把位址從每則錯誤
+# 中 cut 出來，多數會得到一段散文。
 # ---------------------------------------------------------------------
 echo
 echo "--- T60: errors name as much location as exists / 錯誤有多少位置就帶多少 ---"
@@ -2367,19 +2134,12 @@ printf 'a,b\n1,2\n' > "$TMP/t60_ok.csv"
 
 # At one cell: record AND field, because both are true.
 #
-# CORRECTED on 2026-08-19. This asserted `record 3, field 2` for a fault in
-# data record 1 of a .csv2 -- 3 being the physical line. The assertion was
-# right that a cell fault names both; it was wrong about what the number
-# means, and by pinning the printed string it froze the defect as the
-# specification. Round 38 (CC) found that the address could not be typed back
-# into -get. T93 now covers the addressing; this case keeps its own point,
-# which is that a cell fault names BOTH parts rather than one.
+# The record number is the data record (typeable back into -get), with the
+# physical line in parentheses. CC, round 38; T93 covers the addressing. This
+# case's own point is that a cell fault names BOTH parts rather than one.
 #
-# 2026-08-19 更正。它原本對「.csv2 資料第 1 筆的錯誤」斷言 `record 3, field 2`，
-# 而 3 是物理行號。這條斷言在「儲存格錯誤要同時指出兩者」上是對的，錯的是那個號碼的意思；
-# 而它以「釘住印出來的字串」的方式，把缺陷凍結成了規格。第 38 回合（CC）發現那個位址
-# 打不回 -get。定址現在由 T93 涵蓋；這個案例保留它自己的重點：儲存格錯誤要指出「兩個」
-# 部分，而不是其中一個。
+# 紀錄號是資料紀錄號（可以原樣打回 -get），物理行號放在括號裡。CC，第 38 回合；定址由
+# T93 涵蓋。這個案例自己的重點是：儲存格錯誤要指出「兩個」部分，而不是其中一個。
 # 錯在某一格：紀錄與欄位都指出，因為兩者都為真。
 "$CSV2" -r -i "$TMP/t60_cell.csv2" 2> "$TMP/t60_a.txt" >/dev/null
 assert_contains "$(head -1 "$TMP/t60_a.txt")" "record 1 (line 3), field 2" \
@@ -2415,9 +2175,8 @@ else
     ok "T60e a whole-file error names no record either / 檔案層級的錯誤同樣不指出紀錄"
 fi
 
-# Whatever the category, the two-line rule holds -- that half of the sentence
-# was always true and stays asserted.
-# 不論屬於哪一類，兩行規則都成立——那半句一直為真，並持續被斷言。
+# Whatever the category, the two-line rule holds.
+# 不論屬於哪一類，兩行規則都成立。
 for f in t60_a t60_b t60_c t60_e; do
     n=$(wc -l < "$TMP/$f.txt" | tr -d ' ')
     if [[ "$n" == "2" ]]; then
@@ -2430,11 +2189,10 @@ done
 # ---------------------------------------------------------------------
 # T61 -- -si/-so really streams, and stdout is buffered in 64 KiB blocks.
 #
-# Round 9 of the blind testing pointed out that "without buffering the whole
-# file" had never been demonstrated -- a pipeline that completes before you can
-# watch it proves correctness, not streaming. It is measured here instead:
-# the producer emits enough to exceed the buffer, then STALLS, and the test
-# asserts output has already arrived while the input is still open.
+# A pipeline that completes before you can watch it proves correctness, not
+# streaming (round 9). So the producer emits enough to exceed the buffer, then
+# STALLS, and the test asserts output has already arrived while the input is
+# still open.
 #
 # The complementary half matters just as much. Under 64 KiB nothing appears
 # until the run ends, so piping csv2 into something watched live looks like a
@@ -2442,9 +2200,8 @@ done
 # will otherwise report as a bug.
 #
 # T61 —— -si/-so 確實是串流的，而 stdout 以 64 KiB 為單位緩衝。
-# 盲測第 9 回合指出「不緩衝整個檔案」從未被實際展示過——一條在你來得及觀察之前就跑完的
-# 管線，證明的是正確性而不是串流性。這裡改用量的：產生端先送出超過緩衝區的量，然後
-# 「停住」，測試斷言在輸入仍開著的時候輸出就已經到了。
+# 一條在你來得及觀察之前就跑完的管線，證明的是正確性而不是串流性（第 9 回合）。因此產生端
+# 先送出超過緩衝區的量，然後「停住」，測試斷言在輸入仍開著的時候輸出就已經到了。
 # 另一半同樣要緊：不足 64 KiB 時，要到執行結束才會有東西出現，因此把 csv2 接進一個
 # 正在被盯著看的東西，看起來就像卡住。正因為那是別人否則會當成 bug 回報的行為，才值得斷言。
 # ---------------------------------------------------------------------
@@ -2523,11 +2280,8 @@ assert_eq "$(cat "$TMP/t61_pkg.csv" | "$CSV2" -si --headers 1 -contains busybox 
 # T62 -- the sidecar is named the whole filename plus ".index", and the README
 # now says so with a worked example.
 #
-# Round 10 attacked the "an index is never a precondition" claim with a
-# garbage-filled sidecar and could not break it. But the reader had to GUESS the
-# sidecar's filename to run the attack at all: the README referred to it only
-# abstractly. Someone adding it to .gitignore, or writing a cleanup script, was
-# in the same position.
+# Anyone adding the sidecar to .gitignore or writing a cleanup script needs
+# its exact filename, not an abstract mention (round 10).
 #
 # The naming rule matters beyond convenience: appending to the WHOLE filename is
 # what keeps foo.csv and foo.csv2 from sharing one sidecar. Replacing the
@@ -2537,9 +2291,8 @@ assert_eq "$(cat "$TMP/t61_pkg.csv" | "$CSV2" -si --headers 1 -contains busybox 
 # README says is worse than no index at all.
 #
 # T62 —— sidecar 的名稱是「完整檔名加上 .index」，而 README 現在以實例寫出這件事。
-# 第 10 回合用一個塞滿垃圾的 sidecar 攻擊「索引絕不是必要條件」這個宣稱，攻不破。但讀者
-# 為了發動這個攻擊，必須先「猜」出 sidecar 的檔名：README 只以抽象方式提過它。想把它加進
-# .gitignore、或想寫一支清理腳本的人，處境完全相同。
+# 想把 sidecar 加進 .gitignore、或寫一支清理腳本的人，需要的是確切的檔名，而不是抽象的
+# 提及（第 10 回合）。
 # 這條命名規則的意義不只是方便：附加在「完整檔名」之後，正是 foo.csv 與 foo.csv2 不會共用
 # 同一個 sidecar 的原因。若改成替換副檔名，兩者都會是 foo.index，而這兩種格式的標頭列數
 # 不同——於是其中一個檔案的索引會描述另一個檔案的紀錄，那正是 README 所說「很快給你錯資料」
@@ -2582,16 +2335,15 @@ assert_eq "$(wc -c < "$TMP/t62_err.txt" | tr -d ' ')" "0" \
     "T62f and says nothing on stderr, since a fallback is not news / stderr 也不說話，因為「退回掃描」不是需要通知的事"
 
 # Rewriting an index that ALREADY EXISTS is a different code path from writing
-# the first one, and it is the one that broke: it went through
-# FileManager.replaceItemAt, which fails on Linux. Nothing produced wrong data
-# -- a stale index is discarded in favour of a scan -- so the only visible
-# symptoms were a warning on stderr and an optimisation that silently never
-# worked again after its first write. Assert the replacement actually happens,
-# not merely that it is quiet about not happening.
-# 改寫一個「已經存在」的索引，和寫出第一個索引走的是不同的程式路徑，而壞掉的正是前者：
-# 它走的是 FileManager.replaceItemAt，在 Linux 上會失敗。沒有任何東西產生錯誤資料——過期
-# 的索引會被丟棄改用掃描——因此唯一看得見的症狀，是 stderr 上的一則警告，以及一項在第一次
-# 寫出之後就再也沒有生效的最佳化。這裡斷言「替換真的發生了」，而不只是「它安靜地沒發生」。
+# the first one; FileManager.replaceItemAt fails on Linux. A failure there
+# produces no wrong data -- a stale index is discarded in favour of a scan --
+# so the only symptoms are a stderr warning and an optimisation that silently
+# stops working after its first write. Assert the replacement actually
+# happens, not merely that it is quiet about not happening.
+# 改寫一個「已經存在」的索引，和寫出第一個索引走的是不同的程式路徑；FileManager.replaceItemAt
+# 在 Linux 上會失敗。那裡失敗不會產生錯誤資料——過期的索引會被丟棄改用掃描——因此唯一的
+# 症狀是 stderr 上的一則警告，以及一項在第一次寫出後就靜默失效的最佳化。這裡斷言「替換真的
+# 發生了」，而不只是「它安靜地沒發生」。
 rm -f "$TMP/t62.csv.index"
 "$CSV2" -tail 2 -i "$TMP/t62.csv" >/dev/null 2>&1
 assert_succeeds "T62g the first index is written / 第一個索引寫出成功" -- \
@@ -2609,27 +2361,16 @@ unset CSV2_INDEX_MIN_BYTES CSV2_PARALLEL_MIN_BYTES CSV2_PARALLEL_CHUNK_BYTES
 # ---------------------------------------------------------------------
 # T63 -- with context on, --json says which record matched.
 #
-# Round 13 of the blind testing. -A/-B/-C imply --filter, and the reader
-# noticed that the emitted stream is then a MIXTURE of matches and context with
-# nothing separating them. grep distinguishes the two; the README says "as in
-# grep" right next to the context flags, which invited exactly that expectation.
-#
-# The CSV output genuinely cannot mark them -- a marker in a CSV row is a field,
-# and a row with an extra field is a broken record, so the tool would be
-# corrupting its own format to be helpful. That half is documented instead.
-# --json has no such constraint and now carries "match":true|false, but ONLY
-# when context is on: without it every emitted record matched, so the key would
-# be a constant on every line and a change to an output already documented and
-# tested.
+# Round 13. -A/-B/-C imply --filter, so the stream mixes matches and context.
+# CSV output cannot mark them: a marker would be an extra field, a broken
+# record. That half is documented. --json carries "match":true|false, but ONLY
+# with context on; without it every record matched, so the key would be a
+# constant and would change documented output.
 #
 # T63 —— 有上下文時，--json 會說出是哪一筆命中。
-# 盲測第 13 回合。-A/-B/-C 隱含 --filter，而讀者注意到送出的串流因此是命中與上下文的
-# 「混合」，兩者之間沒有任何區別。grep 會區分這兩者；而 README 就在上下文旗標旁邊寫著
-# 「和 grep 一樣」，正好招致了那個期待。
-# CSV 輸出確實無法標記——在 CSV 列裡加標記就等於多一個欄位，而多一欄的列是壞掉的紀錄，
-# 工具會為了幫忙而破壞自己的格式。那一半改以文件說明。--json 沒有這個限制，現在會帶
-# "match":true|false，但「只在有上下文時」：否則送出的每一筆都是命中，那個鍵會在每一行
-# 都是常數，同時也會更動一份已被記載且被測試的輸出。
+# 第 13 回合。-A/-B/-C 隱含 --filter，因此串流混有命中與上下文。CSV 輸出無法標記：
+# 標記就是多一欄，也就是壞掉的紀錄，這一半改以文件說明。--json 會帶 "match":true|false，
+# 但只在有上下文時；否則每一筆都是命中，那個鍵只會是常數，還會更動已記載的輸出。
 # ---------------------------------------------------------------------
 echo
 echo "--- T63: context marks the match in --json / 有上下文時 --json 標出命中 ---"
@@ -2667,13 +2408,9 @@ assert_eq "$(grep -c '"match":' "$TMP/t63b.json" | tr -d ' ')" "0" \
 "$CSV2" -contains zstd -C 1 -i "$TMP/t63.csv" > "$TMP/t63.csv.out" 2>/dev/null
 assert_eq "$(wc -l < "$TMP/t63.csv.out" | tr -d ' ')" "3" \
     "T63g the CSV output is three records / CSV 輸出是三筆紀錄"
-# Counted by csv2, not by awk -F, -- the field count of a CSV file is exactly
-# the thing a comma split gets wrong, and a test that uses the broken method to
-# check the correct one proves nothing on the day it matters. Test scripts are
-# the one place in this tree permitted to invoke csv2 for this.
-# 由 csv2 來數，而不是 awk -F,——一個 CSV 檔的欄數，正是逗號切割會弄錯的那個東西；用壞掉
-# 的方法去檢查正確的方法，在真正出事的那天什麼也證明不了。測試腳本是這棵樹裡唯一被允許
-# 為此呼叫 csv2 的地方。
+# Counted by csv2, not awk -F,: the field count is exactly what a comma split
+# gets wrong, so checking with it proves nothing.
+# 由 csv2 來數而不是 awk -F,：欄數正是逗號切割會弄錯的東西，用它來檢查證明不了什麼。
 nf=$("$CSV2" -si --headers 1 -r --json < "$TMP/t63.csv.out" 2>/dev/null | head -1 | grep -o '"fields":[0-9]*' | cut -d: -f2)
 assert_eq "$nf" "2" \
     "T63h each still has two fields: no marker smuggled in as a field / 每筆仍是兩欄：沒有標記被偷渡成欄位"
@@ -2681,21 +2418,15 @@ assert_eq "$nf" "2" \
 # ---------------------------------------------------------------------
 # T64 -- the suite's own cell accessor is not decorative.
 #
-# Twelve places in this file used `cut -d, -fN` on csv2's output. They were
-# replaced with cell(), which projects the column with -delete -col and then
-# takes the record. This case asserts the replacement was NECESSARY rather than
-# tidy: on this project's own fixture, the two disagree.
-#
-# If they ever agree, the fixture has lost the quoted comma that makes it a
-# realistic test of a CSV parser, and several other cases quietly became weaker
-# at the same moment. This is the tripwire for that.
+# cell() reads a value through csv2 instead of `cut -d, -fN`. On this
+# project's own fixture the two disagree, which is why cell() is necessary.
+# If they ever agree, the fixture has lost its quoted comma and several other
+# cases got weaker at the same moment. This is the tripwire for that.
 #
 # T64 —— 這份測試自己的取格存取子不是裝飾。
-# 本檔案有十二處對 csv2 的輸出使用 `cut -d, -fN`，已改為 cell()——它以 -delete -col 投影出
-# 該欄，再取那一筆。這個案例斷言那次替換是「必要的」而不只是整潔：在本專案自己的 fixture 上，
-# 兩者的結果並不相同。
-# 若哪天兩者一致了，代表 fixture 已失去那個「引號內的逗號」——而正是它使這份 fixture 成為
-# 對 CSV 解析器有意義的測試；在同一刻，另外幾個案例也悄悄變弱了。這個案例就是那條絆線。
+# cell() 經由 csv2 取值，而不是 `cut -d, -fN`。在本專案自己的 fixture 上兩者結果不同，
+# 所以 cell() 是必要的。若哪天兩者一致，代表 fixture 已失去引號內的逗號，另外幾個案例也
+# 同時變弱了。這個案例就是那條絆線。
 # ---------------------------------------------------------------------
 echo
 echo "--- T64: the cell accessor is necessary / 取格存取子是必要的 ---"
@@ -2714,14 +2445,9 @@ fi
 # 它會交還一段碎片。
 assert_contains "$by_cut" 'CORRECTED' \
     "T64b and the comma split returns a fragment of prose, not an error / 而逗號切割回傳的是一段散文碎片，不是錯誤"
-# cell() now returns the RAW value, because it is -get and -get hands over the
-# value rather than a CSV encoding of it. The quotes this used to expect were an
-# artefact of the old two-stage projection, and their disappearance is the
-# improvement, not a regression -- this assertion moved when the helper did,
-# which is how a contract change is supposed to announce itself.
-# cell() 現在回傳「原始值」，因為它就是 -get，而 -get 交出的是值本身而非它的 CSV 編碼。
-# 這裡原本預期的引號，是舊的兩階段投影留下的產物；它們消失是改善而不是退步——這條斷言隨著
-# 輔助函式一起改變，而「契約變更」本來就該用這種方式宣告自己。
+# cell() returns the RAW value: it is -get, and -get hands over the value, not
+# a CSV encoding of it, so no surrounding quotes are expected.
+# cell() 回傳「原始值」：它就是 -get，而 -get 交出的是值本身而非 CSV 編碼，所以不預期引號。
 assert_eq "${by_csv2:0:9}" 'CORRECTED' \
     "T64c while csv2 returns the whole cell, as its raw value / csv2 回傳的則是完整儲存格的原始值"
 if (( ${#by_csv2} > ${#by_cut} )); then
@@ -2734,20 +2460,13 @@ fi
 # T65 -- the workaround the README recommends works on the shape it is
 #        recommended FOR, and the shape next to it is a trap.
 #
-# Round 14. The README's advice for getting one value used to read "or
-# -contains and take cut -f3", sitting a few lines above a --filter example
-# whose output is CSV. `cut -f3` cuts on TAB and is right for the locating
-# report; the same reflex applied to the CSV output beside it returns a
-# fragment. A reader skimming had no way to see which shape the advice was for.
-#
-# Both halves are asserted here, because documenting only the safe one leaves
-# the trap in place for whoever misreads it next.
+# Round 14. `cut -f3` cuts on TAB and is right for the locating report; the
+# same reflex on --filter's CSV output returns a fragment. Both halves are
+# asserted, because documenting only the safe one leaves the trap in place.
 #
 # T65 —— README 建議的替代作法，在「它所建議的那個形狀」上有效，而旁邊那個形狀是陷阱。
-# 第 14 回合。README 取單一值的建議原本寫作「或用 -contains 再 cut -f3」，而它上方幾行就是
-# 一個輸出為 CSV 的 --filter 範例。`cut -f3` 切的是 TAB，對定位報告是正確的；同一個反射動作
-# 用在旁邊那份 CSV 輸出上，回傳的是一段碎片。只是略讀的人，無從看出那個建議是給哪個形狀的。
-# 兩半都在此斷言，因為只記載安全的那一半，等於把陷阱留給下一個讀錯的人。
+# 第 14 回合。`cut -f3` 切的是 TAB，對定位報告是正確的；同樣的動作用在 --filter 的 CSV
+# 輸出上會回傳碎片。兩半都要斷言，因為只記載安全的一半，等於把陷阱留在原地。
 # ---------------------------------------------------------------------
 echo
 echo "--- T65: the documented workaround, and the trap beside it / 文件建議的作法，以及它旁邊的陷阱 ---"
@@ -2784,24 +2503,15 @@ fi
 # ---------------------------------------------------------------------
 # T66 -- --include-headers, and which language names the column.
 #
-# Round 15 found that --include-headers had exactly one sentence in the README
-# and no worked example, unlike every other addressing feature. The reader
-# predicted the line format correctly from general principles -- and got the
-# subtler part half right: they concluded the name column "always names the EN
-# header". It does by default, but it follows --zh, not the matched row.
-#
-# That distinction is the whole reason 0a and 0b are separate addresses. The
-# row that matched and the language the report is written in are two different
-# things, and a report that conflated them would make a 0b hit indistinguishable
-# from a 0a hit whenever the two titles happened to share a word.
+# Round 15. The name column follows --zh, not the matched header row. That is
+# why 0a and 0b are separate addresses: the row that matched and the report's
+# language are different things, and conflating them would make a 0b hit
+# indistinguishable from a 0a hit whenever the two titles share a word.
 #
 # T66 —— --include-headers，以及是「哪一種語言」在為欄位命名。
-# 第 15 回合發現 --include-headers 在 README 裡只有一句話、沒有任何實例，與其他每一項定址
-# 功能都不同。讀者僅憑通則就正確預測了那一行的格式——但比較細的那一半只對了一半：他們的
-# 結論是名稱欄「一律使用英文標頭」。預設時確實如此，但它跟隨的是 --zh，而不是「命中的那一列」。
-# 這個區別正是 0a 與 0b 之所以是兩個不同位址的理由。「命中的是哪一列」與「這份報告以哪種
-# 語言書寫」是兩件事；若報告把兩者混為一談，只要兩個標題剛好共用一個詞，0b 的命中就會與
-# 0a 的命中無法區分。
+# 第 15 回合。名稱欄跟隨 --zh，而不是命中的那一列標頭。這正是 0a 與 0b 分成兩個位址的
+# 理由：命中哪一列與報告用哪種語言是兩件事；混為一談的話，只要兩個標題共用一個詞，
+# 0b 的命中就與 0a 無法區分。
 # ---------------------------------------------------------------------
 echo
 echo "--- T66: --include-headers and the naming language / --include-headers 與命名語言 ---"
@@ -2833,22 +2543,13 @@ assert_eq "$("$CSV2" -contains first --zh -i "$TMP/t66.csv2" 2>/dev/null)" \
 # T67 -- --a1 counts the header rows, so the same record is a different
 #        spreadsheet row in .csv and .csv2.
 #
-# Round 17 picked --a1 unprompted because it had one line in the README, no
-# example, and no statement of how the header count affects the row. That is
-# precisely the arithmetic a header-count-aware feature gets wrong: assume one
-# header row regardless of format and every .csv2 address is off by one -- and
-# still looks like a plausible cell reference, which is why nobody would notice.
-#
-# The tool was right. It was also undemonstrated, so being right was something a
-# reader had to take on faith or rediscover by testing, which is what happened.
+# Round 17. Assuming one header row regardless of format puts every .csv2
+# address off by one, and the result still looks like a plausible cell
+# reference, so nothing would notice. These cases pin the arithmetic.
 #
 # T67 —— --a1 會把標頭列算進去，因此同一筆紀錄在 .csv 與 .csv2 中落在不同的試算表列。
-# 第 17 回合在無人指定的情況下自己挑了 --a1，因為它在 README 裡只有一行、沒有實例，也沒有
-# 說明標頭列數如何影響列號。而那正是「會依標頭列數而變」的功能最容易算錯的地方：若不論格式
-# 一律假設一列標頭，那麼每一個 .csv2 的位址都會差一——而且看起來仍然是一個合理的儲存格參照，
-# 這正是沒有人會注意到的原因。
-# 工具是對的。但它也從未被示範過，於是「它是對的」這件事，讀者只能選擇相信，或自己測出來
-# ——而後者正是實際發生的事。
+# 第 17 回合。若不論格式一律假設一列標頭，每個 .csv2 位址都會差一，而且看起來仍是合理的
+# 儲存格參照，不會有任何東西察覺。這些案例釘住這段算術。
 # ---------------------------------------------------------------------
 echo
 echo "--- T67: --a1 counts the header rows / --a1 會把標頭列算進去 ---"
@@ -2875,8 +2576,8 @@ assert_eq "$("$CSV2" -contains 1 --a1 -i "$TMP/t67.csv2" 2>/dev/null)" \
     $'1:2 [B3]\tver\t1' \
     "T67d and the column letter follows the field number / 欄位字母跟隨欄號"
 
-# The refusal the reader hit first, which was asserted but never documented.
-# 讀者第一次就撞上的那條拒絕——它有被斷言，卻從未被記載。
+# --a1 needs a locating report; without one it is refused.
+# --a1 需要定位報告，沒有就拒絕。
 assert_fails "T67e --a1 without a locating report is refused / 沒有定位報告時 --a1 被拒" -- \
     "$CSV2" -r --a1 -i "$TMP/t67.csv2"
 assert_fails "T67f and --a1 with --filter is refused too, for the same reason / 與 --filter 併用同樣被拒，理由相同" -- \
@@ -2886,29 +2587,17 @@ assert_fails "T67f and --a1 with --filter is refused too, for the same reason / 
 # T68 -- a corrupt index must be DISCARDED, including corruption inside the
 #        index itself.
 #
-# Round 18 of the blind testing, and the only TOOL BROKEN of the run. Round 10
-# had already shown that an index full of garbage is caught. This went further
-# and asked whether a PLAUSIBLE corruption gets through -- one that still
-# passes the O(1) staleness check.
-#
-# It did. Every check described the DATA file: its size, its mtime, the hashes
-# of its first and last bytes, and the number of entries. Nothing described the
-# index. So a single flipped bit in an offset passed all of them, and the wrong
-# offset was used: `-mid 1,1` returned a fragment beginning mid-field, presented
-# as a record, at rc=0, while `-r` on the same file was correct because it never
-# consults the index. `-tail` silently returned one record fewer.
-#
-# The README's own words for that outcome are "far worse than no index". It was
-# produced by the one thing nothing was checking.
+# Round 18. A PLAUSIBLE corruption -- one flipped bit in an offset -- passes
+# every check that describes the DATA file (size, mtime, edge hashes, entry
+# count), since none describes the index itself. The wrong offset then makes
+# `-mid 1,1` return a mid-field fragment as a record at rc=0, and `-tail`
+# silently return one record fewer. `-r` is unaffected; it never reads the index.
 #
 # T68 —— 損毀的索引必須被「丟棄」，包括索引自身內部的損毀。
-# 盲測第 18 回合，也是整輪唯一一個 TOOL BROKEN。第 10 回合已證明「整份垃圾」的索引會被
-# 攔下。這一回合更進一步，問的是「合理的」損毀能不能通過——一個仍然能通過 O(1) 過期檢查的
-# 損毀。它通過了。所有檢查描述的都是「資料檔」：大小、mtime、首尾位元組的雜湊、項目數。
-# 沒有任何東西描述索引本身。於是偏移量裡一個翻轉的位元通過了全部檢查，那個錯誤的偏移量被
-# 採用：`-mid 1,1` 回傳了一段從欄位中間開始的碎片，以「一筆紀錄」呈現，rc=0；而同一個檔案的
-# `-r` 是正確的，因為它從不使用索引。`-tail` 則安靜地少回傳一筆。
-# README 對這種結果的用語是「比沒有索引糟得多」。而它出自那個唯一沒有被檢查的東西。
+# 第 18 回合。一個「合理的」損毀——偏移量裡翻轉一個位元——能通過所有描述「資料檔」的檢查
+# （大小、mtime、首尾雜湊、項目數），因為沒有一項描述索引本身。錯誤的偏移量會讓 `-mid 1,1`
+# 以 rc=0 把從欄位中間開始的碎片當成紀錄回傳，`-tail` 則安靜地少回傳一筆。`-r` 不受影響，
+# 它從不讀索引。
 # ---------------------------------------------------------------------
 echo
 echo "--- T68: corruption INSIDE the index is discarded / 索引「內部」的損毀會被丟棄 ---"
@@ -2986,46 +2675,31 @@ unset CSV2_INDEX_MIN_BYTES CSV2_PARALLEL_MIN_BYTES CSV2_PARALLEL_CHUNK_BYTES
 # ---------------------------------------------------------------------
 # T69 -- no document quotes a test count.
 #
-# Round 20 found README.md still saying "112 PASS" after the suite had passed
-# through 143, 152, 153, 157, 164, 167, 173, 185, 188, 193, 195, 201 and 210.
-# Seven such numbers existed across five files, in three different states of
-# staleness -- one said 74. The block is offered as the way to verify the tool
-# works, so a reader who ran it saw a number that did not match and had no way
-# to know which of the two was wrong.
-#
-# The fix is not to update them. A number that decays with every commit will
-# decay again the moment attention moves. They are gone, and this case stops
-# them coming back: the docs say 0 FAIL and name the one SKIP, both of which
-# stay true as the suite grows.
+# Round 20. A PASS count in a document goes stale with every commit, and a
+# reader who runs the suite sees a number that does not match with no way to
+# tell which side is wrong. Updating them does not fix that; not having them
+# does. The docs say 0 FAIL and name the one SKIP, which stay true as the suite
+# grows.
 #
 # T69 —— 任何文件都不引用測試數量。
-# 第 20 回合發現 README.md 仍寫著「112 PASS」，而測試早已一路經過 143、152、153、157、
-# 164、167、173、185、188、193、195、201 到 210。五個檔案裡共有七個這樣的數字，處於三種
-# 不同的過期狀態——其中一個寫著 74。那段程式區塊是被當成「驗證這支工具能用」的方法提供的，
-# 因此照做的讀者會看到一個對不上的數字，而且無從判斷是哪一邊錯了。
-# 修法不是把它們更新。一個「每次提交都會衰減」的數字，在注意力移開的那一刻就會再次衰減。
-# 它們被移除了，而這個案例阻止它們回來：文件只說 0 FAIL 並指名唯一的那個 SKIP，兩者都會
-# 隨著測試增長而保持為真。
+# 第 20 回合。文件裡的 PASS 數量每次提交都會過期，照做的讀者會看到對不上的數字，卻無從
+# 判斷是哪一邊錯。更新它們解決不了，不寫才行。文件只說 0 FAIL 並指名唯一的 SKIP，
+# 這兩者會隨測試增長而保持為真。
 # ---------------------------------------------------------------------
 echo
 echo "--- T69: no document quotes a test count / 任何文件都不引用測試數量 ---"
 
-# The list did not include plan/ or todo/, and on 2026-08-19 plan.md's own
-# header was found carrying TWO stale counts -- macOS 112, guest 72, against a
-# suite already far past both. This case existed precisely to stop that, and it
-# was not looking at the file. A check with a hand-written file list decays the
-# same way the numbers do; the difference is that nothing reports it.
+# The list includes plan/ and todo/: a hand-written file list decays the same
+# way the numbers do, and nothing reports a file it leaves out.
 #
-# The pattern now excludes a digit preceded by `T`, so a test IDENTIFIER
-# ("測試 T1-T8 通過", "T16 通過") is not mistaken for a count. That distinction
-# is why the list could not simply be widened: plan.md is full of the former.
+# The pattern excludes a digit preceded by `T`, so a test IDENTIFIER
+# ("測試 T1-T8 通過", "T16 通過") is not mistaken for a count; plan.md is full
+# of those.
 #
-# 這份清單原本不含 plan/ 與 todo/，而 2026-08-19 發現 plan.md 自己的開頭帶著「兩個」過期
-# 數字——macOS 寫 112、guest 寫 72，而測試套件早已遠超過兩者。這個案例存在的目的正是阻止
-# 那件事，而它根本沒有在看那個檔案。一份「手寫檔案清單」的檢查，與那些數字以同樣的方式衰減；
-# 差別只在於沒有任何東西會回報它。
-# 樣式現在排除「前面緊接著 T 的數字」，好讓測試「編號」（「測試 T1–T8 通過」、「T16 通過」）
-# 不被誤認為數量。那個區別正是這份清單不能直接放寬的原因：plan.md 裡到處都是前者。
+# 清單包含 plan/ 與 todo/：手寫的檔案清單會與那些數字一樣衰減，而漏掉一個檔案時沒有任何
+# 東西會回報。
+# 樣式排除「前面緊接著 T 的數字」，好讓測試「編號」（「測試 T1–T8 通過」、「T16 通過」）
+# 不被誤認為數量；plan.md 裡到處都是這種編號。
 typeset -a counted
 for f in README.md README.zh-TW.md AGENTS.md CLAUDE.md test/README.md test/README.zh-TW.md \
          plan/plan.md todo/todo.md todo/known-defects.md \
@@ -3048,28 +2722,19 @@ fi
 # ---------------------------------------------------------------------
 # T70 -- -get r:c, the read that matches -update r:c VAL.
 #
-# Round 14 asked for one cell at a known address and found there was no way:
-# record:field composed only with WRITES. Reading it back took --json plus a
-# full-file selection plus an external parser -- and this suite's own cell()
-# helper needed two csv2 invocations and a temp file for the same thing.
-#
-# The strongest argument was that an address can arrive from OUTSIDE: typed by
-# a person from a bug report, or carried over from an earlier run. -contains
-# cannot serve that case at all, because it can only find a value you already
-# know is there.
+# Round 14. record:field is the address -update writes; -get reads the same
+# address. An address can arrive from OUTSIDE (a bug report, an earlier run),
+# and -contains cannot serve that: it only finds a value you already know.
 #
 # T70 —— `-get r:c`，與 `-update r:c VAL` 對稱的那個讀取。
-# 第 14 回合想取出一個已知位址的儲存格，發現辦不到：record:field 只與「寫入」組合。要把它
-# 讀回來，得動用 --json 加全檔選取加外部解析器——而這份測試自己的 cell() 輔助函式，為了同一件事
-# 也需要兩次 csv2 呼叫加一個暫存檔。
-# 最強的理由是：位址可能來自「外部」——有人從 bug 回報裡打進來，或是上一次執行留下的。
-# -contains 完全無法服務那個情境，因為它只能找「你已經知道在裡面」的值。
+# 第 14 回合。record:field 是 -update 寫入的位址，-get 讀取同一個位址。位址可能來自
+# 「外部」（bug 回報、上一次執行），-contains 無法服務這種情境：它只能找你已知存在的值。
 # ---------------------------------------------------------------------
 echo
 echo "--- T70: -get r:c / -get r:c ---"
 
-# The cell that started this: 513 bytes of prose with quoted commas in it.
-# 引發這一切的那一格：513 位元組、內含引號逗號的散文。
+# A 513-byte cell of prose with quoted commas in it.
+# 一格 513 位元組、內含引號逗號的散文。
 raw=$("$CSV2" -get 1:6 -i "$PKG" 2>/dev/null)
 assert_contains "$raw" "CORRECTED" \
     "T70a -get returns the cell / -get 取回該儲存格"
@@ -3080,10 +2745,9 @@ else
 fi
 
 # Raw, not CSV-encoded. The point of an address-based read is to hand over the
-# VALUE; returning a quoted CSV field would put the caller back where round 14
-# started, needing a decoder.
-# 是原始值，不是 CSV 編碼。依位址讀取的意義就是交出「值」；回傳一個帶引號的 CSV 欄位，
-# 會把呼叫端送回第 14 回合的起點——還得再準備一個解碼器。
+# VALUE; a quoted CSV field would leave the caller needing a decoder.
+# 是原始值，不是 CSV 編碼。依位址讀取的意義就是交出「值」；帶引號的 CSV 欄位會讓呼叫端
+# 還得準備解碼器。
 printf 'a,b\nx,"has, comma"\n' > "$TMP/t70.csv"
 assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t70.csv" 2>/dev/null)" 'has, comma' \
     "T70c the value comes back raw, not CSV-quoted / 值以原始形式回來，未加 CSV 引號"
@@ -3091,9 +2755,8 @@ assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t70.csv" 2>/dev/null)" 'has, comma' \
 assert_eq "$("$CSV2" -get 1:b -i "$TMP/t70.csv" 2>/dev/null)" 'has, comma' \
     "T70d and the column may be named instead of numbered / 欄位可用名稱而非編號"
 
-# The round trip the design was sold on: search gives an address, -get reads it,
-# -update writes it. Before this, the middle step did not exist.
-# 這份設計當初的賣點——搜尋給出位址、-get 讀它、-update 寫它。在此之前，中間那一步不存在。
+# The round trip: search gives an address, -get reads it, -update writes it.
+# 來回一圈：搜尋給出位址、-get 讀它、-update 寫它。
 addr=$("$CSV2" -contains busybox -i "$PKG" 2>/dev/null | head -1 | cut -f1)
 assert_eq "$("$CSV2" -get "$addr" -i "$PKG" 2>/dev/null)" "busybox" \
     "T70e an address from -contains feeds straight into -get / -contains 給出的位址可直接餵給 -get"
@@ -3165,14 +2828,12 @@ assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t70_sp.csv" 2>/dev/null | wc -l | tr -d '
     "T70r and the spanning cell comes back with its newline intact / 而那個跨行的儲存格，換行原封不動地回來"
 
 # A flag that shapes output is meaningless with -get, which has exactly one
-# shape. Accepting one silently is worse than meaningless: `-get 1:2 --json` is
-# a natural thing to type, because the README sends you to --json when a value's
-# own newlines matter -- and for its first day this returned the plain value at
-# rc=0 with the flag discarded. Found by self-review the day after -get landed.
-# 「決定輸出形狀」的旗標對 -get 沒有意義，因為它只有一種形狀。安靜地接受比沒有意義更糟：
-# `-get 1:2 --json` 是很自然會打出來的東西，因為 README 在「值本身的換行有意義」時就是叫你
-# 去用 --json——而它上線的第一天，會在 rc=0 下回傳純粹的值並把那個旗標丟掉。由 -get 落地
-# 隔天的自我檢視發現。
+# shape. Accepting one silently is worse: `-get 1:2 --json` is natural to type,
+# since the README sends you to --json when a value's newlines matter, and
+# discarding the flag at rc=0 hands back the plain value unannounced.
+# 「決定輸出形狀」的旗標對 -get 沒有意義，因為它只有一種形狀。安靜地接受更糟：
+# `-get 1:2 --json` 很自然會打出來，因為 README 在值的換行有意義時就叫你用 --json；
+# 若在 rc=0 下丟掉旗標，交回的就是未經告知的純值。
 for f in --json --pretty -t -rownum; do
     assert_fails "T70s -get with $f is refused, not silently ignored / -get 搭配 $f 會被拒，而不是被靜默忽略" -- \
         "$CSV2" -get 1:1 $f -i "$PKG"
@@ -3181,21 +2842,13 @@ done
 # ---------------------------------------------------------------------
 # T71 -- -get's trailing newline is a terminator, and the value is logical.
 #
-# Round 21: the reader attacked -get, which exists because of their own round-14
-# argument, and went at the hardest place for a "prints the value and nothing
-# else" promise to hold. Two results.
-#
-# The behaviour is right in both. What was missing was the mechanism: the README
-# said "where the value's own newlines matter, use --json" without saying why,
-# and a reader wiring -get into a script needs to know that the failure mode is
-# SILENT LOSS of a trailing newline, not garbled output and not an error.
+# Round 21. Someone wiring -get into a script needs to know that the failure
+# mode is SILENT LOSS of a trailing newline, not garbled output and not an
+# error. These cases pin that mechanism.
 #
 # T71 —— -get 的結尾換行是「終止符」，而它交出的是「邏輯值」。
-# 第 21 回合：讀者去攻擊 -get——那是因它自己第 14 回合的論證而存在的東西——並且挑了「印出
-# 值、別的什麼都不印」這個承諾最難守住的地方下手。兩個結果。
-# 兩者的行為都是對的。缺的是「機制」：README 只說「值本身的換行有意義時請用 --json」，
-# 卻沒說為什麼；而要把 -get 接進腳本的人需要知道，失敗的形態是「結尾換行被靜默吃掉」，
-# 不是輸出亂掉，也不是報錯。
+# 第 21 回合。把 -get 接進腳本的人需要知道，失敗的形態是「結尾換行被靜默吃掉」，
+# 不是輸出亂掉，也不是報錯。這些案例釘住這個機制。
 # ---------------------------------------------------------------------
 echo
 echo "--- T71: -get's terminator and logical value / -get 的終止符與邏輯值 ---"
@@ -3211,11 +2864,9 @@ assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t71_in.csv" 2>/dev/null | wc -l | tr -d '
 
 # .csv2 stores that newline as the two characters \n. -get gives the VALUE, so
 # both formats produce identical bytes. The formats differ in how they store a
-# value, not in what the value is -- asserted rather than assumed, because the
-# reader had to guess it.
+# value, not in what the value is.
 # .csv2 以 \n 兩個字元儲存那個換行。-get 交出的是「值」，因此兩種格式產生完全相同的位元組。
-# 兩種格式的差別在於「如何儲存一個值」，不在於「那個值是什麼」——這裡改為斷言而非假定，
-# 因為讀者當時只能靠猜。
+# 兩種格式的差別在於「如何儲存一個值」，不在於「那個值是什麼」。
 assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t71_in.csv2" 2>/dev/null)" \
     "$("$CSV2" -get 1:2 -i "$TMP/t71_in.csv" 2>/dev/null)" \
     "T71b .csv and .csv2 give the same value, though they store it differently / .csv 與 .csv2 給出相同的值，儘管儲存方式不同"
@@ -3247,30 +2898,17 @@ assert_contains "$("$CSV2" -mid 1,1 --json -i "$TMP/t71_tail.csv" 2>/dev/null | 
 # T72 -- which path ran is observable from outside, including when it is the
 #        ordinary one.
 #
-# Round 22 set out to prove "parallel output is byte-identical to
-# single-threaded" using the environment knobs the README provides for exactly
-# that. It built the hardest fixture it could -- a chunk boundary falling inside
-# a quoted field with an embedded comma AND an embedded newline -- got
-# byte-identical output, and then refused to call it a pass, because nothing in
-# -debug said whether the parallel path had run at all.
-#
-# That refusal was right, and sharper than the reader could see: an embedded
-# newline in a .csv is precisely what DISQUALIFIES a file from the parallel
-# path. The fixture built to stress chunk boundaries was one the parallel path
-# is designed never to see. Both runs were single-threaded, and identical output
-# is exactly what that looks like.
-#
-# So the reason is now reported. A test that compares two runs has to be able to
-# prove they were two different runs.
+# Round 22. A test comparing parallel against single-threaded output has to
+# prove the two runs really took different paths. An embedded newline in a
+# .csv disqualifies it from the parallel path, so a fixture built to stress
+# chunk boundaries that way runs single-threaded twice, and identical output
+# is exactly what that looks like. -debug therefore reports which path ran and
+# why.
 #
 # T72 —— 走的是哪一條路，從外面看得出來，包括走的是普通那一條時。
-# 第 22 回合想用 README 為此提供的環境旋鈕，證明「平行輸出與單執行緒逐位元相同」。它建了
-# 能想到最難的 fixture——讓分塊邊界落在一個「同時含逗號與換行」的引號欄位裡——得到逐位元
-# 相同的輸出，然後拒絕把那稱為通過，因為 -debug 裡沒有任何東西說明平行路徑到底有沒有跑。
-# 那個拒絕是對的，而且比讀者看得到的更尖銳：`.csv` 裡的內嵌換行，正是「取消該檔案走平行路徑
-# 資格」的那個東西。那個為了施壓分塊邊界而建的 fixture，恰好是平行路徑依設計永遠不會看到的。
-# 兩次執行都是單執行緒的，而「輸出相同」看起來恰恰就是那個樣子。
-# 因此現在會回報理由。一個比對兩次執行的測試，必須有辦法證明那真的是兩次不同的執行。
+# 第 22 回合。比對平行與單執行緒輸出的測試，必須證明兩次執行真的走了不同的路。`.csv` 裡
+# 的內嵌換行會取消走平行路徑的資格，因此用這種方式施壓分塊邊界的 fixture，其實跑了兩次
+# 單執行緒，而「輸出相同」看起來恰恰就是那樣。所以 -debug 會回報走了哪條路以及理由。
 # ---------------------------------------------------------------------
 echo
 echo "--- T72: the path taken is observable / 走的是哪一條路，看得出來 ---"
@@ -3303,10 +2941,9 @@ p=$(CSV2_PARALLEL_MIN_BYTES=999999999 path_of -contains xyz -i "$TMP/t72.csv2")
 assert_contains "$p" "under CSV2_PARALLEL_MIN_BYTES" \
     "T72e and a file under the threshold says so, with the threshold / 未達門檻的檔案會這樣說，並附上門檻值"
 
-# The claim the reader could not prove, now provable: run it both ways, confirm
-# from -debug that the two runs really were different, and compare the bytes.
-# 讀者當時無法證明的那個宣稱，現在證明得了：兩種方式各跑一次，先從 -debug 確認那真的是
-# 兩次不同的執行，再比對位元組。
+# Run it both ways, confirm from -debug that the runs really differed, and
+# compare the bytes.
+# 兩種方式各跑一次，先從 -debug 確認那真的是兩次不同的執行，再比對位元組。
 par=$(CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=512 "$CSV2" -contains xyz -i "$TMP/t72.csv2" 2>/dev/null)
 sin=$(CSV2_PARALLEL_MIN_BYTES=999999999 "$CSV2" -contains xyz -i "$TMP/t72.csv2" 2>/dev/null)
 assert_eq "$par" "$sin" \
@@ -3314,13 +2951,13 @@ assert_eq "$par" "$sin" \
 
 # T72f's fixture has no quoted fields, so a chunk boundary never lands inside
 # one -- it tests that chunking preserves ORDER, not that it preserves quote
-# state. Round 23 built the harder fixture: a long quoted field packed with
-# embedded commas, sized so that boundaries cut straight through it. A chunk
-# that mishandled quote state would split that record or lose part of it, and
-# would look like ordinary CSV either way.
+# state. This fixture (round 23) has a long quoted field packed with embedded
+# commas, sized so that boundaries cut straight through it. A chunk that
+# mishandled quote state would split or truncate that record, and would look
+# like ordinary CSV either way.
 # T72f 的 fixture 沒有任何引號欄位，因此分塊邊界永遠不會落在其中——它測的是「分塊保持順序」，
-# 不是「分塊保持引號狀態」。第 23 回合建了更難的 fixture：一個塞滿內嵌逗號的長引號欄位，
-# 長度足以讓邊界直接切過它。一個處理錯引號狀態的分塊，會把那筆紀錄切開或吃掉一部分，
+# 不是「分塊保持引號狀態」。這份 fixture（第 23 回合）有一個塞滿內嵌逗號的長引號欄位，
+# 長度足以讓邊界直接切過它。處理錯引號狀態的分塊會把那筆紀錄切開或截斷，
 # 而兩種結果看起來都像是普通的 CSV。
 {
   print -r -- 'id,note'
@@ -3350,31 +2987,16 @@ assert_contains "$qpar" 'several, embedded, commas' \
 # ---------------------------------------------------------------------
 # T73 -- redaction follows the FILE's declaration, not the run's activity.
 #
-# Round 25 went at -log because it is the one feature that persists data to
-# disk with no documented content policy, and asked whether it reintroduces the
-# exposure the absent -key flag exists to avoid.
-#
-# It found the command echo redacted -- `-update 1:4 <value>` -- and the
-# operation line two lines below it printing the same string in the clear. Its
-# words: something decided the value should not appear, and something else
-# wrote it anyway.
-#
-# Verifying it showed worse. The redaction set was populated only by
-# buildTransform, from the columns being transformed IN THIS RUN. So `-hash
-# secret` redacted `secret` in its own log, and `-update 1:secret NEW` on the
-# resulting file -- whose header reads `secret:hmac:<fp>`, the file stating in
-# writing that the column is sensitive -- wrote NEW in the clear. The run that
-# put the secret in was protected. The run that changed it was not.
+# Round 25. -log persists data to disk, so it must not reintroduce the
+# exposure the absent -key flag avoids. Redaction is driven by the FILE's
+# header (`secret:hmac:<fp>` declares the column sensitive), not only by the
+# columns this run transforms; otherwise the run that put a secret in is
+# protected and a later run that edits it writes the value in the clear.
 #
 # T73 —— 遮蔽依據的是「檔案的宣告」，而非「本次執行在做什麼」。
-# 第 25 回合去查 -log，因為它是唯一一個「會把資料寫進磁碟、卻沒有任何內容政策記載」的功能，
-# 並提問：它是否重新引入了「刻意不提供 -key」所要避免的那種暴露。
-# 它發現指令列回顯被遮蔽了——`-update 1:4 <value>`——而兩行之下的操作紀錄，卻把同一個字串
-# 明文寫出。用它的話說：有東西決定了那個值不該出現，而另一個東西照樣把它寫了下去。
-# 查證之後發現更糟。遮蔽集合只由 buildTransform 依「本次要轉換的欄位」填入。於是
-# `-hash secret` 會在它自己的 log 裡遮蔽 secret，而對其產物執行 `-update 1:secret NEW`
-# ——那個檔案的標頭寫著 `secret:hmac:<fp>`，是檔案白紙黑字宣告該欄位敏感——卻會把 NEW
-# 明文寫出。放進秘密的那次執行受保護，改動它的那次執行不受保護。
+# 第 25 回合。-log 會把資料寫進磁碟，因此不得重新引入「刻意不提供 -key」所避免的暴露。
+# 遮蔽依據的是檔案的標頭（`secret:hmac:<fp>` 宣告該欄敏感），而不只是本次要轉換的欄位；
+# 否則放進秘密的那次執行受保護，之後改動它的執行卻會把值明文寫出。
 # ---------------------------------------------------------------------
 echo
 echo "--- T73: redaction follows the file, not the run / 遮蔽依據檔案，而非本次執行 ---"
@@ -3384,38 +3006,17 @@ head -c 32 /dev/urandom > "$TMP/t73.key"
 "$CSV2" -hash secret -keyfile "$TMP/t73.key" -i "$TMP/t73.csv" -o "$TMP/t73_h.csv" -t 2>/dev/null
 cp "$TMP/t73_h.csv" "$TMP/t73_h.bak"
 
-# REVERSED on 2026-08-19, and the reversal is the finding.
+# An edit to a column the file marks protected is REFUSED (round 37). A raw
+# value written into an `:enc:` column cannot be read back, and -decrypt stops
+# at that cell, so every later record is lost with it -- while the log, being
+# redacted, says only `<redacted> -> <redacted>`. Redaction would hide the
+# damage. The guard against vacuous passes lives on the ordinary column below,
+# where a write must still happen and be recorded.
 #
-# Round 25 asked whether -log reintroduces the exposure the absent -key flag
-# exists to avoid, and the answer -- redaction follows the FILE's declaration,
-# not the run's activity -- is still right and is still asserted below.
-#
-# But this test also pinned that the edit itself SUCCEEDS: "redaction is about
-# the log, not about refusing the edit". That was never a decision anyone made.
-# It was a guard against T73a passing vacuously, by the write having failed.
-#
-# Round 37 showed what the write actually does. A raw value written into a
-# column the file marks `:enc:` cannot be read back, and -decrypt stops at that
-# cell -- so every later record, ciphertext intact and never touched, is lost
-# with it. The log said `<redacted> -> <redacted>`, exactly as this test
-# required, and that line was the only record of what had happened.
-#
-# So round 25's protection was working perfectly on a value that should never
-# have been written at all, and the protection is what hid the damage. The edit
-# is now refused, and the vacuity guard moves to the ordinary column, where a
-# write must still happen and still be recorded.
-#
-# 2026-08-19 反轉，而這個反轉本身就是那個發現。
-# 第 25 回合問的是「-log 是否重新引入了『刻意不提供 -key』所要避免的暴露」，而它的答案——
-# 遮蔽依據的是「檔案的宣告」而非「本次執行在做什麼」——仍然正確，下面仍然斷言它。
-# 但這個測試同時釘住了「該次編輯會成功」：「遮蔽針對的是 log，不是拒絕該次編輯」。
-# **那從來不是任何人做過的決定**，它只是一道防線，防止 T73a 因為「寫入失敗」而空洞地通過。
-# 第 37 回合顯示了那次寫入實際上做了什麼：寫進 `:enc:` 欄位的原始值讀不回來，而 -decrypt
-# 會停在那一格——於是之後每一筆（密文完好、從未被碰過）也一起消失。而 log 寫的是
-# `<redacted> -> <redacted>`，與這個測試的要求完全一致，而那一行是「發生了什麼」唯一的紀錄。
-# 也就是說，第 25 回合的保護在一個「根本就不該被寫下去的值」上運作得完美無缺，
-# 而那道保護正是掩蓋損害的東西。該次編輯現在被拒絕，而那道防止空洞通過的防線，
-# 移到一般欄位上——在那裡寫入仍然必須發生、也仍然必須被記錄。
+# 對「檔案標記為受保護」欄位的編輯會被「拒絕」（第 37 回合）。寫進 `:enc:` 欄位的原始值
+# 讀不回來，而 -decrypt 會停在那一格，之後每一筆都跟著遺失——而 log 因為遮蔽，只會寫
+# `<redacted> -> <redacted>`。遮蔽會掩蓋損害。防止空洞通過的防線放在下面的一般欄位上，
+# 在那裡寫入仍然必須發生、也必須被記錄。
 rm -f "$TMP/t73.log"
 "$CSV2" -update 1:secret 'SUPER SECRET 12345' -i "$TMP/t73_h.csv" -o "$TMP/t73_o.csv" \
     -log "$TMP/t73.log" 2>/dev/null
@@ -3439,9 +3040,9 @@ fi
 
 # The log must stay USEFUL. Redacting everything would be safe and worthless:
 # an audit trail that cannot say what changed is not one. This is also the
-# vacuity guard now: if edits stopped working altogether, this fails.
+# vacuity guard: if edits stopped working altogether, this fails.
 # log 必須維持「有用」。全部遮蔽既安全又毫無價值：一份說不出改了什麼的稽核軌跡，不是稽核軌跡。
-# 這一條現在同時是那道「防止空洞通過」的防線：如果編輯整個壞掉了，它會失敗。
+# 這一條同時是「防止空洞通過」的防線：如果編輯整個壞掉了，它會失敗。
 rm -f "$TMP/t73b.log"
 "$CSV2" -update 1:license 'GPL-3.0' -i "$TMP/t73.csv" -o "$TMP/t73_o2.csv" \
     -log "$TMP/t73b.log" 2>/dev/null
@@ -3466,30 +3067,17 @@ assert_contains "$(cat "$TMP/t73c.log")" "fingerprint" \
 # ---------------------------------------------------------------------
 # T74 -- "-md is one-way" has to be true, not merely intended.
 #
-# Round 26 attacked the claim and broke it. -md output redirected into a .csv
-# path is a valid ONE-COLUMN CSV whenever the data contains no commas, so every
-# line has one field, the field counts trivially agree, and csv2 read it back at
-# rc=0 -- handing over the Markdown separator row `|---|---|---|` as data
-# record 1.
-#
-# With commas in the data the counts disagree and it already failed loudly. The
-# check that saved that case is the one that had nothing to notice here. So the
-# guarantee held for the harder-looking input and failed for the simpler one:
-# any table of short plain values.
-#
-# That contradicts the promise this project opens with -- anything else must
-# fail loudly rather than silently emit a half-correct file -- and it did it on
-# a file csv2 had produced itself.
+# Round 26. -md output with no commas in the data is a valid ONE-COLUMN CSV:
+# field counts trivially agree, so without a dedicated check csv2 reads it
+# back at rc=0 and hands over the separator row `|---|---|---|` as record 1.
+# With commas the counts disagree and it already fails loudly, so the field
+# count check does not cover the simpler input: any table of short plain values.
 #
 # T74 —— 「-md 是單向的」必須為真，而不能只是「本意如此」。
-# 第 26 回合攻擊了這個宣稱並且攻破了。把 -md 的輸出重導到 .csv 路徑，只要資料不含逗號，
-# 那就是一份合法的「單欄」CSV：每一行都只有一欄、欄數自然一致，於是 csv2 在 rc=0 下把它讀
-# 回來，並把 Markdown 分隔列 `|---|---|---|` 當成第 1 筆資料交出去。
-# 資料含逗號時欄數不符，它本來就會大聲失敗。救了那個案例的檢查，在這裡沒有東西可以察覺。
-# 於是這條保證在「看起來比較難」的輸入上成立，卻在比較單純的那一種上失效：任何一張由簡短
-# 純值構成的表格。
-# 那牴觸了本專案開宗明義的承諾——其餘一切都必須大聲失敗，而不是靜默產生一個半正確的檔案
-# ——而且它是在一個 csv2 自己產生的檔案上失敗的。
+# 第 26 回合。資料不含逗號時，-md 的輸出是一份合法的「單欄」CSV：欄數自然一致，因此若無
+# 專門的檢查，csv2 會在 rc=0 下讀回它，並把分隔列 `|---|---|---|` 當成第 1 筆交出。
+# 資料含逗號時欄數不符，本來就會大聲失敗；所以欄數檢查涵蓋不到比較單純的輸入：任何一張由
+# 簡短純值構成的表格。
 # ---------------------------------------------------------------------
 echo
 echo "--- T74: -md really is one-way / -md 真的是單向的 ---"
@@ -3517,8 +3105,8 @@ printf 'a,b\n"|---|---|",x\n' > "$TMP/t74_two.csv"
 assert_succeeds "T74e and a multi-column file containing such a value is untouched / 含有這種值的多欄檔案完全不受影響" -- \
     "$CSV2" -r -i "$TMP/t74_two.csv"
 
-# The case that already worked has to keep working, and for its own reason.
-# 原本就能運作的那個案例必須繼續運作，而且是基於它自己的理由。
+# Comma-bearing -md output stays refused, by the field-count check.
+# 含逗號的 -md 輸出仍被拒，靠的是欄數檢查。
 printf 'pkg,note\nzlib,"has, comma"\n' > "$TMP/t74_wc.csv"
 "$CSV2" -r -t -md -i "$TMP/t74_wc.csv" -so > "$TMP/t74_wc_md.csv" 2>/dev/null
 assert_fails "T74f comma-bearing -md output is still refused too / 含逗號的 -md 輸出同樣仍被拒" -- \
@@ -3527,33 +3115,17 @@ assert_fails "T74f comma-bearing -md output is still refused too / 含逗號的 
 # ---------------------------------------------------------------------
 # T75 -- an ambiguous column name is refused, not resolved by position.
 #
-# Round 27 asked whether --normalize governs COLUMN-NAME matching the way it
-# governs cell-value matching, and found it does not: an NFC-typed name matches
-# an NFD-stored header with or without the flag. The cause is that names are
-# compared with Swift's String ==, which is canonical equivalence, while values
-# are compared as bytes.
-#
-# That asymmetry is defensible -- NFC and NFD café are the same NAME to everyone
-# who reads it -- but chasing it down surfaced something the reader did not
-# reach: if two columns can be the same name, which one does an address mean?
-#
-# csv2 returned the first, at rc=0. `-update 1:note X` on a file with two
-# columns called `note` edited whichever came first and said nothing. CSV does
-# not forbid duplicate names and spreadsheets produce them. The caller asked to
-# change `note` and got one of two, chosen by position -- the incident this
-# project was built after, reproduced by the tool meant to prevent it.
+# Round 27. Column names are compared with Swift's String == (canonical
+# equivalence), cell values as bytes; NFC and NFD café are the same NAME. So
+# two columns can share a name, and CSV does not forbid duplicates. Resolving
+# `-update 1:note X` to whichever `note` comes first, at rc=0, would edit one
+# of two columns chosen by position. It is refused instead.
 #
 # T75 —— 有歧義的欄位名稱會被拒絕，而不是依位置解析。
-# 第 27 回合詢問 --normalize 是否像管「儲存格值」那樣管「欄位名稱」的比對，發現並不是：
-# 以 NFC 打出的名稱，不論有沒有那個旗標，都能匹配到 NFD 儲存的標頭。原因是名稱以 Swift 的
-# String == 比較（正規等價），而值是以位元組比較。
-# 那個不對稱說得過去——對每個讀到它的人來說，NFC 與 NFD 的 café 就是同一個「名字」——但
-# 追查它的過程中，浮出一件讀者沒有走到的事：如果兩個欄位可以是同一個名字，那一個位址到底
-# 指的是哪一個？
-# csv2 回傳第一個，rc=0。在一個有兩個 `note` 欄位的檔案上，`-update 1:note X` 會編輯位置在前
-# 的那一個，什麼也不說。CSV 並未禁止重複名稱，而試算表就會產生。呼叫端要求修改 `note`，
-# 拿到的是兩者之一、由位置決定——那正是本專案因之而生的那起事故，被那支本該防止它的工具
-# 重現了一次。
+# 第 27 回合。欄位名稱以 Swift 的 String == 比較（正規等價），儲存格值則以位元組比較；
+# NFC 與 NFD 的 café 是同一個「名字」。因此兩個欄位可以同名，而 CSV 也不禁止重複名稱。
+# 若在 rc=0 下把 `-update 1:note X` 解析成排在前面的那個 `note`，就會改到由位置決定的
+# 兩者之一。因此改為拒絕。
 # ---------------------------------------------------------------------
 echo
 echo "--- T75: an ambiguous column name is refused / 有歧義的欄位名稱會被拒絕 ---"
@@ -3588,26 +3160,18 @@ printf 'caf\xc3\xa9,cafe\xcc\x81\nNFC,NFD\n' > "$TMP/t75_both.csv"
 assert_fails "T75g but two columns differing only in normalisation collide, and that is refused too / 但兩個只差在正規化形式的欄位會相撞，同樣會被拒" -- \
     "$CSV2" -get 1:$'caf\xc3\xa9' -i "$TMP/t75_both.csv"
 
-# T75h-T75k — the same root cause through a worse door, found by round 28.
+# T75h-T75k — the same root cause through --json (round 28).
 #
 # A record object keys `fields` by column name, and a JSON object cannot hold
-# two values under one key. csv2 emitted the duplicate key: legal per RFC 8259,
-# which leaves the interpretation unspecified, and collapsed by every parser in
-# use -- Python's json and JavaScript's JSON.parse keep the last and discard the
-# first. csv2's own bytes held both values; the reader's parser destroyed one
-# before the reader saw it.
+# two values under one key. A duplicate key is legal per RFC 8259 but every
+# parser in use collapses it (Python's json and JSON.parse keep the last), so
+# one value is DESTROYED silently in the caller's parser and cannot be
+# recovered from the parsed object.
 #
-# That is worse than the addressing bug above. There an address picked a column
-# silently; here a value is DESTROYED silently and cannot be recovered from the
-# parsed object by any means.
-#
-# T75h–T75k —— 同一個根本原因，透過一扇更糟的門，由第 28 回合發現。
-# 一筆紀錄的物件以欄名作為 `fields` 的鍵，而 JSON 物件無法在同一個鍵下放兩個值。csv2 照樣
-# 輸出了重複鍵：依 RFC 8259 合法（它把如何解讀列為未定義），而實際使用中的每一個解析器都會
-# 收合它——Python 的 json 與 JavaScript 的 JSON.parse 都留最後一個、丟第一個。csv2 自己的
-# 位元組裡兩個值都在；是讀者的解析器在讀者看到之前毀掉了其中一個。
-# 那比上面的定址缺陷更糟：那裡是一個位址靜默地挑了一欄，這裡是一個值被靜默地毀掉，
-# 而且從解析後的物件裡再也無法以任何方式取回。
+# T75h–T75k —— 同一個根本原因，透過 --json（第 28 回合）。
+# 一筆紀錄的物件以欄名作為 `fields` 的鍵，而 JSON 物件無法在同一個鍵下放兩個值。重複鍵依
+# RFC 8259 合法，但實際使用的每個解析器都會收合它（Python 的 json 與 JSON.parse 都留最後
+# 一個），於是其中一個值在呼叫端的解析器裡被靜默毀掉，從解析後的物件再也取不回來。
 assert_fails "T75h record-shaped --json is refused when two columns share a name / 兩欄同名時，紀錄形狀的 --json 會被拒" -- \
     "$CSV2" -r --json -i "$TMP/t75.csv"
 "$CSV2" -r --json -i "$TMP/t75.csv" 2>"$TMP/t75_j.txt" >/dev/null
@@ -3632,20 +3196,15 @@ assert_contains "$("$CSV2" -r --json -i "$TMP/t75_ok.csv" 2>/dev/null | sed -n 2
 # T75l-T75m — the escape the refusal points at has to be complete, or the
 # refusal takes away expressiveness instead of returning it.
 #
-# Round 29 asked why -delete -col refuses at all, since "remove the note column"
-# has an unambiguous reading when there are two: remove both. The answer is in
-# plan.md, and it turns on the ambiguity being in the caller's BELIEF rather
-# than in the outcome -- someone typing that almost certainly thinks there is
-# one, and deleting both would leave that belief intact for every command they
-# write next. But the answer only holds if addressing by number really does
-# reach every arrangement, so that is asserted here rather than assumed.
+# Round 29. -delete -col refuses a duplicated name even though "remove both"
+# is unambiguous, because the ambiguity is in the caller's BELIEF (they think
+# there is one); see plan.md. That only holds if addressing by number reaches
+# every arrangement, so it is asserted here.
 #
 # T75l–T75m —— 拒絕所指出的那條出路必須是完整的，否則這條拒絕是在收走表達力，而不是把它交還。
-# 第 29 回合追問 -delete -col 為何也要拒絕，既然「移除 note 那一欄」在有兩個時有一個沒有歧義
-# 的讀法：兩個都移除。答案寫在 plan.md，關鍵在於有歧義的是呼叫者的「認知」而不是「結果」
-# ——會這樣打的人幾乎必然以為只有一個，而刪掉兩個會讓那個認知原封不動地留到他接下來寫的
-# 每一行指令裡。但這個答案唯有在「以欄號定址真的到得了每一種安排」時才站得住，因此在此斷言
-# 而非假定。
+# 第 29 回合。即使「兩個都刪」沒有歧義，-delete -col 仍拒絕重複名稱，因為有歧義的是呼叫者
+# 的「認知」（他以為只有一個），見 plan.md。這唯有在「以欄號定址到得了每一種安排」時才成立，
+# 因此在此斷言。
 assert_eq "$("$CSV2" -delete -col 1 -delete -col 3 -i "$TMP/t75.csv" -so 2>/dev/null | head -1)" 'ver' \
     "T75l both duplicated columns can be removed deliberately, by number / 兩個同名欄位都可以用欄號刻意移除"
 assert_eq "$("$CSV2" -delete -col 3 -i "$TMP/t75.csv" -so 2>/dev/null | head -1)" 'note,ver' \
@@ -3654,24 +3213,15 @@ assert_eq "$("$CSV2" -delete -col 3 -i "$TMP/t75.csv" -so 2>/dev/null | head -1)
 # ---------------------------------------------------------------------
 # T76 -- an over-limit -tail is refused, not quietly shortened.
 #
-# Round 31 pointed out that "upper bound on -tail N and -B N" is compatible
-# with three different behaviours: refuse, silently cap the result to the
-# limit, or apply only to some internal thing a request that size never
-# reaches. Only one of them cannot produce a silently short answer, and the
-# phrase did not say which one it was.
-#
-# The tool already refused. What was missing was any statement of it, and any
-# assertion -- so a later change that capped instead of refusing would have
-# been a silent regression with nothing to catch it, in the exact shape this
-# project exists to prevent: a partial answer wearing the clothes of a whole one.
+# Round 31. An upper bound on -tail N and -B N could mean refuse, silently cap,
+# or something internal. Only refusing cannot produce a silently short answer.
+# This pins it, so a change that caps instead would fail here rather than
+# return a partial answer that looks whole.
 #
 # T76 —— 超過上限的 -tail 會被拒絕，而不是被悄悄縮短。
-# 第 31 回合指出，「-tail N 與 -B N 的上限」這句話可以對應到三種不同的行為：拒絕、把結果
-# 靜默地截到上限、或只作用於某個「這種大小的請求根本碰不到」的內部東西。其中只有一種不會
-# 產生「靜默變短的答案」，而那句話並沒有說是哪一種。
-# 工具本來就是拒絕的。缺的是「沒有任何地方這樣寫」，也沒有任何斷言——因此日後若有人把它
-# 改成「截斷而非拒絕」，那會是一次無人攔截的靜默退步，而且形狀正是本專案存在所要防止的：
-# 一個穿著完整答案外衣的部分答案。
+# 第 31 回合。-tail N 與 -B N 的上限可以是拒絕、靜默截斷，或作用於某個內部東西。只有拒絕
+# 不會產生靜默變短的答案。這裡釘住它，日後若改成截斷，會在此失敗，而不是交出一個看起來
+# 完整的部分答案。
 # ---------------------------------------------------------------------
 echo
 echo "--- T76: an over-limit -tail is refused / 超過上限的 -tail 會被拒絕 ---"
@@ -3704,28 +3254,16 @@ assert_fails "T76g -B is bounded by the same variable and refuses too / -B 受�
 # ---------------------------------------------------------------------
 # T77 -- -decrypt refuses at the MARKER, never at the cipher.
 #
-# Round 32 asked what `-decrypt COLS` does when the column is not actually
-# encrypted, and listed the three readings its one-line description admits:
-# refuse, attempt it anyway and surface a ChaCha20-Poly1305 authentication
-# failure, or pass the column through unchanged. Each leads a caller somewhere
-# different, and the sentence chose none of them.
-#
-# The tool refuses by name, which is the friendly one: plaintext never reaches
-# the cipher, so the message is about the file rather than about cryptography.
-# A caller who mistypes a column name gets told they mistyped a column name.
-#
-# Also pinned here, which the round did not try: a HASHED column is refused
-# too. Hashing is one-way, and "undo the masking" is a natural thing to attempt
-# on a column that visibly holds digests.
+# Round 32. `-decrypt COLS` on a column that is not encrypted refuses by the
+# header marker, before the cipher: plaintext never reaches ChaCha20-Poly1305,
+# so the message is about the file rather than an authentication failure, and
+# nothing passes through unchanged. A HASHED column is refused too: hashing is
+# one-way, and undoing it is a natural thing to try on a column of digests.
 #
 # T77 —— -decrypt 在「標記」這一層拒絕，絕不會拖到密碼演算法那一層。
-# 第 32 回合追問：當某欄其實沒有被加密時，`-decrypt COLS` 會怎樣？並列出它那一行說明所允許
-# 的三種解讀：拒絕、照樣嘗試而拋出 ChaCha20-Poly1305 的驗證失敗、或原樣放行。三者會把呼叫端
-# 帶往不同的地方，而那句話一種都沒有選。
-# 工具的做法是「以名稱拒絕」，也就是友善的那一種：明文永遠不會抵達密碼演算法，因此訊息談的是
-# 這個檔案，而不是密碼學。打錯欄名的人，得到的是「你打錯了欄名」。
-# 另外在此釘住該回合沒有試的一項：被「雜湊」的欄位同樣會被拒絕。雜湊是單向的，而對一個
-# 明顯裝著摘要的欄位嘗試「把遮蔽解開」，是很自然的舉動。
+# 第 32 回合。對未加密的欄位下 `-decrypt COLS`，會在密碼演算法之前依標頭標記拒絕：明文
+# 不會抵達 ChaCha20-Poly1305，因此訊息談的是檔案而不是驗證失敗，也沒有任何東西被原樣放行。
+# 被「雜湊」的欄位同樣被拒：雜湊是單向的，而對裝著摘要的欄位嘗試解開是很自然的舉動。
 # ---------------------------------------------------------------------
 echo
 echo "--- T77: -decrypt refuses at the marker / -decrypt 在標記層拒絕 ---"
@@ -3765,30 +3303,18 @@ assert_same "$PKG" "$TMP/t77_d.csv" \
 # ---------------------------------------------------------------------
 # T78 -- --zh falls back on a one-header file, and --json is how you assert.
 #
-# Round 35 found the one silent substitution left in this tool: --zh on a .csv
-# produces output byte-identical to --en, with no signal that the Chinese row
-# it asked for does not exist. Its framing was the right one -- the silence
-# should be a decision rather than an omission.
-#
-# The decision is to keep it. --zh is a DISPLAY preference, not a selector over
-# data: refusing would break any script walking a mix of .csv and .csv2 for a
-# cosmetic reason. And it cannot be mistaken for success -- you asked for
-# Chinese names and the output visibly holds English ones, which is different
-# rather than plausible-but-wrong, unlike every defect this session has fixed.
-#
-# What the round was really reaching for -- asserting a file is bilingual --
-# already has an instrument, and --zh was never it. Both are pinned here so the
-# fallback stays a decision.
+# Round 35. --zh on a .csv produces output byte-identical to --en, and that is
+# a decision, not an omission. --zh is a DISPLAY preference, not a selector
+# over data: refusing would break any script walking a mix of .csv and .csv2.
+# It cannot pass for success either: English names appear where Chinese were
+# asked for, which is visibly different rather than plausible-but-wrong.
+# Asserting that a file is bilingual is --json's "headers" count, not --zh.
 #
 # T78 —— 對只有一列標頭的檔案，--zh 會退回；而「斷言」該用 --json。
-# 第 35 回合找到了這支工具裡僅存的一處靜默替代：對 .csv 使用 --zh，輸出與 --en 逐位元相同，
-# 而它所要求的那一列中文標頭並不存在，卻沒有任何訊號。它的措辭是對的——那份沉默應該是一個
-# 決定，而不是一個疏漏。
-# 決定是「保留」。--zh 是一種「顯示」偏好，不是對資料的選取：拒絕它會為了美觀的理由弄壞任何
-# 走遍 .csv 與 .csv2 混合檔案的腳本。而它也不會被誤認為成功——你要求中文欄名，輸出裡明顯是
-# 英文欄名，那是「不一樣」而不是「看起來對但其實錯」，與這一輪修掉的每一個缺陷都不同。
-# 而該回合真正想做的事——斷言一個檔案是雙語的——本來就有對應的工具，而那從來不是 --zh。
-# 兩者都在此釘住，好讓這個退回保持為一個「決定」。
+# 第 35 回合。對 .csv 使用 --zh，輸出與 --en 逐位元相同，這是一個決定而非疏漏。--zh 是
+# 「顯示」偏好，不是對資料的選取：拒絕它會弄壞任何走遍 .csv 與 .csv2 混合檔案的腳本。
+# 它也不會被誤認為成功：要中文欄名卻出現英文欄名，是明顯的「不一樣」，而不是看似對其實錯。
+# 要斷言檔案是雙語的，用 --json 的 "headers" 計數，而不是 --zh。
 # ---------------------------------------------------------------------
 echo
 echo "--- T78: --zh falls back; --json asserts / --zh 會退回；--json 才是斷言的工具 ---"
@@ -3803,10 +3329,9 @@ assert_succeeds "T78b and does not fail, because it is a display preference / �
     "$CSV2" -contains zlib --zh -i "$TMP/t78_one.csv"
 
 # The fallback is visible, not plausible: English names where Chinese were
-# asked for. That is what makes it different from the defects this session
-# fixed, and it is the load-bearing half of the decision.
-# 這個退回是「看得見」的，不是「看似合理」的：要求中文卻得到英文欄名。那正是它與這一輪修掉的
-# 那些缺陷不同的地方，也是這個決定裡承重的那一半。
+# asked for. That is the load-bearing half of the decision.
+# 這個退回是「看得見」的，不是「看似合理」的：要求中文卻得到英文欄名。這是這個決定裡
+# 承重的那一半。
 assert_contains "$("$CSV2" -contains zlib --zh -i "$TMP/t78_one.csv" 2>/dev/null)" 'pkg' \
     "T78c the fallback is visible in the output, not disguised / 那個退回在輸出裡看得見，沒有被偽裝"
 assert_contains "$("$CSV2" -contains zlib --zh -i "$TMP/t78_two.csv2" 2>/dev/null)" '套件' \
@@ -3820,67 +3345,21 @@ assert_contains "$("$CSV2" -head 1 -t --json -i "$TMP/t78_two.csv2" 2>/dev/null 
     "T78f and two for a .csv2, which is how a caller asserts bilinguality / 對 .csv2 則回報兩列，那才是呼叫端斷言雙語的方式"
 
 # ---------------------------------------------------------------------
-# The index asserted a property of the file that nothing ever derived, and
-# the O(n) proof offered for exactly this doubt did not check it.
+# T79 -- the index's `no_embedded_newlines` claim is derived, and re-checked.
 #
-# An index carries `no_embedded_newlines`. The parallel path consumes it to
-# decide that a line is a record. Three call sites set it, and two of them
-# passed a constant: one wrote `spansLines: false`, the other wrote
-# `rec.line != r.line || false` where `r` is `rec` with only `number`
-# changed -- a comparison that cannot be true. So EVERY index --build-index
-# ever wrote claimed the property, whether the file had it or not.
+# The parallel path trusts `no_embedded_newlines` to decide that a line is a
+# record. If that flag is set on a file whose quoted field holds a newline,
+# every record after it is numbered one too high, at rc=0. Grid offsets and
+# record count survive such a file intact, so --verify-index must re-derive
+# the flag itself, not just check those. --no-index must also keep the
+# parallel eligibility check from loading a sidecar. INDEX_VERSION 3 makes
+# older sidecars, whose flag nothing inside them can verify, be ignored.
 #
-# The consequence needed no tampering and no unusual file. Take a CSV with
-# prose in quotes -- TARGET_PACKAGES.csv's `status_notes` is one, and is the
-# reason this project exists -- put one newline inside one quoted field, and:
-#
-#     --build-index    index built
-#     --verify-index   index OK                                    rc=0
-#     -contains        150001:2   (300001 records)                 rc=0
-#     forced single    150000:2
-#     python3 csv      record 150000, 300000 records
-#
-# The wrong record number, at rc=0, with the documented proof saying the
-# index was fine. That is this project's own failure mode, arriving through
-# the one instrument the README nominates for ruling it out.
-#
-# --verify-index missed it for a reason worth keeping: it checked the grid
-# offsets and the record count, and BOTH SURVIVE this edit intact. Every
-# record still begins exactly where the index says, and there are still
-# exactly as many. The only thing that changed was a claim in the header
-# that nothing re-derived.
-#
-# And the escape hatch did not escape. `--no-index` is documented as "never
-# read or write a .index sidecar"; it did not write one, but the parallel
-# eligibility check loaded one anyway and never looked at o.noIndex. So a
-# user who suspected the sidecar and reached for --no-index still got the
-# sidecar's answer.
-#
-# Four changes: one function answers "does this record span lines" for all
-# three call sites, --verify-index re-derives it, --no-index is honoured
-# where it was not, and INDEX_VERSION goes to 3 so the sidecars already on
-# disk -- which no check inside them can catch -- are ignored rather than
-# trusted.
-#
-# T79 —— 索引宣告了一個「沒有任何東西推導過」的檔案性質，而為了這個疑慮才提供的 O(n)
-# 證明並沒有檢查它。
-# 索引帶著 `no_embedded_newlines`，平行路徑用它來斷定「一行就是一筆」。設定它的呼叫點有
-# 三個，其中兩個傳的是常數：一個寫 `spansLines: false`，另一個寫
-# `rec.line != r.line || false`，而 `r` 是只改了 `number` 的 `rec`——那個比較不可能為真。
-# 於是 --build-index 寫出的每一份索引都宣稱自己有這個性質，不管檔案有沒有。
-# 造成的後果不需要竄改、也不需要特殊檔案：拿一份引號內含散文的 CSV（TARGET_PACKAGES.csv
-# 的 `status_notes` 就是，而那正是本專案存在的理由），在某個引號欄位裡放一個換行，然後
-# --verify-index 說 OK、-contains 回報 150001、強制單執行緒回報 150000、python3 的 csv
-# 模組說是 150000。錯的紀錄號、rc=0，而文件指名的那個證明說索引沒問題。
-# --verify-index 漏掉它的原因值得記下來：它檢查的是格點偏移量與筆數，而這兩者在這個改動
-# 下「都完好無損」——每一筆仍然從索引所說的位元組開始，筆數也一樣。變的只是檔頭裡那個沒有
-# 任何東西重新推導過的宣稱。
-# 而逃生口也逃不掉：`--no-index` 文件寫的是「絕不讀寫 .index sidecar」，它確實沒有寫，但
-# 平行資格檢查仍然載入了一份，而且從來沒看過 o.noIndex。於是因為懷疑 sidecar 而伸手去拿
-# --no-index 的人，拿到的還是 sidecar 的答案。
-# 四項修改：由一個函式為三個呼叫點回答「這一筆有沒有跨行」、--verify-index 重新推導它、
-# 在原本沒有遵守的地方遵守 --no-index，以及把 INDEX_VERSION 推進到 3，讓已經在磁碟上、
-# 且內部沒有任何檢查抓得到的那些 sidecar 被忽略而不是被信任。
+# T79 —— 索引的 `no_embedded_newlines` 宣稱必須經過推導，並且會被重新檢查。
+# 平行路徑依賴 `no_embedded_newlines` 來斷定「一行就是一筆」。若某個引號欄位內含換行的檔案
+# 被標了這個旗標，其後每一筆的紀錄號都會多一，而且 rc=0。這種檔案的格點偏移量與筆數都完好，
+# 因此 --verify-index 必須自己重新推導該旗標，而不只是檢查那兩項。--no-index 也必須讓平行
+# 資格檢查不載入 sidecar。INDEX_VERSION 3 讓舊的 sidecar（其旗標無法從內部驗證）被忽略。
 # ---------------------------------------------------------------------
 echo
 echo "--- T79: the index's claim about the file, re-derived / 索引對檔案的宣稱，重新推導 ---"
@@ -3891,14 +3370,11 @@ echo "--- T79: the index's claim about the file, re-derived / 索引對檔案的
 # The needle sits at record 150, AFTER the spanning one, and that placement is
 # the test. A record that spans lines still STARTS on a line boundary, so its
 # own number survives the miscount; everything after it is shifted by one. A
-# first draft of this fixture put the needle inside the spanning record and
-# passed against the unfixed build -- it was asserting on the one record the
-# defect cannot reach.
+# needle inside the spanning record would pass even with the defect present.
 # 真正合法的 RFC 4180。第 10 筆在引號欄位內含一個換行——沒有竄改，CSV 裡的散文本來就長這樣。
 # needle 放在第 150 筆，也就是跨行那一筆「之後」，而那個位置正是這個測試本身。跨行的紀錄
 # 自己仍然從一個行邊界開始，所以它自己的號碼在誤數中存活下來；被推移一格的是它之後的每一筆。
-# 這個 fixture 的第一版把 needle 放進跨行的那一筆裡，結果在未修正的建置上也通過——它斷言的
-# 正好是這個缺陷碰不到的那一筆。
+# 若把 needle 放進跨行的那一筆裡，即使缺陷存在也會通過。
 { print -r -- 'a,b'
   for i in {1..300}; do
       if [[ $i == 10 ]]; then print -r -- "$i,\"prose spanning"; print -r -- "two lines\""
@@ -3929,8 +3405,9 @@ p=$(CSV2_INDEX_MIN_BYTES=1 CSV2_PARALLEL_MIN_BYTES=1 path_of -contains needle -i
 assert_contains "$p" "records a record spanning lines" \
     "T79c the reason names the index's finding, not 'build one' -- rebuilding would reach the same conclusion / 理由指名索引的發現，而不是叫人「建一個」——重建會得到相同結論"
 
-# The fast path must survive the fix, or the fix is a different defect.
-# 快路徑必須在修正後存活，否則這個修正只是換了一個缺陷。
+# The fast path must still be taken on a clean file, or the check has
+# simply disabled it.
+# 乾淨的檔案仍必須走快路徑，否則這道檢查只是把它關掉了。
 p=$(CSV2_INDEX_MIN_BYTES=1 CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=512 \
     path_of -contains needle -i "$TMP/t79_clean.csv")
 assert_contains "$p" "parallel:" \
@@ -3939,10 +3416,9 @@ assert_contains "$p" "parallel:" \
 assert_succeeds "T79e --verify-index passes on an honestly built index / 誠實建出來的索引通過 --verify-index" -- \
     env CSV2_INDEX_MIN_BYTES=1 "$CSV2" --verify-index -i "$TMP/t79_nl.csv"
 
-# --no-index: documented as "never read or write". The write half was already
-# true; the read half was not, and only the chosen path showed it.
-# --no-index：文件寫的是「絕不讀寫」。「寫」那一半本來就成立，「讀」那一半不成立，
-# 而唯一顯示出來的地方是「走了哪一條路」。
+# --no-index means "never read or write". The read half is visible only in
+# which path was chosen.
+# --no-index 的意思是「絕不讀寫」。「讀」那一半只能從走了哪一條路看出來。
 p=$(CSV2_INDEX_MIN_BYTES=1 CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=512 \
     path_of -contains needle --no-index -i "$TMP/t79_clean.csv")
 assert_contains "$p" "single-threaded: --no-index" \
@@ -3951,10 +3427,9 @@ assert_eq "$(CSV2_INDEX_MIN_BYTES=1 "$CSV2" -contains needle --no-index -i "$TMP
           "$(CSV2_PARALLEL_MIN_BYTES=999999999 "$CSV2" -contains needle -i "$TMP/t79_clean.csv" 2>/dev/null)" \
     "T79g and its answer is the same one, which is the point of refusing / 而它的答案不變，那正是拒絕的意義"
 
-# -tail builds a sidecar as a side effect. That builder passed the constant
-# `false`, so it produced the same lie without anyone asking for an index.
-# -tail 會順手建一份 sidecar。那個建立點傳的是常數 `false`，因此不需要任何人要求建索引，
-# 它就會產生同樣那個謊。
+# -tail builds a sidecar as a side effect, through its own call site, so that
+# builder must derive the flag too.
+# -tail 會經由自己的呼叫點順手建一份 sidecar，因此那個建立點同樣必須推導這個旗標。
 rm -f "$TMP/t79_nl.csv.index"
 CSV2_INDEX_MIN_BYTES=1 "$CSV2" -tail 1 -t -i "$TMP/t79_nl.csv" >/dev/null 2>&1
 p=$(CSV2_INDEX_MIN_BYTES=1 CSV2_PARALLEL_MIN_BYTES=1 path_of -contains needle -i "$TMP/t79_nl.csv")
@@ -3963,29 +3438,24 @@ assert_contains "$p" "records a record spanning lines" \
 
 # The O(1) stamp cannot see a same-size, same-mtime rewrite -- the README says
 # so, and offers --verify-index as the O(n) proof for exactly that case. The
-# proof has to cover the claim the parallel path consumes, not just the two
-# that happened to be right. `touch -t` sets nanoseconds to zero on both
+# proof has to cover the claim the parallel path consumes, not just offsets
+# and count. `touch -t` sets nanoseconds to zero on both
 # platforms, so the stamp is restored exactly and the index really is loaded;
 # if it were not, --verify-index would say "no usable index" instead.
 # O(1) 戳記看不見「大小相同、mtime 相同」的原地改寫——README 這樣寫，並為這個情況提供
 # --verify-index 作為 O(n) 的證明。那個證明必須涵蓋平行路徑真正取用的那個宣稱，而不只是
-# 那兩個剛好是對的。`touch -t` 在兩個平台上都把奈秒設為 0，因此戳記被精確還原、索引真的
+# 偏移量與筆數。`touch -t` 在兩個平台上都把奈秒設為 0，因此戳記被精確還原、索引真的
 # 有被載入；否則 --verify-index 會說「沒有可用的索引」而不是回報不符。
-# Fixed-width records, so the byte to patch is arithmetic. The first version
-# found it with `grep -abo`, which passed on macOS and FAILED IN THE GUEST --
-# busybox's grep need not offer -b, and a test that cannot locate the byte
-# patches the wrong one and then asserts on something else entirely. The
-# offset is checked below before it is used, so this can no longer happen
-# quietly on a platform whose tools differ.
+# Fixed-width records, so the byte to patch is arithmetic rather than found
+# with `grep -abo`: busybox's grep need not offer -b, and a test that cannot
+# locate the byte patches the wrong one. The offset is checked before use.
 #
 #   header  'a,b' + LF                                    =  4 bytes
 #   record  NNN , " twelve-chars " LF                     = 19 bytes
 #   record N starts at 4 + (N-1)*19 ; its payload at +5
 #
-# 固定寬度的紀錄，因此要修改的位元組是算出來的。第一版用 `grep -abo` 找它，在 macOS 上
-# 通過而「在 guest 內失敗」——busybox 的 grep 不一定提供 -b，而一個找不到那個位元組的測試
-# 會去改錯的那一個，然後斷言在完全不同的東西上。下面在使用之前先檢查那個偏移量，因此這件事
-# 不會再在一台工具不同的機器上安靜地發生。
+# 固定寬度的紀錄，因此要修改的位元組是算出來的，而不是用 `grep -abo` 找：busybox 的 grep
+# 不一定提供 -b，找不到那個位元組的測試會改錯位置。偏移量在使用前先檢查。
 { print -r -- 'a,b'
   for i in {1..300}; do
       if [[ $i == 150 ]]; then printf '%03d,"needle here."\n' $i
@@ -4024,20 +3494,14 @@ assert_fails "T79m and exits non-zero, because an index that lies is worse than 
 # T90 -- a raw value must not be written into a column the FILE declares
 # transformed, by any verb.
 #
-# Round 37, defect W. `-update 1:secret NEW` on a file whose header reads
-# `secret:enc:<fp>:<salt>` was accepted at rc=0. The plaintext went in, and
-# `-decrypt` then stopped at that cell -- so records 2 and 3, whose ciphertext
-# was intact and which the edit never touched, could not be read back either.
-# The audit log recorded it as `update 1:secret: <redacted> -> <redacted>`,
-# because redaction follows the file's declaration: the protection worked
-# perfectly on a value that should never have been written, and in doing so it
-# was the only record of the damage and it concealed it.
+# Round 37, defect W. A raw value written into a column whose header reads
+# `secret:enc:<fp>:<salt>` makes `-decrypt` stop at that cell, so later records
+# with intact ciphertext cannot be read back either, and the redacted log
+# (`<redacted> -> <redacted>`) hides the damage.
 #
-# Four verbs write raw values and all four had to be closed. The first fix
-# covered -update and -delete -cell only, and -append walked past it into the
-# identical destruction -- which is why -append --in-place is asserted here
-# separately: it never reaches runEdit, so a guard placed there does nothing
-# for the O(1) path, the one most likely to be used on a large protected file.
+# Four verbs write raw values and all four are closed. -append --in-place is
+# asserted separately: it never reaches runEdit, so a guard there does nothing
+# for the O(1) path, the one most likely used on a large protected file.
 #
 # What stays allowed is as important as what is refused. Transforming and
 # editing in the SAME run is coherent -- the new value is what gets encrypted
@@ -4045,15 +3509,11 @@ assert_fails "T79m and exits non-zero, because an index that lies is worse than 
 # of a protected file is nobody's business but the caller's.
 #
 # T90 —— 任何動詞都不得把原始值寫進一個「檔案自己宣告為已轉換」的欄位。
-# 第 37 回合，編號 W。對標頭為 `secret:enc:<指紋>:<salt>` 的檔案下
-# `-update 1:secret NEW`，會以 rc=0 被接受。明文寫了進去，而 `-decrypt` 接著停在那一格
-# ——於是第 2、3 筆（密文完好、且該次編輯從未碰過）也一起讀不回來。稽核紀錄寫的是
-# `update 1:secret: <redacted> -> <redacted>`，因為遮蔽依據的是檔案的宣告：那道保護在一個
-# 「根本不該被寫下去的值」上運作得完美無缺，而它同時是損害唯一的紀錄，並且掩蓋了它。
-# 有四個動詞會寫入原始值，四個都必須關上。第一版的修正只涵蓋 -update 與 -delete -cell，
-# 而 -append 直接走過去造成一模一樣的破壞——這也是為什麼 -append --in-place 在此單獨斷言：
-# 它不會走到 runEdit，因此放在那裡的守衛對 O(1) 路徑毫無作用，而那正是最可能被用在一個
-# 大型受保護檔案上的路徑。
+# 第 37 回合，編號 W。把原始值寫進標頭為 `secret:enc:<指紋>:<salt>` 的欄位，會讓 `-decrypt`
+# 停在那一格，之後密文完好的紀錄也一起讀不回來，而遮蔽過的 log（`<redacted> -> <redacted>`）
+# 會掩蓋這個損害。
+# 有四個動詞會寫入原始值，四個都關上。-append --in-place 在此單獨斷言：它不會走到 runEdit，
+# 因此放在那裡的守衛對 O(1) 路徑毫無作用，而那正是最可能被用在大型受保護檔案上的路徑。
 # 「什麼仍然被允許」與「什麼被拒絕」一樣重要。在「同一次執行」裡轉換並編輯是說得通的——
 # 被加密的就是那個新值——因為輸入的標頭還沒有標記；而一個受保護檔案裡的一般欄位，
 # 是呼叫者自己的事。
@@ -4077,8 +3537,8 @@ assert_fails "T90d -append -o into such a file is refused / -append 走 -o 同�
     "$CSV2" -append 'x,1,RAW' -i "$TMP/t90_enc.csv" -o "$TMP/t90_out.csv" -t
 
 # The O(1) path does not go through runEdit, so it needs its own guard and its
-# own assertion. This is the case the first fix missed.
-# O(1) 路徑不經過 runEdit，因此它需要自己的守衛與自己的斷言。這正是第一版修正漏掉的那個。
+# own assertion.
+# O(1) 路徑不經過 runEdit，因此它需要自己的守衛與自己的斷言。
 assert_fails "T90e -append --in-place, the O(1) path that skips runEdit, is refused too / -append --in-place（跳過 runEdit 的 O(1) 路徑）同樣被拒絕" -- \
     "$CSV2" -append 'x,1,RAW' -i "$TMP/t90_enc.csv" --in-place
 assert_same "$TMP/t90_enc.csv" "$TMP/t90_enc.bak" \
@@ -4117,34 +3577,33 @@ assert_succeeds "T90m an ordinary column of a protected file is still editable /
 # ---------------------------------------------------------------------
 # T91 -- the append fast path validates what the rewrite path validates.
 #
-# Round 37, defects X and Y. `-append --in-place` read only the header, so for
-# a `.csv` it validated nothing about the records already there. A file ending
-# `zlib,1.3` where the header has three columns took the append at rc=0 and
-# produced a file csv2 itself then refused to read; the SAME input through `-o`
-# was correctly refused. A file ending inside an unclosed quote absorbed the
-# appended record into that field, so a write that reported success had not
-# happened.
+# Round 37, defects X and Y. `-append --in-place` must validate the tail of the
+# file, not just its header. A file ending in a short record (`zlib,1.3` under
+# three columns) would otherwise take the append at rc=0 and become a file
+# csv2 refuses to read, while the same input via `-o` is refused. A file ending
+# inside an unclosed quote would absorb the appended record into that field,
+# so a write reported as successful would not have happened.
 #
 # The check runs only when the file does not end in a newline, which is the
 # only state in which the tail can be half-written -- so the O(1) promise is
 # kept for every file that ends properly, and T91f asserts that rather than
 # trusting it.
 #
-# --truncate-partial is refused here rather than honoured, and that is a
-# decision made while fixing this: honouring it dropped the incomplete record
-# from the PARSE and left it in the FILE, then appended a complete record after
-# it -- rc=0, unreadable next time. Appending adds bytes; it cannot remove any.
+# --truncate-partial is refused here rather than honoured: honouring it would
+# drop the incomplete record from the PARSE but leave it in the FILE, then
+# append a complete record after it -- rc=0, unreadable next time. Appending
+# adds bytes; it cannot remove any.
 #
 # T91 —— 追加快路徑要驗證「重寫路徑會驗證的東西」。
-# 第 37 回合，編號 X 與 Y。`-append --in-place` 只讀標頭，因此對 `.csv` 而言，它對已經在那裡
-# 的紀錄不做任何驗證。一個以 `zlib,1.3` 結尾、而標頭有三欄的檔案，會以 rc=0 接受追加並產生
-# 一個 csv2 自己拒讀的檔案；**同一份輸入**走 `-o` 則被正確拒絕。一個結束在未閉合引號裡的檔案，
-# 會把追加的那一筆吸進那個欄位，於是一次回報成功的寫入其實沒有發生。
+# 第 37 回合，編號 X 與 Y。`-append --in-place` 必須驗證檔案的結尾，而不只是標頭。否則一個
+# 以短紀錄結尾（三欄標頭下的 `zlib,1.3`）的檔案會以 rc=0 接受追加，變成 csv2 自己拒讀的檔案，
+# 而同一份輸入走 `-o` 卻會被拒。結束在未閉合引號裡的檔案，會把追加的那一筆吸進那個欄位，
+# 於是一次回報成功的寫入其實沒有發生。
 # 這個檢查只在檔案未以換行結尾時執行，而那是唯一「結尾可能只寫了一半」的狀態——因此對每一個
 # 正常結尾的檔案，O(1) 的承諾仍然成立，而 T91f 斷言它，不是相信它。
-# --truncate-partial 在此是被拒絕而非被接受，那是修這件事時做的決定：接受它會把不完整的紀錄
-# 從「解析」中丟掉、卻留在「檔案」裡，然後在其後追加一筆完整的——rc=0，下一次就讀不了。
-# 追加只會加上位元組，它移除不了任何東西。
+# --truncate-partial 在此是被拒絕而非被接受：接受它會把不完整的紀錄從「解析」中丟掉、卻留在
+# 「檔案」裡，然後在其後追加一筆完整的——rc=0，下一次就讀不了。追加只會加上位元組，它移除
+# 不了任何東西。
 # ---------------------------------------------------------------------
 echo
 echo "--- T91: the append fast path validates the file it appends to / 追加快路徑會驗證它所追加的檔案 ---"
@@ -4164,10 +3623,8 @@ assert_fails "T91c -append --in-place onto an unclosed quote is refused / 對「
 assert_same "$TMP/t91_quote.csv" "$TMP/t91_quote.bak" \
     "T91d and that file is untouched too / 那個檔案同樣原封不動"
 
-# The point of X: the two paths must now agree. Before the fix they disagreed
-# on the same bytes, which is what made it impossible to notice.
-# X 的重點：兩條路徑現在必須一致。修正之前它們對「同一份位元組」給出相反的結果，
-# 而那正是它難以被發現的原因。
+# The point of X: the two paths must agree on the same bytes.
+# X 的重點：兩條路徑對同一份位元組必須給出相同的結果。
 "$CSV2" -append 'zstd,1.5.7,compression' -i "$TMP/t91_short.csv" -o "$TMP/t91_o.csv" >/dev/null 2>&1
 rc_o=$?
 "$CSV2" -append 'zstd,1.5.7,compression' -i "$TMP/t91_short.csv" --in-place >/dev/null 2>&1
@@ -4177,9 +3634,9 @@ assert_eq "$rc_o" "$rc_ip" \
 
 # A complete record that merely lacks its final newline is NOT damaged, and
 # appending to it must still work -- csv2 supplies the newline. Without this,
-# the fix above could have been "refuse everything without a trailing LF".
+# the guard above could be "refuse everything without a trailing LF".
 # 一筆「只是少了結尾換行」的完整紀錄並沒有損壞，對它追加必須仍然可行——csv2 會補上那個換行。
-# 少了這一條，上面的修正大可以是「凡是沒有結尾 LF 一律拒絕」。
+# 少了這一條，上面的守衛大可以是「凡是沒有結尾 LF 一律拒絕」。
 assert_succeeds "T91f a complete record with no final newline still accepts an append / 「完整但少了結尾換行」的檔案仍可被追加" -- \
     "$CSV2" -append 'zstd,1.5.7,compression' -i "$TMP/t91_ok.csv" --in-place
 assert_eq "$("$CSV2" -r -i "$TMP/t91_ok.csv" 2>/dev/null | wc -l | tr -d ' ')" "3" \
@@ -4206,27 +3663,21 @@ assert_fails "T91i --truncate-partial with -append is refused, not half-honoured
     "$CSV2" -append 'zstd,1.5.7,compression' --truncate-partial -i "$TMP/t91_quote.csv" --in-place
 assert_same "$TMP/t91_quote.csv" "$TMP/t91_quote.bak" \
     "T91j and it left the file alone rather than appending after the incomplete record / 而它沒有動那個檔案，不是在不完整的紀錄後面追加"
-# The message no longer says "the incomplete record", because this refusal
-# fires on the flags alone -- before the file is read -- and so fires on files
-# that have no torn tail at all. What it must still carry is the reason the two
-# cannot be honoured together, and the way through.
-# 訊息不再說「那筆不完整的紀錄」，因為這條拒絕只看旗標——在讀檔之前——因此對「根本沒有撕裂
-# 尾巴」的檔案也會觸發。它必須仍然帶著「兩者為何無法同時被滿足」的理由，以及走得通的那條路。
+# The message does not say "the incomplete record": this refusal fires on the
+# flags alone, before the file is read, so it fires on files with no torn tail
+# too. It carries why the two cannot be honoured together, and the way through.
+# 訊息不說「那筆不完整的紀錄」：這條拒絕只看旗標、在讀檔之前觸發，因此對沒有撕裂尾巴的
+# 檔案也會觸發。它帶著「兩者為何無法同時被滿足」的理由，以及走得通的那條路。
 assert_contains "$tp_msg" "can only add bytes after it" \
     "T91k the message says why, and names the way through / 訊息說出理由，並指出走得通的那條路"
 assert_contains "$tp_msg" "csv2 -r -t --truncate-partial" \
     "T91k2 and the way through is a command, not advice / 而那條路是一個指令，不是一句建議"
 
-# T91i/T91j above use a file whose last record is INCOMPLETE, and they passed
-# for as long as they have existed -- while the refusal they assert was
-# conditional on exactly that. On a healthy file the same combination was
-# accepted at rc=0, and both READMEs said in two places that it is refused.
-# The test was real, the assertion was real, and the case it never reached was
-# the common one.
-# 上面的 T91i／T91j 用的是「最後一筆不完整」的檔案，而它們從存在以來一直通過——同時，它們
-# 所斷言的那個拒絕，其成立條件正好就是「最後一筆不完整」。在一個健康的檔案上，同樣的組合
-# 會以 rc=0 被接受，而兩份 README 在兩個地方都說它被拒絕。測試是真的、斷言是真的，而它從未
-# 走到的那個情況，才是常見的那個。
+# T91i/T91j use a file whose last record is INCOMPLETE, so they cannot tell an
+# unconditional refusal from one that fires only on a torn tail. The README
+# says the combination is refused, so it is asserted on a HEALTHY file too.
+# 上面的 T91i／T91j 用的是「最後一筆不完整」的檔案，因此分不出「無條件拒絕」與「只在尾巴
+# 撕裂時才拒絕」。README 說這個組合會被拒，因此在「健康的檔案」上也要斷言。
 print -r -- 'pkg,version,purpose' > "$TMP/t91_ok.csv"
 print -r -- 'zlib,1.3.1,compression' >> "$TMP/t91_ok.csv"
 cp "$TMP/t91_ok.csv" "$TMP/t91_ok.bak"
@@ -4246,44 +3697,32 @@ assert_succeeds "T91m and reads back cleanly / 而且讀得回來" -- \
 # ---------------------------------------------------------------------
 # T92 -- the log records the value in full, and one entry stays one line.
 #
-# Round 38 found the README promising old and new values "in full; that is the
-# point of an audit trail" while the log cut them at 40 characters. In
-# TARGET_PACKAGES.csv, `status_notes` -- the column whose corruption is the
-# reason this project exists -- reaches 878 bytes, so for exactly that column
-# the log preserved nothing usable.
+# Round 38. The README promises old and new values "in full; that is the point
+# of an audit trail", and values such as `status_notes` reach 878 bytes, so the
+# log does not truncate.
 #
-# Asking what removing the limit would COST turned up the defect the round did
-# not find, and it is the one that had to be fixed first. Logger.redact()
-# wrote the value with quotes and NO escaping, into a format that is one entry
-# per line. A newline inside a value therefore opened a new line whose entire
-# content the value chose:
+# The log is one entry per line, so values are ESCAPED. Unescaped, a newline in
+# a value opens a new line whose whole content the value chooses -- a forged
+# entry with an attacker-picked timestamp:
 #
 #   …INFO  update 1:note: "harmless" -> "x"
-#   2020-01-01T00:00:00+00:00 INFO  nothi…[+11 more chars]"     <- forged
+#   2020-01-01T00:00:00+00:00 INFO  nothing happened"     <- forged
 #
-# The truncation did not prevent that. It only shortened the forged line. So
-# lifting the limit alone would have upgraded the forgery from truncated to
-# complete and convincing. Escape first, then lift.
+# Truncation never prevented that, it only shortened the forged line; lifting
+# the limit without escaping would make the forgery complete.
 #
-# The size decision (2026-08-19): unbounded, with a WARN above 1 MiB. A cap
-# would be an audit trail that drops data, which is the thing being fixed; the
-# warning exists so the person hears about the megabyte at the time rather
-# than finding it in a disk graph later. Note it can only be reached through
-# the OLD value -- a new value that large cannot be passed, because ARG_MAX
-# rejects the command line first.
+# Size: unbounded, with a WARN above 1 MiB. A cap would be an audit trail that
+# drops data; the warning makes the megabyte heard at the time. It is reachable
+# only through the OLD value: ARG_MAX refuses a new value that large first.
 #
 # T92 —— log 完整記錄那個值，而一筆紀錄仍然只佔一行。
-# 第 38 回合發現 README 承諾新舊值「完整記錄；那正是稽核軌跡的意義」，而 log 在第 40 個字元
-# 把它們切斷。`TARGET_PACKAGES.csv` 的 `status_notes`——這個專案存在的理由就是那一欄被改壞
-# ——長達 878 bytes，因此恰恰對那一欄，log 保留不下任何可用的東西。
-# 追問「移除那個上限要付出什麼代價」，翻出了該回合沒有找到、而且必須先修的那個缺陷：
-# Logger.redact() 把值加上引號後直接寫進一個「一行一筆」的格式，完全沒有跳脫。於是值裡的
-# 一個換行就會開啟新的一行，而那一行的全部內容由值決定——一筆時間戳由攻擊者挑選的偽造紀錄。
-# 截斷擋不住那件事，它只是把偽造的那一行剪短。因此「只解除上限」會讓偽造從被剪斷變成完整。
-# 先跳脫，再解除。
-# 大小的決定（2026-08-19）：無界，超過 1 MiB 發 WARN。設上限等於「會丟資料的稽核軌跡」，
-# 而那正是現在要修的東西；警告的存在，是為了讓人當場聽到那一 MB，而不是事後在磁碟用量圖上
-# 發現。注意它只能經由「舊值」達到——那麼大的新值傳不進來，命令列會先被 ARG_MAX 拒絕。
+# 第 38 回合。README 承諾新舊值「完整記錄；那正是稽核軌跡的意義」，而像 `status_notes` 這種
+# 值長達 878 bytes，因此 log 不截斷。
+# log 是「一行一筆」的格式，因此值會被「跳脫」。不跳脫的話，值裡的一個換行就會開啟新的一行，
+# 而那一行的全部內容由值決定——一筆時間戳由攻擊者挑選的偽造紀錄。截斷從來擋不住這件事，
+# 只是把偽造的那一行剪短；不跳脫就解除上限，偽造就會變得完整。
+# 大小：無界，超過 1 MiB 發 WARN。設上限等於「會丟資料的稽核軌跡」；警告讓人當場聽到那一 MB。
+# 它只能經由「舊值」達到：那麼大的新值，命令列會先被 ARG_MAX 拒絕。
 # ---------------------------------------------------------------------
 echo
 echo "--- T92: the log keeps the whole value, on one line / log 完整保留那個值，且只佔一行 ---"
@@ -4376,17 +3815,9 @@ assert_contains "$("$CSV2" -contains NEEDLE -i "$TMP/t92g.csv" 2>/dev/null)" "mo
 # ---------------------------------------------------------------------
 # T93 -- the address in an error message resolves.
 #
-# Round 38, defect CC. Cell-level errors printed `recordsEmitted + 1`, which
-# counts the header rows, so the number was the PHYSICAL LINE wearing a record
-# label. On a .csv2 the offset is exactly two:
-#
-#   csv2: record 4, field 2: undefined escape sequence \q      <- data record 2
-#   csv2 -get 4:2 -i f.csv2   ->  no such record; the file has 2 records
-#
-# Meanwhile record-level errors in the same tool were already correct --
-# `record 1 (line 3)` -- so the error channel carried two numbering schemes,
-# and the README's own example demonstrated the broken one while stating that
-# `N` counts records, not lines, throughout.
+# Round 38, defect CC. A cell-level error must print the RECORD number, not a
+# count that includes header rows (which on a .csv2 is off by two), plus the
+# physical line -- the same `record N (line L)` pair record-level errors print.
 #
 # The number in an error message is an ADDRESS. Someone types it back into
 # -get or -update; that composition is what this tool has instead of a query
@@ -4395,11 +3826,8 @@ assert_contains "$("$CSV2" -contains NEEDLE -i "$TMP/t92g.csv" 2>/dev/null)" "mo
 # wrong" when the file is fine.
 #
 # T93 —— 錯誤訊息裡的位址解得出來。
-# 第 38 回合，缺陷 CC。儲存格層級的錯誤印的是 `recordsEmitted + 1`，那個計數含標頭列，
-# 因此那個號碼是「披著紀錄外衣的物理行號」。在 .csv2 上偏移恰好是二：資料第 2 筆的錯誤
-# 印成 `record 4`，而 `-get 4:2` 回答「沒有這一筆；本檔案有 2 筆」。
-# 同一支工具的紀錄層級錯誤本來就是對的（`record 1 (line 3)`），於是錯誤通道裡並存兩套編號，
-# 而 README 自己的範例示範的正是壞掉的那一套——儘管它同時寫著「N 自始至終數的是紀錄，不是行」。
+# 第 38 回合，缺陷 CC。儲存格層級的錯誤必須印「紀錄號」，而不是含標頭列的計數（在 .csv2 上
+# 會差二），並附上物理行號——與紀錄層級錯誤相同的 `record N (line L)` 格式。
 # 錯誤訊息裡的號碼是一個「位址」。人會把它打回 -get 或 -update，而那個組合正是這支工具用來
 # 取代查詢語言的東西。一個解不出來的位址比沒有更糟：它會把讀者送到另一格，或送到一個
 # 「讀起來像是檔案有問題」的拒絕，而檔案其實沒問題。
@@ -4424,9 +3852,9 @@ assert_eq "$addr" "2:2" \
 assert_eq "$("$CSV2" -get "$addr" -i "$TMP/t93_ok.csv2" 2>/dev/null)" "THEBAD" \
     "T93d and -get on it returns the cell the message was about / 而以它下 -get，取回的正是訊息所指的那一格"
 
-# A .csv has one header row, so the old bug shifted by one there instead of
-# two -- same defect, different offset, which is why it needs its own case.
-# .csv 只有一列標頭，因此舊缺陷在那裡是偏移一格而不是兩格——同一個缺陷、不同的偏移量，
+# A .csv has one header row, so CC shifts by one there instead of two -- same
+# defect, different offset, which is why it needs its own case.
+# .csv 只有一列標頭，因此 CC 在那裡是偏移一格而不是兩格——同一個缺陷、不同的偏移量，
 # 所以它需要自己的案例。
 printf 'a,b\n1,"x"y\n' > "$TMP/t93.csv"
 errc=$("$CSV2" -r -t -i "$TMP/t93.csv" 2>&1 | head -1)
@@ -4455,24 +3883,16 @@ assert_contains "$("$CSV2" -r -t -i "$TMP/t93.csv2" 2>&1 | sed -n 2p)" "第 2 �
 # ---------------------------------------------------------------------
 # T94 -- trace answers "why is record N not in my result".
 #
-# Round 38, defect DD. The README offers `-debug=trace` as "every record's
-# selection decision". It logged only the records it EMITTED -- which is the
-# half you already had, from the output. For the record actually being asked
-# about there was no line, no reason, nothing.
-#
-# And silence meant two different things that could not be told apart: "read
-# and rejected" and "never reached, because -mid stopped the read first". This
-# project condemns exactly that two sections earlier in its own README, about
-# the parallel path: "reporting only the interesting case would make silence
-# ambiguous".
+# Round 38, defect DD. `-debug=trace` is "every record's selection decision",
+# so it must cover records NOT emitted, with the reason; the emitted ones you
+# already have from the output. It also says where a read stopped early,
+# because otherwise silence means two things that cannot be told apart: "read
+# and rejected" and "never reached, because -mid stopped the read first".
 #
 # T94 —— trace 回答「為什麼第 N 筆不在我的結果裡」。
-# 第 38 回合，缺陷 DD。README 把 `-debug=trace` 說成「每一筆紀錄的選取決定」，而它只記錄
-# 「被輸出的」那些——那一半你從輸出本身就已經有了。真正被詢問的那一筆，沒有行、沒有理由、
-# 什麼都沒有。
-# 而那份沉默同時代表兩件無法分辨的事：「讀過但被排除」與「根本沒讀到，因為 -mid 先停了
-# 讀取」。本專案在自己 README 中隔兩節就譴責過這件事（平行路徑那一段）：「只回報有趣的
-# 那個情況，會讓沉默變得有歧義」。
+# 第 38 回合，缺陷 DD。`-debug=trace` 是「每一筆紀錄的選取決定」，因此必須涵蓋「沒有被輸出」
+# 的紀錄並附上理由；有輸出的那些，從輸出本身就看得到。它也會說出讀取在哪裡提前停止，否則
+# 沉默會同時代表兩件無法分辨的事：「讀過但被排除」與「根本沒讀到，因為 -mid 先停了讀取」。
 # ---------------------------------------------------------------------
 echo
 echo "--- T94: trace explains the records that are missing / trace 解釋那些不見的紀錄 ---"
@@ -4515,23 +3935,15 @@ assert_eq "$("$CSV2" -contains zlib --filter -i "$TMP/t94.csv" -debug 2>&1 >/dev
 # ---------------------------------------------------------------------
 # T95 -- the metrics line belongs to every path.
 #
-# Round 38, defect EE. `-debug` is documented as "diagnostics to stderr,
-# including a metrics: line". The parallel path returned before the line was
-# printed, so `peak_rss_bytes` was unavailable on exactly the runs where
-# somebody would want it: parallelism is what a large file gets, and a large
-# file is what makes memory a question. The reader had to reach for
-# /usr/bin/time -l, which is the tool admitting it cannot answer.
-#
-# It is worth having for its own sake, not just for the promise: the two paths
-# do not cost the same, and now the difference is visible from inside.
+# Round 38, defect EE. `-debug` promises "a metrics: line", and the parallel
+# path must print it too: parallelism is what a large file gets, and a large
+# file is what makes `peak_rss_bytes` worth asking about. The two paths do not
+# cost the same, and the line makes the difference visible from inside.
 #
 # T95 —— metrics 那一行屬於每一條路徑。
-# 第 38 回合，缺陷 EE。`-debug` 的文件寫的是「診斷輸出到 stderr，包含一行 metrics」。
-# 平行路徑在那一行被印出來之前就 return 了，因此 `peak_rss_bytes` 恰好在「有人會想看它」的
-# 那些執行上取不到：大檔案拿到的正是平行，而「大檔案」正是讓記憶體成為問題的原因。讀者只能
-# 改用 /usr/bin/time -l——那等於這支工具承認自己答不出來。
-# 這件事本身就值得做，不只是為了兌現那句承諾：兩條路徑的成本並不相同，而現在那個差別
-# 從工具內部就看得見。
+# 第 38 回合，缺陷 EE。`-debug` 承諾「一行 metrics」，平行路徑也必須印出來：大檔案拿到的
+# 正是平行，而大檔案正是讓 `peak_rss_bytes` 值得一問的原因。兩條路徑的成本並不相同，
+# 這一行讓那個差別從工具內部就看得見。
 # ---------------------------------------------------------------------
 echo
 echo "--- T95: every path reports its metrics / 每一條路徑都回報自己的量測 ---"
@@ -4545,8 +3957,8 @@ sin=$(CSV2_PARALLEL_MIN_BYTES=999999999 \
       "$CSV2" -contains xyz -i "$TMP/t95.csv2" -debug 2>&1 >/dev/null)
 
 # Prove the two runs really were different paths before comparing what they
-# printed -- T72's lesson, applied here.
-# 在比較它們印了什麼之前，先證明那真的是兩條不同的路徑——T72 的教訓，用在這裡。
+# printed (see T72).
+# 在比較它們印了什麼之前，先證明那真的是兩條不同的路徑（見 T72）。
 assert_contains "$par" "parallel:" \
     "T95a the first run really took the parallel path / 第一次執行確實走了平行路徑"
 assert_contains "$sin" "single-threaded:" \
@@ -4564,12 +3976,9 @@ assert_contains "$sin" "metrics:" \
 # ---------------------------------------------------------------------
 # T96 -- the address composes; the reported value does not.
 #
-# Round 38, defect FF. The README presents `record:field` addressing as what
-# lets finding and editing compose, and separately says report values are
-# escaped. A reader who joins those two takes the report's third column and
-# feeds it to -update. For any value containing a newline, tab, CR or
-# backslash -- the data this tool exists for -- that writes the escape
-# sequences themselves, at rc=0, with nothing said:
+# Round 38, defect FF. Feeding the report's third column to -update writes the
+# escape sequences themselves, at rc=0, for any value with a newline, tab, CR
+# or backslash:
 #
 #   stored   X <LF> Y \ Z
 #   report   X\nY\\Z            (escaped, correctly: one line per hit, T53)
@@ -4577,18 +3986,14 @@ assert_contains "$sin" "metrics:" \
 #
 # Neither half is wrong on its own. The report must escape or it cannot stay
 # one line per hit; -update must take a logical value or the caller would have
-# to escape by hand. What was missing is the sentence saying they do not meet
-# -- and the middle step that makes them, which already existed: -get returns
-# the stored bytes.
+# to escape by hand. The address composes; the value goes through -get, which
+# returns the stored bytes.
 #
 # T96 —— 能組合的是位址；報告裡的那個值不能。
-# 第 38 回合，缺陷 FF。README 把 `record:field` 定址呈現為「讓尋找與編輯得以組合」的東西，
-# 又在另一處說報告的值有跳脫。把這兩件事接起來的讀者，會拿報告的第三欄去餵 -update。
-# 對任何含換行、TAB、CR 或反斜線的值——也就是這支工具存在的理由——那會把跳脫序列本身寫進去，
-# rc=0，而且什麼都不說。
+# 第 38 回合，缺陷 FF。拿報告的第三欄去餵 -update，對任何含換行、TAB、CR 或反斜線的值，
+# 會在 rc=0 下把跳脫序列本身寫進去。
 # 兩邊單獨看都沒有錯：報告不跳脫就無法維持一行一個命中；-update 不收邏輯值，呼叫端就得自己
-# 手動跳脫。缺的是那句「它們接不起來」，以及那個能讓它們接起來的中間步驟——而它本來就存在：
-# -get 回傳的是儲存的位元組。
+# 手動跳脫。能組合的是位址；值要經由 -get，它回傳的是儲存的位元組。
 # ---------------------------------------------------------------------
 echo
 echo "--- T96: the address composes, the reported value does not / 能組合的是位址，不是報告裡的值 ---"
@@ -4633,30 +4038,23 @@ fi
 # ---------------------------------------------------------------------
 # T97 -- what the meta line observes, and what it merely restates.
 #
-# Round 38, defect GG. Rename a one-header `.csv` to `.csv2` and csv2 reads
-# its first data record as header row 0b: rc=0, one record short, nothing
-# said. The README offered the --json meta line as the way "a caller can
-# assert what it is reading" -- but `headers` there is the DECLARATION. It
-# reports 2 for any `.csv2`, including that one, so asserting on it is
-# asserting the filename against itself.
+# Round 38, defect GG. A one-header `.csv` renamed to `.csv2` has its first
+# data record read as header row 0b: rc=0, one record short. The meta line's
+# `headers` is the DECLARATION -- 2 for any `.csv2` -- so asserting on it
+# asserts the filename against itself; `records` and `fields` are observed.
 #
-# This is not fixed by detection, and that is the decision rather than a
-# limitation admitted late. A row of titles and a row of data are not
-# distinguishable by shape; a detector would be a guess, and "declared by the
-# suffix, never detected" exists precisely to keep guesses out. So the
-# asymmetry stays: WRITING such a file is refused, reading one is not, and the
-# documentation now says which parts of the meta line are counted from the
-# file and which are the name talking.
+# This is not fixed by detection, by decision: a row of titles and a row of
+# data are not distinguishable by shape, so a detector would be a guess, and
+# "declared by the suffix, never detected" exists to keep guesses out. The
+# asymmetry stays: WRITING such a file is refused, reading one is not.
 #
 # T97 —— meta 行裡哪些是「觀察到的」，哪些只是「覆述」。
-# 第 38 回合，缺陷 GG。把一份只有一列標頭的 `.csv` 改名成 `.csv2`，csv2 會把它的第一筆資料
-# 讀成標頭列 0b：rc=0、少一筆、什麼都不說。README 把 --json 的 meta 行當成「呼叫端能斷言
-# 自己讀到什麼」的方法——但那裡的 `headers` 是**宣告**。任何 `.csv2` 它都回報 2，包括那一份，
-# 因此拿它來斷言，等於拿檔名去斷言檔名。
-# 這件事不以「偵測」來修，而那是一個決定，不是事後才承認的限制。「一列標題」與「一列資料」
-# 在形狀上並無分別；偵測器就是猜測，而「由副檔名宣告、絕不偵測」的存在正是為了把猜測擋在外面。
-# 因此那個不對稱維持不變：**寫出**這樣的檔案會被拒絕，**讀取**則不會，而文件現在說明了 meta
-# 行裡哪些欄位是從檔案數出來的、哪些是檔名在說話。
+# 第 38 回合，缺陷 GG。一份只有一列標頭的 `.csv` 改名成 `.csv2` 後，它的第一筆資料會被讀成
+# 標頭列 0b：rc=0、少一筆。meta 行的 `headers` 是**宣告**——任何 `.csv2` 都是 2——因此拿它來
+# 斷言，等於拿檔名去斷言檔名；`records` 與 `fields` 才是觀察值。
+# 這件事刻意不以「偵測」來修：「一列標題」與「一列資料」在形狀上並無分別，偵測器就是猜測，
+# 而「由副檔名宣告、絕不偵測」正是為了把猜測擋在外面。不對稱維持不變：**寫出**這樣的檔案
+# 會被拒絕，**讀取**則不會。
 # ---------------------------------------------------------------------
 echo
 echo "--- T97: the meta line, observed against declared / meta 行：觀察值與宣告值 ---"
@@ -4686,16 +4084,11 @@ assert_contains "$meta" '"fields":3' \
 look=$("$CSV2" -head 1 -t -i "$TMP/t97_lying.csv2" 2>/dev/null | sed -n 2p)
 assert_eq "$look" "zlib,1.3.2,first" \
     "T97e -head 1 -t shows the second header row, where the data is visible / -head 1 -t 會顯示第二列標頭，那裡看得見資料"
-# Built here rather than read from compare/. The first version pointed at
-# compare/vs-sqlite.csv2 and was the ONLY case in the suite to reach outside
-# test/ -- it passed on the host and failed in the guest, where the payload
-# does not carry that directory. A fixture the suite builds is a fixture the
-# suite can rely on anywhere it runs, and this suite has to run on a machine
-# with nothing but the source and the binary.
-# 在此自行建立，而不是去讀 compare/。第一版指向 compare/vs-sqlite.csv2，而它是整份套件裡
-# **唯一**一個伸出 test/ 之外的案例——它在 host 上通過、在 guest 內失敗，因為那裡的 payload
-# 不帶那個目錄。由套件自己建的 fixture，才是套件在任何地方都能依靠的 fixture，而這份套件
-# 必須能在一台「只有原始碼與執行檔」的機器上執行。
+# Built here rather than read from compare/: the guest payload does not carry
+# that directory, and this suite has to run on a machine with nothing but the
+# source and the binary.
+# 在此自行建立，而不是去讀 compare/：guest 的 payload 不帶那個目錄，而這份套件必須能在
+# 一台「只有原始碼與執行檔」的機器上執行。
 printf 'dimension,note\n比較項目,說明\nstorage,text at scale\n' > "$TMP/t97_real.csv2"
 real=$("$CSV2" -head 1 -t -i "$TMP/t97_real.csv2" 2>/dev/null | sed -n 2p)
 assert_contains "$real" "比較項目" \
@@ -4709,33 +4102,28 @@ assert_fails "T97g writing a one-header file to a .csv2 name is still refused / 
 # ---------------------------------------------------------------------
 # T98 -- a value the command line cannot carry is refused, not altered.
 #
-# Found on 2026-08-19 while working out what removing the log truncation would
-# cost, not by the blind round. `csv2 -update 1:2 $'A\xffB'` stored
-# `A U+FFFD B`: the exact substitution T8 exists to prevent, arriving through
-# the WRITE path while T8 was watching the read path.
+# `csv2 -update 1:2 $'A\xffB'` must not store `A U+FFFD B`: that is the
+# substitution T8 prevents on the read path, arriving through the WRITE path.
 #
 # The cause is outside csv2. `CommandLine.arguments` is [String], and Swift
 # builds those by decoding argv as UTF-8 WITH REPLACEMENT, so the bytes are
-# gone before any csv2 code runs. Two answers were possible: carry raw bytes
-# through every value path, or refuse. Refusing is what this project's own
-# rule already says -- do not silently repair malformed input, report it and
-# exit non-zero -- and it is the smaller change by a wide margin.
+# gone before any csv2 code runs. The answer is to refuse, per this project's
+# rule -- do not silently repair malformed input, report it and exit non-zero
+# -- rather than carry raw bytes through every value path.
 #
 # Only DATA arguments are checked. A path may legitimately hold arbitrary
-# bytes on Linux, and refusing those would break something that works today
-# for a fault csv2 does not commit: it hands paths to the filesystem, it does
-# not store them as data.
+# bytes on Linux; csv2 hands paths to the filesystem and does not store them
+# as data, so refusing them would break a working use for no gain.
 #
 # T98 —— 命令列載不動的值會被拒絕，而不是被改動。
-# 2026-08-19 在推敲「移除 log 截斷要付出什麼代價」時發現，不是盲測那一輪找到的。
-# `csv2 -update 1:2 $'A\xffB'` 存進去的是 `A U+FFFD B`：正是 T8 存在所要防止的那個替代，
-# 只是它從**寫入**路徑進來，而 T8 看的是讀取路徑。
+# `csv2 -update 1:2 $'A\xffB'` 不得存成 `A U+FFFD B`：那正是 T8 在讀取路徑上防止的替代，
+# 只是從**寫入**路徑進來。
 # 原因在 csv2 之外。`CommandLine.arguments` 是 [String]，而 Swift 是以「UTF-8 解碼、
 # 無效處以替代字元補上」的方式建出它們的，因此那些位元組在任何 csv2 程式碼執行之前就沒了。
-# 有兩種答案：把原始位元組穿過每一條值的路徑，或者拒絕。拒絕是本專案自己的規則早已規定的
-# 那一個——不要靜默修復格式錯誤的輸入，指出它並以非零結束——而且改動小得多。
-# 只檢查**資料**參數。路徑在 Linux 上本來就可以是任意位元組，為一個 csv2 並未犯下的錯誤去
-# 拒絕它們，會弄壞一個今天能用的用法：csv2 把路徑交給檔案系統，並不把它當成資料儲存。
+# 做法是拒絕，依本專案的規則——不要靜默修復格式錯誤的輸入，指出它並以非零結束——而不是
+# 讓原始位元組穿過每一條值的路徑。
+# 只檢查**資料**參數。路徑在 Linux 上本來就可以是任意位元組；csv2 把路徑交給檔案系統，
+# 並不把它當成資料儲存，拒絕它們只會弄壞一個能用的用法。
 # ---------------------------------------------------------------------
 echo
 echo "--- T98: a non-UTF-8 argument is refused, never silently replaced / 非 UTF-8 的參數會被拒絕，絕不被靜默替換 ---"
@@ -4754,8 +4142,8 @@ cp "$TMP/t98.csv" "$TMP/t98.bak"
 #
 # What is NOT skipped is the other half -- ordinary values must still be
 # accepted and stored exactly, and bytes must still round-trip through a file.
-# Those are the assertions that would catch this fix over-reaching, and they
-# run on all four platforms.
+# Those are the assertions that would catch this check over-reaching, and
+# they run on all four platforms.
 #
 # 這幾條拒絕在 Windows 上無法斷言，而說出理由比放一個「無視平台」的期待要好。Windows 行程
 # 收到的命令列是 UTF-16：shell 對一個無效位元組做了什麼，都發生在行程啟動「之前」，而
@@ -4790,8 +4178,8 @@ assert_contains "$msg" "in a file" \
 fi
 
 # Not over-refusing: ordinary values, including non-ASCII ones, are untouched
-# by this. Without it the fix could be "reject anything interesting".
-# 沒有拒絕過頭：一般的值——包含非 ASCII 的——完全不受影響。少了這一條，這個修正大可以是
+# by this. Without it the check could be "reject anything interesting".
+# 沒有拒絕過頭：一般的值——包含非 ASCII 的——完全不受影響。少了這一條，這道檢查大可以是
 # 「凡是有點特別的都拒絕」。
 assert_succeeds "T98h an ordinary CJK value is still accepted / 一般的中文值仍然被接受" -- \
     "$CSV2" -update 1:note "正常的中文值" -i "$TMP/t98.csv" --in-place
@@ -4812,36 +4200,28 @@ assert_same "$TMP/t98_raw.csv" "$TMP/t98_raw_out.csv" \
 # ---------------------------------------------------------------------
 # T99 -- repeated edits are input-relative, and the divergence is a decision.
 #
-# Round 39. The README documented a singular `-insert N ROW` and nothing else,
-# so a reader had no way to learn that the flag repeats, and no way to know
-# which of two semantics they had chosen. The two are not subtly different:
+# Round 39. A repeated flag in one run and the same edits in separate runs
+# give different files:
 #
 #   one run:    -insert 2 A -insert 4 B -insert 5 C  ->  r1 A r2 r3 B r4 C r5
 #   three runs: the same three, separately           ->  r1 A r2 B C r3 r4 r5
 #
 # Both exit 0. Neither is wrong -- each run's indices are correct against the
-# file that run was handed -- but only the first is a batch.
+# file that run was handed -- but only the first is a batch. T27: every index
+# refers to the INPUT and all edits apply in one pass, the only semantics that
+# makes a batch predictable.
 #
-# The tool is right: T27 settled that every index refers to the INPUT and all
-# edits apply in one pass, which is the only semantics that makes a batch
-# predictable. What was missing was any way for a reader to find that out.
-#
-# This case exists so the divergence stays a DECISION. Someone reading the two
-# outputs side by side could reasonably decide to "fix" the batch form into
-# cumulative behaviour; that would make `-delete 3 -delete 4` delete input
-# record 3 and then whatever slid into position 4, which is the exact failure
-# T27 was written to prevent.
+# This case keeps the divergence a DECISION. "Fixing" the batch form into
+# cumulative behaviour would make `-delete 3 -delete 4` delete input record 3
+# and then whatever slid into position 4, the failure T27 prevents.
 #
 # T99 —— 重複的編輯以輸入為基準，而那個分歧是一個決定。
-# 第 39 回合。README 只寫了單數的 `-insert N ROW`，因此讀者無從知道這個旗標可以重複，
-# 也就無從知道自己選了兩種語意中的哪一種。而那兩種的差別並不細微（見上）。
+# 第 39 回合。同一次執行裡重複旗標，與分開執行同樣的編輯，會得到不同的檔案（見上）。
 # 兩者都是 rc=0。兩者都不算錯——每一次執行的索引，對它拿到的那個檔案都是正確的——
-# 但只有第一種是「一批」。
-# 程式是對的：T27 早已定案「每個索引都指向輸入、所有編輯一次套用」，那是唯一能讓一批
-# 可預測的語意。缺的是「讀者要怎麼知道這件事」。
-# 這個案例的存在，是為了讓那個分歧維持是一個**決定**。有人把兩種輸出並排看過之後，很可能
-# 合理地認為該把批次那一種「修」成累加式——而那會讓 `-delete 3 -delete 4` 刪掉輸入的第 3 筆，
-# 再刪掉遞補到第 4 位的那一筆，也就是 T27 當初要防止的那個失敗。
+# 但只有第一種是「一批」。T27：每個索引都指向輸入、所有編輯一次套用，那是唯一能讓一批
+# 可預測的語意。
+# 這個案例讓那個分歧維持是一個**決定**。把批次那一種「修」成累加式，會讓
+# `-delete 3 -delete 4` 刪掉輸入的第 3 筆，再刪掉遞補到第 4 位的那一筆，也就是 T27 要防止的失敗。
 # ---------------------------------------------------------------------
 echo
 echo "--- T99: repeated edits count against the input / 重複的編輯以輸入為基準 ---"
@@ -4897,39 +4277,26 @@ assert_eq "$(column "$TMP/t99_mix.csv" 1 | tr '\n' ' ')" \
 # ---------------------------------------------------------------------
 # T100 -- the audit trail records unlocking, not only locking.
 #
-# Round 40. `-encrypt` and `-hash` each logged which key they used;
-# `-decrypt` logged only the invocation line. So the trail held every time a
-# column was closed and no record of any time one was opened -- which is the
-# wrong way round for an audit. Encrypting puts data away; decrypting takes it
-# out, and "who opened this column, with which key" is the line somebody comes
-# looking for. The README's log table promised the fingerprint and made no
-# exception for -decrypt.
-#
-# The fingerprint was already computed on that path -- it has to be, to refuse
-# a wrong key -- so nothing was hard about this except noticing.
+# Round 40. `-decrypt` logs which key it used, like `-encrypt` and `-hash`.
+# Encrypting puts data away; decrypting takes it out, and "who opened this
+# column, with which key" is the line an audit looks for. The README's log
+# table promises the fingerprint with no exception for -decrypt.
 #
 # T100 —— 稽核軌跡要記下「開鎖」，不只是「上鎖」。
-# 第 40 回合。`-encrypt` 與 `-hash` 都記錄了自己用哪一把金鑰，`-decrypt` 只記了那行
-# invocation。於是軌跡裡有每一次把欄位關上、卻沒有任何一次把它打開——就稽核而言那是反的。
-# 加密是把資料收起來，解密是把它拿出來，而「誰用哪一把金鑰把這一欄打開了」正是日後有人會來
-# 找的那一行。README 的 log 表承諾了指紋，並未為 -decrypt 開例外。
-# 那個指紋在該路徑上本來就算好了——它必須算，否則無法拒絕錯的金鑰——所以這件事除了「注意到」
-# 之外沒有任何困難。
+# 第 40 回合。`-decrypt` 與 `-encrypt`、`-hash` 一樣，會記錄自己用了哪一把金鑰。加密是把資料
+# 收起來，解密是把它拿出來，而「誰用哪一把金鑰把這一欄打開了」正是稽核要找的那一行。
+# README 的 log 表承諾了指紋，並未為 -decrypt 開例外。
 # ---------------------------------------------------------------------
 echo
 echo "--- T100: a successful decrypt says which key opened it / 成功的解密會說出是哪一把金鑰打開的 ---"
 
 head -c 32 /dev/urandom > "$TMP/t100.key"
-# The plaintext is a token that cannot occur anywhere else. It used to be `s1`,
-# and the check `grep -q 's1'` matched the RANDOM TEMP DIRECTORY NAME in the
-# log's invocation line -- `mktemp -d .test_csv2.XXXXXX` produces six
-# alphanumerics, and one run in a few hundred contains `s1`. The case then
-# failed for a reason unrelated to what it asserts, which is worse than no
-# case: a suite that cries wolf stops being read.
-# 明文改用一個「不可能出現在別處」的記號。原本是 `s1`，而 `grep -q 's1'` 會比對到 log 呼叫行
-# 裡那個「隨機的暫存目錄名」——`mktemp -d .test_csv2.XXXXXX` 產生六個英數字元，幾百次裡就會
-# 有一次含 `s1`。那個案例於是為了「與它所斷言的事無關的理由」而失敗，而那比沒有這個案例更糟：
-# 一份會亂叫的測試，就不會再有人讀它。
+# The plaintext is a token that cannot occur anywhere else. A short value such
+# as `s1` can match the random temp directory name in the log's invocation
+# line (`mktemp -d .test_csv2.XXXXXX`), failing the case for an unrelated
+# reason.
+# 明文用一個「不可能出現在別處」的記號。像 `s1` 這種短值，可能比對到 log 呼叫行裡那個隨機的
+# 暫存目錄名（`mktemp -d .test_csv2.XXXXXX`），讓案例為了無關的理由失敗。
 printf 'pkg,secret\na,PLAINTEXT-CANARY-ONE\nb,PLAINTEXT-CANARY-TWO\n' > "$TMP/t100.csv"
 "$CSV2" -encrypt secret -keyfile "$TMP/t100.key" -i "$TMP/t100.csv" -o "$TMP/t100_e.csv" -t 2>/dev/null
 
@@ -4953,9 +4320,9 @@ else
 fi
 
 # The two fingerprints are different KINDS of number, which is why the README
-# now describes them separately. A :hmac: one is stable per key; a :enc: one is
+# describes them separately. A :hmac: one is stable per key; a :enc: one is
 # per run, because the salt is.
-# 那兩個指紋是**不同種類**的數字，這也是 README 現在分開描述它們的原因。`:hmac:` 是每把金鑰
+# 那兩個指紋是**不同種類**的數字，這也是 README 分開描述它們的原因。`:hmac:` 是每把金鑰
 # 穩定的；`:enc:` 是每次執行都變的，因為 salt 每次都變。
 "$CSV2" -encrypt secret -keyfile "$TMP/t100.key" -i "$TMP/t100.csv" -o "$TMP/t100_e2.csv" -t 2>/dev/null
 fp1=$(head -1 "$TMP/t100_e.csv"  | sed -n 's/.*:enc:\([0-9a-f]*\):.*/\1/p')
@@ -4975,37 +4342,27 @@ assert_eq "$(head -1 "$TMP/t100_h1.csv")" "$(head -1 "$TMP/t100_h2.csv")" \
 # T101 -- the run that trusts an index left no trace, and it is the only
 # run that can be silently wrong.
 #
-# T79 closed the case where the index's claim was never derived. What it
-# cannot close is the stamp: an index is judged current by size + mtime, and
-# `cp -p`, `rsync -t` and `tar -p` all preserve mtime, so a same-size rewrite
-# is invisible to it. That gap is documented, and --verify-index is the O(n)
-# proof offered for it.
+# An index is judged current by size + mtime, and `cp -p`, `rsync -t` and
+# `tar -p` all preserve mtime, so a same-size rewrite is invisible to the
+# stamp. That gap is documented, and --verify-index is its O(n) proof.
 #
-# What was missing sat next to it. EVERY path that DECLINES an index names it
-# and says why -- no index, index records a spanning record, --no-index. The
-# one path that TRUSTS an index said nothing at all, not even at -debug. So
-# the branch that by design can be silently wrong was also the branch leaving
-# no trace: an operator could see why a sidecar was rejected, never that one
-# had been believed, nor which file it was.
+# Every path that DECLINES an index names it and says why. The path that
+# TRUSTS one must say so too, at -debug, naming the sidecar: it is the one
+# branch that by design can be silently wrong.
 #
-# The trust line is what makes this case testable at all. Whether a same-size
-# rewrite escapes the stamp depends on how much mtime precision the platform
-# and `touch -r` preserve, and asserting a fixed answer to that would be a
-# platform-dependent test of the kind this suite has been bitten by before.
-# So the log line is read first, and it decides which of two assertions runs.
-# Both are real; neither is a skip.
+# Whether a same-size rewrite escapes the stamp depends on the mtime precision
+# the platform and `touch -r` preserve, so a fixed answer would be a
+# platform-dependent test. The trust line is read first and decides which of
+# two assertions runs. Both are real; neither is a skip.
 #
 # T101 —— 採信索引的那次執行不留任何痕跡，而它是唯一可能靜默出錯的那一次。
-# T79 關掉的是「索引的宣稱從未被推導」那個缺口。它關不掉的是戳記本身：索引是否為最新
-# 以 size + mtime 判定，而 `cp -p`、`rsync -t`、`tar -p` 都保留 mtime，因此「同樣大小的
-# 改寫」對它是隱形的。那個缺口是記錄在案的，`--verify-index` 就是為它提供的 O(n) 證明。
-# 缺的東西就在它旁邊：每一條「拒絕」索引的路徑都會指名它並說明理由——沒有索引、索引記錄了
-# 跨行紀錄、--no-index。而唯一「採信」索引的那條什麼都不說，連 -debug 都沒有。於是設計上
-# 唯一可能靜默出錯的分支，也正是唯一不留痕跡的分支：操作者看得到 sidecar 為何被拒，卻看
-# 不到它被信了、信的是哪一個檔案。
-# 那行 trust line 也正是本案例得以成立的原因。「同大小改寫」躲不躲得過戳記，取決於平台與
-# `touch -r` 保留多少 mtime 精度；把某個固定答案寫死，就會變成本套件吃過虧的那種平台相依
-# 測試。因此先讀那行 log，由它決定要跑兩個斷言中的哪一個。兩者都是真的斷言，都不是 SKIP。
+# 索引是否為最新以 size + mtime 判定，而 `cp -p`、`rsync -t`、`tar -p` 都保留 mtime，因此
+# 「同樣大小的改寫」對戳記是隱形的。那個缺口記錄在案，`--verify-index` 是它的 O(n) 證明。
+# 每一條「拒絕」索引的路徑都會指名它並說明理由。「採信」索引的那條也必須在 -debug 下說出來
+# 並指名 sidecar：它是設計上唯一可能靜默出錯的分支。
+# 「同大小改寫」躲不躲得過戳記，取決於平台與 `touch -r` 保留多少 mtime 精度，寫死固定答案
+# 就是平台相依的測試。因此先讀那行 trust line，由它決定要跑兩個斷言中的哪一個。兩者都是
+# 真的斷言，都不是 SKIP。
 # ---------------------------------------------------------------------
 echo
 echo "--- T101: an index that was trusted says so / 被採信的索引會說出來 ---"
@@ -5021,10 +4378,8 @@ echo "--- T101: an index that was trusted says so / 被採信的索引會說出�
 # What the false `no_embedded_newlines` corrupts is each LATER chunk's
 # firstRecord, which is derived by counting newlines up to that offset. So the
 # numbers go wrong at the first chunk boundary after the spanning record --
-# measured here at record 158 with 8 KiB chunks -- and not before it. A first
-# draft put the needle at 150, one chunk too early, and passed while the
-# defect was fully present. It was asserting on the half of the file the
-# miscount cannot reach.
+# measured here at record 158 with 8 KiB chunks -- and not before it. A needle
+# at 150, one chunk too early, would pass with the defect fully present.
 # 兩個版本由同一個產生器產出，只差「spanning」與「two」之間那「一個位元組」——前者是空白，
 # 後者是換行。長度依構造相同，因此戳記的 size 那一半分辨不出來；mtime 那一半則交給
 # `touch -r`。
@@ -5032,8 +4387,8 @@ echo "--- T101: an index that was trusted says so / 被採信的索引會說出�
 # 內部的解析器正確處理引號，因此第 1 個區塊連同跨行那一筆全都編號正確。假的
 # `no_embedded_newlines` 弄壞的是「之後每一個區塊」的 firstRecord——那是用「到該位移為止有
 # 幾個換行」推算出來的。於是編號從「跨行紀錄之後的第一個區塊邊界」才開始出錯（此處以 8 KiB
-# 區塊實測為第 158 筆），在那之前完全正確。本 fixture 的第一版把 needle 放在第 150 筆，早了
-# 一個區塊，於是在缺陷完整存在的情況下照樣通過——它斷言的正好是誤數碰不到的那半個檔案。
+# 區塊實測為第 158 筆），在那之前完全正確。若把 needle 放在第 150 筆，早了一個區塊，
+# 缺陷完整存在時也會通過。
 gen_t101() {   # $1 = the one byte that differs / 唯一不同的那個位元組
     print -r -- 'a,b'
     local i
@@ -5092,14 +4447,10 @@ fi
 
 # Unconditional, and that is the point: whether or not the O(1) stamp noticed,
 # the sidecar sitting on disk does NOT describe this file, and the O(n) proof
-# has to say so. A first draft asserted the opposite in the stamp-noticed
-# branch -- reasoning that a rejected index would be rebuilt. It is not:
-# ignoring a stale index leaves it exactly where it was. macOS never reached
-# that branch, so the mistake surfaced only in the guest.
+# has to say so. A rejected index is not rebuilt: ignoring a stale index leaves
+# it exactly where it was.
 # 不分支，而那正是重點：不論 O(1) 戳記有沒有察覺，磁碟上那份 sidecar 都「不」描述這個檔案，
-# 而那個 O(n) 證明就必須這麼說。本案例的第一版在「戳記察覺了」那個分支斷言了相反的事——
-# 理由是「被拒絕的索引會被重建」。它不會：忽略一份過期索引，就只是讓它留在原地。macOS 從未
-# 走到那個分支，所以這個錯誤只在 guest 裡浮現。
+# 而那個 O(n) 證明就必須這麼說。被拒絕的索引不會被重建：忽略一份過期索引，只是讓它留在原地。
 assert_fails "T101c and --verify-index, the O(n) proof offered for that gap, reports the mismatch either way / 而為那個缺口提供的 O(n) 證明 --verify-index 兩種情況下都指出不符" -- \
     "$CSV2" --verify-index -i "$TMP/t101.csv"
 
@@ -5134,37 +4485,29 @@ assert_eq "$(wc -c < "$TMP/t101d_err.txt" | tr -d ' ')" "0" \
     "T101h and without -debug the line is absent, as the pipeline requires / 而沒有 -debug 時那行不存在，一如管線的要求"
 
 # ---------------------------------------------------------------------
-# T102 -- the audit trail could be forged through the one line it always
-# writes.
+# T102 -- the audit trail cannot be forged through the invocation line.
 #
-# `-log` records the invocation on EVERY run, and that line was joined from
-# the raw arguments with no escaping. A newline inside any argument therefore
-# opened a second line in the log whose entire content -- including its own
-# timestamp -- came from the input: a complete, plausible entry for an
-# operation that never happened, at rc=0.
+# `-log` records the invocation on every run. Joined from raw arguments
+# without escaping, a newline in any argument opens a second line whose whole
+# content, timestamp included, comes from the input: a plausible entry for an
+# operation that never happened, at rc=0. The same escaping rule as logged
+# values applies here. This is the wider opening of the two: it needs only
+# `-contains`, no write access to the data.
 #
-# The escaping rule already existed and was already documented; it had been
-# applied to logged VALUES and not here. This is the wider of the two
-# openings, because a value needs an edit and this needs only `-contains` --
-# no write access to the data at all.
-#
-# T102 —— 稽核軌跡可以透過它「一定會寫」的那一行被偽造。
-# `-log` 每一次執行都會記下呼叫方式，而那一行是把原始引數直接以空白接起來的，沒有跳脫。
-# 於是任一引數裡的換行會在 log 中開出第二行，那一行的全部內容——連同它自己的時間戳——
-# 都來自輸入：一筆完整、看起來合理、卻從未發生過的紀錄，rc=0。
-# 這條跳脫規則本來就存在、也已經寫在文件裡，只是被套在記入 log 的「值」上而沒有套到這裡。
-# 而這是兩個開口中較大的那個：值需要一次編輯，這裡只需要 `-contains`——完全不需要對資料
-# 有寫入權限。
+# T102 —— 稽核軌跡不能透過記錄呼叫的那一行被偽造。
+# `-log` 每次執行都記下呼叫方式。若直接接起原始引數而不跳脫，任一引數裡的換行就會開出
+# 第二行，其全部內容（含時間戳）都來自輸入：一筆看似合理、卻從未發生的紀錄，rc=0。
+# 這裡套用與記入 log 的值相同的跳脫規則。兩個開口中這個較大：只需要 `-contains`，
+# 不需要對資料有寫入權限。
 # ---------------------------------------------------------------------
 echo
-# Worded to avoid the literal "cannot open". run_checked.zsh scans output for
-# shell-level failure signals and that phrase is one of them, so these two case
-# titles made a clean 1157/0/1 run report FAILED. A guard that cries wolf is the
-# kind that gets switched off -- the same reason T231b's threshold sits far
-# below the real value.
-# 措辭刻意避開字面上的 "cannot open"。run_checked.zsh 會掃描輸出中 shell 層級的失敗訊號，而
-# 那個片語正是其中之一，於是這兩個案例標題讓一次乾淨的 1157/0/1 被回報成 FAILED。一道會亂叫的
-# 守衛是會被人關掉的那種——與 T231b 的門檻刻意遠低於實際值是同一個理由。
+# Worded to avoid the literal "cannot open": run_checked.zsh treats that phrase
+# as a shell-level failure signal, so a title containing it makes a clean run
+# report FAILED. A guard that cries wolf gets switched off -- the same reason
+# T231b's threshold sits far below the real value.
+# 措辭刻意避開字面上的 "cannot open"：run_checked.zsh 把這個片語當成 shell 層級的失敗
+# 訊號，標題含有它，乾淨的執行就會被回報成 FAILED。會亂叫的守衛會被人關掉——與 T231b
+# 的門檻刻意遠低於實際值是同一個理由。
 echo "--- T102: the logged invocation opens no second line / 記入 log 的呼叫開不出第二行 ---"
 
 print -r -- 'a,b' > "$TMP/t102.csv"
@@ -5192,16 +4535,14 @@ logged2=$(cat "$TMP/t102b.log")
 assert_contains "$logged2" 'a\tb\\c' \
     "T102c TAB and backslash use the same convention as everywhere else / TAB 與反斜線沿用與他處相同的慣例"
 
-# Text reaches the log by TWO routes -- the invocation, and the messages -- and
-# the first fix touched only the invocation. This case takes the second route:
-# an address that names no column produces an error message quoting the name
-# back, and that message carried the newline. Note the destination: without one
-# the run is refused before anything is logged, and a first draft of this case
-# passed for that reason, testing nothing.
-# 文字進入 log 有「兩條」路徑——呼叫，以及訊息——而第一次修正只碰了呼叫。這個案例走第二條：
-# 一個指不到任何欄位的位址會產生「把那個名字引述回來」的錯誤訊息，而那則訊息帶著換行。
-# 注意那個目的地：沒有它，這次執行會在任何東西被記錄之前就被拒絕——本案例的第一版正是
-# 因此而通過的，它什麼也沒測到。
+# Text reaches the log by two routes, the invocation and the messages. This
+# case takes the second: an address naming no column produces an error that
+# quotes the name back, newline included. The destination is required: without
+# one the run is refused before anything is logged, and the case would pass
+# while testing nothing.
+# 文字進入 log 有兩條路徑：呼叫與訊息。本案例走第二條：指不到任何欄位的位址會產生
+# 把名字引述回來的錯誤訊息，連換行一起。目的地不可少：沒有它，執行會在記錄任何東西
+# 之前就被拒絕，本案例會在什麼都沒測到的情況下通過。
 print -r -- 'a,b' > "$TMP/t102c.csv"
 print -r -- '1,2' >> "$TMP/t102c.csv"
 rm -f "$TMP/t102c.log"
@@ -5211,19 +4552,19 @@ rm -f "$TMP/t102c.log"
 assert_eq "$(wc -l < "$TMP/t102c.log" | tr -d ' ')" "2" \
     "T102d an error message quoting the input opens no line either / 引述輸入的錯誤訊息同樣開不出一行"
 
-# The stderr promise is its own: exactly two lines, English then Chinese. The
-# same unescaped message made it four, and a script reading the pair took the
+# The stderr promise is separate: exactly two lines, English then Chinese. An
+# unescaped message makes it four, and a script reading the pair takes the
 # injected line for part of the error.
-# stderr 那個承諾是它自己的：恰好兩行，英文在前中文在後。同一則未跳脫的訊息讓它變成四行，
-# 而依「兩行」去讀的腳本會把被注入的那一行當成錯誤訊息的一部分。
+# stderr 的承諾是另一回事：恰好兩行，英文在前中文在後。未跳脫的訊息會變成四行，而依
+# 「兩行」去讀的腳本會把注入的那一行當成錯誤訊息的一部分。
 assert_eq "$(wc -l < "$TMP/t102c.err" | tr -d ' ')" "2" \
     "T102e and stderr stays at exactly two lines, as documented / 而 stderr 維持恰好兩行，一如文件所述"
 
-# Escaped ONCE. Two fixes, each correct alone, escaped the invocation twice and
-# turned a newline into a literal backslash-n that no longer round-trips.
-# Escaping lives at one point now, and this is what holds it there.
-# 只跳脫「一次」。兩個各自正確的修正，讓呼叫那一行被跳脫了兩次，把一個換行變成再也還原不回
-# 去的字面反斜線 n。跳脫現在只發生在一個地方，而這條斷言就是把它固定在那裡的東西。
+# Escaped once. Escaping at two points turns a newline into a literal
+# backslash-n that no longer round-trips; escaping lives at one point, and this
+# assertion holds it there.
+# 只跳脫一次。在兩處跳脫會把換行變成再也還原不回去的字面反斜線 n；跳脫只發生在一處，
+# 這條斷言把它固定在那裡。
 if grep -q '\\\\n' "$TMP/t102c.log"; then
     bad "T102f the log escaped the same newline twice (\\\\n), so the value no longer round-trips / log 把同一個換行跳脫了兩次（\\\\n），該值再也還原不回去"
 else
@@ -5233,16 +4574,13 @@ fi
 # ---------------------------------------------------------------------
 # T103 -- `--a1` past column Z.
 #
-# The README said "field 3 is C" and stopped there, so a reader addressing a
-# wide sheet had to guess. Spreadsheet columns are BIJECTIVE base-26 -- there
-# is no zero digit, so Z is followed by AA and not by BA, and ZZ by AAA. Plain
-# base-26 gets every boundary wrong. The implementation is right; nothing held
-# it there, and nothing said so.
+# Spreadsheet columns are bijective base-26: there is no zero digit, so Z is
+# followed by AA, not BA, and ZZ by AAA. Plain base-26 gets every boundary
+# wrong. These cases pin the boundaries the README does not spell out.
 #
 # T103 —— `--a1` 在 Z 之後。
-# README 只說到「field 3 是 C」就停了，於是要處理寬表的人只能用猜的。試算表的欄名是
-# 「雙射」26 進位——沒有代表零的位數，因此 Z 之後是 AA 而不是 BA，ZZ 之後是 AAA。用普通
-# 26 進位會在每一個邊界上都算錯。實作是對的，只是沒有東西守著它，也沒有東西說出來。
+# 試算表的欄名是「雙射」26 進位：沒有代表零的位數，因此 Z 之後是 AA 而不是 BA，ZZ 之後
+# 是 AAA。用普通 26 進位會在每個邊界上都算錯。這些案例釘住 README 沒有寫出的邊界。
 # ---------------------------------------------------------------------
 echo
 echo "--- T103: --a1 column letters past Z / --a1 在 Z 之後的欄名 ---"
@@ -5267,35 +4605,25 @@ for pair in 26:'[Z2]' 27:'[AA2]' 52:'[AZ2]' 53:'[BA2]' 702:'[ZZ2]' 703:'[AAA2]';
 done
 
 # ---------------------------------------------------------------------
-# T104 -- "append" that was a seek, and lost half an audit trail.
+# T104 -- `-log` appends under concurrent writers.
 #
-# openLog opened the file for writing and called seekToEndOfFile(). The comment
-# above it said "append, never truncate", and with ONE process that is exactly
-# what it does. With two it is not: the seek fixes an offset at open time, so a
-# writer that opened before another appended goes on writing over what that
-# other one wrote. Eight processes logging 25 operations each left 98 entries
-# of 200 -- none malformed, every run exiting 0.
+# Opening for write and calling seekToEndOfFile() appends correctly with one
+# process only: the seek fixes an offset at open time, so a writer that opened
+# earlier overwrites what another appended since. Eight processes logging 25
+# operations each left 98 of 200 entries, none malformed, every run exiting 0.
+# Same shape as T79: a comment declaring a property nothing derived.
 #
-# The failure shape is this project's own: a comment declaring a property that
-# nothing derived, indistinguishable from the real thing until a second actor
-# appears. T79 was the same shape with `no_embedded_newlines`.
+# The file is an audit trail, and a trail that silently drops entries is worse
+# than none, since its reader believes it complete. A script running csv2 over
+# several files at once with a shared -log is an ordinary use of the flag.
 #
-# It matters here more than most places because the file is an audit trail. Its
-# entire value is that what happened is still there later, and a trail that
-# silently drops half its entries is worse than no trail, since whoever reads
-# it believes it is complete. Nor is concurrency exotic: a script running csv2
-# over several files at once with a shared -log is what the flag is for.
-#
-# T104 —— 一個其實是 seek 的「追加」，弄丟了半份稽核軌跡。
-# openLog 以寫入開啟檔案並呼叫 seekToEndOfFile()。它上面那句註解寫著「一律追加，絕不覆寫」，
-# 而在「一個」行程下它做的正是那件事。兩個行程下就不是了：那個 seek 在開檔當下固定了位移，
-# 於是先開檔的寫入者會持續蓋掉後來者追加的內容。八個行程各記錄 25 次操作，200 筆只剩 98 筆
-# ——沒有一筆是壞的，每一次都以 0 結束。
-# 這個失敗的形狀正是本專案自己的：一句註解宣告了某個性質，而沒有任何東西推導過它；在第二個
-# 行為者出現之前，它與真貨無法區分。T79 的 `no_embedded_newlines` 是同一個形狀。
-# 它在這裡比在多數地方更要緊，因為那個檔案是稽核軌跡。它的全部價值就是「發生過的事日後
-# 還在」，而一份會靜默丟掉一半紀錄的軌跡比沒有軌跡更糟——讀它的人會相信它是完整的。並行
-# 也不是什麼奇特情境：一支同時對多個檔案跑 csv2、共用一個 -log 的腳本，正是這個旗標的用途。
+# T104 —— 並行寫入者下 `-log` 仍是追加。
+# 以寫入開檔再呼叫 seekToEndOfFile()，只有在單一行程下才是正確的追加：seek 在開檔當下
+# 固定了位移，先開檔的寫入者會蓋掉別人之後追加的內容。八個行程各記錄 25 次操作，200 筆
+# 只剩 98 筆，沒有一筆是壞的，每次都以 0 結束。與 T79 同形：一句註解宣告了沒有東西推導
+# 過的性質。
+# 那個檔案是稽核軌跡，會靜默丟紀錄的軌跡比沒有更糟，因為讀它的人會相信它完整。同時對
+# 多個檔案跑 csv2、共用一個 -log，是這個旗標的正常用法。
 # ---------------------------------------------------------------------
 echo
 echo "--- T104: a shared -log under concurrent writers / 並行寫入者共用同一個 -log ---"
@@ -5303,11 +4631,9 @@ echo "--- T104: a shared -log under concurrent writers / 並行寫入者共用�
 print -r -- 'a,b'  > "$TMP/t104.csv"
 print -r -- '1,2' >> "$TMP/t104.csv"
 
-# Pre-existing content, so "never truncate" is measured at the same time as
-# "never overwrite". The two are different promises and only one of them was
-# ever broken.
-# 先放一些既有內容，讓「絕不截斷」與「絕不覆寫」同時被量到。這是兩個不同的承諾，而其中
-# 只有一個曾經被打破。
+# Pre-existing content, so "never truncate" is measured alongside "never
+# overwrite". They are different promises.
+# 先放既有內容，讓「絕不截斷」與「絕不覆寫」一起被量到。這是兩個不同的承諾。
 print -r -- 'PRIOR' > "$TMP/t104.log"
 
 t104_writers=6
@@ -5326,43 +4652,28 @@ assert_eq "$(wc -l < "$TMP/t104.log" | tr -d ' ')" "$t104_want" \
 assert_eq "$(head -1 "$TMP/t104.log")" "PRIOR" \
     "T104b and the file that already existed was appended to, not truncated / 而既有的檔案是被追加，不是被截斷"
 
-# Loss showed up as MISSING lines, never as broken ones, which is why nothing
-# noticed: every surviving entry looked perfect.
-# 遺失是以「少了幾行」的形式出現，從來不是「壞掉的行」——這正是沒有東西發現它的原因：
-# 每一筆活下來的紀錄看起來都完好無缺。
+# Loss shows up as missing lines, never broken ones: every surviving entry
+# looks perfect, so only a count catches it.
+# 遺失是以「少了幾行」出現，從不是「壞掉的行」：每筆留下的紀錄都完好，只有計數抓得到。
 assert_eq "$(grep -vc '^PRIOR$' "$TMP/t104.log" | tr -d ' ')" "$(( t104_want - 1 ))" \
     "T104c and every surviving line is a real entry, since loss never looked like damage / 而每一行都是真正的紀錄——遺失從來不長得像損壞"
 
 # ---------------------------------------------------------------------
-# T105 -- the A1 ROW, which nothing held.
+# T105 -- the A1 row is the spreadsheet row, not the physical line.
 #
-# `--a1` printed the physical line. The code carried an argument for it, and
-# the argument was half right: the record number ALONE would print [A1] for a
-# cell any spreadsheet calls A3, and [E0] for a header, and A1 notation has no
-# row 0. Both true. The answer to it is to add the header rows, not to switch
-# to the line.
+# The record number alone would print [A1] for a cell a spreadsheet calls A3,
+# and [E0] for a header (A1 has no row 0), so header rows are added to it. The
+# physical line is not the answer either: a record spanning lines still
+# occupies one spreadsheet row, since the quoted newline stays in the cell.
+# With one record per line the two coincide, which is why every README example
+# and fixture agree with both readings; only the multi-line case tells them
+# apart, and it is the one case where `--a1` adds anything over `--physical`.
 #
-# With one record per line the two are equal -- and every example in the
-# README, plus every fixture in this repo, is one record per line. So both
-# readings agreed everywhere anyone looked, and the whole existing suite went
-# on passing after the fix, unchanged. That is the measurement: nothing here
-# was holding the row.
-#
-# They differ exactly once: a record spanning lines still occupies ONE
-# spreadsheet row, because the quoted newline stays inside the cell. And that
-# case is the only one where `--a1` offers anything `--physical` does not.
-# The feature was wrong precisely where it was necessary.
-#
-# T105 —— 沒有任何東西守著的那個 A1「列號」。
-# `--a1` 印的是物理行號。程式碼裡有一段為它辯護的論證，而那個論證對了一半：光用紀錄號，
-# 確實會讓一個任何試算表都叫作 A3 的儲存格印成 [A1]、讓標頭印成 [E0]，而 A1 記法沒有第 0 列。
-# 兩者都對。但對它們的解法是「加上標頭列數」，不是「改用行號」。
-# 一筆一行時兩者相等——而 README 的每一個範例、本 repo 的每一份 fixture，全都是一筆一行。
-# 於是兩種讀法在所有人看過的地方都一致，而修正之後整個既有測試套件一條都沒有變。那正是
-# 這裡的量測結果：**沒有任何東西守著那個列號**。
-# 它們只在一種情況下不同：跨行的紀錄在試算表裡仍然只佔一列，因為引號內的換行留在儲存格內。
-# 而那個情況正是 `--a1` 唯一比 `--physical` 多給出一點東西的場合——這個功能，錯在它唯一
-# 有必要存在的地方。
+# T105 —— A1 的列號是試算表的列，不是物理行。
+# 只用紀錄號，會把試算表叫作 A3 的儲存格印成 [A1]、把標頭印成 [E0]（A1 沒有第 0 列），
+# 所以要加上標頭列數。改用物理行也不對：跨行的紀錄在試算表裡仍只佔一列，因為引號內的
+# 換行留在儲存格內。一筆一行時兩者相同，所以 README 的範例與 fixture 對兩種讀法都成立；
+# 只有跨行的情況分得出來，而那正是 `--a1` 唯一比 `--physical` 多給資訊的場合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T105: the A1 row is a spreadsheet row, not a line / A1 的列號是試算表的列，不是行 ---"
@@ -5382,10 +4693,9 @@ got=$("$CSV2" -contains FINDME --a1 --physical -i "$TMP/t105.csv" 2>/dev/null | 
 assert_eq "$got" "3:2@L10 [B4]" \
     "T105a a record spanning lines is still ONE spreadsheet row / 跨行的紀錄在試算表裡仍然只佔一列"
 
-# Stated separately because the point is that they are different things. When
-# --a1 was the line, this assertion would have been the same assertion twice.
-# 分開斷言，因為重點正是「它們是兩個不同的東西」。當 --a1 還是行號時，這一條會與上一條
-# 變成同一個斷言寫兩次。
+# Stated separately because the point is that they differ. If --a1 were the
+# line, this would be the previous assertion written twice.
+# 分開斷言，因為重點正是兩者不同。若 --a1 是行號，這條就等於上一條寫兩次。
 a1row=$("$CSV2" -contains FINDME --a1 -i "$TMP/t105.csv" 2>/dev/null | sed 's/.*\[[A-Z]*\([0-9]*\)\].*/\1/')
 phys=$("$CSV2" -contains FINDME --physical -i "$TMP/t105.csv" 2>/dev/null | sed 's/^[0-9]*:[0-9]*@L\([0-9]*\).*/\1/')
 if [[ "$a1row" != "$phys" ]]; then
@@ -5394,9 +4704,8 @@ else
     bad "T105b --a1 row $a1row equals the physical line $phys on a file with embedded newlines / 在含內嵌換行的檔案上，--a1 的列 $a1row 等於物理行 $phys"
 fi
 
-# A header is row 1, never row 0: A1 notation has no row 0, and that half of
-# the original argument was always right.
-# 標頭是第 1 列，絕不是第 0 列：A1 記法沒有第 0 列，而原本那段論證的這一半一直都是對的。
+# A header is row 1, never row 0: A1 notation has no row 0.
+# 標頭是第 1 列，絕不是第 0 列：A1 記法沒有第 0 列。
 hdr=$("$CSV2" -contains 'a' --a1 --include-headers -i "$TMP/t105.csv" 2>/dev/null | awk 'NR==1{print $1, $2}')
 assert_eq "$hdr" "0:1 [A1]" \
     "T105c the header row is row 1, not row 0 / 標頭列是第 1 列，不是第 0 列"
@@ -5411,10 +4720,9 @@ got2=$("$CSV2" -contains FINDME --a1 --physical -i "$TMP/t105.csv2" 2>/dev/null 
 assert_eq "$got2" "1:2@L3 [B3]" \
     "T105d two header rows put data record 1 on row 3 / 兩列標頭讓第 1 筆資料落在第 3 列"
 
-# And where every fixture in this repo lives -- one record per line -- the two
-# still coincide, so the README's examples remain true.
-# 而在本 repo 每一份 fixture 所在的那個世界——一筆一行——兩者仍然重合，因此 README 的
-# 範例依然為真。
+# With one record per line the two still coincide, so the README's examples
+# remain true.
+# 一筆一行時兩者仍然重合，因此 README 的範例依然為真。
 print -r -- 'a,b'        > "$TMP/t105b.csv"
 print -r -- 'r1,x'      >> "$TMP/t105b.csv"
 print -r -- 'r2,FINDME' >> "$TMP/t105b.csv"
@@ -5423,33 +4731,30 @@ assert_eq "$got3" "2:2@L3 [B3]" \
     "T105e with one record per line the row and the line still agree / 一筆一行時，列號與行號仍然一致"
 
 # ---------------------------------------------------------------------
-# T106 -- forgery inside an entry, which escaping a whole line cannot stop.
+# T106 -- a quote inside a value cannot forge an entry.
 #
-# Whole-line escaping (T102) guarantees one entry per line. It cannot
-# distinguish the quotes that DELIMIT a value from quotes that are IN one --
-# by the time the line is escaped they are the same characters. So a value of
-# `INNOCENT" -> "ALSO INNOCENT` produced
+# Whole-line escaping (T102) guarantees one entry per line, but cannot tell
+# quotes that delimit a value from quotes inside one. A value of
+# `INNOCENT" -> "ALSO INNOCENT` would produce
 #
 #     update 1:note: "third record" -> "INNOCENT" -> "ALSO INNOCENT"
 #
-# one line, one entry, correct data on disk, and no parser can say which half
-# is old and which is new. Greedy gives old=`third record" -> "INNOCENT`;
-# non-greedy gives new=`INNOCENT`; the truth is neither.
+# one line, correct data on disk, and no parser can say which half is old and
+# which is new: greedy gives old=`third record" -> "INNOCENT`, non-greedy gives
+# new=`INNOCENT`, and the truth is neither.
 #
 # Doubled rather than backslashed: it is the convention `.csv2` and RFC 4180
-# already use, so a reader who knows the format needs nothing new -- and it
-# carries no backslash, so the whole-line escape leaves it alone. A `\"` would
-# have had its backslash doubled on the way out, which is the two-layer
-# escaping that made the first attempt wrong.
+# already use, and it carries no backslash, so the whole-line escape leaves it
+# alone. A `\"` would get its backslash doubled on the way out (two-layer
+# escaping).
 #
-# T106 —— 一筆紀錄「內部」的偽造，而整行跳脫擋不住它。
-# 整行跳脫（T102）保證一筆一行。它無法區分「界定值的引號」與「值裡面的引號」——跳脫發生時
-# 兩者已經是同樣的字元了。於是值 `INNOCENT" -> "ALSO INNOCENT` 產生一行合法的紀錄，磁碟上
-# 的資料也正確，卻沒有任何剖析器說得出哪一半是舊值、哪一半是新值：貪婪比對得到
-# old=`third record" -> "INNOCENT`，非貪婪得到 new=`INNOCENT`，而真相兩者皆非。
-# 用「加倍」而非反斜線：那是 `.csv2` 與 RFC 4180 已在使用的慣例，看得懂格式的人不必再學
-# 一套；而且它不含反斜線，整行跳脫不會碰它。寫成 `\"` 的話，反斜線會在輸出時被加倍，
-# 那正是這件事第一次做錯時的兩層跳脫。
+# T106 —— 值裡的引號無法偽造一筆紀錄。
+# 整行跳脫（T102）保證一筆一行，卻無法區分「界定值的引號」與「值裡面的引號」。值
+# `INNOCENT" -> "ALSO INNOCENT` 會產生一行紀錄、磁碟上的資料也正確，卻沒有剖析器說得出
+# 哪一半是舊值、哪一半是新值：貪婪比對得到 old=`third record" -> "INNOCENT`，非貪婪得到
+# new=`INNOCENT`，真相兩者皆非。
+# 用「加倍」而非反斜線：那是 `.csv2` 與 RFC 4180 已在使用的慣例，且不含反斜線，整行跳脫
+# 不會碰它。寫成 `\"` 的話，反斜線會在輸出時被加倍，成了兩層跳脫。
 # ---------------------------------------------------------------------
 echo
 echo "--- T106: a quote in a value cannot rewrite the entry / 值裡的引號無法改寫那筆紀錄 ---"
@@ -5465,23 +4770,20 @@ line=$(grep 'update 1:note' "$TMP/t106.log")
 assert_contains "$line" '"INNOCENT"" -> ""ALSO INNOCENT"' \
     "T106a a quote inside a logged value is doubled, as CSV does it / 記入 log 的值裡的引號會加倍，一如 CSV 的做法"
 
-# The WHOLE message, asserted exactly, because "contains" cannot show that the
-# two values are correctly delimited FROM EACH OTHER -- and that is the entire
-# defect. Note that a regex is deliberately not used to recover the values
-# here: a greedy or non-greedy `"(.*)" -> "(.*)"` is precisely the parser this
-# case exists to protect, and writing one in the test would only demonstrate
-# the ambiguity again rather than measure the encoding.
-# 斷言「整句」訊息且要求精確相符，因為「包含」證明不了那兩個值彼此之間界定正確——而那正是
-# 這個缺陷的全部。此處刻意不用正規表示式去還原：貪婪或非貪婪的 `"(.*)" -> "(.*)"` 正是本
-# 案例要保護的那種剖析器，在測試裡寫一個只會再示範一次那個歧義，而不是量到編碼本身。
+# The whole message, asserted exactly, because "contains" cannot show that the
+# two values are delimited from each other, which is the defect. No regex is
+# used to recover the values: a greedy or non-greedy `"(.*)" -> "(.*)"` is the
+# very parser this case protects, and would only re-demonstrate the ambiguity.
+# 斷言整句訊息且要求精確相符，因為「包含」證明不了兩個值彼此界定正確，而那正是缺陷所在。
+# 此處不用正規表示式還原：貪婪或非貪婪的 `"(.*)" -> "(.*)"` 正是本案例要保護的剖析器，
+# 寫一個只會再示範一次那個歧義。
 msg=${line#* INFO  }
 assert_eq "$msg" 'update 1:note: "third record" -> "INNOCENT"" -> ""ALSO INNOCENT"' \
     "T106b and the old and new values stay delimited from each other / 而新舊兩個值彼此之間的界線仍然成立"
 
-# A value with no quote must be untouched -- the fix has to cost nothing in
-# the ordinary case, which is every case anyone will actually read.
-# 不含引號的值必須完全不受影響——這個修正在普通情況下不能有任何代價，而普通情況正是
-# 所有人真正會去讀的那些。
+# A value with no quote must be untouched: the fix costs nothing in the
+# ordinary case.
+# 不含引號的值必須完全不受影響：這個修正在普通情況下沒有任何代價。
 print -r -- 'a,note'   > "$TMP/t106b.csv"
 print -r -- '1,plain' >> "$TMP/t106b.csv"
 rm -f "$TMP/t106b.log"
@@ -5490,31 +4792,26 @@ assert_contains "$(grep 'update 1:note' "$TMP/t106b.log")" '"plain" -> "still pl
     "T106c while a value with no quote is written exactly as before / 而不含引號的值，寫出來與原本完全相同"
 
 # ---------------------------------------------------------------------
-# T107 -- three ways to decline an index, one message, and the message was
-# false.
+# T107 -- the three ways of declining an index give three messages.
 #
-# No sidecar, a stale sidecar and a sidecar too short to hold a header all
-# ended at the same line: ".csv with no index proving one record per line;
-# build one with --build-index". It asserted there was no index while
-# `x.csv.index` sat beside the data, and it prescribed the thing the reader
-# had just done. A blind-test subject lost several minutes to it.
+# No sidecar, a stale sidecar and a sidecar too short to hold a header must not
+# share ".csv with no index proving one record per line; build one with
+# --build-index": that sentence denies an index sitting beside the data and
+# prescribes what the reader just did.
 #
-# Worse, the reason was not printed at all in the case that most needed it.
-# `load` is called twice per run -- once as a pure eligibility query, once
-# where the index is read -- so its "ignoring and scanning" lines printed
-# twice. Silencing the query was tried and was worse: on a search that
-# declines the parallel path the query is the ONLY call, so the reason
-# vanished. It is deduplicated inside load instead, once per sidecar per run.
+# `load` is called twice per run (an eligibility query, then the real read), so
+# its "ignoring and scanning" line would print twice. Silencing the query is
+# not the fix: on a search that declines the parallel path the query is the
+# only call, and the reason would vanish. It is deduplicated inside load, once
+# per sidecar per run.
 #
-# T107 —— 拒絕索引的三種情況，同一句訊息，而那句訊息是假的。
-# 「沒有 sidecar」、「sidecar 過期」、「sidecar 短到裝不下檔頭」全都走到同一行：
-# 「.csv with no index proving one record per line; build one with --build-index」。
-# 它在 `x.csv.index` 就躺在資料旁邊時宣稱「沒有索引」，並開出對方剛剛做過的那帖藥。
-# 一位盲測受測者為此損失了好幾分鐘。
-# 更糟的是，最需要那個理由的情況下它根本不印。`load` 一次執行被呼叫兩次——一次純資格查詢、
-# 一次真的要讀——因此那些「ignoring and scanning」印了兩次。把查詢靜音試過了，而那更糟：
-# 在一個拒絕平行路徑的搜尋裡，查詢是唯一的一次呼叫，於是理由整個消失。改為在 load 內部
-# 依 sidecar 去重，每次執行只說一次。
+# T107 —— 拒絕索引的三種情況給出三句訊息。
+# 「沒有 sidecar」、「sidecar 過期」、「sidecar 短到裝不下檔頭」不能共用
+# 「.csv with no index proving one record per line; build one with --build-index」：
+# 那句話否認了就在資料旁邊的索引，又開出對方剛做過的那帖藥。
+# `load` 每次執行被呼叫兩次（資格查詢，再真的讀取），所以「ignoring and scanning」會印
+# 兩次。把查詢靜音不是解法：在拒絕平行路徑的搜尋裡，查詢是唯一一次呼叫，理由會整個
+# 消失。改為在 load 內依 sidecar 去重，每次執行只說一次。
 # ---------------------------------------------------------------------
 echo
 echo "--- T107: three ways to decline an index are three messages / 拒絕索引的三種情況是三句訊息 ---"
@@ -5550,13 +4847,11 @@ t107_build short; short_out=$(t107_debug)
 assert_contains "$none_out" "no index proving one record per line" \
     "T107a with no sidecar the message says there is none / 沒有 sidecar 時，訊息說的是沒有"
 
-# The reason is IN the message now, so these assert the reason and not only
-# the naming. The message used to end "run with -debug to see why" -- advice
-# for a reader who is not running with -debug, on a line only visible to one
-# who is.
-# 理由現在寫「在」訊息裡，因此這兩條斷言的是「理由」，不只是「有沒有指名」。那則訊息原本
-# 以「用 -debug 看原因」結尾——那是給「沒有在用 -debug 的人」的建議，卻印在一行只有「正在
-# 用 -debug 的人」才看得到的訊息上。
+# The reason is in the message itself, so these assert the reason, not only
+# the naming. "Run with -debug to see why" would be advice printed on a line
+# only a -debug reader sees.
+# 理由寫在訊息裡，因此這兩條斷言的是理由，而不只是有沒有指名。「用 -debug 看原因」會是
+# 一句只有正在用 -debug 的人才看得到的建議。
 assert_contains "$stale_out" "t107.csv.index was discarded (stale" \
     "T107b with a stale sidecar it names the sidecar AND why / sidecar 過期時，訊息指名它，並說出為什麼"
 
@@ -5581,34 +4876,27 @@ assert_contains "$short_out" "shorter than an index header" \
     "T107e and a sidecar too short to read says so, where it used to say nothing / 而短到讀不了的 sidecar 會說出來，那裡原本什麼都不說"
 
 # ---------------------------------------------------------------------
-# T108 -- the parallel path's memory, which nothing had ever measured.
+# T108 -- the parallel path's memory does not track the file.
 #
-# T9a/b/c pin the streaming path at a flat RSS and are correct. They say
-# nothing about the parallel path, and neither did anything else, so this held
-# for as long as the parallel path has existed: peak RSS came to about one
-# byte per byte of input. 615 MB in, 608 MB resident -- while the
-# single-threaded path over the same file stayed at 9.5 MB.
+# T9a/b/c pin the streaming path at a flat RSS but say nothing about the
+# parallel path. Without this case its peak RSS can grow about one byte per
+# byte of input (615 MB in, 608 MB resident, against 9.5 MB single-threaded).
 #
-# The cause was `planChunks`, which walks the WHOLE file to learn each chunk's
-# first record number, reading it in 1 MiB `Data` objects with no autorelease
-# pool. On Darwin those survive until the process exits. It is the third site
-# of the identical defect: ByteSource.next carries the same comment, and the
-# parallel worker's read loop needed the same fix the same day.
+# The cause was `planChunks`, which walks the whole file to learn each chunk's
+# first record number, reading 1 MiB `Data` objects with no autorelease pool;
+# on Darwin those survive until exit. It is the same defect as in
+# ByteSource.next and the parallel worker's read loop. Forcing one chunk in
+# flight moved peak RSS by half a percent, so the cost does not scale with
+# work in flight: the culprit is the one loop touching every byte outside a
+# pool.
 #
-# What identified it was forcing exactly one chunk in flight at a time. Peak
-# RSS moved by half a percent -- 637 MB against 640 MB. Nothing that scales
-# with work IN FLIGHT can behave like that, which ruled out the workers and
-# left the one loop that touches every byte outside a pool.
-#
-# T108 —— 平行路徑的記憶體，那是從來沒有人量過的東西。
-# T9a／T9b／T9c 把串流路徑釘在一個平坦的 RSS 上，而它們是對的。它們對平行路徑什麼也沒說，
-# 而別的東西也沒有，於是這件事在平行路徑存在的整段時間裡都成立：峰值 RSS 大約是「輸入每一個
-# 位元組對應一個位元組」。讀進 615 MB、常駐 608 MB——而同一個檔案在單執行緒路徑上是 9.5 MB。
-# 成因是 `planChunks`：它為了讓每個區塊知道自己第一筆的編號而走過「整個檔案」，以 1 MiB 的
-# `Data` 讀取，而且沒有 autorelease pool。在 Darwin 上那些會活到行程結束。這是同一個缺陷的
-# 第三個發生地：`ByteSource.next` 帶著同一段註解，而平行工作者的讀取迴圈在同一天需要同樣的修正。
-# 識別出它的，是「強制同時只有一個區塊在飛」那次量測：峰值 RSS 只動了百分之零點五（637 MB
-# 對 640 MB）。任何隨「同時在飛的工作量」而變的東西都不可能是這種行為。
+# T108 —— 平行路徑的記憶體不跟著檔案走。
+# T9a／T9b／T9c 把串流路徑釘在平坦的 RSS 上，但沒說到平行路徑。少了本案例，平行路徑的峰值
+# RSS 可能隨輸入每個位元組增加約一個位元組（讀進 615 MB、常駐 608 MB，單執行緒為 9.5 MB）。
+# 成因是 `planChunks`：它為了讓每個區塊知道第一筆的編號而走過整個檔案，以 1 MiB 的 `Data`
+# 讀取且沒有 autorelease pool；在 Darwin 上那些會活到行程結束。與 `ByteSource.next`、平行
+# 工作者的讀取迴圈是同一個缺陷。強制同時只有一個區塊在飛，峰值 RSS 只動了百分之零點五，
+# 所以成本不隨在飛的工作量而變：元凶是那個在 pool 之外碰過每個位元組的迴圈。
 # ---------------------------------------------------------------------
 echo
 echo "--- T108: the parallel path's memory does not track the file / 平行路徑的記憶體不跟著檔案走 ---"
@@ -5616,18 +4904,14 @@ echo "--- T108: the parallel path's memory does not track the file / 平行路�
 # `.csv2` is used because the format itself guarantees one record per line, so
 # the parallel path is eligible with no index to build.
 # 使用 `.csv2`，因為這個格式本身保證一筆一行，於是不必建立索引，平行路徑就已符合資格。
-# Written by one loop per file rather than by concatenating a block. The first
-# version built a block and appended `tail -n +3` of it repeatedly, and the
-# result did not parse -- csv2 refused it at record 1 with a field-count error,
-# so the runs exited 1 and printed no metrics line at all. The readings were
-# then EMPTY, empty became 0 in the arithmetic, and 0 sailed under the bound:
-# the case reported "costs 0B" and passed, against a build with the defect
-# fully present. Hence the emptiness check below, and this simpler fixture.
-# 每個檔案各用一個迴圈寫出，而不是把一個區塊重複串接。第一版先造一個區塊、再反覆附加它的
-# `tail -n +3`，而那個結果剖析不了——csv2 在第 1 筆就以欄數錯誤拒絕它，於是那兩次執行以 1
-# 結束、完全沒有印出 metrics 行。讀數因此是「空的」，空的在算術裡變成 0，而 0 輕鬆通過了
-# 下面那個界限：這個案例回報「只多花 0B」並且通過了——而當時的建置帶著完整的缺陷。
-# 下面那道「是否為空」的檢查，以及這個比較單純的 fixture，都是因此而來。
+# Written by one loop per file rather than by concatenating a block. A
+# concatenated fixture that fails to parse makes csv2 exit 1 with no metrics
+# line; the empty readings then become 0 in the arithmetic and pass the bound
+# against a build with the defect present. Hence this simple fixture and the
+# emptiness check below.
+# 每個檔案各用一個迴圈寫出，而不是重複串接一個區塊。串接出來的 fixture 若剖析失敗，csv2
+# 會以 1 結束且不印 metrics 行；空的讀數在算術裡變成 0，在帶著缺陷的建置上照樣通過界限。
+# 因此用這個單純的 fixture，並在下面檢查讀數是否為空。
 t108_make() {   # $1 = output, $2 = how many data records
     local i
     {
@@ -5637,16 +4921,14 @@ t108_make() {   # $1 = output, $2 = how many data records
         done
     } > "$1"
 }
-# 10 MB against 40 MB, not 1 MB against 10 MB. Below roughly 10 MB the number
-# being measured is still the working set ramping up -- ten workers, their
-# buffers, the allocator's first arenas -- and that ramp is steeper than the
-# retention being tested for, so the case failed on a build that was correct.
-# Both sizes here sit above the ramp, where what changes with the input is the
+# 10 MB against 40 MB, not 1 MB against 10 MB. Below roughly 10 MB the reading
+# is still the working set ramping up (ten workers, their buffers, the
+# allocator's first arenas), a ramp steeper than the retention under test, so
+# a correct build would fail. Above it, what changes with the input is the
 # input.
-# 用 10 MB 對 40 MB，而不是 1 MB 對 10 MB。大約 10 MB 以下，量到的還是「工作集正在爬升」
-# ——十個工作者、它們的緩衝區、配置器最初的 arena——而那個爬升比這裡要測的「保留」還陡，
-# 於是這個案例在一個正確的建置上失敗了。這裡的兩個尺寸都在爬升段之上，那裡隨輸入而變的
-# 就是輸入本身。
+# 用 10 MB 對 40 MB，而不是 1 MB 對 10 MB。大約 10 MB 以下，量到的還是工作集在爬升（十個
+# 工作者、它們的緩衝區、配置器最初的 arena），那個爬升比要測的「保留」還陡，正確的建置也會
+# 失敗。在爬升段之上，隨輸入而變的就是輸入本身。
 t108_make "$TMP/t108_small.csv2" 200000
 t108_make "$TMP/t108_big.csv2"   800000
 
@@ -5676,26 +4958,21 @@ fi
 # extra bytes cost. Retaining the input would put the whole difference here.
 # 兩次平行執行之間，地板互相抵銷，剩下的就是「多出來的位元組要花多少」。若輸入被留住，
 # 整個差額都會出現在這裡。
-# An empty reading arithmetically becomes 0, and 0 passes the bound below --
-# a test computing a plausible answer out of missing data, which is the exact
-# failure this project exists to prevent. It happened here on the first
-# attempt, so it is checked rather than assumed.
-# 讀不到值時，算術上會變成 0，而 0 會通過下面那個界限——一個「用缺失的資料算出看似合理的
-# 答案」的測試，正是本專案存在要防的那種失敗。本案例第一次寫出來時就發生了，因此這裡是
-# 檢查而不是假設。
+# An empty reading becomes 0 arithmetically, and 0 passes the bound below: a
+# plausible answer computed from missing data. So it is checked, not assumed.
+# 讀不到值時算術上會變成 0，而 0 會通過下面的界限：用缺失的資料算出看似合理的答案。
+# 因此這裡是檢查而不是假設。
 if [[ -z "$t108_r_s" || -z "$t108_r_b" ]]; then
     bad "T108b could not read peak_rss_bytes (s=$(wc -c < "$TMP/t108_s.txt" 2>/dev/null)B b=$(wc -c < "$TMP/t108_b.txt" 2>/dev/null)B) [$(tr '\n' '|' < "$TMP/t108_s.txt" 2>/dev/null)] / 無法讀出 peak_rss_bytes"
     t108_r_s=0; t108_r_b=1
 fi
 t108_diff=$(( t108_r_b - t108_r_s ))
 t108_grew=$(( t108_sz_b - t108_sz_s ))
-# Half the added input. Measured either side of the fix on this exact pair:
-# retaining the input costs +39.9 MB for +28.2 MB of file, not retaining it
-# costs +7.1 MB. Half separates those with room on both sides, and a tighter
-# bound would be measuring the working set again.
-# 界限取「多出來的輸入的一半」。在這一組尺寸上、修正前後各量過一次：留住輸入時，檔案多
-# 28.2 MB 要付出 +39.9 MB；不留住時是 +7.1 MB。一半能把兩者分開且兩側都有餘裕，而更緊的
-# 界限只會又量到工作集。
+# Half the added input. On this pair, retaining the input costs +39.9 MB for
+# +28.2 MB of file; not retaining it costs +7.1 MB. Half separates those with
+# room on both sides; a tighter bound would measure the working set again.
+# 界限取多出來的輸入的一半。在這組尺寸上，留住輸入時檔案多 28.2 MB 要多付 +39.9 MB；
+# 不留住時是 +7.1 MB。一半能把兩者分開且兩側都有餘裕，更緊的界限又會量到工作集。
 t108_bound=$(( t108_grew / 2 ))
 if (( t108_diff < t108_bound )); then
     ok "T108b a ${t108_grew}B larger file costs ${t108_diff}B, not the file (bound ${t108_bound}B) / 大 ${t108_grew}B 的檔案只多花 ${t108_diff}B，而不是整個檔案"
@@ -5728,30 +5005,24 @@ assert_same "$TMP/t108_capped.out" "$TMP/t108_free.out" \
     "T108d and throttling changes what is held, not what is written / 而限流改變的是持有多少，不是寫出什麼"
 
 # ---------------------------------------------------------------------
-# T109 -- a keyfile of one byte was accepted, and a keyfile of zero was not.
+# T109 -- a keyfile too short to be a key is refused.
 #
-# That asymmetry is the whole finding: someone had already decided a keyfile
-# must have content, and the missing decision was how much. A one-byte key
-# produced a file that looks encrypted -- `license:enc:a4d6aee9:…` -- and the
-# whole column came back in 98 tries.
+# An empty keyfile is refused, so the open question is how short is too
+# short. A one-byte key produces a file that looks encrypted
+# (`license:enc:a4d6aee9:…`) yet the whole column comes back in 98 tries.
+# The README warns that unkeyed `-hash` falls to a word list and prescribes
+# `-keyfile`; a weak keyfile must not be silently accepted as that cure.
 #
-# The README devotes a boxed section to warning that unkeyed `-hash` falls to a
-# word list and prescribes `-keyfile` as the cure, then says nothing about the
-# strength of the cure. A blind-test subject put it exactly: this tool's
-# silence at 1 byte is indistinguishable from its silence at 32.
-#
-# The floor applies when protection is CREATED and never when a file is READ.
+# The floor applies when protection is created, never when a file is read.
 # Applying it to `-decrypt` would make a file made with a weak key permanently
-# unreadable -- losing data for a security reason, which is the worse trade.
+# unreadable -- losing data for a security reason, the worse trade.
 #
-# T109 —— 一個位元組的金鑰檔被接受，而零個位元組的被拒絕。
-# 那個不對稱正是整個發現：有人早已決定「金鑰檔必須有內容」，缺的是「多少」。一個位元組的
-# 金鑰產生出一個看起來是加密過的檔案——`license:enc:a4d6aee9:…`——而整欄在 98 次內被復原。
-# README 用一整個方框段落警告「不帶金鑰的 `-hash` 擋不住字典攻擊」並開出 `-keyfile` 這帖藥，
-# 然後對那帖藥的強度隻字不提。一位盲測受測者說得最準：這個工具在 1 byte 時的沉默，與它在
-# 32 bytes 時的沉默無法區分。
-# 這個下限只在「建立保護」時適用，「讀取」時絕不適用。把它套到 `-decrypt` 上，會讓一份用弱
-# 金鑰做出來的檔案再也讀不回來——以安全為由造成資料無法取回，那是更糟的交換。
+# T109 —— 短到稱不上金鑰的金鑰檔會被拒絕。
+# 空的金鑰檔會被拒絕，所以問題在於多短算太短。一個位元組的金鑰產生的檔案看起來是加密過的
+# （`license:enc:a4d6aee9:…`），整欄卻在 98 次內被復原。README 警告不帶金鑰的 `-hash`
+# 擋不住字典攻擊，並開出 `-keyfile` 這帖藥；弱金鑰檔不能被靜默地當成那帖藥接受。
+# 這個下限只在建立保護時適用，讀取時絕不適用。套到 `-decrypt` 上，會讓用弱金鑰做出來的
+# 檔案再也讀不回來——以安全為由造成資料無法取回，那是更糟的交換。
 # ---------------------------------------------------------------------
 echo
 echo "--- T109: a key too short to be one / 一把短到稱不上金鑰的金鑰 ---"
@@ -5780,13 +5051,12 @@ assert_fails "T109c keyed -hash refuses it too, since it is also creating protec
 assert_succeeds "T109d while a real key works / 而一把真正的金鑰可以運作" -- \
     "$CSV2" -encrypt license -keyfile "$TMP/t109_good.key" -i "$TMP/t109.csv" -o "$TMP/t109_ok.csv" -t
 
-# The asymmetry, measured. A file made with the short key BEFORE the floor
-# existed must still open, or the floor has destroyed data to protect it.
-# 那個不對稱，量出來。在下限存在「之前」用短金鑰做出來的檔案必須仍然打得開，否則這個下限
-# 就是為了保護資料而毀掉了資料。
-# Built with the good key, then decrypted with it -- the read path must not
-# consult the floor at all, which is what this pins.
-# 用好金鑰建立，再用它解密——讀取路徑完全不該去看那個下限，而這正是這裡要釘住的。
+# A file made with a short key before the floor existed must still open, or
+# the floor destroys data to protect it. Such a file cannot be made now, so
+# this builds with the good key and pins that the read path does not consult
+# the floor at all.
+# 在下限存在之前用短金鑰做出來的檔案必須仍然打得開，否則下限就是為了保護資料而毀掉資料。
+# 現在已做不出那種檔案，因此這裡用好金鑰建立，釘住的是讀取路徑完全不去看那個下限。
 assert_succeeds "T109e and -decrypt never consults the floor, because reading must not depend on it / 而 -decrypt 完全不看那個下限，因為「讀得回來」不能取決於它" -- \
     "$CSV2" -decrypt all -keyfile "$TMP/t109_good.key" -i "$TMP/t109_ok.csv" -o "$TMP/t109_back.csv" -t
 
@@ -5802,26 +5072,21 @@ assert_contains "$msg" "Reading a file that was already made with a short key is
     "T109g and the refusal says that reading an existing file is not affected / 而拒絕訊息說明「讀取既有檔案」不受影響"
 
 # ---------------------------------------------------------------------
-# T110 -- three things the documentation did not say, now that it does.
+# T110 -- what `-md` escapes, and what SIGPIPE returns, are documented.
 #
-# `-md` escapes `|` to `\|` and an embedded newline to <br> in DATA cells.
-# Neither was written down. The one that IS documented is a different `<br>`:
-# the one joining two header rows. A blind-test subject wrote an alignment
-# checker, split a rendered row on `|`, counted the escaped ones, and got a
-# fault that was not there -- they were one step from filing a defect against
-# correct code.
+# `-md` escapes `|` to `\|` and an embedded newline to <br> in data cells.
+# That `<br>` is distinct from the documented one joining two header rows.
+# A checker that splits a rendered row on `|` without skipping escaped pipes
+# reports a misalignment that is not there.
 #
-# Exit 141 was not written down either, and the "Exit status" section said in
-# so many words that there is no third case beyond 0 and error. There is:
-# SIGPIPE, which a pipeline meets constantly, and which is not a csv2 failure.
+# Exit 141 is a third outcome besides 0 and error: SIGPIPE, which a pipeline
+# meets constantly, and which is not a csv2 failure.
 #
-# T110 —— 三件文件原本沒說、現在說了的事。
-# `-md` 在「資料」儲存格裡把 `|` 跳脫成 `\|`、把內嵌換行變成 <br>。兩者都沒有寫下來；有寫的
-# 那個 `<br>` 是另一回事（兩列標頭的接合）。一位盲測受測者寫了一個對齊檢查器，把算繪後的一列
-# 以 `|` 切開，連被跳脫的那些也算了進去，於是得到一個並不存在的錯誤——他離「對一段正確的程式
-# 提出缺陷報告」只差一步。
-# 結束狀態 141 也沒有寫下來，而「結束狀態」那一節明白寫著「除了 0 與錯誤之外沒有第三種情況」。
-# 有的：SIGPIPE，管線會不斷遇到它，而它不是 csv2 的失敗。
+# T110 —— 文件寫明 `-md` 跳脫什麼，以及 SIGPIPE 回傳什麼。
+# `-md` 在資料儲存格裡把 `|` 跳脫成 `\|`、把內嵌換行變成 <br>。這個 `<br>` 與文件中
+# 接合兩列標頭的那個不同。把算繪後的一列以 `|` 切開卻不略過被跳脫的 `|`，會得到一個
+# 並不存在的錯位。
+# 結束狀態 141 是 0 與錯誤之外的第三種結果：SIGPIPE，管線經常遇到，而它不是 csv2 的失敗。
 # ---------------------------------------------------------------------
 echo
 echo "--- T110: what -md escapes, and what SIGPIPE returns / -md 跳脫什麼，以及 SIGPIPE 回傳什麼 ---"
@@ -5839,11 +5104,11 @@ assert_contains "$md" 'has \| a pipe' \
 assert_contains "$md" 'has<br>a newline' \
     "T110b and an embedded newline becomes <br> for the same reason / 而內嵌換行基於同樣理由變成 <br>"
 
-# The row must still have exactly the column count, which is the property the
-# escaping exists to protect. Counted on UNESCAPED pipes only -- counting all
-# of them is the mistake the escaping caused, and the reason it is documented.
-# 那一列的欄數必須維持不變，而那正是這道跳脫要保護的性質。只數「未被跳脫」的 |——把全部
-# 都數進去正是這道跳脫造成的那個誤判，也是它被寫進文件的原因。
+# The row must keep its column count, which is what the escaping protects.
+# Only unescaped pipes are counted; counting all of them is the misreading
+# the documentation warns about.
+# 那一列的欄數必須不變，那正是這道跳脫要保護的性質。只數未被跳脫的 |；全部都數是文件
+# 所警告的那種誤判。
 row=$(print -r -- "$md" | grep 'a pipe')
 bars=$(print -r -- "$row" | sed 's/\\|//g' | tr -cd '|' | wc -c | tr -d ' ')
 assert_eq "$bars" "3" \
@@ -5854,14 +5119,11 @@ assert_eq "$bars" "3" \
 # SIGPIPE。生產端必須長到「消費端離開時 csv2 還在寫」，否則這什麼也量不到。
 # No `local` here: this is a brace group at script level, not a function, and
 # zsh rejects `local` outside a function. The rejection goes to stderr, the
-# redirection sends the group's stdout to the file, and the fixture ends up
-# wrong while the script carries on -- which is how T110d first failed with
-# rc=1 and 187 bytes of stderr that had nothing to do with SIGPIPE. The same
-# mistake broke T108's fixture earlier the same day.
+# group's stdout still goes to the file, and the fixture ends up wrong while
+# the script carries on -- failing T110d for a reason unrelated to SIGPIPE.
 # 此處不用 `local`：這是腳本層級的大括號群組，不是函式，而 zsh 不允許 `local` 出現在函式
-# 之外。那個拒絕會走 stderr，重導把群組的 stdout 送進檔案，於是 fixture 是壞的而腳本照常
-# 往下跑——T110d 第一次失敗時的 rc=1 與 187 bytes stderr 就是這麼來的，與 SIGPIPE 無關。
-# 同一天稍早，T108 的 fixture 也是被同一個錯誤弄壞的。
+# 之外。那個拒絕走 stderr，群組的 stdout 照樣送進檔案，於是 fixture 壞了而腳本照常往下跑
+# ——T110d 會因為與 SIGPIPE 無關的原因失敗。
 { print -r -- 'a,b'
   for i in {1..20000}; do print -r -- "$i,needle"; done
 } > "$TMP/t110_big.csv"
@@ -5879,55 +5141,47 @@ assert_eq "$t110_rc" "141" \
 assert_eq "$(wc -c < "$TMP/t110_err.txt" | tr -d ' ')" "0" \
     "T110e and says nothing on stderr, because it is not csv2's failure / 而且在 stderr 上不說任何話，因為那不是 csv2 的失敗"
 
-# Redundant quoting survives a round trip. Undocumented until now, and the kind
-# of fidelity people check for themselves if nobody states it.
-# 冗餘的引號在 round-trip 中存活。在此之前沒有記載，而那是「沒有人講就會有人自己去測」的
-# 那種保真性質。
+# Redundant quoting survives a round trip: a fidelity property people check
+# for themselves if nobody states it.
+# 冗餘的引號在 round-trip 中存活：那是沒有人講就會有人自己去測的保真性質。
 print -r -- 'a,b'              > "$TMP/t110q.csv"
 print -r -- '"1","no comma"'  >> "$TMP/t110q.csv"
 assert_contains "$("$CSV2" -r -t -i "$TMP/t110q.csv")" '"1","no comma"' \
     "T110f quoting that was not required is preserved, not normalised away / 非必要的引號會被保留，而不是被正規化掉"
 
 # ---------------------------------------------------------------------
-# T111 -- three rules that existed and were not applied where they also hold.
+# T111 -- three rules applied on every axis where they hold.
 #
-# (a) `-append` onto a file whose last record is incomplete is refused. The
-#     README says so twice and says it of BOTH destinations: "Checked for -o
-#     and for --in-place alike -- the fast path used to skip it". `-o` did
-#     check. `--in-place`, which is the only destination the fast path serves,
-#     did not, because the guard was behind `if the file does not end in a
-#     newline` and its comment argued that such a file "is the only file whose
-#     last record can be half-written". A record left open by an unclosed
-#     quote contains newlines like any prose, so the file ends with one and the
-#     record is still open.
+# (a) `-append` onto a file whose last record is incomplete is refused, for
+#     `-o` and `--in-place` alike (the README says both). The fast path serves
+#     only `--in-place`, so its guard cannot sit behind "the file does not end
+#     in a newline": a record left open by an unclosed quote contains newlines
+#     like any prose, so the file ends with one while the record is still
+#     open. Otherwise: rc=0, a file csv2 then refuses to read, and the appended
+#     record swallowed by the quote, so the documented repair,
+#     --truncate-partial, discards the record just "successfully" written.
 #
-#     What that produced: rc=0, a file csv2 then refuses to read, and the
-#     appended record swallowed by the unclosed quote -- so the documented
-#     repair, --truncate-partial, discards the record that had just been
-#     written "successfully".
+# (b) `-delete -col X` plus an edit aimed at column X is refused ("the edit
+#     would have no effect and would still be reported as done"). The same
+#     holds for `-delete a,b` plus an edit aimed at a record in a..b, which
+#     otherwise drops the edit silently at rc=0.
 #
-# (b) `-delete -col X` plus an edit aimed at column X is refused, with the
-#     reason spelled out: "the edit would have no effect and would still be
-#     reported as done". `-delete a,b` plus an edit aimed at a RECORD in a..b
-#     did exactly that, silently, at rc=0. One axis had the rule; the other did
-#     not, and the two live in different parts of the same function.
+# (c) The message that teaches `.csv2` escaping must print `\n`, not `\\n`.
+#     Message escaping is centralised, which is right for values and wrong
+#     for prose; a reader following a `\\n` writes a literal backslash-n and
+#     gets rc=0 with the wrong value.
 #
-# (c) The message that teaches `.csv2` escaping was itself escaped, so it
-#     printed `\\n` where `.csv2` defines `\n`. A reader following it wrote a
-#     literal backslash-n and got rc=0 with the wrong value. Caused the same
-#     morning by centralising message escaping -- correct for values, wrong for
-#     prose, and a single choke point cannot tell them apart.
-#
-# T111 —— 三條「已經存在、卻沒有被套到它同樣成立的地方」的規則。
-# (a) `-append` 到最後一筆不完整的檔案會被拒絕，README 說了兩次，而且說的是「兩種目的地
-#     一視同仁」。`-o` 確實檢查了；`--in-place`——快路徑唯一服務的目的地——沒有，因為那個
-#     守衛被放在「若檔案不以換行結尾」之下，而它的註解主張那種檔案「是唯一『最後一筆可能
-#     只寫了一半』的檔案」。一筆停在未關閉引號裡的紀錄，和任何散文一樣含有換行，因此檔案
-#     以換行結尾，而那一筆仍然開著。結果是 rc=0、csv2 自己讀不回來，而那筆剛被「成功」寫入
-#     的紀錄被未關閉的引號吞掉，文件指定的修復手段隨後把它丟棄。
-# (b) `-delete -col X` 與瞄準欄位 X 的編輯併用會被拒絕，理由寫得一字不差。而 `-delete a,b`
-#     與瞄準 a..b 之中某一筆的編輯併用，做的正是那件事，靜默，rc=0。
-# (c) 那則「教你 .csv2 怎麼跳脫」的訊息，自己被跳脫了。
+# T111 —— 三條規則，在它們成立的每一個軸上都要套用。
+# (a) `-append` 到最後一筆不完整的檔案會被拒絕，`-o` 與 `--in-place` 一視同仁（README 兩者
+#     都寫了）。快路徑只服務 `--in-place`，所以它的守衛不能放在「檔案不以換行結尾」之下：
+#     停在未關閉引號裡的紀錄和任何散文一樣含有換行，於是檔案以換行結尾而那一筆仍開著。
+#     否則就是 rc=0、csv2 自己讀不回來，剛追加的紀錄被引號吞掉，文件指定的修復手段
+#     --truncate-partial 隨後把那筆剛「成功」寫入的紀錄丟棄。
+# (b) `-delete -col X` 與瞄準欄位 X 的編輯併用會被拒絕（「編輯不會有效果，卻仍會被回報為
+#     完成」）。`-delete a,b` 與瞄準 a..b 之中某一筆的編輯併用同樣成立，否則那個編輯會在
+#     rc=0 下被靜默丟棄。
+# (c) 教你 `.csv2` 怎麼跳脫的訊息必須印出 `\n`，而不是 `\\n`。訊息的跳脫集中在一處，對值
+#     是對的、對散文是錯的；照著 `\\n` 做的讀者會寫出字面反斜線 n，rc=0 卻得到錯的值。
 # ---------------------------------------------------------------------
 echo
 echo "--- T111: rules that stopped at one axis / 只走到一個軸就停住的規則 ---"
@@ -5945,8 +5199,8 @@ assert_fails "T111a -append --in-place refuses a file whose last record is left 
 assert_same "$TMP/t111_open.csv" "$TMP/t111_open.bak" \
     "T111b and does not write into it / 而且沒有寫進去"
 
-# The short-record variant, which took the same path for the same reason.
-# 欄數不足的那個變體，基於同樣理由走了同樣的路。
+# The short-record variant, which takes the same path for the same reason.
+# 欄數不足的那個變體，基於同樣理由走同樣的路。
 { print -r -- 'id,name,note'
   print -r -- 'r1,n1,a'
   print -r -- 'r2,n2'
@@ -5957,8 +5211,8 @@ assert_fails "T111c and refuses a short final record under --in-place too / --in
 assert_same "$TMP/t111_short.csv" "$TMP/t111_short.bak" \
     "T111d leaving that one alone as well / 那一份同樣沒有被動過"
 
-# And the fast path must still do its job on a healthy file, or the fix has
-# simply broken -append.
+# And the fast path must still work on a healthy file, or the fix has simply
+# broken -append.
 # 而快路徑在健康的檔案上必須照常運作，否則這個修正只是把 -append 弄壞了。
 { print -r -- 'id,name,note'; print -r -- 'r1,n1,a' } > "$TMP/t111_ok.csv"
 assert_succeeds "T111e while a healthy file still appends / 而健康的檔案照常追加得上" -- \
@@ -6008,35 +5262,32 @@ assert_eq "$got" "$want" \
     "T111m and a value written the way it says round-trips as a real newline / 而依它所說寫出的值，會還原成一個真正的換行"
 
 # ---------------------------------------------------------------------
-# T112 -- two messages that pointed elsewhere instead of answering.
+# T112 -- messages that answer instead of redirecting.
 #
-# (a) `--verify-index` said "no usable index beside X" with the sidecar sitting
-#     right there. This tool separates "absent" from "present and unusable"
-#     everywhere else -- the parallel decline was fixed for exactly that
-#     distinction hours earlier the same day -- and the one verb whose entire
-#     job is to report on a sidecar collapsed the two.
+# (a) `--verify-index` distinguishes "absent" from "present and unusable", as
+#     the rest of the tool does; "no usable index beside X" with the sidecar
+#     right there collapses the two in the one verb whose job is to report on
+#     a sidecar.
 #
-# (b) The parallel decline ended "run with -debug to see why". That is advice
-#     for a reader who is NOT running with -debug, printed on a line only a
-#     reader who IS can see. The answer was one line above, at INFO. The reason
-#     is in the message now.
+# (b) The parallel decline carries its reason. "Run with -debug to see why"
+#     would be advice for a non-debug reader printed on a line only a -debug
+#     reader sees.
 #
-# (c) A `-mid` window that begins past the end returns nothing at rc=0, which
-#     is indistinguishable from a window that exists and is empty. The
-#     documented way to tell them apart is `records` on the trailing `--json`
-#     meta line -- and `-md`, the shape you actually hand to a person, has no
-#     meta line at all: it renders a complete-looking empty table. The
-#     detection channel and the presentation channel did not compose.
+# (c) A `-mid` window that begins past the end returns nothing, which looks
+#     like a window that exists and is empty. `records` on the trailing
+#     `--json` meta line tells them apart, but `-md`, the shape handed to a
+#     person, has no meta line and renders a complete-looking empty table. So
+#     the warning goes to stderr, which every shape has.
 #
-# T112 —— 兩則「把讀者指到別處，而不是回答他」的訊息。
-# (a) `--verify-index` 在 sidecar 就躺在那裡時說「旁邊沒有可用的索引」。這個工具在其他每一處
-#     都把「不存在」與「存在但不能用」分開——平行路徑的拒絕就是為了這個分別而在同一天稍早
-#     修過的——而唯一一個「整份工作就是回報某個 sidecar」的動詞，把兩者合成了一句。
-# (b) 平行路徑的拒絕以「用 -debug 看原因」結尾。那是給「沒有在用 -debug 的人」的建議，卻印在
-#     一行只有「正在用 -debug 的人」看得到的訊息上。答案就在上一行的 INFO 裡。
-# (c) 起點在結尾之後的 `-mid` 視窗會在 rc=0 下什麼都不回傳，與「存在且為空的視窗」無法區分。
-#     文件指定的分辨方法是 `--json` 結尾 meta 的 `records`——而 `-md`，也就是你真正交給人的
-#     那個形狀，根本沒有 meta 行：它算繪出一張看起來完整的空表格。
+# T112 —— 會回答而不是轉介的訊息。
+# (a) `--verify-index` 要分開「不存在」與「存在但不能用」，一如這個工具的其他地方；
+#     在 sidecar 就在那裡時說「旁邊沒有可用的索引」，等於在唯一以回報 sidecar 為職責的
+#     動詞上把兩者合成一句。
+# (b) 平行路徑的拒絕自己帶著理由。「用 -debug 看原因」會是給沒用 -debug 的人的建議，
+#     卻印在只有正在用 -debug 的人才看得到的那一行。
+# (c) 起點在結尾之後的 `-mid` 視窗什麼都不回傳，看起來像存在且為空的視窗。`--json` 結尾
+#     meta 的 `records` 分得出來，但 `-md`——交給人的那個形狀——沒有 meta 行，算繪出一張
+#     看起來完整的空表格。所以警告走 stderr，每一種形狀都有它。
 # ---------------------------------------------------------------------
 echo
 echo "--- T112: messages that answer instead of redirecting / 會回答而不是轉介的訊息 ---"
@@ -6089,14 +5340,13 @@ md_err=$("$CSV2" -mid 500,505 -t -md -i "$TMP/t112.csv" 2>&1 >/dev/null)
 assert_contains "$md_err" "starts after the last record" \
     "T112g a -mid window past the end says so even under -md / 起點超過結尾的 -mid 視窗，即使在 -md 下也會說出來"
 
-# T112h is inverted by phase 8 item four. It used to assert that this stays a
-# success "because the run did what it was told", and -md is precisely the
-# shape where that was worst: it renders a complete-looking empty table with no
-# meta line to contradict it. The run doing what it was told is not the
-# question; whether the caller can tell what happened is.
-# T112h 被第 8 階段第四項反轉。它先前斷言這仍然是成功，「因為那次執行做了它被告知的事」，
-# 而 -md 正是那個說法最糟的形狀：它算繪出一張看起來完整的空表格，且沒有 meta 行可以反駁它。
-# 「那次執行有沒有照做」不是問題所在，「呼叫端分不分得出發生了什麼」才是。
+# T112h follows phase 8 item four: under -md this is an error, not a success.
+# -md renders a complete-looking empty table with no meta line to contradict
+# it; what matters is whether the caller can tell what happened, not whether
+# the run did what it was told.
+# T112h 依循第 8 階段第四項：在 -md 下這是錯誤，不是成功。-md 會算繪出一張看起來完整的
+# 空表格，且沒有 meta 行可以反駁它；重點是呼叫端分不分得出發生了什麼，而不是那次執行
+# 有沒有照做。
 assert_fails "T112h and under -md it is an error, not a complete-looking empty table / 而在 -md 下它是錯誤，不是一張看起來完整的空表" -- \
     "$CSV2" -mid 500,505 -t -md -i "$TMP/t112.csv"
 
@@ -6113,59 +5363,44 @@ assert_eq "${#quiet2}" "0" \
     "T112j and a clamped END stays silent, as it was designed to / 而被截斷的「終點」保持安靜，一如它的設計"
 
 # ---------------------------------------------------------------------
-# T113 -- the numbers in the README's worked example, checked against the file
-# it names.
+# T113 -- the README's worked example matches the file it names.
 #
-# A blind-test subject reported the `--json` example as stale: it shows
-# `records:21` and the TARGET_PACKAGES.csv they had held 22. Both were right.
-# The example describes `test/fixtures/TARGET_PACKAGES.csv`, which has 21; the
-# parent project keeps its own working copy of the same filename and it has
-# moved on. The README named neither, so there was no way to tell which one it
-# meant -- and no way to notice when the one it did mean changes.
+# The `--json` example describes `test/fixtures/TARGET_PACKAGES.csv` (21
+# records). The parent project keeps a working copy with the same filename
+# that moves on, so the README spells out the path and this case pins the
+# numbers. Same class of drift T69 guards for PASS counts: a number in prose
+# describing something that moves, with nothing re-checking it.
 #
-# The path is spelled out now, and this pins the numbers. It is the same class
-# of drift T69 guards for PASS counts: a number in prose that describes
-# something which moves, with nothing re-checking it.
-#
-# T113 —— README 範例裡的數字，對照它所指名的那個檔案來檢查。
-# 一位盲測受測者把那段 `--json` 範例回報為過期：它寫 `records:21`，而他手上的
-# TARGET_PACKAGES.csv 有 22 筆。兩邊都沒錯。那個範例描述的是 `test/fixtures/` 底下那一份
-# （21 筆）；母專案自己保有一份同名的工作複本，而它已經往前走了。README 兩份都沒指名，
-# 因此無從判斷它指的是哪一份——也無從在它所指的那一份改變時察覺。
-# 現在路徑寫全了，而這個案例把數字釘住。它與 T69 守的是同一類漂移：散文裡一個描述「會變動
-# 的東西」的數字，而沒有任何東西回頭複查它。
+# T113 —— README 範例與它所指名的檔案相符。
+# 那段 `--json` 範例描述的是 `test/fixtures/TARGET_PACKAGES.csv`（21 筆）。母專案保有一份
+# 同名、會持續變動的工作複本，因此 README 寫全路徑，本案例釘住數字。與 T69 守 PASS 數
+# 是同一類漂移：散文裡描述會變動之物的數字，而沒有東西回頭複查。
 # ---------------------------------------------------------------------
 echo
 echo "--- T113: the worked example's numbers / 範例裡的那些數字 ---"
 
 t113_meta=$("$CSV2" -contains busybox --json -i "$PKG" 2>/dev/null | tail -1)
-# Anchored on the busybox block, not on the first meta line in the file --
-# there is more than one worked example and the first belongs to a different
-# one. The first attempt at this case compared against that other example and
-# failed, which is the case doing its job on itself.
-# 錨定在 busybox 那一段，而不是檔案裡的第一行 meta——範例不只一個，而第一個屬於另一段。
-# 本案例的第一版比對到了那另一段而失敗，那正是這個案例對它自己起了作用。
+# Anchored on the busybox block, not on the first meta line in the file:
+# there is more than one worked example and the first belongs to another.
+# 錨定在 busybox 那一段，而不是檔案裡的第一行 meta：範例不只一個，而第一個屬於另一段。
 t113_readme=$(grep -A6 'csv2 -contains busybox --json' "$ROOT/README.md" \
     | grep -o '{"meta":{"records":[0-9]*,"matched":[0-9]*}}' | head -1)
 
 assert_eq "$t113_meta" "$t113_readme" \
     "T113a the README's meta line matches what the fixture it names produces / README 的 meta 行與它所指名的 fixture 實際產出相符"
 
-# The meta line alone is not enough, and round 88 is why. That block showed the
-# final line of a seven-line output under a `$` prompt with no ellipsis, and
-# T113a passed the whole time -- the one line it compared WAS correct. A worked
-# example can be true line by line and false as a transcript.
+# The meta line alone is not enough (round 88): a block can show only the
+# final line of a seven-line output under a `$` prompt with no ellipsis while
+# that one line is correct. A worked example can be true line by line and
+# false as a transcript.
 #
-# So the first HIT line is compared too, and the block must either carry every
-# line or say that it does not. `…` is the marker; a block with neither the
-# full output nor an ellipsis is the shape that shipped.
+# So the first hit line is compared too, and the block must either carry
+# every line or say it does not, with `…` as the marker.
 #
-# 只比對那一行 meta 是不夠的，而第 88 回合就是理由。那個區塊在一個 `$` 提示符底下展示了七行輸出的
-# 最後一行、沒有省略號，而 T113a 自始至終都通過——它比對的那一行**確實是對的**。
-# **一個範例可以逐行為真，而作為一份轉錄為假。**
+# 只比對那一行 meta 是不夠的（第 88 回合）：一個區塊可以在 `$` 提示符底下只展示七行輸出的
+# 最後一行、沒有省略號，而那一行本身是對的。**一個範例可以逐行為真，而作為一份轉錄為假。**
 #
-# 因此第一行**命中**也一起比對，而那個區塊要嘛帶著每一行、要嘛說出它沒有。`…` 就是那個標記；
-# 一個「既沒有完整輸出、也沒有省略號」的區塊，正是當初出貨的那個形狀。
+# 因此第一行命中也一起比對，而那個區塊要嘛帶著每一行、要嘛說出它沒有，以 `…` 為標記。
 t113_hit=$("$CSV2" -contains busybox --json -i "$PKG" 2>/dev/null | LC_ALL=C sed -n '2p')
 t113_block=$(LC_ALL=C grep -A8 'csv2 -contains busybox --json' "$ROOT/README.md")
 t113_readme_hit=$(print -r -- "$t113_block" | LC_ALL=C grep -o '{"record":1,"field":1,[^}]*}' | head -1)
@@ -6198,30 +5433,28 @@ assert_contains "$(grep -A1 'csv2 -contains busybox --json' "$ROOT/README.md" | 
     "T113c and the example names which copy it is reading / 而範例指名了它讀的是哪一份複本"
 
 # ---------------------------------------------------------------------
-# T114 -- a numeric knob with a bad value, which used to fail three different
-# ways and once as nothing at all.
+# T114 -- a numeric knob with a bad value is refused with a message.
 #
-#   CSV2_PARALLEL_MIN_BYTES=-1     SIGTRAP, exit 133, zero bytes on stdout AND
-#                                  stderr. A failure that looks like nothing.
-#   CSV2_MAX_BUFFER_RECORDS=-1     accepted, then reported back as
+#   CSV2_PARALLEL_MIN_BYTES=-1     must not SIGTRAP (exit 133, nothing on
+#                                  stdout or stderr: a failure that looks like
+#                                  nothing)
+#   CSV2_MAX_BUFFER_RECORDS=-1     must not be accepted and later reported as
 #                                  "exceeds the buffered-record limit (-1)"
-#   CSV2_PARALLEL_MIN_BYTES=16MiB  silently ignored, and -debug then printed
-#                                  the DEFAULT under the variable's own name
+#   CSV2_PARALLEL_MIN_BYTES=16MiB  must not be ignored while -debug prints the
+#                                  default under the variable's own name
 #
-# The third is the one that hides. Someone setting 16MiB sees
-# `under CSV2_PARALLEL_MIN_BYTES (16777216)` and reads it as confirmation --
-# the number agrees by coincidence. Set 8MiB and that line still says
-# 16777216.
+# The third hides best: someone setting 16MiB sees
+# `under CSV2_PARALLEL_MIN_BYTES (16777216)` and reads it as confirmation,
+# though it agrees only by coincidence; set 8MiB and it still says 16777216.
+# "Do not silently repair malformed input" applies, and an environment
+# variable is input.
 #
-# "Do not silently repair malformed input" is this project's own rule, and an
-# environment variable is input.
-#
-# T114 —— 一個值壞掉的數值旗標，原本會以三種不同的方式失敗，其中一種是「什麼都不像」。
-# 負數會 SIGTRAP、以 133 結束，stdout 與 stderr 都是空的；另一個接受負數再把它回報成
-# 「超過上限 (-1)」；而無法解析的值被靜默忽略，`-debug` 接著用那個變數自己的名字印出預設值。
+# T114 —— 值壞掉的數值旗標會被拒絕並給出訊息。
+# 負數不能觸發 SIGTRAP（以 133 結束、stdout 與 stderr 都是空的）；另一個旗標不能接受負數
+# 再回報成「超過上限 (-1)」；無法解析的值不能被忽略，同時 `-debug` 用那個變數的名字印出預設值。
 # 第三種最會藏：設了 16MiB 的人看到 `under CSV2_PARALLEL_MIN_BYTES (16777216)`，會把它讀成
-# 確認——而那只是碰巧相等。設 8MiB，同一行仍然印 16777216。
-# 「不要靜默修復格式錯誤的輸入」是本專案自己的規則，而環境變數就是輸入。
+# 確認，而那只是碰巧相等；設 8MiB，同一行仍然印 16777216。
+# 「不要靜默修復格式錯誤的輸入」在此適用，而環境變數就是輸入。
 # ---------------------------------------------------------------------
 echo
 echo "--- T114: a knob with a bad value / 值壞掉的旗標 ---"
@@ -6241,10 +5474,10 @@ assert_eq "$t114_rc" "1" \
 assert_contains "$t114_err" "CSV2_PARALLEL_MIN_BYTES=-1" \
     "T114b and the message quotes the variable and the value back / 而訊息把變數與值原樣引述回來"
 
-# The crash left NOTHING on either stream. A caller checking rc != 0 had no
-# message to report, which is the part that makes it worse than an error.
-# 那次崩潰在兩個串流上都什麼也沒留下。一個檢查 rc != 0 的呼叫端沒有任何訊息可以回報，
-# 而那正是它比「一個錯誤」更糟的地方。
+# A crash that leaves nothing on either stream gives a caller checking
+# rc != 0 no message to report, which is worse than an error.
+# 在兩個串流上都什麼也沒留下的崩潰，讓檢查 rc != 0 的呼叫端沒有任何訊息可以回報，
+# 比一個錯誤更糟。
 if (( ${#t114_err} > 0 )); then
     ok "T114c and there is something on stderr to report / 而 stderr 上有東西可以回報"
 else
@@ -6269,52 +5502,46 @@ assert_eq "$t114_rc" "0" \
     "T114g while a value that parses is accepted / 而一個解析得出來的值會被接受"
 
 # ---------------------------------------------------------------------
-# T115 -- two files from somewhere else, each of which read as success.
+# T115 -- two foreign files that must not read as success.
 #
-# (a) csv2 has a CR-line-ending detector with a first-rate message. It asked
-#     "was there NO LF at all", and a CR-separated file with a single trailing
-#     LF answers "there was one" -- so the detector stayed silent and the file
-#     read as ZERO records at rc=0, `-contains` found nothing, and
-#     `--verify-index` reported the index fine. One byte decided whether the
-#     user got the diagnosis or nothing.
+# (a) The CR-line-ending detector must not ask "was there no LF at all": a
+#     CR-separated file with a single trailing LF would then read as zero
+#     records at rc=0, `-contains` finding nothing and `--verify-index`
+#     reporting the index fine. One byte must not decide whether the user
+#     gets the diagnosis.
 #
-# (b) A UTF-16 file was read byte-transparently: correct for a tool that
-#     promises bytes round-trip, useless to the person holding it. Every second
-#     byte is NUL, the column names carry them, and the whole thing parses at
-#     rc=0 into records that mean nothing. FF FE and FE FF cannot begin a UTF-8
-#     file, so seeing one is not a guess.
+# (b) A UTF-16 file read byte-transparently parses at rc=0 into meaningless
+#     records, every second byte NUL, column names included. FF FE and FE FF
+#     cannot begin a UTF-8 file, so recognising one is not a guess.
 #
-# Both are refused rather than repaired, for the same reason: guessing an
-# encoding or a line ending is how a tool ends up silently producing something
-# plausible and wrong.
+# Both are refused rather than repaired: guessing an encoding or a line ending
+# is how a tool silently produces something plausible and wrong.
 #
-# T115 —— 兩個來自別處的檔案，而它們都讀成了「成功」。
-# (a) csv2 有一個 CR 行尾偵測器，訊息寫得很好。它問的是「有沒有『完全沒有』LF」，而一個
-#     以 CR 分隔、結尾多一個 LF 的檔案回答「有一個」——於是偵測器沉默，該檔案以 rc=0 讀成
-#     零筆紀錄、`-contains` 什麼也找不到、`--verify-index` 說索引沒問題。一個位元組決定了
-#     使用者拿到的是那個診斷，還是什麼都沒有。
-# (b) 一個 UTF-16 檔案被以「位元組透明」的方式讀進來：對一個承諾位元組原樣往返的工具是正確
-#     的，對拿著它的人毫無用處。FF FE 與 FE FF 不可能出現在 UTF-8 檔案開頭，因此看到它不是
-#     在猜。
+# T115 —— 兩種外來檔案不能讀成「成功」。
+# (a) CR 行尾偵測器不能問「是不是完全沒有 LF」：否則一個以 CR 分隔、結尾多一個 LF 的檔案
+#     會以 rc=0 讀成零筆紀錄，`-contains` 什麼也找不到，`--verify-index` 說索引沒問題。
+#     一個位元組不能決定使用者拿不拿得到診斷。
+# (b) 以位元組透明方式讀進的 UTF-16 檔案，會在 rc=0 下剖析成毫無意義的紀錄，每隔一個位元組
+#     就是 NUL，欄名也是。FF FE 與 FE FF 不可能出現在 UTF-8 檔案開頭，因此辨認它不是在猜。
+# 兩者都是拒絕而非修復：猜編碼或行尾，正是工具靜默產出「看似合理卻錯誤」之物的方式。
 # ---------------------------------------------------------------------
 echo
 echo "--- T115: files from somewhere else / 來自別處的檔案 ---"
 
-# (a) CR separators, with a trailing LF -- the byte that used to hide it.
-# (a) CR 分隔，結尾多一個 LF——就是那個原本讓它藏起來的位元組。
+# (a) CR separators, with a trailing LF -- the byte that would hide it.
+# (a) CR 分隔，結尾多一個 LF——就是那個會讓它藏起來的位元組。
 # printf, not `print -r`: with -r zsh writes the two characters backslash-r
-# rather than a CR, and the fixture then tests nothing. The same trap broke
-# T111m earlier today.
+# rather than a CR, and the fixture then tests nothing.
 # 用 printf，不是 `print -r`：加了 -r，zsh 寫出的是「反斜線 r」兩個字元而不是一個 CR，
-# 於是這個 fixture 什麼也測不到。同一個陷阱今天稍早弄壞過 T111m。
+# 於是這個 fixture 什麼也測不到。
 printf 'a,b\r1,x\r2,y\n' > "$TMP/t115_cr.csv"
 assert_fails "T115a a CR-separated file is diagnosed even with a trailing LF / 以 CR 分隔的檔案，即使結尾多一個 LF 也會被診斷出來" -- \
     "$CSV2" -r -i "$TMP/t115_cr.csv"
 assert_contains "$("$CSV2" -r -i "$TMP/t115_cr.csv" 2>&1)" "tr '\\r' '\\n'" \
     "T115b and the message still names the conversion / 而訊息仍然指出那個轉換指令"
 
-# CR-only, which always worked, must keep working.
-# 純 CR 的情況原本就有效，必須繼續有效。
+# CR-only must keep being diagnosed.
+# 純 CR 的檔案必須繼續被診斷出來。
 printf 'a,b\r1,x\r2,y' > "$TMP/t115_cronly.csv"
 assert_fails "T115c and a CR-only file is still diagnosed / 純 CR 的檔案仍然被診斷出來" -- \
     "$CSV2" -r -i "$TMP/t115_cronly.csv"
@@ -6338,11 +5565,11 @@ printf '\376\377\0n\0a\0m\0e\0\n' > "$TMP/t115_be.csv"
 assert_fails "T115g and the other byte order too / 另一種位元組順序同樣如此" -- \
     "$CSV2" -r -i "$TMP/t115_be.csv"
 
-# The UTF-8 BOM must still be STRIPPED, not refused: that is a different file
-# and a different decision, and confusing the two would break every Excel
-# export this tool exists to read.
-# UTF-8 的 BOM 必須仍然被「剝除」而不是被拒絕：那是另一種檔案、另一個決定，把兩者混為一談
-# 會弄壞每一份這個工具存在所要讀的 Excel 匯出檔。
+# The UTF-8 BOM must still be stripped, not refused: that is a different file
+# and a different decision, and refusing it would break every Excel export
+# this tool exists to read.
+# UTF-8 的 BOM 必須仍然被「剝除」而不是被拒絕：那是另一種檔案、另一個決定，拒絕它會弄壞
+# 每一份這個工具要讀的 Excel 匯出檔。
 printf '\357\273\277a,b\n1,x\n' > "$TMP/t115_bom.csv"
 assert_succeeds "T115h while a UTF-8 BOM is still stripped rather than refused / 而 UTF-8 的 BOM 仍然是被剝除，不是被拒絕" -- \
     "$CSV2" -r -i "$TMP/t115_bom.csv"
@@ -6350,50 +5577,45 @@ assert_contains "$("$CSV2" -contains 1 -i "$TMP/t115_bom.csv" 2>/dev/null)" "1:1
     "T115i and the first column is still addressable / 而第一欄仍然定址得到"
 
 # ---------------------------------------------------------------------
-# T116 -- the tool producing its own signature failure.
+# T116 -- an index that edits itself must stay true.
 #
-# (a) `-append --in-place` updated the index's record count, its offsets and
-#     its freshness stamp, and left `no_embedded_newlines` exactly as it found
-#     it. Append a legitimate multi-line record -- a quoted newline, which is
-#     the thing this tool exists to handle -- and the index now asserts a
-#     property of the file that nothing re-derived.
+# (a) `-append --in-place` edits the index rather than rebuilding it (unlike
+#     `-append -o` and `-update`), so besides the record count, offsets and
+#     freshness stamp it must re-derive `no_embedded_newlines`. Appending a
+#     legitimate multi-line record otherwise leaves the index asserting a
+#     property nothing re-derived -- T79's failure, at a fourth call site.
+#     The O(1) check passes because the stamp was just refreshed; `-contains`
+#     takes the parallel path and numbers every record after the next chunk
+#     boundary one too high, at rc=0, so the README's find-then-edit recipe
+#     writes into the wrong row.
 #
-#     T79's sentence, word for word, through a fourth call site: the one that
-#     EDITS an index instead of rebuilding it. `-append -o` and `-update`
-#     rebuild, so neither could get this wrong.
+# (b) Two `-update`s on one cell are refused; otherwise the first is applied
+#     and silently overwritten at rc=0, the situation the `-update`/`-delete`
+#     refusal already describes.
 #
-#     The consequence is the worst kind: the O(1) check PASSES, because this
-#     path just refreshed the stamp itself. `-contains` then takes the parallel
-#     path and numbers every record after the next chunk boundary one too high,
-#     at rc=0 -- so following the README's own find-then-edit recipe writes into
-#     the wrong row.
+# (c) A modifier with no verb is refused; accepting and ignoring it would make
+#     the `-insert -cell` refusal positional, so `-cell` written after the
+#     positional arguments would slip past.
 #
-# (b) Two `-update`s on one cell: the first was applied and then overwritten,
-#     rc=0, silently. The refusal for `-update` colliding with `-delete` states
-#     the reason in words that describe this exactly.
-#
-# (c) A modifier with no verb was accepted and ignored, which made the
-#     `-insert -cell` refusal positional: writing `-cell` after the positional
-#     arguments walked past it.
-#
-# T116 —— 這個工具自己造出了它的招牌失敗。
-# (a) `-append --in-place` 更新了索引的筆數、偏移量與新鮮度戳記，卻把 `no_embedded_newlines`
-#     原封不動地留著。追加一筆合法的跨行紀錄——引號內的換行，正是這個工具存在所要處理的東西
-#     ——索引於是宣稱了一個沒有任何東西重新推導過的檔案性質。那是 T79 那句話的逐字重演，
-#     發生在第四個呼叫點：唯一一條「編輯」索引而不是重建它的路徑。
-#     後果是最糟的一種：O(1) 檢查會「通過」，因為這條路徑剛剛才自己更新過戳記。
-# (b) 同一格上的兩次 `-update`：第一次被套用後覆蓋，rc=0，靜默。
-# (c) 沒有動詞可依附的修飾符被接受並忽略，於是「-insert 不可與 -cell 併用」變成位置性的。
+# T116 —— 一份會編輯自己的索引必須保持為真。
+# (a) `-append --in-place` 是「編輯」索引而非重建（不同於 `-append -o` 與 `-update`），因此除了
+#     筆數、偏移量與新鮮度戳記之外，它還必須重新推導 `no_embedded_newlines`。否則追加一筆合法
+#     的跨行紀錄後，索引宣稱的是沒有東西重新推導過的性質——T79 的失敗，發生在第四個呼叫點。
+#     O(1) 檢查會通過，因為戳記剛被更新；`-contains` 走平行路徑，把下一個區塊邊界之後的每一筆
+#     都編號多一，rc=0，於是照 README 的「先找再改」會寫進錯的列。
+# (b) 同一格上的兩次 `-update` 會被拒絕；否則第一次被套用後在 rc=0 下被靜默覆蓋，正是
+#     `-update`／`-delete` 衝突的拒絕訊息所描述的情況。
+# (c) 沒有動詞可依附的修飾符會被拒絕；接受並忽略它，會讓「-insert 不可與 -cell 併用」變成
+#     位置性的：把 `-cell` 寫在位置引數之後就能繞過。
 # ---------------------------------------------------------------------
 echo
 echo "--- T116: an index that edited itself into a lie / 一份把自己編輯成謊言的索引 ---"
 
-# No `local` in a brace group: zsh rejects it outside a function, the rejection
-# goes to stderr while the group's stdout still reaches the file, and the
-# fixture ends up wrong while the script carries on. Third time today -- T108,
-# T110, and here.
+# No `local` in a brace group: zsh rejects it outside a function, the
+# rejection goes to stderr while the group's stdout still reaches the file,
+# and the fixture ends up wrong while the script carries on (as in T108, T110).
 # 大括號群組裡不用 `local`：zsh 不允許它出現在函式外，那個拒絕走 stderr，而群組的 stdout
-# 仍然寫進檔案，於是 fixture 是壞的而腳本照常往下跑。今天第三次了——T108、T110，以及這裡。
+# 仍然寫進檔案，於是 fixture 壞了而腳本照常往下跑（T108、T110 亦同）。
 { print -r -- 'id,name,note'
   for i in {1..400}; do print -r -- "$i,name$i,\"note $i\""; done
 } > "$TMP/t116.csv"
@@ -6452,54 +5674,29 @@ assert_succeeds "T116j while the form that means something still works / 而真�
     "$CSV2" -delete -cell 1:2 -i "$TMP/t116b.csv" --in-place
 
 # ---------------------------------------------------------------------
-# T117 -- the two READMEs must cite the same test cases.
+# T117 -- the two READMEs cite the same test cases.
 #
-# Bilingual edits keep landing on one side only. It has happened twice that
-# anyone noticed: AE (a fingerprint table row written in English and lost in
-# Chinese, because a Python script asserted mid-way and wrote nothing, and the
-# retry only reproduced part of the work) and again on 2026-08-20, when the
-# UTF-16 and CR refusals were documented in the Chinese README alone for an
-# hour -- the same failure, the same cause, the same retry.
+# Bilingual edits tend to land on one side only (AE). Case numbers are the
+# cheapest mechanical proxy for "the same content is in both": a section that
+# says "Asserted by T115" in one language and is missing from the other shows
+# up here at once, without anyone remembering to check.
 #
-# Both times a blind-test subject found it. Nothing in the tree was looking.
-#
-# Case numbers are the cheapest mechanical proxy for "the same content is in
-# both". A section that says "Asserted by T115" in one language and does not
-# exist in the other shows up here immediately, and it does not depend on
-# anyone remembering to check.
-#
-# T117 —— 兩份 README 必須引用同一組測試案例。
-# 雙語編輯一再只落地一半。被發現的有兩次：AE（指紋表的一列寫進了英文、中文那半消失了，
-# 因為一支 Python 腳本中途 assert、整份未寫入，而重試只重現了其中一部分），以及 2026-08-20
-# 那次——UTF-16 與 CR 的拒絕有一小時只存在於中文 README 裡。同樣的失敗、同樣的成因、
-# 同樣的重試。
-# 兩次都是盲測受測者找到的。這棵樹上沒有任何東西在看。
-# 案例編號是「兩邊有同樣內容」最便宜的機械替代指標：一節在某一種語言裡寫著「由 T115 斷言」
-# 而在另一種語言裡根本不存在，會立刻在這裡浮出來，而且不必有人記得去檢查。
+# T117 —— 兩份 README 引用同一組測試案例。
+# 雙語編輯容易只落地一半（AE）。案例編號是「兩邊內容相同」最便宜的機械替代指標：一節在
+# 某一種語言裡寫著「由 T115 斷言」而在另一種語言裡不存在，會立刻在這裡浮出來，不必有人
+# 記得去檢查。
 # ---------------------------------------------------------------------
 echo
 echo "--- T117: both READMEs cite the same cases / 兩份 README 引用同一組案例 ---"
 
-# Set difference without comm: this rootfs's busybox has no comm applet, and
-# until T137's command-not-found guard existed, its absence turned T117a,
-# T117b and T121h into empty comparisons that reported PASS in the guest --
-# three cases that had never once run there. It was then `grep -Fxv -f`, which
-# is in every busybox build here and says the same thing: the lines of A that
-# are not whole lines of B.
-# 不用 comm 做集合差集：這個 rootfs 的 busybox 沒有 comm applet，而在 T137 那個
-# command-not-found 守衛出現之前，它的缺席會把 T117a、T117b 與 T121h 變成空的比較，
-# 在 guest 上回報 PASS——那三個案例在那裡一次也沒有真的執行過。當時改用的是 `grep -Fxv -f`，
-# 它在這裡的每一個 busybox 建置裡都有，說的是同一件事：A 當中「不是 B 的完整某一行」的那些行。
-# Now zsh's own `${A:|B}`, which needs no external tool and no temp file at
-# all. The `grep -Fxv -f` form it replaces was already the SECOND answer to
-# this question -- the first was `comm`, absent from this busybox -- and on
-# 2026-09-03 T241 reached for `comm` a third time, in this same file, eight
-# hundred lines below a comment saying it does not exist here. Keeping one
-# implementation is the point: a second one is where the next divergence goes.
-# 現在用 zsh 自己的 `${A:|B}`，完全不需要外部工具，也不需要暫存檔。它取代的 `grep -Fxv -f`
-# 本身已經是這個問題的**第二個**答案——第一個是 `comm`，而這個 busybox 沒有它——而 2026-09-03
-# T241 在同一個檔案裡、在一句「這裡沒有 comm」的註解下方八百行處，第三次伸手拿了 comm。
-# 保持只有一份實作正是重點：第二份，就是下一次分歧會發生的地方。
+# Set difference with zsh's own `${A:|B}`: no external tool, no temp file.
+# The guest's busybox has no `comm` applet, and before T137's
+# command-not-found guard its absence made T117a, T117b and T121h empty
+# comparisons that reported PASS without running. Keep this one
+# implementation: a second one is where the next divergence goes.
+# 用 zsh 自己的 `${A:|B}` 做集合差集：不需要外部工具，也不需要暫存檔。guest 的 busybox 沒有
+# `comm` applet，而在 T137 的 command-not-found 守衛出現之前，它的缺席讓 T117a、T117b 與 T121h
+# 變成空的比較，沒有執行就回報 PASS。保持只有這一份實作：第二份就是下一次分歧發生的地方。
 only_in_first() {   # first-list second-list
     local -a _a _b _d
     _a=(${(f)1}); _a=(${_a:#})
@@ -6546,11 +5743,11 @@ else
 fi
 
 # ---------------------------------------------------------------------
-# T118 -- the parser telling two stories about one file.
+# T118 -- the parser tells one story about one file, whatever the chunk size.
 #
-# A parallel worker calls finish() at the end of its CHUNK. The message there
-# was written for the end of the INPUT, and on a chunk boundary that lands
-# inside a quoted field it said three wrong things at once:
+# A parallel worker calls finish() at the end of its chunk. The end-of-input
+# message, given on a chunk boundary inside a quoted field, says three wrong
+# things at once:
 #
 #   csv2: record 3: the input ends inside a quoted field -- the closing quote
 #         is missing. The record is incomplete; pass --truncate-partial …
@@ -6558,28 +5755,22 @@ fi
 #   * the input did not end; the worker's view of it did
 #   * the fault is at record 1; the worker counts from its own chunk
 #   * --truncate-partial does nothing here, and had it worked it would have
-#     discarded a COMPLETE record
+#     discarded a complete record
 #
-# The same file at a larger chunk size got the correct message. A parser
-# contradicting itself about what a file contains, with an environment variable
-# casting the deciding vote, in the one area that is this tool's whole reason
-# for existing.
+# and an environment variable decides which message a file gets. A chunk
+# ending mid-quote means the file is not one-record-per-line, the premise the
+# format or the index handed the parallel path. So the run does what the tool
+# does everywhere with a premise that proves false: discards it and scans.
+# Both paths then give the same diagnosis because the same code produces it.
 #
-# The fix is not a better sentence. A chunk ending mid-quote means the file is
-# not one-record-per-line, which is the premise the format or the index handed
-# the parallel path -- so the run does what this tool does everywhere else with
-# a premise that turns out false: discards it and scans. Both paths then give
-# the same diagnosis because it is the same code producing it.
-#
-# T118 —— 解析器對同一個檔案說了兩種故事。
-# 平行工作者是在自己那「一塊」的結尾呼叫 finish()。那裡的訊息是為「輸入的結尾」寫的，而當
-# 區塊邊界落在引號欄位中間時，它一次說錯三件事：輸入並沒有結束（結束的是工作者的視野）、
+# T118 —— 不論 chunk 大小，解析器對同一個檔案只說一種故事。
+# 平行工作者是在自己那一塊的結尾呼叫 finish()。為「輸入的結尾」寫的訊息，若在落在引號
+# 欄位中間的區塊邊界上說出來，會一次說錯三件事：輸入並沒有結束（結束的是工作者的視野）、
 # 出問題的是第 1 筆而不是第 3 筆（它從自己那一塊的開頭數）、以及 --truncate-partial 在這裡
-# 什麼也不做，而若它真的作用了，丟掉的會是一筆「完整」的紀錄。
-# 同一個檔案在較大的 chunk 下得到正確訊息——決定權落在一個環境變數手上。
-# 修法不是換一句更好的話：區塊在引號中間結束，代表這個檔案不是一筆一行，而那正是格式或索引
-# 交給平行路徑的前提；於是這次執行做這個工具在其他每一處對「前提被推翻」所做的事——丟掉它、
-# 改用掃描。兩條路徑因此說法一致，因為說話的是同一段程式。
+# 什麼也不做，若真的作用了，丟掉的會是一筆完整的紀錄；而且哪個檔案拿到哪則訊息，由一個
+# 環境變數決定。區塊在引號中間結束，代表這個檔案不是一筆一行，而那正是格式或索引交給平行
+# 路徑的前提；於是這次執行做這個工具在每一處對「前提被推翻」所做的事——丟掉它、改用掃描。
+# 兩條路徑因此說法一致，因為說話的是同一段程式。
 # ---------------------------------------------------------------------
 echo
 echo "--- T118: one file, one story / 同一個檔案，同一個說法 ---"
@@ -6595,9 +5786,9 @@ t118_single=$("$CSV2" -r -i "$TMP/t118.csv2" 2>&1 | head -1)
 assert_contains "$t118_single" "a raw newline inside a cell" \
     "T118a single-threaded names the raw newline / 單執行緒指出那個裸換行"
 
-# Every chunk size has to give the SAME answer. The sizes below straddle the
-# boundary where the behaviour used to change.
-# 每一個 chunk 大小都必須給出「同一個」答案。下面這幾個尺寸跨越了原本行為改變的那個界線。
+# Every chunk size has to give the same answer. The sizes below straddle the
+# boundary where the message would otherwise change.
+# 每一個 chunk 大小都必須給出同一個答案。下面這幾個尺寸跨越了訊息原本會改變的那個界線。
 t118_bad=0
 for cb in 4 8 16 64 4194304; do
     got=$(CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=$cb \
@@ -6624,34 +5815,31 @@ done
 [[ "$got" == *"the input ends inside a quoted field"* ]] || \
     ok "T118c and never says the input ended when a chunk did / 而絕不把「區塊結束」說成「輸入結束」"
 
-# A file that really does end inside a quoted field must still get the message
-# that was written for it -- the fix must not have removed a true diagnosis.
-# 一個真的在引號欄位內結束的檔案，仍然必須拿到那則為它而寫的訊息——這個修正不能把一個
-# 為真的診斷一起移除。
+# A file that really does end inside a quoted field must still get that
+# message: the fix must not remove a true diagnosis.
+# 真的在引號欄位內結束的檔案，仍然必須拿到那則訊息：這個修正不能把為真的診斷一起移除。
 printf 'a,b\nA,B\n1,"unclosed\n' > "$TMP/t118_trunc.csv2"
 assert_contains "$("$CSV2" -r -i "$TMP/t118_trunc.csv2" 2>&1 | head -1)" "the input ends inside a quoted field" \
     "T118d while a genuinely truncated file still gets that message / 而一個真的被截斷的檔案仍然拿到那則訊息"
 
 # ---------------------------------------------------------------------
-# T119 -- the one verb that did not refuse zero, and it is the one that writes.
+# T119 -- `-insert` refuses zero, like every other verb.
 #
 #   csv2 -insert 0 'z,z,z' -i g.csv --in-place -log L.log
-#   rc=0, stderr empty, file byte-for-byte unchanged
+#   must not give rc=0, empty stderr, an unchanged file, and
 #   L.log: wrote 2 records, 3 fields, atomic rename OK
 #
-# An audit entry corroborating a write that never included the row. In a batch
-# it dropped its own row and applied the others, so the file came out partially
-# edited at rc=0.
+# That is an audit entry corroborating a write that never included the row;
+# in a batch the row is dropped and the others applied, a partial edit at
+# rc=0. `-delete 0,0`, `-head 0`, `-mid 0,2` and `-update 0:1` all refuse
+# zero. The documented range is `1..N`, and both bounds are enforced
+# (`-insert 11` on a ten-record file is refused).
 #
-# Every sibling already refused zero -- `-delete 0,0`, `-head 0`, `-mid 0,2`,
-# `-update 0:1`. The documented range is `1..N`; the upper bound was enforced
-# (`-insert 11` on a ten-record file is refused) and the lower was not.
-#
-# T119 —— 唯一一個不拒絕 0 的動詞，而它正是會「寫入」的那一個。
-# rc=0、stderr 空無一物、檔案逐位元未變，而 -log 記著「wrote 2 records … atomic rename OK」
-# ——一筆替「從未包含那一列的寫入」作證的稽核紀錄。在批次裡它會丟掉自己那一列、套用其餘的，
-# 於是檔案以 rc=0 的狀態被改成一半。
-# 每一個同輩動詞早就拒絕 0 了。文件寫的範圍是 `1..N`：上界有檢查，下界沒有。
+# T119 —— `-insert` 與其他動詞一樣拒絕 0。
+# 不能出現 rc=0、stderr 空無一物、檔案逐位元未變，而 -log 記著「wrote 2 records … atomic
+# rename OK」——那是一筆替「從未包含那一列的寫入」作證的稽核紀錄；在批次裡則會丟掉那一列、
+# 套用其餘的，以 rc=0 改成一半。`-delete 0,0`、`-head 0`、`-mid 0,2`、`-update 0:1` 都拒絕 0。
+# 文件寫的範圍是 `1..N`，上下界都要檢查（對十筆的檔案 `-insert 11` 會被拒絕）。
 # ---------------------------------------------------------------------
 echo
 echo "--- T119: -insert and zero / -insert 與 0 ---"
@@ -6669,9 +5857,8 @@ assert_same "$TMP/t119.csv" "$TMP/t119.bak" \
     "T119c and neither touched the file / 兩者都沒有動到檔案"
 
 # The refusal must happen before anything is written, or the audit trail
-# corroborates a write again -- which is what made this worth finding.
-# 拒絕必須發生在任何寫入之前，否則稽核軌跡又會替一次寫入作證——而那正是這件事值得被找出來
-# 的原因。
+# corroborates a write that did not happen.
+# 拒絕必須發生在任何寫入之前，否則稽核軌跡會替一次沒發生的寫入作證。
 rm -f "$TMP/t119.log"
 "$CSV2" -insert 0 'z,z,z' -i "$TMP/t119.csv" --in-place -log "$TMP/t119.log" >/dev/null 2>&1
 if grep -q "atomic rename OK" "$TMP/t119.log" 2>/dev/null; then
@@ -6695,20 +5882,19 @@ assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t119.csv")" "z" \
     "T119h and the row landed first / 而那一列落在第一位"
 
 # ---------------------------------------------------------------------
-# T120 -- a bilingual message with one language in it.
+# T120 -- each half of a bilingual message is in its own language.
 #
-# The index-discard reasons were written once, in English, and interpolated
-# into BOTH halves of a two-line bilingual message:
+# Index-discard reasons written once in English and interpolated into both
+# halves give
 #
 #   csv2：索引 s.csv.index 存在但無法使用：stale: the data file changed。
 #
-# "Exactly two lines, English then Chinese" held by count and not by language,
-# and it held that way because a string written once got used twice.
+# which keeps "exactly two lines, English then Chinese" by count but not by
+# language.
 #
-# T120 —— 一則雙語訊息，裡面只有一種語言。
-# 那些「索引被丟棄的理由」被寫了一次、只有英文，然後被插進一則雙語兩行訊息的「兩」半裡。
-# 「恰好兩行、英文在前中文在後」依行數成立、依語言不成立——而它之所以如此，是因為一個
-# 只寫了一次的字串被用了兩次。
+# T120 —— 雙語訊息的兩半各用自己的語言。
+# 「索引被丟棄的理由」若只用英文寫一次、再插進雙語訊息的兩半，就會得到上面那一行：
+# 「恰好兩行、英文在前中文在後」依行數成立，依語言不成立。
 # ---------------------------------------------------------------------
 echo
 echo "--- T120: both halves in their own language / 兩半各說自己的語言 ---"
@@ -6722,12 +5908,11 @@ for i in {1..300}; do print -r -- "$i,y$i"; done >> "$TMP/t120.csv"
 t120=$("$CSV2" --verify-index -i "$TMP/t120.csv" 2>&1)
 t120_zh=$(print -r -- "$t120" | sed -n '2p')
 
-# The reason, not the old wording. It used to say 資料檔已經改變 -- "the data
-# file changed" -- which the stamp cannot know: copy another file's sidecar
-# into place and nothing about the data file has changed at all. What the check
-# establishes is that the two do not match.
-# 比對的是「理由」，不是舊的措辭。它原本說「資料檔已經改變」，而那個戳記並不知道這件事：
-# 把另一個檔案的 sidecar 複製過來，資料檔一個位元組也沒有變。那個檢查確立的是「兩者不相符」。
+# The reason, not "資料檔已經改變" (the data file changed), which the stamp
+# cannot know: copy another file's sidecar into place and the data file has
+# not changed at all. What the check establishes is that the two do not match.
+# 比對的是理由，而不是「資料檔已經改變」——那個戳記不可能知道這件事：把另一個檔案的
+# sidecar 複製過來，資料檔一個位元組也沒變。那個檢查確立的是「兩者不相符」。
 assert_contains "$t120_zh" "過期：它不描述這個檔案" \
     "T120a the Chinese line carries the reason in Chinese / 中文那一行帶著中文的理由"
 
@@ -6743,32 +5928,35 @@ else
 fi
 
 # ---------------------------------------------------------------------
-# T121 -- a flag written into your data, and four more argument-parser holes.
+# T121 -- a known flag is not data, plus four more argument-parser holes.
 #
-#   csv2 -update 1:1 -t -i f.csv --in-place     rc=0, the cell now holds "-t"
-#   csv2 -append --json -i f.csv --in-place     a record containing "--json"
+#   csv2 -update 1:1 -t -i f.csv --in-place     must not store "-t" at rc=0
+#   csv2 -append --json -i f.csv --in-place     must not append "--json"
 #
-# This tool's founding failure -- exit zero, plausible garbage -- arriving
-# through its own argument parser. The README quotes multissh being bitten by
-# an unknown option swallowed as a hostname as the reason unknown flags are
-# always an error; the principle was there and stopped at UNKNOWN flags.
+# Otherwise this tool's founding failure -- exit zero, plausible garbage --
+# arrives through its own argument parser. The README's reason for refusing
+# unknown flags (multissh swallowing an unknown option as a hostname)
+# applies to known flags in a data position too.
 #
 # Known flags only, not "anything starting with a dash": `-update 1:2 -5`
-# stores a negative number. `--` ends flag parsing for the value that follows,
-# which is how a value that IS a flag name gets stored.
+# stores a negative number. `--` ends flag parsing for the value that
+# follows, which is how a value that is a flag name gets stored.
 #
-# The other four, all rc=0 before:
-#   -hash note -hash ver   hashed ver, left note in PLAINTEXT
-#   -o with --in-place     wrote -o, left the in-place target untouched
-#   --verify-index --no-index   read the sidecar --no-index forbids
-#   the log's "wrote N records, M fields"   reported the INPUT's shape
+# The other four (T122, T123), each rc=0 when unguarded:
+#   -hash note -hash ver   hashes ver, leaves note in plaintext
+#   -o with --in-place     writes -o, leaves the in-place target untouched
+#   --verify-index --no-index   reads the sidecar --no-index forbids
+#   the log's "wrote N records, M fields"   must report the output's shape
 #
-# T121 —— 一個被寫進資料裡的旗標，以及另外四個引數解析器的洞。
-# 這是這個工具的招牌失敗——以 0 結束、輸出看似合理的垃圾——而它是從自己的引數解析器進來的。
-# README 引用過 multissh 被「未知選項被當成主機名吞掉」咬過的事，作為「未知旗標一律視為錯誤」
-# 的理由；那條原則本來就在，只是停在「未知」旗標上。
+# T121 —— 已知旗標不是資料，以及另外四個引數解析器的洞。
+# 否則這個工具的招牌失敗——以 0 結束、輸出看似合理的垃圾——會從它自己的引數解析器進來。
+# README 拒絕未知旗標的理由（multissh 把未知選項當成主機名吞掉），同樣適用於出現在資料
+# 位置的已知旗標。
 # 只擋已知旗標，而不是所有以減號開頭的東西：`-update 1:2 -5` 存的是一個負數。`--` 結束其後
 # 那個值的旗標解析，那是「本身就是旗標名的值」存得進去的方式。
+# 另外四個（T122、T123），未設防時都是 rc=0：-hash 給兩次只雜湊後者、前者留成明文；
+# -o 與 --in-place 併用時寫了 -o、原地目標沒動；--verify-index --no-index 讀了 --no-index
+# 禁止的 sidecar；log 的「wrote N records, M fields」必須回報輸出的形狀。
 # ---------------------------------------------------------------------
 echo
 echo "--- T121: a flag is not data / 旗標不是資料 ---"
@@ -6791,10 +5979,9 @@ assert_same "$TMP/t121.csv" "$TMP/t121.bak" \
 assert_fails "T121c the same for a row literal / 對「一列」的字面值同樣如此" -- \
     "$CSV2" -append --json -i "$TMP/t121.csv" --in-place
 
-# A value that merely LOOKS like a flag must still work: a negative number is
-# ordinary data and refusing it would be a worse defect than the one being
-# fixed.
-# 一個「看起來像旗標」的值必須仍然能用：負數是普通資料，把它擋掉會比正在修的這個缺陷更糟。
+# A value that merely looks like a flag must still work: a negative number is
+# ordinary data, and refusing it would be worse than the defect being fixed.
+# 一個「看起來像旗標」的值必須仍然能用：負數是普通資料，把它擋掉比這個缺陷更糟。
 assert_succeeds "T121d while a negative number is still stored / 而負數仍然存得進去" -- \
     "$CSV2" -update 1:1 -5 -i "$TMP/t121.csv" --in-place
 assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t121.csv")" "-5" \
@@ -6813,13 +6000,12 @@ assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t121.csv")" "-t" \
 # 悄悄地不再涵蓋它。
 t121_cases=$(awk '/^func parseArgs/,/^\}/' "$ROOT/src/main.swift" \
     | grep -oE '^\s+case "[a-zA-Z0-9-]+"(, "[a-zA-Z0-9-]+")*:' | grep -oE '"[a-zA-Z0-9-]+"' | tr -d '"' | sort -u)
-# Uppercase allowed on both sides. A single-letter alias like `-V` is spelled
-# "V" in the case list and in KNOWN_FLAGS, and a lowercase-only pattern skipped
-# the entire `case "version", "V":` line -- so the one flag missing from
-# KNOWN_FLAGS was the one this check could not see.
-# 兩邊都允許大寫。像 `-V` 這樣的單字母別名，在 case 清單與 KNOWN_FLAGS 裡都寫作 "V"，
-# 而「只允許小寫」的樣式會把整行 `case "version", "V":` 跳過——於是「KNOWN_FLAGS 唯一漏掉
-# 的那個旗標」，正好是這個檢查看不見的那一個。
+# Uppercase allowed on both sides: a single-letter alias like `-V` is spelled
+# "V" in the case list and in KNOWN_FLAGS, and a lowercase-only pattern would
+# skip the whole `case "version", "V":` line, hiding exactly the flag a
+# mismatch would involve.
+# 兩邊都允許大寫：像 `-V` 這樣的單字母別名，在 case 清單與 KNOWN_FLAGS 裡都寫作 "V"，而
+# 只允許小寫的樣式會把整行 `case "version", "V":` 跳過，正好藏起可能出錯的那個旗標。
 t121_listed=$(awk '/^let KNOWN_FLAGS/,/^\]/' "$ROOT/src/main.swift" \
     | grep -oE '"[a-zA-Z0-9-]+"' | tr -d '"' | sort -u)
 t121_missing=$(only_in_first "$t121_cases" "$t121_listed" | tr '\n' ' ')
@@ -6838,10 +6024,10 @@ echo "--- T122: twice, and both at once / 兩次，以及同時 ---"
 
 head -c 32 /dev/urandom > "$TMP/t122.key"
 
-# The one with a security consequence: -hash twice hashed the second column and
-# left the first in plaintext, at rc=0, in a file whose purpose was masking it.
-# 有安全後果的那一個：-hash 給兩次，雜湊了第二欄、把第一欄留成明文，rc=0——而那個檔案存在
-# 的目的就是遮蔽它。
+# The one with a security consequence: -hash twice would hash the second
+# column and leave the first in plaintext, at rc=0, in a file meant to mask it.
+# 有安全後果的那一個：-hash 給兩次會雜湊第二欄、把第一欄留成明文，rc=0——而那個檔案的
+# 目的就是遮蔽它。
 assert_fails "T122a -hash twice is refused rather than masking only the last / -hash 給兩次會被拒絕，而不是只遮蔽最後一個" -- \
     "$CSV2" -hash note -hash b -keyfile "$TMP/t122.key" -i "$TMP/t121_pristine.csv" -o "$TMP/t122.csv" -t
 
@@ -6851,13 +6037,13 @@ assert_succeeds "T122b while one -hash still works / 而一個 -hash 照常運�
 assert_fails "T122c -o with --in-place is refused, not silently one of them / -o 與 --in-place 併用會被拒絕，而不是靜默擇一" -- \
     "$CSV2" -update 1:1 'Z' -i "$TMP/t121_pristine.csv" --in-place -o "$TMP/t122c.csv"
 
-# An index has to EXIST, or --verify-index fails for want of one and the case
-# passes without ever testing --no-index. It did exactly that on the first
-# attempt: green against a build where `--verify-index --no-index` happily read
-# the sidecar and reported `index OK`.
-# 索引必須「存在」，否則 --verify-index 會因為「找不到索引」而失敗，於是這個案例根本沒測到
-# --no-index 就通過了。第一版正是如此：在一個「`--verify-index --no-index` 會愉快地讀那個
-# sidecar 並回報 `index OK`」的建置上，它是綠的。
+# An index has to exist, or --verify-index fails for want of one and the
+# case passes without testing --no-index -- green even against a build where
+# `--verify-index --no-index` reads the sidecar and reports `index OK`. T122d0
+# proves the index is there.
+# 索引必須存在，否則 --verify-index 會因為找不到索引而失敗，這個案例根本沒測到 --no-index
+# 就通過——即使在「`--verify-index --no-index` 會讀 sidecar 並回報 `index OK`」的建置上也
+# 是綠的。T122d0 證明索引確實在。
 "$CSV2" --build-index -i "$TMP/t121_pristine.csv" >/dev/null 2>&1
 assert_succeeds "T122d0 with an index present, --verify-index alone succeeds / 索引存在時，單獨的 --verify-index 會成功" -- \
     "$CSV2" --verify-index -i "$TMP/t121_pristine.csv"
@@ -6881,40 +6067,36 @@ t123_line=$(grep wrote "$TMP/t123.log")
 assert_contains "$t123_line" "wrote 20 records, 6 fields" \
     "T123a the log reports what was written, not what was read / log 回報的是「寫出了什麼」，不是「讀進了什麼」"
 
-# Cross-checked against the file rather than against my expectation of it.
-# 與檔案本身對照，而不是與我對它的預期對照。
+# Cross-checked against the file itself, not against an expectation of it.
+# 與檔案本身對照，而不是與對它的預期對照。
 assert_contains "$("$CSV2" -r --json -i "$TMP/t123.csv" 2>/dev/null | tail -1)" '"records":20' \
     "T123b and the file agrees / 而檔案同意"
 
 # ---------------------------------------------------------------------
-# T124 -- the worst thing this tool can do, from one well-formed command.
+# T124 -- re-masking an already-marked column is refused in both directions.
 #
 #   csv2 -encrypt status -keyfile k.bin -i p.csv -o e.csv -t
-#   csv2 -hash    status -keyfile k.bin -i e.csv --in-place     rc=0, silent
+#   csv2 -hash    status -keyfile k.bin -i e.csv --in-place     (must refuse)
 #   csv2 -decrypt all    -keyfile k.bin -i e.csv -o back.csv -t
 #   csv2: no encrypted columns found
 #
-# The ciphertext was hashed one way and the `:enc:` marker overwritten, taking
-# the salt with it. The correct key does not help. Nothing was printed, and the
-# audit trail recorded a hash as though that were the whole story.
+# Without the guard the ciphertext is hashed one way and the `:enc:` marker
+# overwritten along with the salt; the correct key no longer helps, nothing
+# is printed, and the audit trail records only a hash. The worst thing this
+# tool can do, from one well-formed command.
 #
-# The two guards were asymmetric: -hash looked only for a hash marker, -encrypt
-# only for an encryption marker, and neither looked at the other's. The README
-# already promised the general rule -- "re-masking an already-marked column is
-# refused rather than layered" -- and the promise was kept in one direction of
-# two.
+# The README's rule -- "re-masking an already-marked column is refused rather
+# than layered" -- needs each guard to look for the other's marker, not only
+# its own. The other direction destroys nothing but produces a file that lies
+# about itself: `:hmac:` becomes `:enc:`, and `-decrypt` hands back hex
+# digests under a clean column name.
 #
-# The other direction destroys nothing and produces a file that lies about
-# itself: `:hmac:` becomes `:enc:`, and `-decrypt` then hands back hex digests
-# under a clean column name with nothing marking them as digests.
-#
-# T124 —— 這個工具做得出來最糟的一件事，只需要一個格式完全正確的指令。
-# 密文被單向雜湊掉，`:enc:` 標記連同 salt 一起被覆寫。正確的金鑰救不回來。什麼都沒印，
-# 而稽核軌跡把「雜湊了一個欄位」記成了事情的全部。
-# 兩個守衛原本是不對稱的：-hash 只找雜湊標記、-encrypt 只找加密標記，兩者都不看對方的。
-# README 早就承諾了那條通則——「對一個已經標記過的欄位再次遮蔽會被拒絕，而不是疊加」——
-# 而那個承諾在兩個方向裡守住了一個。
-# 反方向不銷毀任何東西，但會產生一個「對自己說謊」的檔案。
+# T124 —— 對已標記的欄位再次遮蔽，兩個方向都要拒絕。
+# 沒有這道守衛，密文會被單向雜湊掉，`:enc:` 標記連同 salt 一起被覆寫；正確的金鑰救不回來，
+# 什麼都沒印，稽核軌跡只記下一次雜湊。這是這個工具用一個格式正確的指令做得出來最糟的事。
+# README 的通則——「對一個已經標記過的欄位再次遮蔽會被拒絕，而不是疊加」——要求每個守衛
+# 都去找對方的標記，而不只是自己的。反方向不銷毀任何東西，但會產生一個對自己說謊的檔案：
+# `:hmac:` 變成 `:enc:`，`-decrypt` 交回的是掛在乾淨欄名底下的十六進位摘要。
 # ---------------------------------------------------------------------
 echo
 echo "--- T124: re-masking a marked column / 對已標記的欄位再次遮蔽 ---"
@@ -6963,8 +6145,8 @@ assert_succeeds "T124i and still encrypts / 也照常加密得了" -- \
     "$CSV2" -encrypt status -keyfile "$TMP/t124.key" -i "$TMP/t124.csv" -o "$TMP/t124_e2.csv" -t
 
 # ---------------------------------------------------------------------
-# T125 -- --truncate-partial dropping far more than "a record", in silence.
-# T125 —— --truncate-partial 靜默丟掉的，遠不只「一筆」。
+# T125 -- --truncate-partial says how much it discarded.
+# T125 —— --truncate-partial 會說出它丟掉了多少。
 # ---------------------------------------------------------------------
 echo
 echo "--- T125: how much --truncate-partial discards / --truncate-partial 丟掉了多少 ---"
@@ -7008,33 +6190,29 @@ assert_succeeds "T126b and an address that far into the file resolves / 而那�
     "$CSV2" -get 1:1 -i "$TMP/t126.csv2" --truncate-partial
 
 # ---------------------------------------------------------------------
-# T127 -- CRLF is ONE Swift Character, and the escapers switched on Characters.
+# T127 -- CRLF is one Swift Character, so escapers must handle it as such.
 #
 #   csv2 -contains $'needle\r\n2026-01-01T00:00:00+00:00 INFO  forged' -log L
-#   L: two lines, the second entirely chosen by the input, timestamp included
+#   L: must stay one line, not a second line chosen by the input
 #
-# A bare LF was escaped correctly. `\r\n` matched neither `case "\n"` nor
-# `case "\r"`, because Swift's `Character` is a grapheme cluster and CRLF is
-# one of them. The forgery AI and AJ closed came back through it -- reachable
-# from a plain `-contains`, with no write access to anything.
+# `\r\n` matches neither `case "\n"` nor `case "\r"`, because Swift's
+# `Character` is a grapheme cluster and CRLF is one cluster. Unhandled, it
+# reopens the forgery closed by AI and AJ, from a plain `-contains` with no
+# write access.
 #
 # One defect, three guarantees: one log entry per line, one report line per
-# matching cell, and errors as exactly two lines on stderr. The report is the
-# one that stings: a single hit printed two lines, so `cut -f1` returns a
-# fragment of prose where an address belongs, in the interface this tool
-# recommends for scripts.
+# matching cell, and errors as exactly two lines on stderr. A hit printed on
+# two lines makes `cut -f1` return prose where an address belongs, in the
+# interface this tool recommends for scripts. The README's `--pretty` section
+# notes the same Swift property ("grapheme clusters, NOT a per-code-point
+# lookup").
 #
-# The README warns about this exact property of Swift for `--pretty` --
-# "grapheme clusters, NOT a per-code-point lookup" -- a few hundred lines from
-# where the escaper was written.
-#
-# T127 —— CRLF 在 Swift 裡是「一個」Character，而兩個跳脫器都是以 Character 去 switch。
-# 單獨的 LF 被正確跳脫；`\r\n` 兩個 case 都不匹配，於是原樣通過。AI 與 AJ 關掉的偽造從它
-# 回來了——而且只需要一次普通的 `-contains`，完全不需要對任何東西有寫入權限。
+# T127 —— CRLF 在 Swift 裡是一個 Character，跳脫器必須照此處理。
+# `\r\n` 兩個 case 都不匹配，因為 Swift 的 `Character` 是字素叢集，而 CRLF 是一個叢集。沒處理
+# 的話，AI 與 AJ 關掉的偽造會從這裡回來，只需要一次普通的 `-contains`，不需要任何寫入權限。
 # 一個缺陷，三個保證：log 一筆一行、報告「每個命中的儲存格一行」、以及 stderr 恰好兩行。
-# 其中報告那一項最痛：一個命中印出兩行，於是 `cut -f1` 在該是位址的地方回傳一段散文碎片
-# ——就發生在這個工具推薦給腳本使用的那個介面上。
-# README 就在 `--pretty` 那一節警告過 Swift 的這個性質，相隔幾百行。
+# 一個命中印成兩行，`cut -f1` 就會在該是位址的地方回傳散文碎片——就在這個工具推薦給腳本
+# 使用的介面上。README 的 `--pretty` 一節也提到 Swift 的同一個性質。
 # ---------------------------------------------------------------------
 echo
 echo "--- T127: a CRLF is not two characters / CRLF 不是兩個字元 ---"
@@ -7061,9 +6239,9 @@ printf 'a,b\n1,"has\r\nCRLF"\n' > "$TMP/t127b.csv"
 assert_eq "$("$CSV2" -contains has -i "$TMP/t127b.csv" 2>/dev/null | wc -l | tr -d ' ')" "1" \
     "T127c a cell containing CRLF still prints as ONE report line / 含 CRLF 的儲存格仍然只印一行報告"
 
-# And a CR alone and an LF alone must keep working -- the fix must not have
-# traded one pair for the singles.
-# 而單獨的 CR 與單獨的 LF 必須繼續有效——這個修正不能拿「一對」去換掉「單個」。
+# A lone CR and a lone LF must keep working: handling the pair must not lose
+# the singles.
+# 單獨的 CR 與單獨的 LF 必須繼續有效：處理那一對不能弄丟單個的。
 rm -f "$TMP/t127c.log"
 "$CSV2" -contains "$(printf 'a\rb')" -i "$TMP/t127.csv" -log "$TMP/t127c.log" >/dev/null 2>&1
 assert_eq "$(wc -l < "$TMP/t127c.log" | tr -d ' ')" "1" \
@@ -7074,8 +6252,8 @@ assert_eq "$(wc -l < "$TMP/t127d.log" | tr -d ' ')" "1" \
     "T127e and so is a lone LF / 單獨的 LF 也是"
 
 # ---------------------------------------------------------------------
-# T128 -- flags that were accepted and did something else.
-# T128 —— 被接受、卻做了別的事的旗標。
+# T128 -- flag combinations that would be accepted and do something else are refused.
+# T128 —— 會被接受、卻做了別的事的旗標組合，一律拒絕。
 # ---------------------------------------------------------------------
 echo
 echo "--- T128: accepted, and doing something else / 被接受，然後做了別的事 ---"
@@ -7085,17 +6263,17 @@ print -r -- '1,x' >> "$TMP/t128.csv"
 cp "$TMP/t128.csv" "$TMP/t128.bak"
 head -c 32 /dev/urandom > "$TMP/t128.key"
 
-# --build-index REPLACED the verb: the index was built and the edit was
-# dropped, at rc=0, silently under --in-place.
-# --build-index 是「取代」動詞：索引建了、編輯被丟掉，rc=0，在 --in-place 下完全靜默。
+# --build-index must not replace the verb: building the index and dropping
+# the edit at rc=0 is silent under --in-place.
+# --build-index 不能「取代」動詞：建了索引、丟掉編輯、rc=0，在 --in-place 下完全靜默。
 assert_fails "T128a --build-index with an edit verb is refused / --build-index 與編輯動詞併用會被拒絕" -- \
     "$CSV2" -update 1:2 'CHANGED' --build-index -i "$TMP/t128.csv" --in-place
 assert_same "$TMP/t128.csv" "$TMP/t128.bak" \
     "T128b and neither the index nor the edit happened / 而索引與編輯都沒有發生"
 
-# -get writes no header, so a transform's salt has nowhere to live: the output
-# was ciphertext nothing could ever decrypt.
-# -get 不寫標頭，因此轉換的 salt 無處可放：輸出的是一段沒有任何東西還原得了的密文。
+# -get writes no header, so a transform's salt would have nowhere to live:
+# the output would be ciphertext nothing could decrypt.
+# -get 不寫標頭，因此轉換的 salt 無處可放：輸出會是一段沒有任何東西還原得了的密文。
 assert_fails "T128c -get with -encrypt is refused, since the salt would have nowhere to go / -get 與 -encrypt 併用會被拒絕，因為 salt 沒有地方可放" -- \
     "$CSV2" -get 1:2 -encrypt b -keyfile "$TMP/t128.key" -i "$TMP/t128.csv"
 
@@ -7109,28 +6287,20 @@ assert_fails "T128d --include-headers without -contains is refused, as its sibli
 echo
 echo "--- T129: in place, on the right file / 就地，而且是對的那個檔案 ---"
 
-# Pin the claim itself, on every platform, every run.
+# Pin the platform claim itself, on every platform, every run.
 #
-# The sentence "the guest's zsh does not carry zsh/stat" was false and sat
-# in this file for weeks. It was not a discipline failure -- it was true of
-# the `stat` APPLET when it was written, and nothing here ever asked
-# whether it was still true of the MODULE. A claim about a platform that
-# only a comment holds will drift, and the drift is silent because the
-# comment sits beside the code and reads as though someone had just checked.
+# A claim about a platform held only by a comment drifts silently, since the
+# comment sits beside the code and reads as freshly checked: "the guest's zsh
+# does not carry zsh/stat" was true of the `stat` applet, never of the
+# module. macOS, the aarch64 guest, WSL and the Windows MSYS zsh all carry
+# zsh/stat. If one stops, this fails by name instead of T129e quietly
+# skipping.
 #
-# So this asks. Four platforms carry zsh/stat today -- macOS, the aarch64
-# guest, WSL and the Windows MSYS zsh, measured 2026-08-26. If one ever
-# stops, this FAILS by name instead of T129e quietly skipping and a comment
-# explaining it away.
-#
-# 把那個宣稱本身釘住，在每個平台、每一次執行。
-# 「guest 的 zsh 沒有帶 zsh/stat」這句話是假的，而它在這個檔案裡待了好幾週。那不是紀律問題
-# ——它被寫下的當時，對 `stat` 這個 **applet** 而言為真，而這裡從來沒有任何東西去問過「它對
-# 那個**模組**是不是仍然為真」。一個只由註解持有的、關於某平台的宣稱一定會漂移，而且漂得無聲，
-# 因為註解就在它所描述的程式碼旁邊，看起來像是有人剛確認過。
-# 所以這裡去問。今天有四個平台帶著 zsh/stat——macOS、aarch64 guest、WSL、Windows 的 MSYS zsh，
-# 2026-08-26 量到。哪天有一個不再有，這裡會指名失敗，而不是 T129e 安靜地跳過、再由一則註解
-# 把它解釋掉。
+# 把那個平台宣稱本身釘住，在每個平台、每一次執行。
+# 只由註解持有的平台宣稱會無聲地漂移，因為註解就在程式碼旁邊，讀起來像剛確認過：
+# 「guest 的 zsh 沒有帶 zsh/stat」對 `stat` 這個 applet 為真，對那個模組從來不是。macOS、
+# aarch64 guest、WSL、Windows 的 MSYS zsh 都帶著 zsh/stat。哪天有一個不再有，這裡會指名
+# 失敗，而不是 T129e 安靜地跳過。
 if zmodload -F zsh/stat b:zstat 2>/dev/null; then
     ok "T129g this platform carries the zsh/stat module / 這個平台帶著 zsh/stat 模組"
 else
@@ -7171,16 +6341,13 @@ else
     # original's an edit silently widens who can read the file.
     # 模式：暫存檔以 umask 的模式建立，因此不把原檔的模式帶過去，一次編輯就會悄悄放寬
     # 「誰讀得到這個檔案」。
-    # The mode half is guarded separately from the symlink half, because the
-    # two capabilities are independent and the Windows node has exactly one of
-    # them: real symlinks, and permission bits that are a POSIX-shaped fiction
-    # over an ACL, so `chmod` does not bite. One platform flag could not say
-    # that, which is half of why these eight cases sat unskipped-but-unrun
-    # there for weeks. JT.
-    # 模式那一半與 symlink 那一半分開守衛，因為那是兩個各自獨立的能力，而 Windows 節點恰好
-    # 只有其中一個：真正的 symlink，以及一組「覆在 ACL 之上、形似 POSIX」的權限位元，因此
-    # `chmod` 咬不住。一個平台旗標說不出這件事，而那正是那八個案例在那裡「沒被跳過、也沒被
-    # 執行過」好幾週的一半原因。JT。
+# The mode half is guarded separately from the symlink half because the two
+# capabilities are independent, and the Windows node has exactly one: real
+# symlinks, but permission bits that are a POSIX-shaped fiction over an ACL,
+# so `chmod` does not bite. One platform flag cannot say that. JT.
+# 模式那一半與 symlink 那一半分開守衛，因為那是兩個獨立的能力，而 Windows 節點恰好只有
+# 其中一個：真正的 symlink，以及一組「覆在 ACL 之上、形似 POSIX」的權限位元，因此 `chmod`
+# 咬不住。一個平台旗標說不出這件事。JT。
     if (( ! HAVE_POSIX_MODES )); then
         skipt "T129d-f the mode an edit carries / 一次編輯帶過去的模式 (chmod does not bite on this filesystem / chmod 在這個檔案系統上咬不住)"
         T129_MODE_SKIPPED=1
@@ -7189,40 +6356,31 @@ else
     print -r -- '1,x' >> "$TMP/t129_mode.csv"
     chmod 600 "$TMP/t129_mode.csv"
     "$CSV2" -update 1:2 'Z' -i "$TMP/t129_mode.csv" --in-place >/dev/null 2>&1
-    # Reading a file's mode is the least portable thing in this suite, and the
-    # history is why this now asks zsh instead of asking a command:
-    #   - BSD stat and GNU stat both take -f and mean opposite things by it: the
-    #     mode format on macOS, "filesystem status" on Linux. The GNU one prints
-    #     a block of filesystem facts to STDOUT before exiting 1, so `A || B`
-    #     ran B as well and the substitution captured both.
-    #   - The aarch64 guest has no `stat` applet in its busybox, so both
-    #     branches produced nothing and T129d failed there while passing on
-    #     macOS, with the program behaving identically on both.
-    # zstat_mode uses the zsh builtin, which is the same everywhere and needs no
-    # guessing from output -- and every platform here has it, the guest
-    # included. The ls fallback stays anyway: it is what T129f checks against
-    # busybox's `ls`, and a fallback nothing exercises is a fallback nobody can
-    # trust the day it is needed.
-    # 讀一個檔案的模式，是這份測試裡可攜性最差的一件事，而下面這段歷史正是「現在改成問 zsh、
-    # 不問某個指令」的理由：
-    #   - BSD 與 GNU 的 stat 都收 -f，意思卻相反：在 macOS 上是模式格式，在 Linux 上是
-    #     「檔案系統狀態」。GNU 那個會先把一整塊檔案系統資訊印到 STDOUT 再以 1 結束，於是
-    #     `A || B` 連 B 也跑了，而那次替換把兩者都收了進去。
-    #   - aarch64 guest 的 busybox 沒有 `stat` applet，於是兩條分支都給不出東西，T129d 在那裡
-    #     失敗、在 macOS 上通過，而程式在兩邊的行為其實一樣。
-    # zstat_mode 用的是 zsh 的內建指令，每個平台都一樣，也不必從輸出去猜——而這裡每一個平台都
-    # 有它，包含 guest。ls 後備仍然保留：它正是 T129f 拿去和 busybox 的 `ls` 對照的東西，而一個
-    # 沒有東西去運動它的後備，在真正需要它的那天沒有人敢信。
+# Reading a file's mode is the least portable thing in this suite, which is
+# why this asks zsh instead of a command:
+#   - BSD stat and GNU stat both take -f and mean opposite things by it: the
+#     mode format on macOS, "filesystem status" on Linux. GNU prints a block
+#     of filesystem facts to stdout before exiting 1, so `A || B` runs B as
+#     well and the substitution captures both.
+#   - The aarch64 guest's busybox has no `stat` applet.
+# zstat_mode uses the zsh builtin, the same everywhere, with no guessing from
+# output. The ls fallback stays because T129f exercises it against busybox's
+# `ls`; a fallback nothing exercises cannot be trusted the day it is needed.
+# 讀一個檔案的模式，是這份測試裡可攜性最差的一件事，所以改問 zsh、不問某個指令：
+#   - BSD 與 GNU 的 stat 都收 -f，意思卻相反：在 macOS 上是模式格式，在 Linux 上是
+#     「檔案系統狀態」。GNU 那個會先把一整塊檔案系統資訊印到 stdout 再以 1 結束，於是
+#     `A || B` 連 B 也跑了，替換把兩者都收了進去。
+#   - aarch64 guest 的 busybox 沒有 `stat` applet。
+# zstat_mode 用 zsh 的內建指令，每個平台都一樣，也不必從輸出去猜。ls 後備仍然保留，因為
+# T129f 拿它和 busybox 的 `ls` 對照；沒有東西去運動的後備，在真正需要它的那天沒有人敢信。
     assert_eq "$(file_mode "$TMP/t129_mode.csv")" "600" \
         "T129d and an edit does not widen the file's permissions / 而一次編輯不會放寬這個檔案的權限"
 
-    # The fallback above only runs where stat is missing -- that is, only where
-    # nothing can check it. Compare the two here, on every platform that has
-    # both, so a wrong rwx decoder cannot sit unnoticed until the one place it
-    # is relied upon.
-    # 上面那條後備只在「沒有 stat」的地方會用到——也就是只在沒有東西能檢查它的地方。
-    # 所以在每一個兩者兼具的平台上把它們對起來，免得一個解錯的 rwx 解碼器一路潛伏到
-    # 唯一依賴它的那個地方。
+# The ls fallback only runs where zstat is missing, where nothing can check
+# it. So the two are compared on every platform that has both, and a wrong
+# rwx decoder cannot hide until the one place it is relied on.
+# 上面那條後備只在沒有 zstat 的地方會用到，也就是沒有東西能檢查它的地方。所以在每個兩者
+# 兼具的平台上把它們對起來，免得解錯的 rwx 解碼器一路潛伏到唯一依賴它的地方。
     chmod 754 "$TMP/t129_mode.csv"
     _t129_zstat=$(zstat_mode "$TMP/t129_mode.csv")
     if [[ $_t129_zstat == <-> ]]; then
@@ -7232,65 +6390,48 @@ else
         skipt "T129e the ls fallback reads the same mode zstat does / ls 後備讀到的模式與 zstat 相同 (no zsh/stat module on this platform to compare against / 此平台沒有 zsh/stat 模組可供比對)"
     fi
 
-    # And against the chmod that set it, which needs no second reader at all.
-    #
-    # T129e compares two READERS, so it says they agree -- not that either is
-    # right. Two readers that are wrong the same way pass it. chmod is the
-    # ground truth: it is what SET the bits, every platform has it, and no
-    # second reader is involved.
-    #
-    # 754 rather than 600 on purpose: it exercises r-x and r--, which 600 does
-    # not, so a decoder that mishandled the x column shows up here and not in
-    # T129d.
-    #
-    # It also reaches the ls decoder on the guest, where `ls` is BUSYBOX's and
-    # not the one the other platforms verified the decoder against. That was
-    # written here as the reason this case exists, on the belief that the guest
-    # could not run T129e at all -- a belief taken from a stale comment in this
-    # file and never measured. The guest runs T129e. The case is worth keeping
-    # for the reason above, which does not depend on that.
-    #
-    # 再與「設定它的那個 chmod」比一次，這完全不需要第二個讀取器。
-    # T129e 比的是兩個「讀取器」，因此它說的是「它們一致」，不是「其中任何一個是對的」——兩個
-    # 錯得一樣的讀取器一樣會通過。chmod 才是基準真相：位元就是它設的，每個平台都有它，而且不牽涉
-    # 任何第二個讀取器。
-    # 刻意用 754 而不是 600：它會用到 r-x 與 r--，那是 600 用不到的，因此一個把 x 那一欄處理錯的
-    # 解碼器會在這裡現形，而不是在 T129d。
-    # 它同時也在 guest 上碰到那個 ls 解碼器，而那裡的 `ls` 是 **busybox** 的——不是其他平台用來
-    # 驗證這個解碼器的那個 ls。這一點原本被寫成「這個案例存在的理由」，而那是建立在「guest 根本
-    # 跑不了 T129e」這個信念上的——那個信念取自這個檔案裡一則過期的註解，從未被量過。guest 跑得了
-    # T129e。這個案例仍然值得保留，理由是上面那一段，而那一段不依賴這件事。
+# And against the chmod that set it, which needs no second reader at all.
+#
+# T129e compares two readers, so it says they agree, not that either is
+# right; two readers wrong the same way pass it. chmod is the ground truth:
+# it set the bits, and every platform has it.
+#
+# 754 rather than 600 on purpose: it exercises r-x and r--, which 600 does
+# not, so a decoder that mishandles the x column shows up here and not in
+# T129d. On the guest it also reaches the ls decoder against busybox's `ls`.
+#
+# 再與「設定它的那個 chmod」比一次，這完全不需要第二個讀取器。
+# T129e 比的是兩個讀取器，所以它說的是「它們一致」，不是「其中任何一個是對的」；兩個錯得
+# 一樣的讀取器一樣會通過。chmod 才是基準真相：位元是它設的，每個平台都有它。
+# 刻意用 754 而不是 600：它會用到 r-x 與 r--，那是 600 用不到的，因此把 x 那一欄處理錯的
+# 解碼器會在這裡現形，而不是在 T129d。在 guest 上它也讓 ls 解碼器面對 busybox 的 `ls`。
     assert_eq "$(mode_from_ls "$TMP/t129_mode.csv")" "754" \
         "T129f and the ls decoder agrees with the chmod that set it / 而 ls 解碼器與設定它的那個 chmod 一致"
     fi
 fi
 
 # ---------------------------------------------------------------------
-# T137 -- a flag whose Chinese entry lost half its English one.
+# T137 -- the two flag tables document the same flags.
 #
-# Round 53: "the Chinese -t entry omits the English entry's 'It applies to
-# SELECTIONS only -- an edit ... always writes the headers'. Covered later, but
-# the flag table diverges between languages."
+# Round 53: the Chinese -t entry omitted the English entry's "It applies to
+# SELECTIONS only -- an edit ... always writes the headers". T117 cannot see
+# that, since the entry cites no case number: the same drift one level down,
+# a sentence missing rather than a section.
 #
-# T117 could not see it: that entry cites no case number, and case numbers are
-# all T117 compares. This is the same drift one level down -- not a section
-# missing, a sentence missing.
+# The measure described for this is the byte length of each flag's
+# description, compared under LC_ALL=C so every platform's awk counts the same
+# thing. Chinese says the same in fewer characters and more bytes, so the
+# ratio sits near 1 (minimum 0.81, median 1.06 over 38 flags; the defective -t
+# entry would have been 0.25). Threshold 0.5: below anything real, far above
+# the failure.
 #
-# The measure is the byte length of each flag's description, compared between
-# the two files under LC_ALL=C so every platform's awk counts the same thing.
-# Chinese says the same thing in fewer characters and more bytes, so the ratio
-# sits near 1: measured across 38 flags today the minimum is 0.81 and the
-# median 1.06, while the -t entry as found would have been 0.25. The threshold
-# is 0.5, which is below anything real and far above the failure.
-#
-# T137 —— 一個「中文條目掉了英文條目一半內容」的旗標。
-# 第 53 回合發現：中文的 -t 條目少了英文那句「它只作用於選取——一次編輯一定會寫出標頭列」。
-# T117 看不到它：那個條目沒有引用案例編號，而 T117 比對的就只有案例編號。這是同一種漂移
-# 往下一層——不是少了一節，是少了一句。
-# 量的是每個旗標說明的「位元組長度」在兩份檔案間的比值，並在 LC_ALL=C 下計算，好讓每個平台的
-# awk 數的是同一種東西。中文用較少的字、較多的位元組講同一件事，因此比值接近 1：今天實測
-# 38 個旗標，最低 0.81、中位數 1.06，而當時的 -t 條目會是 0.25。門檻取 0.5，低於任何真實
-# 值，也遠高於那次失敗。
+# T137 —— 兩份旗標表記載同樣的旗標。
+# 第 53 回合：中文的 -t 條目少了英文那句「它只作用於選取——一次編輯一定會寫出標頭列」。
+# T117 看不到它，因為那個條目沒有引用案例編號：同一種漂移往下一層，少的是一句而不是一節。
+# 為此描述的量法是每個旗標說明的位元組長度在兩份檔案間的比值，在 LC_ALL=C 下計算，讓每個
+# 平台的 awk 數的是同一種東西。中文用較少的字、較多的位元組講同一件事，所以比值接近 1（38 個
+# 旗標中最低 0.81、中位數 1.06；有缺陷的 -t 條目會是 0.25）。門檻 0.5：低於任何真實值，
+# 也遠高於那次失敗。
 # ---------------------------------------------------------------------
 echo
 echo "--- T137: the flag tables say the same amount / T137：兩份旗標表說的份量相同 ---"
@@ -7318,18 +6459,18 @@ fi
 # ---------------------------------------------------------------------
 # T138 -- reporting an error must not be a way to fail.
 #
-# DV routed every SINK through Platform.writeAll. The direct stderr writes are
-# not sinks -- the top-level error printer, the Logger echo, -debug -- and they
-# still called FileHandle.standardError.write, which answers a failed write
-# with an exception nobody catches. So `csv2 -get 9:9 -i f.csv 2>&-`, an
-# ordinary thing for a script to do, exited 134 WHILE PRINTING THE REFUSAL:
-# a status of 1 turned into one the documentation does not contain.
+# DV routed every sink through Platform.writeAll. The direct stderr writes
+# (the top-level error printer, the Logger echo, -debug) are not sinks, and
+# FileHandle.standardError.write answers a failed write with an uncaught
+# exception. So `csv2 -get 9:9 -i f.csv 2>&-`, ordinary in a script, would
+# exit 134 while printing the refusal: a status the documentation does not
+# contain, in place of 1.
 #
-# T138 —— 「回報一個錯誤」這件事本身，不該成為一種失敗的方式。
-# DV 把每一個 sink 都導向了 Platform.writeAll，而直接寫 stderr 的那幾處不是 sink——最上層
-# 的錯誤印出、Logger 的回顯、-debug——它們仍然呼叫 FileHandle.standardError.write，
-# 而它對「寫入失敗」的回答是一個沒有人接的例外。於是 `csv2 -get 9:9 -i f.csv 2>&-`
-# 這種腳本裡很平常的寫法，會在「印出那則拒絕」的當下以 134 結束。
+# T138 —— 「回報一個錯誤」本身不該成為一種失敗的方式。
+# DV 把每一個 sink 都導向 Platform.writeAll，而直接寫 stderr 的那幾處（最上層的錯誤印出、
+# Logger 的回顯、-debug）不是 sink；FileHandle.standardError.write 對寫入失敗的回答是一個
+# 沒人接的例外。於是 `csv2 -get 9:9 -i f.csv 2>&-` 這種腳本裡很平常的寫法，會在印出拒絕
+# 的當下以 134 結束：文件裡沒有的狀態，取代了 1。
 # ---------------------------------------------------------------------
 echo
 echo "--- T138: stderr that cannot be written / T138：寫不出去的 stderr ---"
@@ -7355,18 +6496,18 @@ assert_eq "$(wc -l < "$TMP/t138.err" | tr -d ' ')" "2" \
 # ---------------------------------------------------------------------
 # T140 -- a column list that names nothing, and a name that is a number.
 #
-# Round 54, its two worst findings. `-hash ""` exited 0 having done nothing:
-# output byte-identical, no marker, nothing on stderr -- while a WRONG name was
-# refused by name. And on a file whose columns are named `2` and `1`,
-# `-hash 2` protected position 2, the column called `1`, silently.
+# Round 54. `-hash ""` must not exit 0 having done nothing (output
+# byte-identical, no marker, nothing on stderr) while a wrong name is refused
+# by name. On a file whose columns are named `2` and `1`, `-hash 2` must not
+# silently protect position 2, the column called `1`. Both are the failure
+# the duplicate-name refusal addresses: the tool picking something for the
+# caller and saying nothing.
 #
-# Both are the same failure the duplicate-name refusal was written against on
-# 2026-08-18: the tool picked something for the caller and said nothing.
-#
-# T140 —— 一份「什麼也沒指名」的欄位清單，以及一個「名字是數字」的欄位。
-# 第 54 回合最嚴重的兩項。`-hash ""` 以 0 結束、什麼也沒做——輸出逐位元相同、沒有標記、
-# stderr 空白——而一個「錯的」名字卻會被指名拒絕。而在欄名為 `2` 與 `1` 的檔案上，
-# `-hash 2` 保護的是位置 2，也就是名為 `1` 的那一欄，不說一句話。
+# T140 —— 一份什麼也沒指名的欄位清單，以及一個名字是數字的欄位。
+# 第 54 回合。`-hash ""` 不能以 0 結束卻什麼也沒做（輸出逐位元相同、沒有標記、stderr 空白），
+# 而一個錯的名字卻會被指名拒絕。在欄名為 `2` 與 `1` 的檔案上，`-hash 2` 不能不說一句話就
+# 保護位置 2，也就是名為 `1` 的那一欄。兩者都是重複欄名拒絕所針對的失敗：工具替呼叫端選了
+# 某個東西，卻什麼也不說。
 # ---------------------------------------------------------------------
 echo
 echo "--- T140: naming nothing, and naming a number / T140：什麼也沒指名，以及指名一個數字 ---"
@@ -7424,32 +6565,32 @@ assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t140.csv")" "MIT" \
     "T140f a plain column number still works where no name collides / 沒有名字相撞時，單純的欄號照常可用"
 
 # ---------------------------------------------------------------------
-# T141 -- the window that could never have selected anything, and an -o that
-# cannot be renamed onto.
+# T141 -- a window that cannot select anything, and an -o that cannot be
+# renamed onto.
 #
-# Round 54: the -mid past-the-end WARN did not fire on a file with a header and
-# no records -- the one file where EVERY window is past the end. The condition
-# carried `seen > 0`. And the refusals table promised `-o /dev/stdout` would be
-# answered with "Use -so"; what came back was "cannot create temporary file
-# beside /dev/fd/1", which names neither the cause nor the way out, and a path
-# the caller never typed.
+# Round 54. A file with a header and no records is the one file where every
+# window is past the end, so a `seen > 0` condition must not gate the check.
+# And the refusals table promises `-o /dev/stdout` is answered with "Use -so",
+# not "cannot create temporary file beside /dev/fd/1", which names neither the
+# cause nor the way out, and a path the caller never typed.
 #
-# T141 —— 一個「不可能選到任何東西」的視窗，以及一個「rename 不上去」的 -o。
+# T141 —— 一個不可能選到任何東西的視窗，以及一個 rename 不上去的 -o。
+# 第 54 回合。有標頭、沒有紀錄的檔案，是唯一一個「每個視窗都在結尾之後」的檔案，所以那個
+# 檢查不能被 `seen > 0` 擋住。拒絕表承諾 `-o /dev/stdout` 會得到「Use -so」，而不是
+# 「cannot create temporary file beside /dev/fd/1」——那句話既沒說原因也沒說出路，而且提到
+# 一個呼叫端從沒打過的路徑。
 # ---------------------------------------------------------------------
 echo
 echo "--- T141: warning where every window is past the end / T141：每一個視窗都在結尾之後時的警告 ---"
 
 print -r -- 'a,b,c' > "$TMP/t141_hdr.csv"
-# T141a is inverted by phase 8 item four, and this is the case that shows why
-# the old rule was weakest exactly where it was most needed. A header row and
-# no records is the one file where EVERY window is past the end -- and the old
-# behaviour gave the caller empty output at rc=0, with `--json` saying
-# `"records":0` whether the window was past the end or the file was simply
-# empty. A warning was added for it; an error answers it.
-# T141a 被第 8 階段第四項反轉，而這個案例正好顯示舊規則「在它最被需要的地方最弱」。
-# 一個有標頭、沒有紀錄的檔案，是唯一一個「每一個視窗都在結尾之後」的檔案——而舊行為給呼叫端的是
-# 空輸出、rc=0，且 `--json` 無論是「視窗越界」還是「檔案本來就空」都說 `"records":0`。當時為它
-# 加了一個警告；一個錯誤則直接回答了它。
+# T141a follows phase 8 item four: an error, not a warning. A header row and
+# no records gives empty output at rc=0 otherwise, with `--json` saying
+# `"records":0` whether the window is past the end or the file is simply
+# empty, so a warning is weakest exactly where it is most needed.
+# T141a 依循第 8 階段第四項：這是錯誤，不是警告。否則有標頭、沒有紀錄的檔案會給出空輸出、
+# rc=0，而 `--json` 不論是視窗越界還是檔案本來就空都說 `"records":0`；警告正好在最需要它的
+# 地方最弱。
 assert_fails "T141a a window past the end of an empty file is an error / 空檔案上「結尾之後」的視窗是錯誤" -- \
     "$CSV2" -mid 1,3 -t -i "$TMP/t141_hdr.csv"
 _t141_err=$("$CSV2" -mid 1,3 -t -i "$TMP/t141_hdr.csv" 2>&1 >/dev/null)
@@ -7502,12 +6643,17 @@ assert_succeeds "T141f -o to a path that does not exist yet still works / -o 指
 # T142 -- --yes decides the algorithm, not just the prompt.
 #
 # Round 54: "-hash license" gives `license:hash`, unkeyed SHA-256, which the
-# README warns at length is dictionary-attackable. "-hash license --yes" gives
-# `license:hmac:<fp>`. --yes is listed as "accept the default key without a
-# prompt", and for -hash that turns out to decide whether the output is
-# dictionary-attackable. Both READMEs say so now, so both need this behind
-# them -- including the consequence, which is that the two never compare equal.
+# README warns is dictionary-attackable; "-hash license --yes" gives
+# `license:hmac:<fp>`. --yes is "accept the default key without a prompt",
+# and for -hash that decides whether the output is dictionary-attackable.
+# Both READMEs state this and its consequence, that the two never compare
+# equal, and this case backs both.
 #
+# T142 —— --yes 決定的是演算法，不只是「跳過詢問」。
+# 第 54 回合：「-hash license」給出 `license:hash`，不帶金鑰的 SHA-256，README 警告它擋不住字典
+# 攻擊；「-hash license --yes」給出 `license:hmac:<fp>`。--yes 的意思是「不詢問、接受預設金鑰」，
+# 而對 -hash 而言那決定了輸出擋不擋得住字典攻擊。兩份 README 都寫出這點與它的後果——兩者
+# 永遠不會相等——本案例為兩者作保。
 # T142 —— --yes 決定的是演算法，不只是「跳過詢問」。
 # ---------------------------------------------------------------------
 echo
@@ -7521,16 +6667,14 @@ print -r -- 'lib,MIT'     >> "$TMP/t142.csv"
 assert_contains "$(head -1 "$TMP/t142_plain.csv")" "license:hash" \
     "T142a -hash without a key marks the column :hash / 沒有金鑰的 -hash 把該欄標記為 :hash"
 
-# HOME points at the key this suite made, not at the operator's. `--yes` reads
-# the DEFAULT key -- a file in the caller's home directory -- so without this
-# the case passes on a machine that happens to have one and fails on a machine
-# that does not, which is what a freshly reinstalled WSL node demonstrated:
-# four failures that were all one missing file, none of them about csv2.
-# T37 already runs the other half of this, with HOME pointing somewhere empty.
-# HOME 指向這套測試自己造出來的金鑰，而不是操作者的。`--yes` 讀的是「預設金鑰」——呼叫端家
-# 目錄裡的一個檔案——因此少了這一行，這個案例會在「剛好有那個檔案」的機器上通過、在沒有的
-# 機器上失敗，而一台剛重裝過的 WSL 節點正好示範了這件事：四個失敗，全部是同一個缺檔，
-# 沒有一個與 csv2 有關。T37 早就在跑這件事的另一半，它把 HOME 指向一個空的地方。
+# HOME points at the key this suite made, not the operator's. `--yes` reads
+# the default key, a file in the caller's home directory, so without this the
+# case passes on a machine that happens to have one and fails on one that
+# does not, for reasons unrelated to csv2. T37 covers the other half, with
+# HOME pointing somewhere empty.
+# HOME 指向這套測試自己造出來的金鑰，而不是操作者的。`--yes` 讀的是預設金鑰——呼叫端家目錄
+# 裡的一個檔案——因此少了這一行，這個案例會在剛好有那個檔案的機器上通過、在沒有的機器上
+# 失敗，原因與 csv2 無關。T37 涵蓋另一半，它把 HOME 指向一個空的地方。
 HOME="$TMP/home" "$CSV2" -hash license --yes -t -i "$TMP/t142.csv" -o "$TMP/t142_yes.csv"
 assert_contains "$(head -1 "$TMP/t142_yes.csv")" "license:hmac:" \
     "T142b while --yes marks it :hmac:, having selected the default key / 而 --yes 會標記為 :hmac:，因為它選定了預設金鑰"
@@ -7540,10 +6684,9 @@ head -c 32 /dev/urandom > "$TMP/t142.key"
 assert_contains "$(head -1 "$TMP/t142_key.csv")" "license:hmac:" \
     "T142c and -keyfile likewise / -keyfile 同樣如此"
 
-# The consequence the README now states: the two do not compare equal, so a
-# join across files masked differently matches nothing.
-# README 現在寫出來的那個後果：兩者不會相等，因此跨「以不同方式遮蔽的檔案」比對，一個都
-# 對不上。
+# The consequence the README states: the two do not compare equal, so a join
+# across files masked differently matches nothing.
+# README 寫出來的那個後果：兩者不會相等，因此跨「以不同方式遮蔽的檔案」比對，一個都對不上。
 _t142_a=$("$CSV2" -get 1:license -i "$TMP/t142_plain.csv")
 _t142_b=$("$CSV2" -get 1:license -i "$TMP/t142_yes.csv")
 if [[ -n $_t142_a && $_t142_a != $_t142_b ]]; then
@@ -7561,31 +6704,32 @@ assert_eq "$("$CSV2" -get 1:license -i "$TMP/t142_yes.csv")" "$("$CSV2" -get 2:l
 # ---------------------------------------------------------------------
 # T143 -- the documented limit of the O(1) stamp, pinned as a limit.
 #
-# Round 54 tried eight times to defeat the stamp, failed every time, and
-# concluded the README's description of it was wrong -- that the check is
-# stronger than "size, mtime, first and last bytes". It is not. Reproduced by
-# hand the same day: an equal-length substitution that adds an embedded
-# newline, with mtime restored to the nanosecond, gives
+# The stamp checks size, mtime, first and last bytes, as the README says, and
+# no more. An equal-length substitution that adds an embedded newline, with
+# mtime restored to the nanosecond, gives
 #
 #   indexed  : 900001:2      <- wrong
 #   --no-index: 900000:2     <- right
 #   --verify-index: index MISMATCH: ... record 450001 spans lines
 #
-# That is the hazard the README describes, and a documentation change claiming
-# safety here would have been the worst kind of edit this project can make. So
-# the limitation gets a test of its own: it must stay reproducible, because the
-# day it stops being reproducible is the day the description has to change.
+# That is the hazard the README describes (round 54 failed to stage it and
+# concluded the description was wrong; it is not). A documentation change
+# claiming safety here would be the worst kind of edit, so the limitation has
+# its own test: it must stay reproducible, and the day it is not, the
+# description has to change.
 #
-# CSV2_INDEX_MIN_BYTES lowers the threshold so this needs a small file rather
-# than the 28 MB one used by hand. `touch -r` carries the nanoseconds; where it
-# does not, the case skips rather than passing for the wrong reason.
+# CSV2_INDEX_MIN_BYTES lowers the threshold so a small file suffices. `touch
+# -r` carries the nanoseconds; where it does not, the case skips rather than
+# passing for the wrong reason.
 #
-# T143 —— 把 O(1) 戳記「有文件記載的極限」當成一條極限釘住。
-# 第 54 回合試了八次都沒能騙過那個戳記，於是推論 README 對它的描述有誤。並非如此：同一天
-# 以手動方式重現——一次等長、且把 mtime 還原到奈秒的替換，會讓索引路徑回報 900001:2、
-# --no-index 回報 900000:2，而 --verify-index 抓得到。那正是 README 描述的那個風險，而
-# 「改文件去宣稱這裡是安全的」會是這個專案做得出來最糟的一種編輯。因此這條極限自己有了
-# 一個測試：它必須保持可重現——它哪一天不再可重現，就是那段描述該改的那一天。
+# T143 —— 把 O(1) 戳記有文件記載的極限，當成一條極限釘住。
+# 那個戳記只檢查大小、mtime、首尾位元組，一如 README 所說，不多也不少。一次等長、加入內嵌
+# 換行、且把 mtime 還原到奈秒的替換，會讓索引路徑回報 900001:2、--no-index 回報 900000:2，
+# 而 --verify-index 抓得到。那正是 README 描述的風險（第 54 回合沒能佈置出來，推論描述有誤；
+# 並非如此）。「改文件去宣稱這裡是安全的」會是最糟的一種編輯，因此這條極限有自己的測試：
+# 它必須保持可重現，它哪天不再可重現，那段描述就該改。
+# CSV2_INDEX_MIN_BYTES 降低門檻，小檔案就夠用。`touch -r` 會帶上奈秒；帶不上的地方，本案例
+# 跳過，而不是因為錯的理由通過。
 # ---------------------------------------------------------------------
 echo
 echo "--- T143: the stamp's documented blind spot / T143：戳記在文件中載明的盲點 ---"
@@ -7598,13 +6742,12 @@ echo "--- T143: the stamp's documented blind spot / T143：戳記在文件中載
 ' $i $i; done
 } > "$TMP/t143.csv"
 
-# Both thresholds: the wrong RECORD NUMBER comes from the chunked search, which
-# is what consumes the index's no_embedded_newlines claim. Lowering only the
-# index threshold left the parallel path out and the hazard did not appear --
-# a test that would have "proved" the danger was gone.
-# 兩個門檻都要降：錯誤的「紀錄編號」來自分塊搜尋，而那正是消費索引 no_embedded_newlines
-# 宣稱的地方。只降索引門檻會把平行路徑排除在外，於是那個風險不會出現——那會變成一個
-# 「證明危險已經消失」的測試。
+# Both thresholds: the wrong record number comes from the chunked search,
+# which is what consumes the index's no_embedded_newlines claim. Lowering only
+# the index threshold leaves the parallel path out, the hazard does not
+# appear, and the test would "prove" the danger gone.
+# 兩個門檻都要降：錯誤的紀錄編號來自分塊搜尋，那正是消費索引 no_embedded_newlines 宣稱
+# 的地方。只降索引門檻會把平行路徑排除在外，風險不會出現，這個測試就會「證明危險已消失」。
 export CSV2_INDEX_MIN_BYTES=1024
 export CSV2_PARALLEL_MIN_BYTES=1024
 export CSV2_PARALLEL_CHUNK_BYTES=2048
@@ -7638,58 +6781,44 @@ else
         # The stamp rejected the file, so this platform's touch -r did not
         # carry the nanoseconds and the hazard cannot be staged here.
         # 戳記否決了這個檔案，表示這個平台的 touch -r 沒有帶上奈秒，無法在此佈置這個情境。
-        # Recorded for T69b. It cannot probe this itself: deciding whether
-        # touch -r carried the nanoseconds needs to READ them, and the guest
-        # has no stat at all -- which is the same platform that skips here.
-        # The case that made the skip is the only thing that knows.
-        # 記錄下來給 T69b。它自己探測不到：要判斷 touch -r 有沒有帶上奈秒就得「讀」到奈秒，
-        # 而 guest 根本沒有 stat——而那正是會在這裡跳過的同一個平台。知道這件事的，只有
-        # 「造成這次跳過」的那個案例本身。
+# Recorded for T69b, which cannot probe this itself: deciding whether touch
+# -r carried the nanoseconds means reading them, and the guest, the platform
+# that skips here, has no stat. Only the case that skipped knows.
+# 記錄下來給 T69b，它自己探測不到：要判斷 touch -r 有沒有帶上奈秒就得讀到奈秒，而會在這裡
+# 跳過的 guest 根本沒有 stat。知道這件事的，只有跳過的那個案例本身。
         T143_SKIPPED=1
         skipt "T143 an index the O(1) stamp still accepts / 一份 O(1) 戳記仍然接受的索引 (touch -r did not carry the nanoseconds here / 此平台的 touch -r 沒有帶上奈秒)"
     elif [[ $_t143_indexed != $_t143_scanned ]]; then
         ok "T143a the documented hazard is still reachable: indexed says $_t143_indexed, a scan says $_t143_scanned / 有文件記載的那個風險仍然可達：索引說 $_t143_indexed，掃描說 $_t143_scanned"
         assert_contains "$_t143_verify" "MISMATCH" \
             "T143b while --verify-index still catches it / 而 --verify-index 仍然抓得到"
-        # Only -contains reads the sidecar, which is the mechanism behind the
-        # corruption the READMEs describe: the ADDRESS is wrong, and the verb
-        # you hand it to is not. With this stale index in place, -get agrees
-        # with itself under --no-index -- so the two halves of the compose
-        # recipe disagree while each behaves correctly.
-        # An earlier version of this check looked for the word "index" in
-        # -debug output from each verb and compared two silences.
-        # 只有 -contains 會讀 sidecar，而那正是兩份 README 所描述的那個損壞的機制：錯的是
-        # 「位址」，不是你把它交給的那個動詞。在這份過期索引存在的情況下，-get 與它自己
-        # 在 --no-index 下的答案一致——於是「組合配方」的兩半彼此矛盾，而各自都沒有做錯。
-        # 這個檢查的較早版本，是在各動詞的 -debug 輸出裡找「index」這個字，比較的是兩片沉默。
+# Only -contains among these two reads the sidecar, which is the mechanism
+# behind the corruption the READMEs describe: the address is wrong, not the
+# verb you hand it to. With this stale index in place, -get agrees with
+# itself under --no-index, so the two halves of the compose recipe disagree
+# while each behaves correctly.
+# 這兩者之中只有 -contains 會讀 sidecar，那正是兩份 README 所描述的損壞機制：錯的是位址，
+# 不是你把它交給的動詞。這份過期索引在場時，-get 與它自己在 --no-index 下的答案一致——於是
+# 組合配方的兩半彼此矛盾，而各自都沒有做錯。
         assert_eq "$("$CSV2" -get 200:2 -i "$TMP/t143.csv")" \
                   "$("$CSV2" -get 200:2 --no-index -i "$TMP/t143.csv")" \
             "T143c while -get gives the same answer with the sidecar and without it / 而 -get 在「有 sidecar」與「沒有 sidecar」下給的是同一個答案"
-        # WHICH verbs read the sidecar, measured rather than asserted from a
-        # report. The READMEs said "only -contains" for a day, taken from a
-        # blind round and never run; -mid takes an index hit too, and a reader
-        # deciding when they need --verify-index was being told the wrong set.
-        # 哪些動詞會讀 sidecar，用量的、不是從報告抄的。兩份 README 有一天寫著「只有
-        # -contains」，那句話取自一份盲測報告、從來沒有被執行過；`-mid` 同樣會走索引，
-        # 而一個「在判斷自己何時需要 --verify-index」的讀者，拿到的是錯的那一組。
+# Which verbs read the sidecar, measured rather than asserted: -mid and -tail
+# take an index hit too, and a reader deciding when they need --verify-index
+# must be told the right set.
+# 哪些動詞會讀 sidecar，用量的而不是斷言的：-mid 與 -tail 同樣會走索引，而一個在判斷自己
+# 何時需要 --verify-index 的讀者，必須拿到正確的那一組。
         for _t143_verb in "-contains v000200" "-mid 100,110" "-tail 5"; do
-            # Two different messages for two different consumers: the seek
-            # says "index hit", the parallel search says "trusting index". A
-            # probe for one of them concluded the other verb does not read the
-            # sidecar -- the same overgeneralisation this case exists to
-            # correct, made while correcting it.
-            # 兩個不同的消費端有兩種不同的訊息：seek 說「index hit」，平行搜尋說「trusting
-            # index」。只探測其中一種，就會得出「另一個動詞不讀 sidecar」的結論——正是這個
-            # 案例要糾正的那種以偏概全，而它是在糾正的過程中犯的。
-            # Captured, not piped. Under this file's `exec > >(tee ...)` the
-            # form `cmd 2>&1 >/dev/null | grep` did not deliver stderr to the
-            # grep -- three cases reported "does not read the sidecar" about
-            # output that plainly said it did. A probe printing the same
-            # capture showed the text; the difference was the plumbing.
-            # 用捕獲，不用管線。在這個檔案的 `exec > >(tee …)` 之下，
-            # `cmd 2>&1 >/dev/null | grep` 這個寫法沒有把 stderr 交給那個 grep——於是三個
-            # 案例對著「明明說了自己讀了 sidecar」的輸出，回報「它不讀」。把同一份捕獲印出來
-            # 就看得到那段文字；差別在管線本身。
+# Two consumers, two messages: the seek says "index hit", the parallel
+# search says "trusting index". Probing for only one would wrongly conclude
+# the other verb does not read the sidecar.
+# 兩個消費端有兩種訊息：seek 說「index hit」，平行搜尋說「trusting index」。只探測其中
+# 一種，就會錯誤地得出「另一個動詞不讀 sidecar」的結論。
+# Captured, not piped. Under this file's `exec > >(tee ...)`, the form
+# `cmd 2>&1 >/dev/null | grep` does not deliver stderr to the grep, so the
+# probe would miss text the output plainly contains.
+# 用捕獲，不用管線。在這個檔案的 `exec > >(tee …)` 之下，`cmd 2>&1 >/dev/null | grep`
+# 不會把 stderr 交給那個 grep，探測會漏掉輸出裡明明有的文字。
             _t143_out=$("$CSV2" ${=_t143_verb} -i "$TMP/t143.csv" -debug 2>&1 >/dev/null)
             if [[ $_t143_out == *"index hit"* || $_t143_out == *"trusting index"* ]]; then
                 ok "T143f $_t143_verb reads the sidecar / $_t143_verb 會讀 sidecar"
@@ -7712,12 +6841,13 @@ unset CSV2_INDEX_MIN_BYTES CSV2_PARALLEL_MIN_BYTES CSV2_PARALLEL_CHUNK_BYTES
 # ---------------------------------------------------------------------
 # T144 -- names with a comma in them, and a column part that is empty.
 #
-# Round 54: a file whose first column is called `a,b` produced
-# `the columns are: a,b, c` -- three columns to any reader, human or script.
-# And `-get 1:` answered "expected r:c", a complaint about a shape that is
-# right, when what is missing is the column.
+# A column called `a,b` must be listed so the comma is visibly inside the
+# name; otherwise `a,b, c` reads as three columns. `-get 1:` must say the
+# column is missing, not "expected r:c", because the shape is right. Round 54.
 #
-# T144 —— 名字裡有逗號的欄位，以及一個空的欄位部分。
+# T144 —— 名字裡有逗號的欄位，以及一個空的欄位部分。欄位清單必須讓名字裡的逗號
+# 看得出來，否則 `a,b, c` 會被讀成三欄；`-get 1:` 必須說缺的是欄位，而不是
+# 「expected r:c」，因為形狀是對的。第 54 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T144: a comma inside a name / T144：名字裡的逗號 ---"
@@ -7761,32 +6891,28 @@ assert_contains "$_t144_s" "expected r:c" \
 # ---------------------------------------------------------------------
 # T145 -- advice that has to work when followed.
 #
-# Round 55 followed a refusal's own remedy and lost a record to it. The message
-# offered "Rename the file or drop --headers" as equals: dropping --headers
-# reads the file as it is, while renaming a .csv2 to .csv makes the second
-# header row into data record 1, at rc=0, with output that looks entirely
-# plausible. The round only caught it by diffing record counts afterwards.
-#
-# Two more from the same task: `-insert` past the end diagnosed correctly and
-# never mentioned -append, which the README names as the answer elsewhere; and
-# `-o /dev/stdout`, with stdout redirected to a FILE, failed from inside the
-# sink with "cannot create temporary file beside /dev/fd/1: No such file or
-# directory" -- a false cause, a path the caller never typed, no remedy.
+# The --headers mismatch must not offer "rename the file" as an equal of
+# "drop --headers": renaming a .csv2 to .csv turns the second header row into
+# data record 1, at rc=0, with plausible output. `-insert` past the end must
+# point at -append. `-o /dev/stdout` with stdout on a file must name the path
+# as typed and a remedy, not a false cause about /dev/fd/1. Round 55.
 #
 # T145 —— 照著做就必須行得通的建議。
-# 第 55 回合照著一則拒絕自己給的補救方式去做，因而弄丟了一筆紀錄。
+# --headers 不符時，不能把「改檔名」與「拿掉 --headers」並列：把 .csv2 改成 .csv 會讓第二列
+# 標頭變成資料紀錄 1，rc=0，輸出看起來完全合理。`-insert` 越過結尾時必須指向 -append。
+# stdout 導到檔案時，`-o /dev/stdout` 必須指名打出來的路徑與出路，而不是一個關於 /dev/fd/1
+# 的錯誤原因。第 55 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T145: following the message / T145：照著訊息去做 ---"
 
 # Its own fixture, not compare/vs-sqlite.csv2: that directory is not in the
-# payload the guest is built from, and the suffix/--headers check runs before
-# the file is opened -- so T145a passed there against a file that did not
-# exist, while T145b compared two empty strings. A case that passes because
-# its input is missing is not a case.
+# guest payload, and the suffix/--headers check runs before the file is
+# opened, so T145a would pass against a missing file and T145b would compare
+# two empty strings.
 # 自己的 fixture，不用 compare/vs-sqlite.csv2：那個目錄不在 guest 的 payload 裡，而
-# 「副檔名對 --headers」的檢查在開檔之前就跑了——於是 T145a 在那裡對著一個不存在的檔案通過，
-# 而 T145b 比較的是兩個空字串。一個「因為輸入不存在而通過」的案例，不是一個案例。
+# 「副檔名對 --headers」的檢查在開檔之前就跑，因此 T145a 會對著不存在的檔案通過，
+# T145b 則會比較兩個空字串。
 print -r -- 'pkg,note'      > "$TMP/t145_two.csv2"
 print -r -- '套件,備註'     >> "$TMP/t145_two.csv2"
 print -r -- 'busybox,small' >> "$TMP/t145_two.csv2"
@@ -7822,69 +6948,39 @@ else
     bad "T145d -update was offered -append, which does not do what -update does / -update 被建議了 -append，而那不是 -update 做的事"
 fi
 
-# -o into a directory that cannot hold a temp file. /dev is the case round 55
-# hit; the message must name the path as typed and the way out.
-# -o 指向一個放不下暫存檔的目錄。第 55 回合撞到的是 /dev；訊息必須指名「打出來的那個路徑」
-# 與出路。
-# T145g: the same refusal, reached in a way every platform can reach. A path
-# whose PARENT is a regular file cannot hold a new file for anyone -- not root,
-# not Windows -- and it lands on the same throw as /dev does, with the same
-# sentence. `fileKind` returns .regular rather than nil for the parent, so this
-# is "cannot create here", not "the directory does not exist".
+# -o into a directory that cannot hold a temp file: the message must name the
+# path as typed and the way out.
+# -o 指向一個放不下暫存檔的目錄：訊息必須指名打出來的那個路徑與出路。
+# T145g: the same refusal, reachable on every platform. A path whose PARENT is
+# a regular file cannot hold a new file for anyone, root or Windows, and lands
+# on the same throw as /dev. `fileKind` returns .regular rather than nil for
+# the parent, so this is "cannot create here", not "the directory does not
+# exist". T145e asks the same through /dev/stdout, which root can defeat; this
+# one covers the refusal everywhere, not only for an unprivileged uid.
+# T145g：同一道拒絕，換一條每個平台都走得到的路。父路徑是一般檔案的路徑，對任何人——root 或
+# Windows——都放不下新檔案，並落在與 /dev 相同的 throw 上。那個父路徑的 `fileKind` 回傳 .regular
+# 而不是 nil，因此這是「在這裡建不了」而不是「目錄不存在」。T145e 透過 /dev/stdout 問同一件事，
+# 但 root 能繞過；這一個讓那道拒絕在每個地方都有覆蓋，而不只在 uid 沒有特權時。
 #
-# T145e below asks the same question through /dev/stdout, which is a POSIX
-# path and refused for a reason root can defeat: root creates files in /dev.
-# That case stays as it is and stays skipped where it cannot bite. This one
-# exists so the refusal itself is covered everywhere, rather than only where
-# the uid happens to be unprivileged.
-# T145g：同一道拒絕，換一條每個平台都走得到的路。一個「父路徑是一般檔案」的路徑，對任何人都
-# 放不下新檔案——root 不行，Windows 也不行——而它落在與 /dev 相同的那個 throw 上，印出同一句話。
-# 那個父路徑的 `fileKind` 回傳的是 .regular 而不是 nil，因此這是「在這裡建不了」而不是「目錄不存在」。
+# The path is RELATIVE on purpose. MSYS2 converts a POSIX path to a Windows
+# one only when it resolves; `/c/.../t145_notadir/out.csv` does not (the
+# parent is a file), so it reaches the native binary verbatim, `stat` returns
+# ENOENT, and csv2 truthfully says "does not exist" -- a different answer from
+# the other platforms. A relative path needs no conversion, so the case tests
+# the same thing everywhere. LB.
 #
-# 底下的 T145e 透過 /dev/stdout 問同一個問題，那是一條 POSIX 路徑，而它被拒絕的理由是 root 能夠
-# 打敗的：root 在 /dev 裡建得出檔案。那個案例維持原樣，並在咬不住的地方繼續跳過。這一個的存在，
-# 是為了讓「那道拒絕本身」在每個地方都有覆蓋，而不是只在「uid 剛好沒有特權」的地方。
-# A RELATIVE path, and that is the whole point of this line.
-#
-# With an ABSOLUTE path this case failed on Windows for a reason that has
-# nothing to do with csv2, and it took three diagnoses to find out. MSYS2
-# converts a POSIX path to a Windows one only when the path RESOLVES:
-# `/c/.../t145_notadir/out.csv` does not resolve, because `t145_notadir` is a
-# file and not a directory, so MSYS hands the string to the native binary
-# verbatim. `/c/Users/...` genuinely does not exist in the Windows namespace,
-# so `stat` returns ENOENT and csv2 says "does not exist" -- a truthful answer
-# about the string it was given, and a different answer from the other two
-# platforms about the same intent.
-#
-# Proven by the `-debug` line of one run: with the target's parent a real
-# DIRECTORY, both `-i` and `-o` arrive as `C:/...`; with the parent a file,
-# `-o` arrives as `/c/...`.
-#
-# A relative path needs no conversion, so all three platforms see the same
-# thing and the case tests the same thing everywhere. LB.
-#
-# **相對**路徑，而那正是這一行的全部重點。
-#
-# 用**絕對**路徑時，這個案例在 Windows 上以一個與 csv2 完全無關的理由失敗，而那花了三次診斷才
-# 查出來。MSYS2 只在一條 POSIX 路徑**解析得了**時才把它轉成 Windows 路徑：
-# `/c/…/t145_notadir/out.csv` 解析不了，因為 `t145_notadir` 是檔案而不是目錄，於是 MSYS 把那個
-# 字串**原樣**交給原生程式。而 `/c/Users/…` 在 Windows 的命名空間裡真的不存在，所以 `stat` 回
-# ENOENT、csv2 說「不存在」——對它拿到的那個字串而言是誠實的答案，而對同一個意圖來說，是與
-# 另外兩個平台不同的答案。
-#
-# 證據是同一次執行的 `-debug` 行：目標的父路徑是**真目錄**時，`-i` 與 `-o` 都以 `C:/…` 抵達；
-# 父路徑是檔案時，`-o` 以 `/c/…` 抵達。
-#
-# 相對路徑不需要轉換，因此三個平台看到的是同一個東西，這個案例在每個地方測的也是同一件事。LB。
+# 這裡**刻意**用相對路徑。MSYS2 只在 POSIX 路徑解析得了時才把它轉成 Windows 路徑；
+# `/c/…/t145_notadir/out.csv` 解析不了（父路徑是檔案），於是原樣交給原生程式，`stat` 回 ENOENT，
+# csv2 誠實地說「不存在」——與其他平台的答案不同。相對路徑不需要轉換，因此這個案例在每個平台
+# 測的是同一件事。LB。
 _t145_rel="${TMP:t}/t145_notadir"
 printf 'x' > "$TMP/t145_notadir"
-# The input path does NOT traverse the file. `$_t145_rel/../t145.csv` would
-# resolve `..` through `t145_notadir`, which is a file, and that is ENOTDIR on
-# every platform -- it only escaped notice because `-o` is validated before the
-# input is opened, so the case would still pass while its `-i` was broken.
-# 輸入路徑**不穿過那個檔案**。`$_t145_rel/../t145.csv` 會經由 `t145_notadir` 去解析 `..`，而它是
-# 一個檔案，在每個平台上都是 ENOTDIR——這一點之所以沒被發現，只是因為 `-o` 的檢驗發生在輸入被
-# 開啟之前，於是那個案例會在它的 `-i` 已經壞掉的情況下照樣通過。
+# The input path does NOT traverse the file: `$_t145_rel/../t145.csv` would
+# resolve `..` through a file, which is ENOTDIR everywhere, and since `-o` is
+# validated before the input is opened the case would still pass with a
+# broken `-i`.
+# 輸入路徑**不穿過那個檔案**：`$_t145_rel/../t145.csv` 會經由一個檔案去解析 `..`，在每個平台上
+# 都是 ENOTDIR；而 `-o` 的檢驗在輸入開啟之前，因此 `-i` 壞了這個案例仍會通過。
 _t145_nd=$(cd "${TMP:h}" && "$CSV2" -r -t -i "${TMP:t}/t145.csv" -o "$_t145_rel/out.csv" 2>&1 >/dev/null)
 if [[ $_t145_nd == *"cannot be created"* && $_t145_nd == *"t145_notadir"* ]]; then
     ok "T145g a path whose parent is a file is refused for what it is, on every platform / 父路徑是一個檔案的路徑，會以「它是什麼」被拒絕——在每一個平台上"
@@ -7896,15 +6992,13 @@ if (( IS_WINDOWS )); then
     T145E_SKIPPED=1
     skipt "T145e -o into a directory that cannot take a new file / -o 指向一個放不下新檔案的目錄 (no /dev here / 這裡沒有 /dev)"
 else
-    # stdout to a regular FILE, which is the case round 55 hit and the one the
-    # earlier check could not catch: /dev/stdout then resolves to /dev/fd/1,
-    # which IS a regular file, so "not a regular file" let it through. With
-    # stdout on /dev/null the older check already fired, and a version of this
-    # case written that way passed against the build that had the defect.
-    # stdout 導向一個「一般檔案」，那正是第 55 回合撞到、而先前那道檢查抓不到的情況：
-    # /dev/stdout 此時解析成 /dev/fd/1，而它**是**一般檔案，於是「不是一般檔案」放行了它。
-    # 若把 stdout 導到 /dev/null，較早那道檢查本來就會發動——這個案例的那個寫法，對「還帶著
-    # 這個缺陷的建置」照樣通過。
+    # stdout to a regular FILE: /dev/stdout then resolves to /dev/fd/1, which
+    # IS a regular file, so a "not a regular file" check lets it through. With
+    # stdout on /dev/null the older check fires instead, and the case would
+    # pass against a build that still has the defect.
+    # stdout 導向一個「一般檔案」：/dev/stdout 此時解析成 /dev/fd/1，而它**是**一般檔案，
+    # 因此「不是一般檔案」的檢查會放行它。若 stdout 導到 /dev/null，觸發的是較早那道檢查，
+    # 這個案例會對仍帶著缺陷的建置照樣通過。
     _t145_dev=$("$CSV2" -r -t -i "$TMP/t145.csv" -o /dev/stdout 2>&1 > "$TMP/t145_capture.txt")
     if [[ -z ${_t145_dev//[[:space:]]/} ]]; then
         # Some systems can create a file beside /dev/fd/1 -- the guest, running
@@ -7915,18 +7009,12 @@ else
         # 一次失敗。這裡要測的性質是「失敗時那則訊息說了什麼」，因此此處沒有東西可檢查，
         # 而不是「有東西通過了」。
         T145E_SKIPPED=1
-        # The reason, not the case's own title. `-o /dev/stdout` is refused
-        # because a new file cannot be created in /dev -- and root can create
-        # one there, so in the guest the run SUCCEEDS and there is nothing to
-        # assert. Saying "-o into a directory that cannot take a new file" as
-        # the REASON tells the reader what the case is about, not why it did
-        # not run, and sends them looking for a directory rather than for the
-        # uid. Same shape as T203e/f, fixed the same day.
-        # 說出理由，而不是這個案例自己的標題。`-o /dev/stdout` 之所以被拒絕，是因為「無法在
-        # /dev 裡建立新檔案」——而 root 在那裡建得出來，於是在 guest 裡那次執行**成功**了，
-        # 沒有東西可以斷言。把「-o 指向一個放不下新檔案的目錄」當成**理由**寫出來，說的是這個
-        # 案例在講什麼，不是它為什麼沒有執行，會把讀者送去找一個目錄而不是去看 uid。
-        # 與 T203e/f 同一個形狀，同一天修正。
+        # The skip gives the reason, not the case's title: root can create a
+        # file in /dev, so in the guest the run succeeds and there is nothing
+        # to assert. A title as the reason would send the reader looking for a
+        # directory rather than at the uid. Same shape as T203e/f.
+        # 略過時說出理由，而不是案例的標題：root 在 /dev 裡建得出檔案，因此在 guest 裡那次執行
+        # 會成功，沒有東西可斷言。拿標題當理由，會讓讀者去找目錄而不是去看 uid。與 T203e/f 同形。
         skipt "T145e -o into a directory that cannot take a new file / -o 指向一個放不下新檔案的目錄 (this user can create a file in /dev, so the refusal never fires / 這個使用者在 /dev 裡建得出檔案，因此那道拒絕不會觸發)"
     elif [[ $_t145_dev == *"/dev/stdout"* && $_t145_dev == *"-so"* && $_t145_dev != *"/dev/fd/1"* ]]; then
         ok "T145e it names the path as typed and points at -so / 它指名打出來的那個路徑，並指向 -so"
@@ -7948,12 +7036,13 @@ fi
 # ---------------------------------------------------------------------
 # T146 -- a conversion recipe has to produce a file this tool will open.
 #
-# Round 55: "the iconv/tr recipes produce .utf8/.lf filenames that csv2's own
-# suffix rule then rejects; neither recipe mentions renaming to .csv". Advice
-# that ends in a file the tool refuses is not advice, and the round had to work
-# the rename out for itself.
+# The iconv/tr recipes must end in a .csv name: a .utf8/.lf output is then
+# rejected by csv2's own suffix rule, and advice that ends in a refused file
+# is not advice. Round 55.
 #
-# T146 —— 一條轉換建議，必須產出一個「這個工具打得開」的檔案。
+# T146 —— 一條轉換建議，必須產出一個「這個工具打得開」的檔案。iconv/tr 的建議必須以 .csv
+# 檔名結尾：.utf8/.lf 的輸出會被 csv2 自己的副檔名規則拒絕，而結局是被拒絕之檔案的建議不算建議。
+# 第 55 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T146: following the conversion advice / T146：照著轉換建議去做 ---"
@@ -8000,11 +7089,9 @@ fi
 # ---------------------------------------------------------------------
 # T147 -- output pasted into an example that csv2 never printed.
 #
-# Round 56 found a directory listing inside a ```console block, twice in one
-# example, in output csv2 does not produce. It arrived when a message quoted in
-# the README was updated by capturing a command's output and substituting it
-# whole -- the capture carried a bare `ls` with it, and the case that pins the
-# quoted message (T58) passed, because the message line was still there.
+# Pins that no ```console block contains a directory listing, which is what a
+# wholesale substitution of captured command output can carry in. T58 cannot
+# catch it, because the quoted message line is still there. Round 56.
 #
 # The check is deliberately narrow: three or more consecutive lines inside a
 # console block that are bare filenames. That is what a pasted `ls` looks like
@@ -8013,9 +7100,8 @@ fi
 # "would" print, which is the question the examples exist to answer.
 #
 # T147 —— 被貼進範例、而 csv2 從來不會印出的輸出。
-# 第 56 回合在一個 ```console 區塊裡找到一段目錄列表，同一個範例裡出現兩次。它是這樣進去的：
-# 更新 README 引用的一則訊息時，我以「捕獲指令輸出再整段替換」的方式進行，而那次捕獲把一段
-# 裸的 `ls` 一起帶了進來；而釘住那則引用訊息的案例（T58）照樣通過，因為那一行訊息還在。
+# 釘住 ```console 區塊裡沒有目錄列表——那是「整段替換捕獲的指令輸出」會帶進來的東西。T58 抓不到，
+# 因為被引用的那行訊息還在。第 56 回合。
 # 這個檢查刻意寫得很窄：console 區塊裡連續三行以上的「裸檔名」。一段被貼進來的 `ls` 就長那樣，
 # 而這些範例裡沒有別的東西長那樣——CSV 輸出有逗號、報告有 tab、訊息有空白。更寬的規則就得去
 # 判斷 csv2「會不會」印出某段東西，而那正是這些範例本身要回答的問題。
@@ -8049,14 +7135,13 @@ else
 fi
 
 # ---------------------------------------------------------------------
-# T148 -- the audit trail was thinnest where the loss is largest.
+# T148 -- the audit trail must be fullest where the loss is largest.
 #
-# Round 56: the -log table promises "old and new values in an ordinary column
-# -- in full, never truncated", and `-delete -cell` destroyed exactly such a
-# value while logging only `blank 1:notes`. A deleted RECORD logged its number
-# and nothing of its contents. `-hash` logged no column names at all, and
-# unkeyed it logged nothing whatsoever -- the operation that is both
-# irreversible and dictionary-attackable had the weakest trail of any.
+# The -log table promises old and new values in full. So `-delete -cell` must
+# log the value it destroyed, a deleted record must log its contents by
+# column, and `-hash` must log its columns and whether a key was used -- the
+# irreversible, dictionary-attackable operation cannot have the weakest trail.
+# Round 56.
 #
 # T148 —— 稽核軌跡最薄的地方，正是損失最大的地方。
 # ---------------------------------------------------------------------
@@ -8077,10 +7162,9 @@ cp "$TMP/t148.csv" "$TMP/t148_del.csv"
 rm -f "$TMP/t148_del.log"
 "$CSV2" -delete 1 -i "$TMP/t148_del.csv" --in-place -log "$TMP/t148_del.log"
 # Both sides quoted: a column name can contain the comma this entry separates
-# on, and `delete record 1: a,b="1"` reads as three fields. Round 58 found that
-# a day after the entry was added.
+# on, and `delete record 1: a,b="1"` reads as three fields. Round 58.
 # 兩邊都加引號：欄名裡可以含有「這則紀錄用來分隔的那個逗號」，而 `delete record 1: a,b="1"`
-# 讀起來像三個欄位。第 58 回合在這則紀錄加上去的隔天就發現了。
+# 讀起來像三個欄位。第 58 回合。
 assert_contains "$(cat "$TMP/t148_del.log")" 'delete record 1: "a"="1", "notes"="secret-value"' \
     "T148b and deleting a record records its contents, by column / 而刪除一筆紀錄會逐欄記下它的內容"
 
@@ -8121,15 +7205,13 @@ assert_eq "$(grep -c 'delete record' "$TMP/t148_nl.log")" "1" \
 # ---------------------------------------------------------------------
 # T149 -- what a value can do to the terminal, and to a file's line endings.
 #
-# Round 56, two findings from "someone else's file":
-#
-#   - the locating report escaped \t \n \r \\ and passed every other control
-#     through, so a cell holding ESC-[-31m recoloured the terminal from inside
-#     the third column -- and an ESC can also erase the line it is printed on,
-#     which is the line carrying the address;
-#   - `-append --in-place` on a CRLF file appended an LF record, leaving one
-#     file written two ways. csv2 reads it back (endings are decided per
+#   - the locating report must escape every control character, not only
+#     \t \n \r \\: an ESC in a cell can recolour the terminal or erase the
+#     line carrying the address;
+#   - `-append --in-place` on a CRLF file must append CRLF, so one file is not
+#     written two ways. csv2 reads mixed endings back (they are decided per
 #     record); plenty of other tools do not.
+# Round 56.
 #
 # T149 —— 一個值能對終端機、以及對一個檔案的行尾做什麼。
 # ---------------------------------------------------------------------
@@ -8187,17 +7269,15 @@ fi
 # ---------------------------------------------------------------------
 # T150 -- `all` belongs to -decrypt, and to no other verb.
 #
-# Round 56: "a column named `all` cannot be addressed by name with -decrypt".
-# Checking it turned up the larger half: `all` was special for EVERY verb, so
-# `-hash all` on a file with no encrypted columns selected nothing and exited 0
-# having done nothing -- the silent no-op T140 closed for an empty list,
-# reached by another road. The README gives the keyword to -decrypt alone.
+# A column named `all` must be addressable by name. If `all` were special for
+# every verb, `-hash all` on a file with no encrypted columns would select
+# nothing and exit 0 -- the silent no-op T140 closed for an empty list. The
+# README gives the keyword to -decrypt alone. Round 56.
 #
 # T150 —— `all`屬於 -decrypt，不屬於任何其他動詞。
-# 第 56 回合說「名為 `all` 的欄位無法以名字被 -decrypt 定址」。查它時翻出了更大的那一半：
-# `all` 對「每一個」動詞都是特別的，於是 `-hash all` 在一個沒有加密欄位的檔案上什麼也沒選中、
-# 以 0 結束、什麼也沒做——那正是 T140 為「空清單」關掉的那個靜默無操作，換了一條路走回來。
-# ---------------------------------------------------------------------
+# 名為 `all` 的欄位必須能以名字定址。若 `all` 對每個動詞都特別，`-hash all` 在沒有加密欄位的
+# 檔案上會什麼也沒選中、以 0 結束——那正是 T140 為「空清單」關掉的那個靜默無操作。README 只把
+# 這個關鍵字給了 -decrypt。第 56 回合。
 echo
 echo "--- T150: the all keyword / T150：all 這個關鍵字 ---"
 
@@ -8222,15 +7302,14 @@ assert_contains "$_t150_d" "no encrypted columns found" \
     "T150c and -decrypt all still means every marked column / 而 -decrypt all 仍然代表「每一個被標記的欄位」"
 
 # ---------------------------------------------------------------------
-# T151 -- three sentences the READMEs now make, which nothing was checking.
+# T151 -- three sentences the READMEs make, each checked.
 #
 # `-so` as a dry run before an irreversible edit, and `--` as the way to write
-# a value that begins with a dash -- which csv2's own error message recommends
-# and the README never mentioned. The third sentence from the same batch, that
-# only -contains reads the sidecar, is checked in T143c, where a stale index is
-# already staged and the claim can be measured instead of inferred.
+# a value that begins with a dash, which csv2's own error message recommends.
+# The third, that only -contains reads the sidecar, is checked in T143c, where
+# a stale index is already staged and the claim can be measured.
 #
-# T151 —— 兩份 README 現在說出口、而先前沒有任何東西在檢查的三句話。
+# T151 —— 兩份 README 說出口的三句話，每一句都要檢查。
 # ---------------------------------------------------------------------
 echo
 echo "--- T151: the dry run and the dash / T151：乾跑與減號 ---"
@@ -8260,18 +7339,13 @@ assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t151_dash.csv")" "--in-place" \
 # ---------------------------------------------------------------------
 # T152 -- the compose recipe, and the shell in the middle of it.
 #
-# Round 57: the recipe is annotated "# round-trips" and does not, for a value
-# ending in a newline. csv2 is not at fault -- `$( )` strips every trailing
-# newline, so the value comes back one byte shorter and is written back that
-# way at rc=0. The READMEs now carry the caveat and the `printf x` form that
-# survives it; both belong to a test, since a recipe that does not work is
-# worse than no recipe.
-#
-# Also here: `-contains` prints in ascending record order. The recipe leans on
-# `head -1` and nothing said so.
+# `$( )` strips every trailing newline, so the plain recipe writes a value
+# ending in a newline back one byte shorter, at rc=0. The READMEs carry the
+# caveat and the `printf x` form that survives it; both are tested, since a
+# recipe that does not work is worse than none. Also: `-contains` prints in
+# ascending record order, which the recipe's `head -1` relies on. Round 57.
 #
 # T152 —— 那份組合配方，以及夾在中間的那個 shell。
-# ---------------------------------------------------------------------
 echo
 echo "--- T152: the recipe as written / T152：照著寫出來的那份配方 ---"
 
@@ -8293,13 +7367,11 @@ _t152_kept=$("$CSV2" -get 1:2 -i "$TMP/t152.csv"; printf x); _t152_kept=${_t152_
 assert_eq "$(print -rn -- "$_t152_kept" | od -A n -c | tr -s ' ')" "$(printf 'x\n\n' | od -A n -c | tr -s ' ')" \
     "T152b while the printf x form keeps every byte -get produced / 而 printf x 的寫法保住了 -get 產生的每一個位元組"
 
-# The recipe as a WHOLE, which is the thing the README publishes. printf x
-# keeps two newlines -- the value's own and the one -get adds -- so a recipe
-# that stops there grows the value by one on every round trip. It was published
-# without the third line on 2026-08-21 and round 61 measured the growth.
-# 那份配方「整體」——那才是 README 發表出去的東西。printf x 保住的是兩個換行：值自己的，
-# 以及 -get 加上的那一個；因此一份「停在那裡」的配方，每來回一次就讓值多一個換行。
-# 它 2026-08-21 發表時就少了第三行，而第 61 回合量到了那個增長。
+# The recipe as a WHOLE, which is what the README publishes. printf x keeps
+# two newlines -- the value's own and the one -get adds -- so without the
+# third line the value grows by one newline every round trip. Round 61.
+# 那份配方「整體」——那才是 README 發表的東西。printf x 保住兩個換行：值自己的，以及 -get
+# 加上的那一個；少了第三行，值每來回一次就多一個換行。第 61 回合。
 _t152_final=${_t152_kept%$'\n'}
 "$CSV2" -update 1:2 "$_t152_final" -i "$TMP/t152.csv" -o "$TMP/t152_rt.csv"
 assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t152_rt.csv" | od -A n -c | tr -s ' ')" \
@@ -8330,11 +7402,9 @@ assert_eq "$("$CSV2" -contains z -i "$TMP/t152c.csv" | cut -f1 | tr '\n' ' ')" "
 # ---------------------------------------------------------------------
 # T153 -- N edits in one run either all land or none do.
 #
-# Round 57 wrote the loop the compose recipe implies -- one csv2 call per
-# address -- and a failure on the fourth left the first three written, at exit
-# 1, with nothing in the file to say which. The atomic form exists and was
-# documented only as a lesson about -insert numbering. Both READMEs name it
-# now, so it needs holding: all-or-nothing, and the log agreeing.
+# One csv2 call per address leaves earlier edits written when a later one
+# fails, at exit 1, with nothing to say which. Both READMEs name the atomic
+# form, so it is pinned: all-or-nothing, and the log agreeing. Round 57.
 #
 # T153 —— 一次執行裡的 N 個編輯，要嘛全部落地、要嘛一個都不落地。
 # ---------------------------------------------------------------------
@@ -8361,9 +7431,10 @@ assert_eq "$(cksum < "$TMP/t153.csv")" "$_t153_before" \
 assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t153.csv")$("$CSV2" -get 2:2 -i "$TMP/t153.csv")$("$CSV2" -get 3:2 -i "$TMP/t153.csv")" "ABC" \
     "T153c while a run whose addresses are all good lands all of them / 而位址全部合法的執行，會讓它們全部落地"
 
-# The loop the recipe implies, for contrast: this is what the READMEs now warn
-# about, and it has to actually behave that way or the warning is folklore.
-# 對照組：配方所暗示的那個迴圈——那正是兩份 README 現在警告的東西，而它必須真的是那樣，
+# The call-per-address loop, for contrast: the READMEs warn that it leaves
+# earlier edits written, and it has to really behave that way or the warning
+# is folklore.
+# 對照組：「每個位址跑一次」的迴圈。兩份 README 警告它會留下先前的編輯，而它必須真的如此，
 # 否則那句警告就只是傳說。
 {
     print -r -- 'a,b'
@@ -8382,17 +7453,15 @@ fi
 # T154 -- the surface a user sees first, checked against the one the parser
 # actually has.
 #
-# T121h pins KNOWN_FLAGS against the parser's cases. Nothing pinned either
-# against `--help`, and `--build-index` was missing from it -- a real flag,
-# documented in both READMEs, absent from the text a user reads before
-# reaching either. The blind rounds could not have found it: they are forbidden
-# `--help`, which is what makes it the least-watched interface in the project.
+# T121h pins KNOWN_FLAGS against the parser's cases; this pins both against
+# `--help`, in both directions, so a real flag cannot be missing from it (as
+# `--build-index` was) and a removed one cannot linger. Blind rounds are
+# forbidden `--help`, so nothing else watches it.
 #
 # T154 —— 使用者最先看到的那份介面，對上解析器真正擁有的那一份。
-# T121h 把 KNOWN_FLAGS 與解析器的 case 釘在一起，而沒有任何東西把它們與 `--help` 釘在一起，
-# 於是 `--build-index` 從 help 裡缺席——一個真實存在、兩份 README 都寫了的旗標，卻不在
-# 「使用者在讀到那兩份文件之前會先讀的那段文字」裡。盲測回合找不到它：它們被禁止使用
-# `--help`，而那正是這個專案裡最沒有人在看的那個介面。
+# T121h 把 KNOWN_FLAGS 與解析器的 case 釘在一起；這裡把兩者與 `--help` 雙向釘住，讓真實的旗標
+# 不會從 help 缺席（`--build-index` 曾經如此），被移除的也不會殘留。盲測回合被禁止使用
+# `--help`，因此沒有別的東西在看它。
 # ---------------------------------------------------------------------
 echo
 echo "--- T154: --help against the flags that exist / T154：--help 對上真正存在的旗標 ---"
@@ -8402,10 +7471,10 @@ assert_eq "$?" "0" \
     "T154a --help exits 0 / --help 以 0 結束"
 
 # assert_same compares FILES, not strings: it takes two paths and cmp's them.
-# Handing it two strings compares two paths that do not exist, which "differ" --
-# and the case fails for a reason that has nothing to do with what it asks.
-# assert_same 比的是「檔案」不是字串：它收兩個路徑再 cmp。把兩個字串交給它，比的是兩個
-# 不存在的路徑，那當然「不同」——於是這個案例因為一個與它要問的事情無關的理由而失敗。
+# Two strings would be two nonexistent paths, which "differ", and the case
+# would fail for an unrelated reason.
+# assert_same 比的是「檔案」不是字串：它收兩個路徑再 cmp。交給它兩個字串，等於比兩個不存在
+# 的路徑，必然「不同」，案例會因無關的理由失敗。
 "$CSV2" --help > "$TMP/t154_long.txt" 2>&1
 "$CSV2" -h     > "$TMP/t154_short.txt" 2>&1
 assert_same "$TMP/t154_long.txt" "$TMP/t154_short.txt" \
@@ -8432,9 +7501,8 @@ else
 fi
 
 # And every flag in the help is one the parser knows -- the other direction,
-# which is how a help text starts advertising something that was removed.
-# 而 help 裡的每一個旗標，都必須是解析器認得的——另一個方向，那正是一份 help 開始宣傳
-# 「已經被移除的東西」的方式。
+# which catches a help text still advertising something removed.
+# 而 help 裡的每一個旗標都必須是解析器認得的——另一個方向，抓的是 help 仍在宣傳已被移除的東西。
 _t154_ghost=""
 for _f in ${(f)"$(print -r -- "$_t154_help" | grep -oE '(^| )--?[a-z][a-z0-9-]+' | tr -d ' ' | sed 's/^-*//' | sort -u)"}; do
     [[ -z $_f ]] && continue
@@ -8448,8 +7516,8 @@ fi
 
 # The same question of the two READMEs. Compare the flags actually advertised
 # by --help, rather than internal parser sentinels such as the refused `-key`.
-# 對兩份 README 問同一個問題。T117 以案例編號把兩份 README 互相比對；這裡把兩份都拿去對
-# 解析器——那是「一個旗標被加進程式碼與其中一份文件」時，抓得到的那個方向。
+# 對兩份 README 問同一個問題。比對的是 --help 實際宣傳的旗標，而不是解析器內部的哨兵值，
+# 例如被拒絕的 `-key`。
 _t154_doc=""
 _t154_public=$(print -r -- "$_t154_help" | grep -oE '(^| )--?[a-z][a-z0-9-]+' | tr -d ' ' | sed 's/^-*//' | sort -u)
 for _f in ${(f)_t154_public}; do
@@ -8466,13 +7534,11 @@ fi
 # T155 -- an output shape asked for on a path that writes CSV, and a log
 # entry a parser can read.
 #
-# Round 58: `--json` and `-md` with an edit verb were accepted, ignored and
-# exited 0, while `--a1` in the same position was refused and `-md` without -t
-# on an edit was refused for a different reason -- three flags on one axis,
-# three behaviours. And the `delete record` entry added the day before wrote
-# column names unquoted, so a name containing `, ` made the entry unparseable;
-# the invocation line quoted nothing, so a path with a space in it named a
-# command nobody ran.
+# `--json` and `-md` with an edit verb must be refused like `--a1`, not
+# accepted, ignored and exited 0: one axis, one behaviour. Log entries must
+# quote column names (a name containing `, ` makes the entry unparseable) and
+# arguments with spaces (otherwise the invocation line names a command nobody
+# ran). Round 58.
 #
 # T155 —— 在一條「寫出 CSV」的路徑上要求一種輸出形狀，以及一則解析得了的 log 紀錄。
 # ---------------------------------------------------------------------
@@ -8515,10 +7581,9 @@ assert_contains "$(head -1 "$TMP/t155_sp.log")" '-i "' \
 # ---------------------------------------------------------------------
 # T156 -- the JSON shape a consumer would validate against.
 #
-# Round 58: a `.csv2` object carries a sixth key, `header_zh`, which appears
-# nowhere in either README -- "a schema-validating consumer breaks on the first
-# .csv2". And `--en`/`--zh`, documented as changing the report's middle field,
-# change nothing here. Both are now written down, so both need holding.
+# A `.csv2` object carries a sixth key, `header_zh`, and `--en`/`--zh` change
+# the report but not --json. Both are documented, so both are pinned: a
+# schema-validating consumer depends on them. Round 58.
 #
 # T156 —— 一個消費端會拿去驗證的那個 JSON 形狀。
 # ---------------------------------------------------------------------
@@ -8549,11 +7614,9 @@ fi
 # says and the opposite of what a reader would guess.
 # --en／--zh 改變的是報告、不是 JSON——那是 README 現在寫的，也與讀者會猜的相反。
 # Real files, not process substitution: assert_same runs cmp on two PATHS, and
-# /dev/fd entries do not behave the same everywhere -- this passed on macOS and
-# failed in the guest, which is the wrong reason to fail.
+# /dev/fd entries do not behave the same everywhere (they fail in the guest).
 # 用真正的檔案，不用 process substitution：assert_same 是對兩個「路徑」跑 cmp，而 /dev/fd
-# 的行為不是每個地方都一樣——這個案例在 macOS 上通過、在 guest 上失敗，而那是一個錯誤的
-# 失敗理由。
+# 的行為不是每個地方都一樣（在 guest 上會失敗）。
 print -r -- "$_t156_two" > "$TMP/t156_plain.json"
 "$CSV2" -contains x --json --zh -i "$TMP/t156.csv2" | sed -n 2p > "$TMP/t156_zh.json"
 assert_same "$TMP/t156_plain.json" "$TMP/t156_zh.json" \
@@ -8564,24 +7627,19 @@ assert_contains "$("$CSV2" -contains x --zh -i "$TMP/t156.csv2")" "乙" \
 # ---------------------------------------------------------------------
 # T157 -- a .csv with an embedded newline seeks like a .csv2.
 #
-# Round 59 measured `-tail 40` on a 15 MB .csv reading the entire file where a
-# .csv2 of the same shape read 7 kB, and reported it as the two formats
-# behaving differently. It was never the format: the seek required
-# `no_embedded_newlines`, because a grid point was a byte offset alone and a
-# resume could not say which physical LINE it had landed on -- and --physical
-# puts that line in the output, which must be byte-identical with and without
-# an index. One quoted newline in 450,000 records cost the whole file.
-#
-# Index v4 stores the line with each grid point, so the gate is gone. The
-# property it protected is the thing to hold onto here: the two runs must still
-# agree, exactly, including --physical, across the record that spans lines.
+# The seek used to require `no_embedded_newlines`, because a grid point was a
+# byte offset alone and a resume could not say which physical LINE it landed
+# on -- and --physical puts that line in the output, which must be
+# byte-identical with and without an index. One quoted newline cost a seek on
+# the whole file. Index v4 stores the line with each grid point, so the gate
+# is gone; what this holds is the property it protected: both runs agree
+# exactly, including --physical, across a record that spans lines. Round 59.
 #
 # T157 —— 含內嵌換行的 .csv，seek 得跟 .csv2 一樣。
-# 第 59 回合量到 15 MB 的 .csv 上 `-tail 40` 讀了整個檔案，而同樣形狀的 .csv2 只讀 7 kB，
-# 並把它回報成「兩種格式行為不同」。那從來不是格式的問題：seek 需要 `no_embedded_newlines`，
-# 因為格點只有位元組偏移量、恢復解析說不出「落在第幾實體行」——而 --physical 會把那個行號
-# 放進輸出，且有無索引的輸出必須逐位元相同。45 萬筆裡的一個引號換行，代價是整個檔案。
-# 索引 v4 把行號與格點存在一起，那道門因此拿掉了。這裡要守住的，正是它當初保護的那個性質。
+# seek 原本需要 `no_embedded_newlines`，因為格點只有位元組偏移量，恢復解析說不出落在第幾
+# 實體行——而 --physical 會把行號放進輸出，且有無索引的輸出必須逐位元相同。一個引號內換行
+# 就讓整個檔案失去 seek。索引 v4 把行號與格點存在一起，那道門因此拿掉；這裡守住的是它保護
+# 的那個性質：兩次執行完全一致，包含 --physical，跨過跨行的紀錄也一樣。第 59 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T157: seeking into a file whose records span lines / T157：seek 進一個「紀錄會跨行」的檔案 ---"
@@ -8651,12 +7709,10 @@ unset CSV2_INDEX_MIN_BYTES
 # ---------------------------------------------------------------------
 # T158 -- the one output shape that was quietly lying.
 #
-# Round 59: "--json is lossy for invalid UTF-8 while -r and -get are not. No
-# flag, no WARN, no marker, no exit status distinguishes a faithful --json line
-# from a lossy one." Measured: a value of `caf\xe9` came out as "caf<U+FFFD>",
-# valid JSON, rc=0 -- in the shape this README recommends when the value is the
-# thing that matters, while the locating report answers the same case with
-# `<non-UTF-8: 63 61 66 e9>`.
+# --json must not turn invalid UTF-8 into U+FFFD at rc=0: that is valid JSON
+# and indistinguishable from a faithful line, in the shape the README
+# recommends when the value matters, while -r, -get and the locating report
+# (`<non-UTF-8: 63 61 66 e9>`) stay faithful. Round 59.
 #
 # T158 —— 唯一一個在安靜說謊的輸出形狀。
 # ---------------------------------------------------------------------
@@ -8686,30 +7742,27 @@ assert_succeeds "T158d and -r reads the file / 而 -r 讀得了這個檔案" -- 
 
 # Valid UTF-8 still goes through --json, including astral characters.
 # 合法的 UTF-8 照樣通過 --json，包含星光平面的字元。
-# Compared in --json-ascii, whose output is pure ASCII by definition. The
-# needle was `café🚀` and Windows failed on it while its own output showed the
-# value present -- a case that measured the platform's handling of a non-ASCII
-# literal in this file, not the tool.
-# 以 --json-ascii 比對，它的輸出依定義就是純 ASCII。原本的比對字串是 `café🚀`，Windows 在
-# 那裡失敗，而它自己的輸出裡那個值明明就在——那個案例量的是「這個檔案裡一個非 ASCII 字面值
-# 在該平台上如何被處理」，不是這個工具。
+# Compared in --json-ascii, whose output is pure ASCII by definition. A
+# non-ASCII needle such as `café🚀` measures how the platform handles a
+# non-ASCII literal in this file (Windows fails it), not the tool.
+# 以 --json-ascii 比對，它的輸出依定義就是純 ASCII。像 `café🚀` 這樣的非 ASCII 比對字串，
+# 量到的是「平台如何處理這個檔案裡的非 ASCII 字面值」（Windows 會失敗），不是這個工具。
 printf 'a,b\n1,caf\xc3\xa9\xf0\x9f\x9a\x80\n' > "$TMP/t158_ok.csv"
 assert_contains "$("$CSV2" -r -t --json-ascii -i "$TMP/t158_ok.csv" | sed -n 2p)" 'caf\u00e9\ud83d\ude80' \
     "T158e while valid UTF-8 is carried as it always was / 而合法的 UTF-8 一如既往地被載著走"
 
 # ---------------------------------------------------------------------
-# T159 -- three things about reading that nothing had written down.
-#
-# Round 59, all three found by running the same read over a hundred small files
-# and comparing against Python's csv module:
+# T159 -- three documented facts about reading, compared against Python's
+# csv module:
 #   - a blank line anywhere is a hard error, including the one a file ending in
-#     two newlines has, and the message talked about field counts;
+#     two newlines has, and the message must say "blank line", not talk about
+#     field counts;
 #   - a bare CR inside an UNQUOTED field is data here and a row separator to
-#     most parsers, so the record counts differ across tools;
+#     most parsers, so record counts differ across tools;
 #   - NUL and the other control bytes are accepted verbatim.
-# All three are now in both READMEs, so all three need holding.
+# All three are in both READMEs. Round 59.
 #
-# T159 —— 三件關於「讀取」、而先前沒有任何地方寫下來的事。
+# T159 —— 三件關於「讀取」、寫在文件裡的事。
 # ---------------------------------------------------------------------
 echo
 echo "--- T159: blank lines, bare CR, and control bytes / T159：空白行、裸 CR，以及控制位元組 ---"
@@ -8753,20 +7806,16 @@ assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t159_nul.csv" | od -A n -c | tr -s ' ')" 
     "T159e a NUL byte is data and comes back unchanged / NUL 是資料，而且原樣回來"
 
 # ---------------------------------------------------------------------
-# T160 -- an administrative flag beside a verb, and the half of that rule
-# that was never written.
+# T160 -- an administrative flag beside a verb.
 #
-# Round 60: `csv2 --build-index -contains X -i f.csv` exited 0 having searched
-# nothing -- indistinguishable from "found nothing", which the README documents
-# as rc=0 as well. `--build-index -get 1:1` put `index built: 5 records ...`
-# on stdout, so the README's own `val=$(csv2 -get ...)` recipe writes that
-# sentence into a data cell.
+# --build-index / --verify-index REPLACE the operation, so beside any verb or
+# output shape they must be refused, as they already were for edit verbs.
+# Otherwise `--build-index -contains X` exits 0 having searched nothing
+# (indistinguishable from "found nothing"), and `--build-index -get 1:1` puts
+# `index built: ...` on stdout, where the README's `val=$(csv2 -get ...)`
+# recipe writes it into a data cell. Round 60.
 #
-# csv2 already refused this for EDIT verbs, with a message explaining that the
-# flag REPLACES the operation. The same rule, half its domain -- this project's
-# most frequent defect, and mine to have made here.
-#
-# T160 —— 一個管理用旗標與一個動詞並排，以及那條規則沒有被寫下來的另一半。
+# T160 —— 一個管理用旗標與一個動詞並排。
 # ---------------------------------------------------------------------
 echo
 echo "--- T160: --build-index / --verify-index replace the operation / T160：--build-index／--verify-index 是取代那個操作 ---"
@@ -8793,13 +7842,11 @@ done
 # 拒絕它等於拒絕那個最單純的寫法。
 assert_succeeds "T160b --build-index alone still works / 單獨的 --build-index 照舊可用" -- \
     "$CSV2" --build-index -i "$TMP/t160.csv"
-# `-r` typed explicitly is refused like any other verb. The first version of
-# T160 excluded it on the reasoning that -r is also the default -- true of the
-# DEFAULT, and not of a caller who typed it and got no output. Round 61 found
-# the difference; the flag alone (T160b) is the case that had to keep working.
-# 明確打出來的 `-r` 與其他動詞一樣會被拒絕。T160 的第一版把它排除在外，理由是「-r 也是
-# 預設值」——那對「預設」成立，對「一個真的打了它、卻沒有拿到輸出的呼叫端」不成立。
-# 第 61 回合找出了這個差別；必須繼續可用的是「單獨那個旗標」（T160b）。
+# `-r` typed explicitly is refused like any other verb. That -r is also the
+# default is true of the DEFAULT, not of a caller who typed it and got no
+# output; the flag alone (T160b) is what must keep working. Round 61.
+# 明確打出來的 `-r` 與其他動詞一樣會被拒絕。「-r 也是預設值」對「預設」成立，對「真的打了它、
+# 卻沒有拿到輸出的呼叫端」不成立；必須繼續可用的是單獨那個旗標（T160b）。第 61 回合。
 _t160_r=$("$CSV2" --build-index -r -i "$TMP/t160.csv" 2>&1)
 if [[ $_t160_r == *"cannot both run"* ]]; then
     ok "T160c and an explicitly typed -r is refused too / 而明確打出來的 -r 同樣會被拒絕"
@@ -8828,12 +7875,10 @@ assert_succeeds "T160d and --verify-index alone / 單獨的 --verify-index 也�
 # ---------------------------------------------------------------------
 # T161 -- the temp file's permissions while the write is happening.
 #
-# Round 61: "--in-place exposes the contents of a restrictively-permissioned
-# file for the duration of the write." The temp file was created with the
-# umask's mode and the source's mode applied just before the rename, so a 0600
-# file spent the whole write as -rw-r--r-- under a name anyone could open.
-# On a 15 MB file that is a real window, and the README's "an edit does not
-# change who can read it" was true only of the finished file.
+# The temp file must be created with the source's mode, not the umask's with
+# the mode applied just before the rename: otherwise a 0600 file spends the
+# whole write as -rw-r--r--, and "an edit does not change who can read it"
+# holds only for the finished file. Round 61.
 #
 # T161 —— 寫入進行中，那個暫存檔的權限。
 # ---------------------------------------------------------------------
@@ -8884,18 +7929,15 @@ fi
 # ---------------------------------------------------------------------
 # T162 -- the smallest file that breaks each rule.
 #
-# Round 62 built, for every rule about input, the smallest file that violates
-# it and the smallest that satisfies it by one byte. Two rules failed at the
-# boundary:
-#
-#   - a file that IS a UTF-16 BOM and nothing else -- two bytes, which is what
-#     an editor writes for an empty document saved as UTF-16 -- was accepted at
-#     rc=0 as a one-column CSV whose column name is those two invalid bytes,
-#     because the UTF-8 BOM test needs three bytes and the check waited for
-#     three. A zero-byte file, semantically the same, is refused;
+#   - a file that IS a UTF-16 BOM and nothing else (two bytes, what an editor
+#     writes for an empty document saved as UTF-16) must be refused like a
+#     zero-byte file, not read as a one-column CSV named by two invalid bytes.
+#     The UTF-8 BOM test needs three bytes, so the check must not wait for
+#     three;
 #   - a blank line in a ONE-column file is a record with one empty field,
-#     because they are the same bytes -- true, defensible, and stated nowhere,
-#     while the rule reads "a blank line anywhere is refused".
+#     because they are the same bytes; this is documented beside "a blank
+#     line anywhere is refused".
+# Round 62.
 #
 # T162 —— 讓每一條規則破掉的最小檔案。
 # ---------------------------------------------------------------------
@@ -8942,12 +7984,10 @@ assert_fails "T162f while two columns make it a blank line again / 而兩欄時�
 # ---------------------------------------------------------------------
 # T163 -- the output shape follows the flag, not the number.
 #
-# Round 62 ran roughly sixty flag pairs the refusals table does not list.
-# `-A 0` left the locating report in place while `-A 1` switched to records, so
-# `csv2 -contains X -A "$N"` returned one of two incompatible formats depending
-# on a variable -- a TAB-separated report against CSV, rc=0, nothing said. The
-# README says -A/-B/-C imply --filter, unconditionally, and the implication was
-# written as `after > 0 || before > 0`.
+# -A/-B/-C imply --filter unconditionally, so `-A 0` must give records like
+# `-A 1`. If the implication were `after > 0 || before > 0`,
+# `csv2 -contains X -A "$N"` would return a TAB-separated report or CSV
+# depending on a variable, at rc=0. Round 62.
 #
 # T163 —— 輸出形狀跟著旗標走，不跟著數字走。
 # ---------------------------------------------------------------------
@@ -8988,11 +8028,10 @@ assert_eq "$("$CSV2" -contains HIT -A 2 -i "$TMP/t163.csv" | wc -l | tr -d ' ')"
 # ---------------------------------------------------------------------
 # T164 -- which shapes substitute, and which refuse.
 #
-# Round 62, reading the document as its author's adversary: "only --json was
-# quiet about it" -- a sentence I wrote -- is false. `-md` substitutes U+FFFD
-# for a byte sequence that is not UTF-8, silently, at rc=0, and --pretty pads
-# the column to the substituted width. That is defensible for a RENDERING and
-# it is not what the sentence claimed.
+# `-md` substitutes U+FFFD for a byte sequence that is not UTF-8, silently, at
+# rc=0, and --pretty pads to the substituted width. That is defensible for a
+# RENDERING, so the README says so instead of claiming only --json was quiet
+# about it. Round 62.
 #
 # T164 —— 哪些形狀會替換，哪些會拒絕。
 # ---------------------------------------------------------------------
@@ -9011,12 +8050,10 @@ assert_fails "T164c --json refuses them / --json 拒絕它們" -- \
 
 # -md substitutes, and the README says so rather than claiming otherwise.
 # -md 會替換，而 README 現在照實寫，不再宣稱相反的事。
-# Hex, not `od -c`: this platform's od renders the replacement character as a
-# glyph plus `** **`, so an octal probe found nothing and reported that -md
-# does not substitute -- measuring od's rendering rather than the bytes.
-# 用十六進位，不用 `od -c`：這個平台的 od 會把替換字元印成一個字形加上 `** **`，因此一個
-# 用八進位去探測的檢查什麼也沒找到，於是回報「-md 不會替換」——量到的是 od 的呈現方式，
-# 不是那些位元組。
+# Hex, not `od -c`: some od renders the replacement character as a glyph plus
+# `** **`, so an octal probe finds nothing and measures od, not the bytes.
+# 用十六進位，不用 `od -c`：有的 od 會把替換字元印成一個字形加上 `** **`，於是八進位的探測
+# 什麼也找不到，量到的是 od 而不是那些位元組。
 _t164_md=$("$CSV2" -r -t -md -i "$TMP/t164.csv" | od -A n -t x1 | tr -s ' ')
 if [[ $_t164_md == *"ef bf bd"* ]]; then
     ok "T164d while -md substitutes U+FFFD, as a rendering does / 而 -md 會換成 U+FFFD——算繪就是這樣"
@@ -9043,13 +8080,12 @@ fi
 # valid test of properties that must hold for all of them.
 #
 # This case checks PROPERTIES rather than reproducing a known defect, so it can
-# pass without proving anything. Each of the four checks was inverted in a copy
-# of this file on 2026-08-21 and each one reported, naming the argv and the
-# seed file -- that is what says the harness can speak, and it is the part a
-# fuzz case usually lacks.
+# pass without proving anything. Each of the four checks has been inverted in
+# a copy of this file and each one reported, naming the argv and the seed file
+# -- the evidence that the harness can speak, which a fuzz case usually lacks.
 # 這個案例檢查的是「性質」，不是重現某個已知缺陷，因此它可能在什麼也沒證明的情況下通過。
-# 2026-08-21 曾把那四項檢查各自反轉、各跑一份副本，四項都發了聲並指出 argv 與種子檔——
-# 那才是「這個框架說得出話」的證據，而那正是 fuzz 案例通常缺少的部分。
+# 四項檢查都曾在副本裡各自反轉，而每一項都發了聲並指出 argv 與種子檔——那是「這個框架說得出話」
+# 的證據，也是 fuzz 案例通常缺少的部分。
 #
 # T139 —— 沒有人列舉過的組合。
 # 這裡其他每一個案例，都是因為有人想到了才存在。這一個在退化的檔案上隨機產生「連續編輯」，
@@ -9127,18 +8163,14 @@ if (( t139_bad == 0 )); then
 fi
 
 # ---------------------------------------------------------------------
-# T136 -- claims the README makes that nothing had checked.
+# T136 -- claims the README makes, each with something behind it:
+#   - -md escapes more than the two things listed (a backslash is doubled);
+#   - -md's handling of `<br>` versus a real newline;
+#   - --verify-index's exit statuses, and that it declines to run its O(n)
+#     comparison when the cheap stamp already says no.
+# Round 53.
 #
-# Round 53 found each of these by reading the README and then measuring:
-#   - -md escapes more than the two things listed (a backslash is doubled) and
-#     passes a TAB through raw;
-#   - -md is not reversible: `<br>` as text and a real newline emit the same
-#     bytes, so a checker cannot tell them apart;
-#   - --verify-index's exit statuses were documented nowhere, and it declines
-#     to run its O(n) comparison when the cheap stamp already says no.
-# Each is now stated in both READMEs, so each needs something behind it.
-#
-# T136 —— README 現在說出口、而先前沒有任何東西檢查的幾項宣稱。
+# T136 —— README 說出口的幾項宣稱，每一項背後都要有東西撐著。
 # ---------------------------------------------------------------------
 echo
 echo "--- T136: what -md escapes, and what --verify-index answers / T136：-md 跳脫了什麼，而 --verify-index 回答什麼 ---"
@@ -9148,42 +8180,24 @@ _t136_md=$("$CSV2" -md -t -i "$TMP/t136.csv")
 
 assert_contains "$_t136_md" 'C:\\path' \
     "T136a -md doubles a backslash, as the README now says / -md 會把反斜線變成兩個，一如 README 現在所寫"
-# A TAB used to pass through raw, and this case asserted that. It does not any
-# more: -md is a RENDERING read by a person, so it escapes control characters
-# the way the locating report does -- a `\t` for the tab and `\xNN` for the
-# rest. Round 70 built a licence column reading `GPL-3.0<BS>*7 MIT`, which
-# rendered as `MIT` on any terminal that moves the cursor for a backspace,
-# while `-get` returned the real bytes. The old assertion was pinning the hole.
-# 原本 TAB 會原樣通過，而這個案例斷言了那件事。現在不會了：`-md` 是一種給人讀的「算繪」，
-# 因此它像定位報告那樣跳脫控制字元——TAB 是 `\t`，其餘是 `\xNN`。第 70 回合造了一個
-# 授權欄位 `GPL-3.0<BS>×7 MIT`，在任何「退格會移動游標」的終端機上算繪成 `MIT`，而 `-get`
-# 交還的是真正的位元組。舊的那條斷言，釘住的正是那個洞。
+# A TAB is escaped, not passed raw: -md is a RENDERING read by a person, so it
+# escapes control characters the way the locating report does (`\t`, `\xNN`).
+# A raw backspace lets `GPL-3.0<BS>*7 MIT` render as `MIT` on a terminal while
+# `-get` returns the real bytes. Round 70.
+# TAB 會被跳脫，不會原樣通過：`-md` 是給人讀的「算繪」，因此它像定位報告那樣跳脫控制字元
+# （`\t`、`\xNN`）。原樣的退格會讓 `GPL-3.0<BS>×7 MIT` 在終端機上算繪成 `MIT`，而 `-get`
+# 交還的是真正的位元組。第 70 回合。
 if [[ $_t136_md == *'\t'* && $_t136_md != *$'\t'* ]]; then
     ok "T136b and escapes a TAB the way the report does / 而 TAB 以定位報告的方式被跳脫"
 else
     bad "T136b the TAB is not escaped / TAB 沒有被跳脫"
 fi
 
-# The collision, stated as a fact rather than discovered by someone relying on
-# it: two different values, the same bytes out.
-# 那個碰撞，作為一個「先說出來」的事實，而不是留給依賴它的人去撞見：兩個不同的值，
-# 輸出相同的位元組。
-# Two different files, two renderings -- and this case asserted the opposite
-# until 2026-08-26.
-#
-# It pinned a collision: a literal `<br>` and a real newline rendered to the
-# same bytes, so `-md` could not be read back. That was true, it was stated as
-# a fact rather than left to be discovered, and it was the right thing to
-# assert while nothing read Markdown. Phase 8a made the format reversible, so
-# the collision is gone and the assertion that pinned it is now false. The
-# case stays, inverted: the two must now DIFFER, because that difference is
-# what the reader depends on.
-#
-# 兩個不同的檔案，兩份不同的算繪——而這個案例在 2026-08-26 之前斷言的是相反的事。
-# 它釘住的是一個碰撞：字面的 `<br>` 與真正的換行算繪出相同的位元組，因此 `-md` 讀不回來。
-# 那在當時為真，而且是被「先說出來」的事實而不是留給人去撞見的；在還沒有任何東西讀 Markdown
-# 的時候，那是該斷言的東西。第 8a 階段讓這個格式變成可逆的，於是那個碰撞消失了，而釘住它的那條
-# 斷言現在是假的。這個案例留下來，但反過來：兩者現在必須**不同**，因為讀取端依賴的正是那個不同。
+# A literal `<br>` and a real newline must render DIFFERENTLY. Phase 8a made
+# -md reversible, and the Markdown reader depends on that difference; an
+# assertion that they collide would now be false.
+# 字面的 `<br>` 與真正的換行必須算繪得**不同**。第 8a 階段讓 -md 變成可逆，Markdown 讀取端
+# 依賴的正是那個不同；斷言兩者碰撞，現在是假的。
 printf 'a\n"p<br>q"\n' > "$TMP/t136_lit.csv"
 printf 'a\n"p\nq"\n'   > "$TMP/t136_nl.csv"
 if [[ "$("$CSV2" -md -t -i "$TMP/t136_lit.csv")" != "$("$CSV2" -md -t -i "$TMP/t136_nl.csv")" ]]; then
@@ -9228,18 +8242,15 @@ assert_eq "$("$CSV2" -get 2:2 -i "$TMP/t136i.csv")" "y" \
     "T136i while an ordinary read scans and is right / 而一般的讀取會改為掃描，且是對的"
 
 # ---------------------------------------------------------------------
-# T135 -- three situations, one sentence, and a reason the system had already
-# given us.
+# T135 -- several situations, one sentence: say which of them it is.
 #
-# Round 53: pointing -keyfile at a DIRECTORY reported "keyfile is empty or
-# unreadable", which describes neither; and an unreadable sidecar reported
-# "reason not recorded" when the reason was one strerror() call away. Both are
-# the same shape: a message that covers several cases by naming none of them.
+# -keyfile pointing at a DIRECTORY must say so rather than "empty or
+# unreadable", which describes neither; an unreadable sidecar must give the
+# strerror() reason rather than "reason not recorded". Round 53.
 #
-# T135 —— 三種情況、一句話，以及一個系統早就給了我們的理由。
-# 第 53 回合：把 -keyfile 指到一個「目錄」時回報「金鑰檔為空或無法讀取」，而那兩者都不是它；
-# 一份讀不到的 sidecar 回報「沒有記錄到理由」，而那個理由離一次 strerror() 只有一步。
-# 兩者是同一個形狀：一句涵蓋好幾種情況、卻沒有指名其中任何一種的訊息。
+# T135 —— 好幾種情況、一句話：說出是哪一種。
+# 把 -keyfile 指到「目錄」時，必須說它是目錄，而不是「為空或無法讀取」——那兩者都不是它；
+# 讀不到的 sidecar 必須給出 strerror() 的理由，而不是「沒有記錄到理由」。第 53 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T135: say which of them it is / T135：說出是哪一種 ---"
@@ -9253,11 +8264,11 @@ _t135_dir_out=$("$CSV2" -encrypt b -keyfile "$TMP/t135_dir" -i "$TMP/t135.csv" -
 assert_contains "$_t135_dir_out" "keyfile is a directory" \
     "T135a a directory given as -keyfile is named as one / 把目錄當成 -keyfile 時，訊息說它是目錄"
 
-# The old message was "keyfile is empty or unreadable", which CONTAINS "keyfile
-# is empty" -- so a contains-check alone passed against the very wording this
-# case exists to rule out. It has to require the hedge to be gone.
-# 舊訊息是「keyfile is empty or unreadable」，而它「包含」「keyfile is empty」——因此單靠
-# contains 檢查，會對著這個案例要排除的那句措辭本身通過。它必須要求那個含糊的部分不在。
+# The old message "keyfile is empty or unreadable" CONTAINS "keyfile is empty",
+# so a contains-check alone would pass against the wording this case rules out.
+# It has to require the hedge to be gone.
+# 舊訊息「keyfile is empty or unreadable」「包含」「keyfile is empty」，因此單靠 contains
+# 檢查，會對著這個案例要排除的措辭通過。它必須要求那個含糊的部分不在。
 _t135_empty_out=$("$CSV2" -encrypt b -keyfile "$TMP/t135_empty" -i "$TMP/t135.csv" -o "$TMP/t135_out.csv" 2>&1)
 if [[ $_t135_empty_out == *"keyfile is empty"* && $_t135_empty_out != *"or unreadable"* ]]; then
     ok "T135b and an empty file is called empty, not empty-or-unreadable / 而空檔案就叫空檔案，不是「為空或無法讀取」"
@@ -9265,30 +8276,24 @@ else
     bad "T135b $(print -r -- $_t135_empty_out | head -1) / 訊息如上"
 fi
 
-# An unreadable sidecar. Skipped where the test runs as root or where the
-# permission cannot be made to bite: chmod 000 does not stop root, and a file
-# csv2 can still read would make this pass for the wrong reason.
-# 一份讀不到的 sidecar。在「以 root 執行」或「權限咬不住」的地方跳過：chmod 000 擋不住 root，
-# 而一個 csv2 仍讀得到的檔案會讓這個案例因為錯誤的理由通過。
+# An unreadable sidecar.
+# 一份讀不到的 sidecar。
 "$CSV2" --build-index -i "$TMP/t135.csv" >/dev/null 2>&1
-# A DIRECTORY where the sidecar should be, not `chmod 000`. Permission cannot
-# be made to bite in the guest, which runs as root and reads anything -- so
-# this case skipped there, on the one platform whose whole purpose is to be a
-# second implementation of the runtime. A directory fails the open for every
-# user including root, takes the same code path, and produces the same
-# sentence with a different reason after it:
+# A DIRECTORY where the sidecar should be, not `chmod 000`: permission cannot
+# bite as root, so the guest would skip it, and the guest is the second
+# implementation of the runtime. A directory fails the open for every user
+# including root, takes the same code path, and produces the same sentence
+# with a different reason after it:
 #
 #   chmod 000  -> exists but cannot be read: Permission denied
 #   directory  -> exists but cannot be read: Operation ...
 #
-# The assertion was never about permissions. It is that the sidecar's failure
-# is REPORTED WITH ITS REASON rather than as a bare "cannot be used", and a
-# directory exercises that just as well.
-# 在 sidecar 該在的位置放一個**目錄**，而不是 `chmod 000`。權限在 guest 裡咬不住——它以 root
-# 執行、什麼都讀得到——因此這個案例在那裡跳過了，而那個平台存在的全部意義，正是「作為執行期的
-# 第二份實作」。一個目錄會讓每一個使用者（包含 root）的 open 都失敗，走的是同一條程式碼路徑，
-# 印出同一句話、後面接著不同的原因。這個斷言從來就不是關於權限的：它要的是「sidecar 的失敗會
-# 連同它的原因一起被說出來」，而不是只說一句「無法使用」——一個目錄同樣能運動到那件事。
+# The assertion is that the failure is REPORTED WITH ITS REASON rather than a
+# bare "cannot be used", and a directory exercises that just as well.
+# 在 sidecar 該在的位置放一個**目錄**，而不是 `chmod 000`：權限擋不住 root，guest 會因此跳過，
+# 而 guest 正是執行期的第二份實作。目錄會讓每一個使用者（包含 root）的 open 都失敗，走同一條
+# 程式碼路徑，印出同一句話、後面接著不同的原因。這個斷言要的是「失敗會連同原因一起說出來」，
+# 而不是只說「無法使用」——目錄同樣能運動到那件事。
 rm -f "$TMP/t135.csv.index" 2>/dev/null
 mkdir -p "$TMP/t135.csv.index" 2>/dev/null
 if [[ ! -d "$TMP/t135.csv.index" ]]; then
@@ -9307,16 +8312,14 @@ rmdir "$TMP/t135.csv.index" 2>/dev/null
 # ---------------------------------------------------------------------
 # T134 -- a sidecar that belongs to a different file.
 #
-# Round 53: "No mention that a FOREIGN sidecar is reported as 'stale: the data
-# file changed' when the data file did not change." The stamp compares size,
-# mtime and content hashes; it establishes that the two do not match and
-# cannot say which of them moved. Telling the reader their data file changed
-# sends them looking for an edit nobody made.
+# The stamp compares size, mtime and content hashes; it establishes that the
+# two do not match and cannot say which moved. A foreign sidecar must not be
+# reported as "the data file changed", which sends the reader looking for an
+# edit nobody made. Round 53.
 #
 # T134 —— 一份屬於別的檔案的 sidecar。
-# 第 53 回合：「沒有任何地方提到，一份『外來的』sidecar 會被回報成『過期：資料檔已經改變』，
-# 而那個資料檔根本沒有變。」那個戳記比對的是大小、mtime 與內容雜湊；它確立的是「兩者不相符」，
-# 說不出是哪一邊動了。告訴讀者他的資料檔變了，會把他送去找一次沒有人做過的編輯。
+# 戳記比對的是大小、mtime 與內容雜湊；它確立的是「兩者不相符」，說不出是哪一邊動了。外來的
+# sidecar 不能被回報成「資料檔已經改變」，那會把讀者送去找一次沒有人做過的編輯。第 53 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T134: whose sidecar is this / T134：這份 sidecar 是誰的 ---"
@@ -9355,20 +8358,17 @@ assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t134_mine.csv")" "1" \
 # ---------------------------------------------------------------------
 # T133 -- what the writer does to a value it has to re-serialise.
 #
-# Round 53: "-update a whitespace-only cell with its own value rewrites
-# `"   "` as `   `; -rownum quotes differently from -r. Same value, different
-# bytes, spurious git diff -- in a tool whose closing argument is that git can
-# diff it."
-#
-# Both were real. The whitespace is data, and it is the kind that vanishes
-# silently in the next tool along; the -rownum difference had no reason at all
-# behind it -- preserveRaw was switched off wholesale when a column was added,
-# though it is decided per field.
+# Same value, same bytes: `-update` with a whitespace-only cell's own value
+# must keep `"   "` quoted (the whitespace is data, and the kind the next tool
+# drops silently), and `-rownum` must quote like `-r` -- preserveRaw is decided
+# per field, not switched off when a column is added. Otherwise git shows a
+# spurious diff, in a tool whose argument is that git can diff it. Round 53.
 #
 # T133 —— 寫出端對一個「必須重新序列化」的值做了什麼。
-# 第 53 回合：「以原值 -update 一個只有空白的儲存格，`"   "` 會被寫成 `   `；`-rownum` 的
-# 引號規則與 `-r` 不同。同一個值、不同的位元組、憑空多出來的 git diff——而這支工具最後的
-# 論據正是『git 可以 diff 它』。」兩件都成立。
+# 同一個值、同一組位元組：以原值 -update 一個只有空白的儲存格，`"   "` 必須保持引號（空白是
+# 資料，而且是下一個工具會靜默丟掉的那種）；`-rownum` 的引號規則必須與 `-r` 相同——preserveRaw
+# 是逐欄決定的，不因多加一欄就整體關掉。否則 git 會出現憑空的 diff，而這支工具的論據正是
+# 「git 可以 diff 它」。第 53 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T133: the same value, the same bytes / T133：同一個值，同一組位元組 ---"
@@ -9407,23 +8407,18 @@ assert_eq "$("$CSV2" -r -i "$TMP/t133c.csv" | head -1)" '1,plain' \
 # ---------------------------------------------------------------------
 # T132 -- an address the tool printed, handed back to the tool.
 #
-# The README promises the locating report's notation composes: "the same
-# notation -contains prints, so finding and editing compose". Three ways that
-# was not true:
-#   - a .csv header hit prints plain `0:1`, while the README said `0a`/`0b`
-#     and "never plain 0" -- a script filtering on ^0[ab]: missed every one;
-#   - -update and -delete -cell answered a header address with "expected r:c",
-#     which is a complaint about the shape of an address csv2 had just printed,
-#     while -get explained the reason. One property, three accounts;
-#   - --physical and --a1 print `1:1@L2` and `1:1 [A2]`, and feeding either
-#     back produced `no column named "1@L2"`, sending the reader after a column
-#     that was never the problem.
+# The README promises the locating report's notation composes. So:
+#   - a .csv header hit prints plain `0:1`, as the README says;
+#   - -get, -update and -delete -cell all answer a header address with the
+#     reason, never "expected r:c" about an address csv2 itself printed;
+#   - --physical (`1:1@L2`) and --a1 (`1:1 [A2]`) addresses paste back to the
+#     cell they named, rather than `no column named "1@L2"`.
 #
 # T132 —— 工具印出來的位址，交還給工具。
-# README 承諾定位報告的寫法可以直接接下去，而它在三個地方不成立：`.csv` 的標頭命中印的是
-# 單純的 `0:1`（README 說「絕不會是單純的 0」）；-update 與 -delete -cell 用「需要 r:c」
-# 回答一個 csv2 剛剛自己印出來的位址，而 -get 講的是理由；--physical 與 --a1 印出的
-# `1:1@L2`、`1:1 [A2]` 餵回去會得到「沒有名為 1@L2 的欄位」。
+# README 承諾定位報告的寫法可以直接接下去，因此：`.csv` 的標頭命中印的是單純的 `0:1`，一如
+# README 所寫；-get、-update 與 -delete -cell 回答標頭位址時都講理由，絕不用「需要 r:c」回答
+# 一個 csv2 自己印出來的位址；--physical（`1:1@L2`）與 --a1（`1:1 [A2]`）的位址貼回去會拿到
+# 它指名的那一格，而不是「沒有名為 1@L2 的欄位」。
 # ---------------------------------------------------------------------
 echo
 echo "--- T132: the tool accepts, or explains, what it printed / T132：工具印出來的東西，它要嘛收，要嘛講清楚 ---"
@@ -9456,16 +8451,11 @@ for _t132_addr in '0:1' '0a:1' '0b:1'; do
     done
 done
 
-# A printed address COMPOSES: paste it back and get the cell it named. These
-# two asserted the opposite until 2026-09-10 -- that a decorated address was
-# refused with a message pointing at the decoration. The refusal was correct
-# and was not the best answer: the decoration is a CLAIM about the file, and
-# checking it is worth more than declining to read it. T302 covers the claim;
-# these two cover the round trip, which is what the README promises.
-# 印出來的位址是**可以接下去的**：貼回去就會拿到它指名的那一格。這兩個案例直到 2026-09-10 為止
-# 斷言的是相反的事——帶裝飾的位址會以一則指出那段裝飾的訊息被拒絕。那個拒絕是對的，但不是最好
-# 的答案：那段裝飾是一個關於檔案的**宣稱**，而驗證它比拒讀它有價值。T302 涵蓋那個宣稱；這兩個
-# 涵蓋那趟來回，也就是 README 承諾的東西。
+# A printed address COMPOSES: paste it back and get the cell it named. The
+# decoration is a CLAIM about the file, and checking it (T302) is worth more
+# than refusing to read it; these two cover the round trip the README promises.
+# 印出來的位址是**可以接下去的**：貼回去就會拿到它指名的那一格。那段裝飾是一個關於檔案的
+# **宣稱**，驗證它（T302）比拒讀它有價值；這兩個涵蓋 README 承諾的那趟來回。
 _t132_phys=$("$CSV2" -contains foo --physical -i "$TMP/t132.csv" | head -1 | cut -f1)
 _t132_want=$("$CSV2" -contains foo --physical -i "$TMP/t132.csv" | head -1 | cut -f3)
 assert_eq "$("$CSV2" -get "$_t132_phys" -i "$TMP/t132.csv" 2>/dev/null)" "$_t132_want" \
@@ -9495,14 +8485,10 @@ fi
 # ---------------------------------------------------------------------
 # T131 -- a write that fails for a reason other than a departed reader.
 #
-# Two failures used to be treated as one. `Platform.writeAll` called
-# readerHasGone() for ANY failed write, so a full disk raised SIGPIPE and csv2
-# exited 141 with an empty stderr and a half-written file -- and 141 is the
-# status the README tells callers to disregard. The file sink meanwhile used
-# FileHandle.write, on the reasoning that a file cannot meet a broken pipe:
-# true, and beside the point, because it can meet ENOSPC, and Foundation
-# answers that with an exception nobody catches (exit 134, no diagnostic, temp
-# file left behind).
+# Only a departed reader is SIGPIPE/141, the status the README tells callers
+# to disregard. Any other failed write -- a full disk on stdout, ENOSPC on the
+# file sink, where Foundation's FileHandle.write would throw uncaught (exit
+# 134, no diagnostic, temp file left) -- must exit 1 with a message.
 #
 # ENOSPC itself is not reachable portably -- it needs a filesystem this suite
 # has no business creating -- so it is verified by hand in
@@ -9510,15 +8496,12 @@ fi
 # that IS portable: writing to a descriptor the shell has closed.
 #
 # T131 —— 一次「不是因為讀端離開」而失敗的寫入。
-# 兩種失敗曾被當成同一種：`Platform.writeAll` 對任何失敗的寫入都呼叫 readerHasGone()，
-# 於是磁碟寫滿會引發 SIGPIPE、csv2 以 141 結束、stderr 空白、磁碟上留著寫到一半的檔案
-# ——而 141 正是 README 叫呼叫端不必理會的那個狀態。檔案 sink 則走 FileHandle.write，
-# 理由是「檔案不可能遇到管線斷掉」：那是對的，也不是重點，因為它會遇到 ENOSPC，而
-# Foundation 對此的回答是一個沒有人接的例外（rc=134、沒有診斷、暫存檔留下）。
+# 只有讀端離開才是 SIGPIPE／141，也就是 README 叫呼叫端不必理會的那個狀態。其他任何失敗的寫入
+# ——stdout 磁碟寫滿、檔案 sink 遇到 ENOSPC（Foundation 的 FileHandle.write 會丟出沒人接的例外：
+# rc=134、沒有診斷、暫存檔留下）——都必須以 1 結束並給出訊息。
 # ENOSPC 本身無法可攜地重現——那需要一個本測試沒有立場去建立的檔案系統——因此它由
 # todo/known-defects.md（DV）以手動方式驗證，而這裡用一個「可攜的」失敗來釘住同一個
 # 性質：寫入一個已被 shell 關掉的描述子。
-# ---------------------------------------------------------------------
 echo
 echo "--- T131: a failed write is reported, not disguised / 失敗的寫入會被回報，而不是被偽裝 ---"
 
@@ -9546,14 +8529,14 @@ assert_eq "$?" "1" \
     "T131d with nowhere to report to, the status still says it failed / 連回報的地方都沒有時，結束狀態仍然說它失敗了"
 
 # T131e -- the temp file after a signal. The README says a failed in-place edit
-# leaves none beside the target; that was true of the error paths and false of
-# a killed process, which left a hidden multi-megabyte file nobody would see.
+# leaves none beside the target, and that must hold for a killed process too,
+# not only the error paths.
 #
 # The mid-run check is not decoration: without it this case passes when csv2
 # exits before the signal arrives, which is the same "cannot tell the two
 # apart" hole T43h had.
-# T131e —— 訊號之後的暫存檔。README 說失敗的就地編輯不會在目標旁留下暫存檔；那在錯誤路徑上
-# 成立，在「行程被殺死」時不成立——它會留下一個沒有人看得到的隱藏檔，好幾 MB。
+# T131e —— 訊號之後的暫存檔。README 說失敗的就地編輯不會在目標旁留下暫存檔；這對「行程被殺死」
+# 也必須成立，不只是錯誤路徑。
 # 「執行中」那一步不是裝飾：少了它，這個案例在「csv2 早在訊號到達前就結束了」時照樣通過，
 # 那與 T43h 曾有的「分不出兩者」是同一個洞。
 if (( IS_WINDOWS )); then
@@ -9575,13 +8558,10 @@ else
         bad "T131e mid-run temp=${_t131_mid:-none}, left behind=${_t131_left:-none} / 執行中的暫存檔與殘留如上"
     fi
 
-    # Not only the signal that came to mind. A round killed an edit with
-    # SIGXFSZ, SIGPIPE, SIGALRM and SIGUSR1 and got a hidden temp file each
-    # time -- SIGXFSZ being what an `ulimit -f` or a filesystem quota produces,
-    # which is not exotic at all.
-    # 不只是「當初想到的那個訊號」。有一個回合用 SIGXFSZ、SIGPIPE、SIGALRM、SIGUSR1 各殺了
-    # 一次編輯，每次都留下一個隱藏的暫存檔——而 SIGXFSZ 正是 `ulimit -f` 或檔案系統配額會
-    # 產生的那一個，一點也不罕見。
+    # Every catchable signal that ends a run, not only TERM: SIGXFSZ is what
+    # `ulimit -f` or a filesystem quota produces, which is not exotic.
+    # 每一個「可攔截且會結束執行」的訊號，不只 TERM：SIGXFSZ 正是 `ulimit -f` 或檔案系統配額
+    # 會產生的那一個，一點也不罕見。
     _t131_leaks=""
     _t131_untested=""
     for _t131_sig in HUP QUIT XFSZ ALRM USR1 PIPE; do
@@ -9590,15 +8570,11 @@ else
             | "$CSV2" -r -t -si --headers 1 -o "$TMP/t131_out.csv" 2>/dev/null &
         _t131_pid=$!
         # Poll for the temp file rather than assuming one second is enough.
-        # A fixed `sleep 1` failed twice on 2026-09-01 while T212 was running
-        # three swift-frontend processes: csv2 had not reached the point of
-        # creating the temp file yet, so there was nothing for the signal to
-        # leave behind -- and that "nothing to test" went into the LEAK list
-        # and printed as "a temp file survived", which is its opposite. KS.
-        # 輪詢等那個暫存檔出現，而不是假設一秒就夠。2026-09-01 有兩次固定的 `sleep 1` 失敗，
-        # 而當時 T212 正跑著三個 swift-frontend：csv2 還沒走到「建立暫存檔」那一步，因此那個訊號
-        # 根本沒有東西可以留下——而那個「沒有東西可測」被放進了**洩漏**清單，印出來是
-        # 「暫存檔還在」，恰好是它的相反。KS。
+        # On a loaded machine csv2 may not have created it yet, and a
+        # "nothing to test" must not land in the LEAK list and print as "a
+        # temp file survived", which is its opposite. KS.
+        # 輪詢等那個暫存檔出現，而不是假設一秒就夠。機器忙碌時 csv2 可能還沒建立它，而「沒有東西
+        # 可測」不能被放進**洩漏**清單、印成「暫存檔還在」——那恰好是它的相反。KS。
         _t131_waited=0
         while (( _t131_waited < 50 )) && \
               [[ -z $(print -r -- "$TMP"/.t131_out.csv.csv2tmp.*(N)) ]]; do
@@ -9606,9 +8582,8 @@ else
             _t131_waited=$(( _t131_waited + 1 ))
         done
         # Still absent after five seconds is a case that could not be run, and
-        # it is reported as that -- in its own list, in its own sentence.
-        # 五秒之後仍然沒有出現，那是一個「跑不成的案例」，並且就以那個身分回報——用它自己的清單、
-        # 自己的句子。
+        # it is reported as that, in its own list.
+        # 五秒之後仍然沒有出現，那是一個「跑不成的案例」，就以那個身分回報，用它自己的清單。
         [[ -z $(print -r -- "$TMP"/.t131_out.csv.csv2tmp.*(N)) ]] && \
             { _t131_untested="$_t131_untested $_t131_sig"; kill -TERM $_t131_pid 2>/dev/null; continue }
         kill -$_t131_sig $_t131_pid 2>/dev/null
@@ -9684,9 +8659,9 @@ else
         T130C_SKIPPED=1
     fi
 
-    # Same file, two spellings: as typed, and through a link to it. Neither used
-    # to be refused, and neither is equivalent to --in-place.
-    # 同一個檔案的兩種寫法：直接打，以及經由一個指向它的連結。兩者過去都不會被拒絕，
+    # Same file, two spellings: as typed, and through a link to it. Both must be
+    # refused; neither is equivalent to --in-place.
+    # 同一個檔案的兩種寫法：直接打，以及經由一個指向它的連結。兩者都必須被拒絕，
     # 而兩者都不等同於 --in-place。
     print -r -- 'a,b'  > "$TMP/t130_f.csv"
     print -r -- '1,x' >> "$TMP/t130_f.csv"
@@ -9706,25 +8681,16 @@ fi
 # ---------------------------------------------------------------------
 # T165 -- the append fast path reads the whole file, so it leaves an index.
 #
-# Round 63 measured `-append --in-place` at 50/188/802 ms on 2/8/35 MB and
-# caught the README saying, in three places, that its fast path "never reads
-# the file to the end". It stopped being true when the unclosed-quote check
-# was added: that check parses every byte on every append. Two of those three
-# sentences were load-bearing -- they were the stated REASON for the one
-# behaviour that made this the only write path in the tool to leave a file it
-# had just read from end to end without a sidecar.
-#
-# So the behaviour moved to match the rule the document already states: the
-# next operation that writes the file, or that has to read it to the end
-# anyway, puts a good index back. Appending does both.
+# The unclosed-quote check parses every byte on every append, so the fast path
+# does read the file to the end, and the README must not say it "never reads
+# the file to the end". The behaviour follows the rule the document states:
+# the next operation that writes the file, or that has to read it to the end
+# anyway, puts a good index back. Appending does both. Round 63.
 #
 # T165 —— 追加快路徑會把整個檔案讀完，因此它會留下一份索引。
-# 第 63 回合量到 `-append --in-place` 在 2/8/35 MB 上是 50/188/802 ms，並抓到 README 有
-# 三處說它的快路徑「從不把檔案讀到結尾」。那句話在「未關閉引號」檢查加進來時就不再成立：
-# 那個檢查每一次追加都會解析每一個位元組。三處之中有兩處是承重的——它們是某個「行為」的
-# 理由，而那個行為讓這條路徑成為本工具唯一一條「剛剛從頭到尾讀完一個檔案、卻沒有留下
-# sidecar」的寫入路徑。
-# ---------------------------------------------------------------------
+# 「未關閉引號」檢查每一次追加都會解析每一個位元組，因此快路徑確實會讀到結尾，README 不能說它
+# 「從不把檔案讀到結尾」。行為跟著文件所述的規則走：下一個會寫入檔案、或本來就得把它讀完的
+# 操作，會放回一份正確的索引；追加兩者都是。第 63 回合。
 echo
 echo "--- T165: an append leaves an index / T165：一次追加會留下索引 ---"
 
@@ -9742,12 +8708,11 @@ fi
 assert_succeeds "T165b and that index describes the file / 而那份索引與檔案相符" -- \
     "$CSV2" --verify-index -i "$TMP/t165.csv"
 
-# --no-index still means none, and the size threshold still decides. Both were
-# checked because "builds one now" must not become "builds one always": the
-# flag is the user saying do not, and the threshold is the reason a two-line
-# file has no sidecar.
-# --no-index 仍然表示不建，而大小門檻仍然說了算。兩者都要檢查，因為「現在會建」不可以變成
-# 「一律會建」：那個旗標是使用者說不要，而那個門檻是「兩行的檔案旁邊沒有 sidecar」的理由。
+# --no-index still means none, and the size threshold still decides: "builds
+# one now" must not become "builds one always". The flag is the user saying
+# do not, and the threshold is why a two-line file has no sidecar.
+# --no-index 仍然表示不建，而大小門檻仍然說了算：「現在會建」不可以變成「一律會建」。
+# 那個旗標是使用者說不要，而那個門檻是「兩行的檔案旁邊沒有 sidecar」的理由。
 CSV2_INDEX_MIN_BYTES=0 "$CSV2" -append 'r41,n41' -i "$TMP/t165b.csv" --in-place --no-index
 assert_eq "$([[ -f "$TMP/t165b.csv.index" ]] && echo yes || echo no)" "no" \
     "T165c --no-index still builds none / --no-index 仍然什麼都不建"
@@ -9758,23 +8723,21 @@ assert_eq "$([[ -f "$TMP/t165c.csv.index" ]] && echo yes || echo no)" "no" \
 # ---------------------------------------------------------------------
 # T166 -- the line an appended record starts on.
 #
-# Found while checking T165, not reported by the round. The append path
-# computed the appended record's line as `index.lastLine + prefix`, and
-# lastLine is the line the LAST record STARTS on -- so the sum was short by
-# however many lines that record occupies. An appended record landing on a
-# grid point put a wrong line into the sidecar; `-mid N,N --json` printed it,
-# `--no-index` disagreed by one, and `--verify-index` said OK because it did
-# not check the lines it stores.
+# lastLine is the line the LAST record STARTS on, so `index.lastLine + prefix`
+# is short by however many lines that record occupies. An appended record on a
+# grid point would then carry a wrong line into the sidecar: `-mid N,N --json`
+# prints it, `--no-index` disagrees by one, and `--verify-index` must check the
+# lines it stores to notice.
 #
 # The fixture makes record 1 span two lines, so record 257 -- the second grid
 # point at stride 256 -- lands one line further down than its record number
 # suggests, and the two answers can differ.
 #
 # T166 —— 一筆被追加的紀錄從哪一行開始。
-# 這是檢查 T165 時發現的，不是那個回合回報的。追加路徑用 `index.lastLine + prefix` 算它，
-# 而 lastLine 是「最後一筆『開始』的那一行」——因此那個和少了那一筆自己佔掉的行數。fixture
-# 讓第 1 筆跨兩行，於是第 257 筆（stride 256 的第二個格點）比它的紀錄號多落一行，兩個答案
-# 因此才可能不同。
+# lastLine 是「最後一筆『開始』的那一行」，因此 `index.lastLine + prefix` 會少掉那一筆自己佔的
+# 行數。落在格點上的追加紀錄會因此把錯的行號寫進 sidecar：`-mid N,N --json` 印出它、`--no-index`
+# 差一行，而 `--verify-index` 必須檢查它存的行號才會發現。fixture 讓第 1 筆跨兩行，於是第 257 筆
+# （stride 256 的第二個格點）比它的紀錄號多落一行，兩個答案因此才可能不同。
 # ---------------------------------------------------------------------
 echo
 echo "--- T166: the appended record's line / T166：被追加那一筆的行號 ---"
@@ -9806,16 +8769,13 @@ assert_eq "$(CSV2_INDEX_MIN_BYTES=0 "$CSV2" -mid 257,257 --json -i "$TMP/t166b.c
 
 # --verify-index has to be able to CATCH a wrong line, or T166a passes for
 # free the next time this regresses. So the index is bent by one line and its
-# checksum recomputed -- which means writing a second implementation of that
-# checksum, from the CONSTANT 0x1000_0000_01b3 and not from the name the
-# comment beside it used to give it, which was the FNV-1a prime and wrong (GC).
+# checksum recomputed, with a second implementation of that checksum written
+# from the CONSTANT 0x1000_0000_01b3, not from the FNV-1a prime's name (GC).
 #
-# That second implementation is zsh now, and used to be Python. The guest has
-# no python3, so on the one platform nobody watches while it runs, the check
-# that --verify-index can catch anything did not run at all -- the same hole
-# T204 had, and the same answer: build the fixture out of what every platform
-# has. Where python3 does exist the two are compared byte for byte (T166e), so
-# the independence that made Python worth using is kept rather than traded away.
+# It is written in zsh because the guest has no python3, and a fixture must be
+# built from what every platform has (as in T204). Where python3 exists the two
+# implementations are compared byte for byte (T166e), keeping the independence
+# a second language gives.
 #
 # zsh cannot write 0xcbf29ce484222325 as a literal: it truncates a hex constant
 # after 15 digits, and says so. The basis is assembled from two halves, and
@@ -9823,12 +8783,10 @@ assert_eq "$(CSV2_INDEX_MIN_BYTES=0 "$CSV2" -mid 257,257 --json -i "$TMP/t166b.c
 # & 0xFFFFFFFFFFFFFFFF. T166e is what holds that claim up.
 #
 # --verify-index 必須「抓得到」一個錯的行號，否則下次退化時 T166a 會白白通過。因此這裡把索引的
-# 行號扳歪一行、重算檢查碼——而那表示要寫出那個檢查碼的第二份實作，照著**常數**
-# 0x1000_0000_01b3 寫，而不是照它旁邊那則註解曾經給它的名字（那個名字是 FNV-1a 質數，是錯的，GC）。
-# 那第二份實作現在是 zsh，以前是 Python。guest 沒有 python3，於是在「它執行時沒有人看著」的那個
-# 平台上，「--verify-index 抓不抓得到東西」這項檢查根本沒有跑——那與 T204 是同一個洞，也是同一個
-# 答案：用每個平台都有的東西做 fixture。有 python3 的地方，兩者會逐位元比對（T166e），因此當初
-# 讓 Python 值得一用的那個獨立性是被保留下來，而不是被換掉。
+# 行號扳歪一行、重算檢查碼，而檢查碼的第二份實作是照著**常數** 0x1000_0000_01b3 寫的，不是照
+# FNV-1a 質數的名字（GC）。
+# 它用 zsh 寫，因為 guest 沒有 python3，而 fixture 必須用每個平台都有的東西做（同 T204）。有
+# python3 的地方，兩份實作會逐位元比對（T166e），保留第二種語言帶來的獨立性。
 # zsh 寫不出 0xcbf29ce484222325 這個字面值：十六進位常數超過 15 位就會被截斷，而且它會說出來。
 # 那個基底是用兩半組出來的，而有號 64 位元乘法的位元樣式，與 Python 用 & 0xFFFF... 得到的相同。
 # 撐住這個宣稱的就是 T166e。
@@ -9871,11 +8829,9 @@ else
     T166D_SKIPPED=1
 fi
 
-# Two implementations of one checksum, agreeing on the byte. Where python3 is
-# absent this cannot be asked -- and the case above still runs, which is the
-# whole point of the rewrite.
-# 同一個檢查碼的兩份實作，在位元組上一致。沒有 python3 的地方問不了這件事——而上面那個案例
-# 仍然會跑，那正是這次改寫的全部意義。
+# Two implementations of one checksum, agreeing on the byte. Without python3
+# this cannot be asked, and T166d still runs.
+# 同一個檢查碼的兩份實作，在位元組上一致。沒有 python3 的地方問不了這件事，而 T166d 仍然會跑。
 if command -v python3 >/dev/null 2>&1; then
     cp "$TMP/t166c.index.orig" "$TMP/t166c.py.index"
     python3 - "$TMP/t166c.py.index" <<'PYBEND'
@@ -9904,18 +8860,15 @@ fi
 # ---------------------------------------------------------------------
 # T167 -- what --pretty's memory figure is measuring.
 #
-# The README taught CSV2_PRETTY_MAX_BYTES with an example that said a
-# five-record slice "holds 9 MB". The slice is 237 bytes; 9 MB is what
-# `csv2 -tail 1` costs too. The rule was right and the number was the
-# process's floor, attached to the one concept the paragraph existed to teach.
-# There is no portable way to measure RSS here, so what this case pins is the
-# claim that survived: the limit counts the MATERIAL, so a small slice of a
-# file too large to pretty-print whole is still fine.
+# CSV2_PRETTY_MAX_BYTES counts the MATERIAL, so a small slice of a file too
+# large to pretty-print whole is still fine. The process's own floor (about
+# 9 MB, also paid by `csv2 -tail 1`) is not the slice's cost. There is no
+# portable way to measure RSS here, so the limit's unit is what is pinned.
 #
 # T167 —— `--pretty` 那個記憶體數字量的是什麼。
-# README 用一個例子教 CSV2_PRETTY_MAX_BYTES，說五筆的切片「holds 9 MB」。那個切片是 237
-# bytes，而 9 MB 是 `csv2 -tail 1` 也要付的。規則是對的，數字是行程的地板。這裡沒有可攜的
-# RSS 量法，因此這個案例釘住的是活下來的那個宣稱：上限量的是「材料」。
+# CSV2_PRETTY_MAX_BYTES 量的是「材料」，因此一個大到無法整份美化的檔案，取一小段仍然沒問題。行程
+# 自己的地板（約 9 MB，`csv2 -tail 1` 也要付）不是切片的成本。這裡沒有可攜的 RSS 量法，因此
+# 釘住的是上限的單位。
 # ---------------------------------------------------------------------
 echo
 echo "--- T167: --pretty counts the material / T167：--pretty 量的是材料 ---"
@@ -9934,9 +8887,9 @@ assert_succeeds "T167b and a slice of the same file under it is fine / 而同一
 # T168 -- the buffered-record refusal names the knob, and the flag typed.
 #
 # The README says the message "names the request, the limit and the variable"
-# and covers `-tail N` and `-B N` with that one sentence. `-tail` named all
-# three; `-B` named two. And `-C 6`, which sets `before` as well, was reported
-# as `-B 6` -- a message pointing at a flag that is not on the command line.
+# for both `-tail N` and `-B N`, so both must name all three; and `-C 6`, which
+# sets `before` as well, must be reported as `-C 6`, not a flag that is not on
+# the command line.
 #
 # T168 —— 緩衝上限那條拒絕會指出旋鈕，以及使用者實際打的那個旗標。
 # ---------------------------------------------------------------------
@@ -9961,11 +8914,10 @@ assert_fails "T168d all three refuse rather than truncate / 三者都是拒絕�
 # ---------------------------------------------------------------------
 # T169 -- the log's escape set is the report's escape set.
 #
-# `-log` documented four escapes and told the reader to unescape those four
-# and then read the quoted fields. The log also writes `\xNN` for every other
-# control byte -- the same convention the locating report documents -- so a
-# script written to the documented procedure mis-decodes any value carrying
-# one, in the output the document calls the authoritative audit trail.
+# The log writes `\xNN` for every control byte beyond the four named escapes
+# -- the locating report's convention -- and the -log docs must say so, or a
+# script that unescapes only the four mis-decodes values in the output the
+# document calls the authoritative audit trail.
 #
 # T169 —— log 的跳脫集合，就是報告的跳脫集合。
 # ---------------------------------------------------------------------
@@ -9997,17 +8949,11 @@ assert_fails "T170a -insert checks the field count too / -insert 同樣會檢查
     "$CSV2" -insert 2 'x,y' -i "$TMP/t170.csv" -o "$TMP/t170out.csv"
 printf 'a,b\n1,2\n3,"unterminated' > "$TMP/t170p.csv"
 _t170w=$("$CSV2" -r -t --truncate-partial -i "$TMP/t170p.csv" -o "$TMP/t170clean.csv" 2>&1)
-# Asserts WHAT it discarded, which is what this case's own title claims. It
-# used to look for the token `WARN`, which was a cheap way to detect that a
-# warning happened and checked nothing about its content -- and it broke on
-# 2026-09-08 when the level stopped being printed to stderr, because the log
-# FILE's line and the stderr line had been the same string. That change was
-# right (the `-add-column` warning never carried a level), and this assertion
-# was measuring the wrapper rather than the message.
-# 斷言的是它**丟掉了什麼**，而那正是這個案例自己的標題所宣稱的。它先前找的是 `WARN` 這個 token
-# ——那是「偵測有警告發生」的廉價手段，對內容什麼也沒檢查——而它在 2026-09-08 壞掉，因為那個等級
-# 不再被印到 stderr：log **檔案**那一行與 stderr 那一行原本是同一個字串。那次改動是對的
-# （`-add-column` 的警告從來就沒有帶等級），而這個斷言量的是外包裝、不是訊息。
+# Asserts WHAT it discarded, which is what this case's title claims. Matching
+# the token `WARN` checked nothing about the content, and stderr carries no
+# level (the log file line does), so it measured the wrapper, not the message.
+# 斷言的是它**丟掉了什麼**，那正是這個案例的標題所宣稱的。比對 `WARN` 這個 token 對內容什麼也
+# 沒檢查，而 stderr 不帶等級（log 檔案那一行才帶），因此它量的是外包裝，不是訊息。
 assert_contains "$_t170w" "discarded" \
     "T170b --truncate-partial warns about what it discarded / --truncate-partial 會就它丟掉的東西發出警告"
 assert_contains "$_t170w" "unterminated record" \
@@ -10016,11 +8962,10 @@ assert_contains "$_t170w" "unterminated record" \
 # ---------------------------------------------------------------------
 # T171 -- --no-index gives up the parallel path on a .csv, and says so.
 #
-# The README recommends `--no-index` in two places as "slower, and right by
-# construction". How much slower is not only the index: on a `.csv` it also
-# forfeits the parallel search, because a `.csv` needs an index to prove one
-# record per line. The program says this under -debug; the document said it
-# in a different table. Measured 2.6x on 450,000 records.
+# On a `.csv`, `--no-index` also forfeits the parallel search, because a
+# `.csv` needs an index to prove one record per line (about 2.6x on 450,000
+# records). The README recommends `--no-index` as "slower, and right by
+# construction", so -debug must name which path was taken and why.
 #
 # T171 —— `--no-index` 在 `.csv` 上還會放棄平行路徑，而且它說得出來。
 # ---------------------------------------------------------------------
@@ -10036,11 +8981,9 @@ assert_contains "$_t171" "--no-index" \
 # ---------------------------------------------------------------------
 # T172 -- the -- example from the flag list, run verbatim.
 #
-# `:359` shows `-update 1:2 -- --in-place` to explain that `--` marks ONE
-# argument as data. Typed as printed it refuses: an edit needs a destination.
-# It is a fragment, and this README has twice apologised for printing blocks
-# that look runnable and are not -- so the fragment now carries its
-# destination, and this case is what keeps the printed form working.
+# The README's `-update 1:2 -- --in-place` example explains that `--` marks
+# ONE argument as data. It carries its destination so it runs as printed (an
+# edit needs one), and this case keeps the printed form working.
 #
 # T172 —— 旗標清單裡那個 `--` 範例，逐字執行。
 # ---------------------------------------------------------------------
@@ -10057,18 +9000,18 @@ assert_eq "$("$CSV2" -get 1:2 -i "$TMP/t172out.csv")" "--in-place" \
 # ---------------------------------------------------------------------
 # T173 -- an inserted row is a record of the output.
 #
-# Caught by T166d's new check rather than by a round: an inserted row went out
-# through emit(), which advances the byte offset and nothing else, so the same
-# run wrote N+1 records and an index claiming N. Every grid point after the
-# insertion then named a byte belonging to some other record, and the seek
-# followed it: `-mid 257,258` returned records 258 and 259 labelled 257 and
-# 258, at rc=0, while --no-index returned the right ones. The same counter
-# feeds the audit trail, which said "wrote 300 records" for a file with 301.
+# An inserted row goes through emit(), which advances only the byte offset, so
+# the record counter must count it too. Otherwise a run writes N+1 records and
+# an index claiming N: every grid point after the insertion names another
+# record's bytes, `-mid 257,258` returns records 258 and 259 labelled 257 and
+# 258 at rc=0, and the audit trail says "wrote 300 records" for 301. Caught by
+# T166d's check.
 #
 # T173 —— 被插入的一列，是輸出的一筆紀錄。
-# 由 T166d 新加的檢查抓到，而不是由某個回合回報：被插入的一列走 emit()，而 emit() 只推進
-# 位元組偏移量，於是同一次執行寫出 N+1 筆、建出一份說 N 筆的索引。插入點之後的每一個格點
-# 指向的位元組都成了另一筆紀錄的開頭，而 seek 照著走。同一個計數器也餵給稽核軌跡。
+# 被插入的一列走 emit()，而 emit() 只推進位元組偏移量，因此紀錄計數器也必須數到它。否則一次
+# 執行寫出 N+1 筆、索引卻說 N 筆：插入點之後的每一個格點都指向另一筆紀錄的位元組，`-mid 257,258`
+# 以 rc=0 交出標成 257、258 的第 258、259 筆，而稽核軌跡對 301 筆說「wrote 300 records」。
+# 由 T166d 的檢查抓到。
 # ---------------------------------------------------------------------
 echo
 echo "--- T173: -insert and the index it leaves / T173：-insert 與它留下的索引 ---"
@@ -10092,14 +9035,13 @@ assert_contains "$(grep 'wrote ' "$_t173_log")" "wrote 301 records" \
 # ---------------------------------------------------------------------
 # T174 -- the header rows advance the line, because they are lines.
 #
-# Also caught by T166d. The line was counted in emitData and the header rows
-# go out through emit, so an index built by a write said record 1 was on line
-# 1 -- off by exactly the number of header rows, on every such index since v4
-# added the line.
+# The line is counted in emitData while header rows go out through emit, so
+# both must advance it; otherwise an index built by a write says record 1 is
+# on line 1, off by the number of header rows. Caught by T166d.
 #
 # T174 —— 標頭列會推進行號，因為它們就是行。
-# 同樣由 T166d 抓到。行號在 emitData 裡數，而標頭列走 emit：一次寫入建出的索引因此說第 1 筆
-# 在第 1 行，差距恰好等於標頭列數。
+# 行號在 emitData 裡數，而標頭列走 emit，因此兩者都必須推進它；否則一次寫入建出的索引會說第 1 筆
+# 在第 1 行，差距恰好等於標頭列數。由 T166d 抓到。
 # ---------------------------------------------------------------------
 echo
 echo "--- T174: where record 1 is, according to a written index / T174：一份寫出來的索引說第 1 筆在哪 ---"
@@ -10120,22 +9062,18 @@ assert_eq "$(CSV2_INDEX_MIN_BYTES=100 "$CSV2" -mid 1,1 --json -i "$TMP/t174out.c
 # ---------------------------------------------------------------------
 # T175 -- --in-place is the EDIT destination, and a selection is not an edit.
 #
-# Round 64. `csv2 -head 1 -t -i f.csv --in-place` exited 0 and left one record
-# of twenty-two: the selection was written back over the input. Nothing on
-# stdout, nothing on stderr, and the log held only the invocation, because the
-# `wrote N records` line belongs to the edit path -- so the most destructive
-# operation in the tool was also the least audited one, and the README points
-# an auditor at exactly that line.
-#
-# What stood in the way was `-t`, a flag about HEADERS: without it the write is
-# refused because a headerless file would lie about its format. A safety
-# property resting on a formatting flag is one nobody chose.
+# A selection with --in-place must be refused: `csv2 -head 1 -t -i f.csv
+# --in-place` would write one record back over twenty-two, at rc=0, silently,
+# with no `wrote N records` line in the log because that line belongs to the
+# edit path -- the most destructive operation, and the least audited. Only
+# `-t`, a flag about HEADERS, would stand in the way, and a safety property
+# must not rest on a formatting flag. Round 64.
 #
 # T175 —— --in-place 是「編輯」的目的地，而選取不是編輯。
-# 第 64 回合。`csv2 -head 1 -t -i f.csv --in-place` 以 0 結束，22 筆只剩 1 筆：那個選取被寫回
-# 了輸入。兩條輸出流上都沒有東西，log 裡只有「呼叫」那一行——因為 `wrote N records` 屬於編輯
-# 路徑，於是這個工具最具破壞性的操作，同時是它最少被稽核的。擋在中間的是 `-t`，一個關於
-# 標頭的旗標。
+# 選取搭配 --in-place 必須被拒絕：`csv2 -head 1 -t -i f.csv --in-place` 會以 rc=0、靜默地把 22 筆
+# 寫回成 1 筆，log 裡也沒有 `wrote N records`，因為那一行屬於編輯路徑——最具破壞性的操作，同時
+# 最少被稽核。擋在中間的只會是 `-t`，一個關於標頭的旗標，而安全性質不能建立在格式旗標上。
+# 第 64 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T175: a selection cannot be written back over its input / T175：選取不能被寫回它的輸入 ---"
@@ -10177,22 +9115,21 @@ assert_succeeds "T175h -hash --in-place still works / -hash --in-place 仍然可
 # ---------------------------------------------------------------------
 # T176 -- a control character in an error message.
 #
-# Round 64 went looking for a forged THIRD line on stderr and found the line
-# count solid and the escaping rule not. `lineEscape` handled a newline and a
-# carriage return and let everything else through, so
-# `no column named "<ESC>[2K…"` printed a live erase-line sequence on the very
-# line carrying the diagnosis -- the hazard this project argues for escaping
-# the locating report, one screen away in the same file.
+# `lineEscape` must escape every control character, not only newline and CR:
+# otherwise `no column named "<ESC>[2K…"` prints a live erase-line sequence on
+# the line carrying the diagnosis -- the same hazard the locating report is
+# escaped against. The line count was already solid. Round 64.
 #
 # The backslash is still NOT escaped by the whole-line rule: a message that
 # teaches `\n` has to read as `\n`. What closes the remaining ambiguity is the
 # VALUE escaper at the site that quotes input back.
 #
 # T176 —— 錯誤訊息裡的控制字元。
-# 第 64 回合去找 stderr 上偽造的「第三行」，發現行數的承諾是穩的、跳脫的規則不是。
+# `lineEscape` 必須跳脫每一個控制字元，而不只是換行與 CR：否則 `no column named "<ESC>[2K…"`
+# 會在承載診斷的那一行上印出一個有效的「清除整行」序列——與定位報告要防的是同一個風險。行數的
+# 承諾本來就是穩的。第 64 回合。
 # 反斜線仍然不由「整行」那條規則處理：一則在教 `\n` 的訊息必須讀作 `\n`。剩下的那個歧義，
 # 由「插值處的值跳脫」關掉。
-# ---------------------------------------------------------------------
 echo
 echo "--- T176: what an error message may put on your terminal / T176：一則錯誤訊息可以放什麼到你的終端機上 ---"
 
@@ -10211,11 +9148,11 @@ _t176_tab=$("$CSV2" -delete -col "$(printf 'na\tme')" -i "$TMP/t176.csv" -o "$TM
 assert_contains "$_t176_tab" '\t' \
     "T176c a TAB likewise / TAB 同樣如此"
 
-# The prose that TEACHES escaping must still read as prose. This is the case
-# that made "escape everything" wrong on 2026-08-20 and it is checked here so
-# the two halves cannot be confused again.
-# 那些「教你怎麼跳脫」的散文必須仍然讀作散文。這正是 2026-08-20 讓「全部都跳脫」變成錯誤答案
-# 的那個案例，在此檢查，好讓那兩半不會再被混為一談。
+# The prose that TEACHES escaping must still read as prose. This is why
+# "escape everything" is wrong, and it is checked here so the two halves
+# cannot be confused again.
+# 那些「教你怎麼跳脫」的散文必須仍然讀作散文。這正是「全部都跳脫」之所以錯的原因，在此檢查，
+# 好讓那兩半不會再被混為一談。
 printf 'k,v\n鍵,值\nrow1,a\\qb\n' > "$TMP/t176.csv2"
 _t176_prose=$("$CSV2" -r -i "$TMP/t176.csv2" 2>&1)
 assert_contains "$_t176_prose" 'sequence \q' \
@@ -10246,21 +9183,17 @@ done
 # ---------------------------------------------------------------------
 # T177 -- the guard is about SELECTION, not about the absence of an edit verb.
 #
-# Round 65, one day after T175. That guard asked "is there an edit verb?" and
-# `-hash` is one of a kind, so `-head 1 -hash license -i f.csv --in-place`
-# walked past it and left one record of six at rc=0 -- the same destruction
-# T175 stops, one flag away from the command T175 stops. `-encrypt` and
-# `-decrypt` reach it too, and the `-decrypt` form destroys ciphertext and the
-# header salt together, which the README says nobody can ever recover.
-#
-# The refusals table stated the rule correctly ("a SELECTION with --in-place")
-# while the implementation used a different predicate. This case pins the rule
-# rather than the predicate.
+# `-hash` (like `-encrypt` and `-decrypt`) is an edit verb, so a guard that asks
+# "is there an edit verb?" lets `-head 1 -hash license -i f.csv --in-place` keep
+# one record of six at rc=0; the `-decrypt` form destroys the ciphertext and the
+# header salt together. The rule is "a SELECTION with --in-place is refused",
+# and this case pins the rule rather than a predicate. Round 65; see T175.
 #
 # T177 —— 那道守衛管的是「選取」，不是「沒有編輯動詞」。
-# 第 65 回合，在 T175 之後一天。那道守衛問的是「有沒有編輯動詞？」而 `-hash` 算是一種，
-# 於是 `-head 1 -hash license -i f.csv --in-place` 從它旁邊走了過去，六筆只剩一筆，rc=0。
-# 拒絕表寫的是正確的規則，實作用的是另一個謂詞。
+# `-hash`（以及 `-encrypt`、`-decrypt`）本身就是編輯動詞，所以只問「有沒有編輯動詞」的守衛
+# 會放過 `-head 1 -hash license -i f.csv --in-place`，六筆只剩一筆、rc=0；`-decrypt` 那一種
+# 會把密文和標頭的鹽一起毀掉。規則是「選取加上 --in-place 一律拒絕」，本案例釘住的是規則，
+# 不是某個謂詞。第 65 回合；參見 T175。
 # ---------------------------------------------------------------------
 echo
 echo "--- T177: a selection plus a protection verb / T177：選取加上保護動詞 ---"
@@ -10272,11 +9205,9 @@ for _combo in "-head 1 -hash license --yes" "-tail 1 -hash license --yes" \
     cp "$TMP/t177.csv" "$TMP/t177w.csv"
     assert_fails "T177a $_combo --in-place is refused / $_combo --in-place 被拒絕" -- \
         env HOME="$TMP/home" "$CSV2" ${=_combo} -i "$TMP/t177w.csv" --in-place
-    # cmp, not sha256_of: that helper hashes a STRING, so it was comparing two
-    # file NAMES and failing on the copy's different name -- a check that could
-    # not have passed, which is the other half of a check that cannot fail.
-    # 用 cmp 而不是 sha256_of：那個輔助函式雜湊的是「字串」，因此它比的是兩個檔案「名字」，
-    # 在複本名字不同時必然失敗——一個「不可能通過」的檢查，正是「不可能失敗」的另一半。
+    # cmp, not sha256_of: that helper hashes a STRING, so it would compare the
+    # two file names and could never pass.
+    # 用 cmp 而不是 sha256_of：那個輔助函式雜湊的是字串，會變成比較兩個檔名，永遠不會通過。
     if ! cmp -s "$TMP/t177w.csv" "$TMP/t177.csv"; then
         bad "T177b $_combo changed the file / $_combo 改動了那個檔案"
     fi
@@ -10308,12 +9239,11 @@ assert_succeeds "T177e -r -hash --in-place still works / -r -hash --in-place 仍
 assert_eq "$("$CSV2" -r -t --no-index -i "$TMP/t177r.csv" | wc -l | tr -d ' ')" "6" \
     "T177f and every record survived it / 而每一筆都活了下來"
 
-# The outcome line: a protection write goes through the select path, which had
-# no such line. The README nominates it as the one to look for when asking
-# whether an edit landed, so it was missing from the writes that cannot be
-# undone.
-# 那一行「結果」：保護寫入走的是選取路徑，而那條路徑原本沒有這一行。README 指名它是
-# 「想知道編輯有沒有落地時該找的那一行」，於是它獨獨在「無法還原」的那些寫入上不存在。
+# The outcome line: a protection write goes through the select path and must
+# still log it, because the README names it as the line that says whether an
+# edit landed.
+# 「結果」那一行：保護寫入走的是選取路徑，也必須記下這一行，因為 README 指名它是判斷
+# 編輯有沒有落地時該看的那一行。
 rm -f "$TMP/t177.log"
 HOME="$TMP/home" "$CSV2" -hash license --yes -i "$TMP/t177.csv" -o "$TMP/t177h.csv" -t -log "$TMP/t177.log"
 assert_contains "$(cat "$TMP/t177.log")" "wrote 5 records" \
@@ -10333,16 +9263,16 @@ fi
 # ---------------------------------------------------------------------
 # T178 -- -rownum is a column, and it follows the column rules.
 #
-# Round 65. Its Markdown header cell was hard-coded to `rownum<br>列號`, so
-# `--en` and `--zh` -- documented as giving "one clean row instead" -- could
-# not clean the one cell csv2 had invented, and a ONE-header `.csv` got a
-# `<br>` cell beside plain ones in a table whose join is explained by the data
-# having two header rows. And `--json`, which names fields rather than
-# numbering them, accepted `-rownum` and dropped it: the same silence `--a1`
-# and `--physical` are refused for, and that `-get` refuses `-rownum` for by
-# name.
+# The Markdown header cell for -rownum follows the file's header rows: a
+# one-header `.csv` gets plain `rownum`, a `.csv2` gets `rownum<br>列號`, and
+# `--en`/`--zh` clean it like any other column. `--json` names fields rather
+# than numbering them, so it refuses `-rownum` instead of dropping it, as
+# `-get` does. Round 65.
 #
 # T178 —— -rownum 是一個「欄」，而它遵守欄的規則。
+# Markdown 標頭裡 -rownum 那一格跟著檔案的標頭列走：單列標頭的 `.csv` 是 `rownum`，`.csv2`
+# 是 `rownum<br>列號`，`--en`/`--zh` 也像清其他欄一樣清它。`--json` 以名字而非編號指稱欄位，
+# 所以它拒絕 `-rownum`，而不是把它丟掉，與 `-get` 一致。第 65 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T178: -rownum as a column / T178：-rownum 作為一個欄 ---"
@@ -10364,11 +9294,12 @@ assert_fails "T178e --json refuses -rownum rather than dropping it / --json 拒�
 # ---------------------------------------------------------------------
 # T179 -- a flag that decides how a search compares needs a search.
 #
-# Round 65: --normalize with no -contains was accepted and did nothing, while
-# its two neighbours in the same section, --filter and --include-headers, are
-# both refused for exactly that.
+# --normalize without -contains is refused, as --filter and --include-headers
+# are; accepting it would do nothing. Round 65.
 #
 # T179 —— 一個「決定搜尋怎麼比較」的旗標，需要一次搜尋。
+# 沒有 -contains 的 --normalize 會被拒絕，與 --filter、--include-headers 一致；接受它等於
+# 什麼也不做。第 65 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T179: --normalize needs -contains / T179：--normalize 需要 -contains ---"
@@ -10382,30 +9313,27 @@ assert_succeeds "T179b and with -contains it is accepted / 搭配 -contains 則�
 # ---------------------------------------------------------------------
 # T180 -- CR line endings: the rule, not a count.
 #
-# Round 66 pulled the stated reason and the actual trigger apart in both
-# directions. The guard said "this file uses CR line endings"; the test was
-# "bare CRs outnumber line feeds".
+# The CR guard tests a rule, not "bare CRs outnumber line feeds". A count
+# misfires both ways:
 #
-#   a,b<LF>1,x<CR><CR><CR>y<LF>   3 CRs, 2 LFs -> refused, and the file is
-#                                 LF-terminated. The message asserted something
-#                                 false about it, and `tr '\r' '\n'` -- which
-#                                 that message prescribes -- turns that one
+#   a,b<LF>1,x<CR><CR><CR>y<LF>   3 CRs, 2 LFs: a count refuses it, though the
+#                                 file is LF-terminated, and the `tr '\r' '\n'`
+#                                 the message prescribes would turn that one
 #                                 record into a file csv2 will not read.
 #   col<CR>"L<LF>L<LF>L<LF>L"<CR>zz<CR>
-#                                 3 CRs, 3 LFs -> accepted at rc=0 as three
+#                                 3 CRs, 3 LFs: a count accepts it as three
 #                                 records under a column named `col<CR>"L`,
-#                                 the quoted field torn down its own newlines,
-#                                 nothing on stderr. A genuine CR-terminated
-#                                 file, silently misparsed.
+#                                 tearing the quoted field down its newlines --
+#                                 a real CR-terminated file, silently misparsed.
 #
 # The rule is exact: a CR-terminated file has no LF to end its first line, so
 # everything lands in the first record, and the header row is where the
-# evidence always is.
+# evidence always is. Round 66.
 #
 # T180 —— CR 行尾：一條規則，不是一個數量。
-# 第 66 回合把「自陳的理由」與「實際的觸發條件」往兩個方向都拉開了。守衛說的是「本檔案使用
-# CR 行尾」，而測的是「裸 CR 比換行多」。規則是精確的：一個以 CR 結尾的檔案沒有 LF 去結束
-# 它的第一行，因此全部內容都落在第一筆紀錄裡，而證據永遠在標頭列。
+# CR 守衛測的是一條規則，不是「裸 CR 比換行多」；數量在兩個方向都會判錯。規則是精確的：
+# 以 CR 結尾的檔案沒有 LF 去結束它的第一行，因此全部內容都落在第一筆紀錄裡，而證據永遠
+# 在標頭列。第 66 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T180: CR line endings / T180：CR 行尾 ---"
@@ -10441,48 +9369,41 @@ assert_succeeds "T180g a quoted CR in a header is a name / 標頭裡加了引號
 # ---------------------------------------------------------------------
 # T181 -- a FIFO given to -i.
 #
-# Round 66: `csv2 -r -i fifo.csv` on a stream carrying three lines reported
-# `expected 1 header row(s), found 0` -- the message for a file with nothing in
-# it. Two causes, both fixed here: the freshness stamp read the first and last
-# 64 bytes before the parse, and on a pipe those bytes do not come back; and
-# runSelect opened the input TWICE, once to hand planIndex a plan it only reads
-# the format from, so the second open waited for a writer that had already
-# gone.
+# A FIFO given to -i reads as the stream it carries. Two things stop that: a
+# freshness stamp that reads the first and last 64 bytes before the parse
+# (bytes a pipe does not give back), and opening the input twice in runSelect,
+# where the second open waits for a writer that has already gone. Either one
+# shows up as `expected 1 header row(s), found 0`. Round 66.
 #
 # T181 —— 交給 -i 的一個 FIFO。
-# 第 66 回合：一條正要送來三行的串流，`csv2 -r -i fifo.csv` 回報的是
-# `expected 1 header row(s), found 0`——那是「檔案裡什麼都沒有」的訊息。兩個原因都在此修掉：
-# 新鮮度戳記在解析前讀了頭尾各 64 位元組，而在管線上那些位元組不會回來；以及 runSelect 把
-# 輸入開了「兩次」。
+# 交給 -i 的 FIFO 讀出來就是它承載的串流。有兩件事會破壞它：在解析前讀頭尾各 64 位元組的
+# 新鮮度戳記（管線不會把那些位元組還回來），以及 runSelect 把輸入開兩次——第二次會等一個
+# 早已離開的寫入端。兩者的症狀都是 `expected 1 header row(s), found 0`。第 66 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T181: -i on a FIFO / T181：-i 指向一個 FIFO ---"
 
 # Windows is excluded by NAME here, which this file otherwise avoids: MSYS2
-# ships an mkfifo that creates something, and a reader on it never meets its
+# ships an mkfifo that creates something, but a reader on it never meets its
 # writer, so the case does not fail -- it HANGS, and a suite that hangs reports
-# nothing at all. The first Windows run of this case sat for twenty minutes.
-# 這裡以「平台名字」排除 Windows，而這個檔案在其他地方避免這樣做：MSYS2 帶了一個 mkfifo，
-# 它建得出東西，但在它上面的讀取端永遠遇不到寫入端——於是這個案例不是失敗，而是「卡住」，
-# 而一個卡住的測試什麼也回報不了。這個案例在 Windows 上的第一次執行坐了二十分鐘。
+# nothing at all.
+# 這裡以「平台名字」排除 Windows，而這個檔案在其他地方避免這樣做：MSYS2 帶的 mkfifo 建得出
+# 東西，但上面的讀取端永遠遇不到寫入端——於是這個案例不是失敗而是「卡住」，而卡住的測試
+# 什麼也回報不了。
 if (( IS_WINDOWS )); then
     skipt "T181a a FIFO on Windows never connects its two ends / Windows 上的 FIFO 兩端接不起來"
     T181A_SKIPPED=1
 elif (( $+commands[mkfifo] )); then
     rm -f "$TMP/t181.fifo.csv"
     if mkfifo "$TMP/t181.fifo.csv" 2>/dev/null; then
-        # Bounded. On 2026-10-12 one WSL run stopped right after this case's
-        # heading and sat there until the harness killed it an hour later; the
-        # next run passed, and 300 repetitions of exactly these three lines
-        # then gave no hang at all, so the cause is not known. What IS known is
-        # the cost: a suite that hangs reports nothing, which is the reason
-        # Windows is excluded above. So the reader runs in the background and
-        # is given 30 seconds; past that both ends are killed and the case
-        # FAILS by name instead of taking the suite with it.
-        # 有上限。2026-10-12 有一次 WSL 的執行停在這個案例的標題之後，直到一小時後被執行環境中止；
-        # 緊接著的下一次通過了，而把這三行原樣重複 300 次也完全沒有卡住，所以成因不明。已知的是代價：
-        # 一個卡住的套件什麼都回報不了——那正是上面排除 Windows 的理由。因此讀取端放到背景並給它
-        # 30 秒；超過就把兩端都殺掉，讓這個案例**指名失敗**，而不是把整個套件一起帶走。
+        # Bounded: a hang after this heading was seen once on WSL and not
+        # reproduced in 300 repetitions, so the cause is unknown, and a suite
+        # that hangs reports nothing. The reader runs in the background with 30
+        # seconds; past that both ends are killed and the case FAILS by name
+        # instead of taking the suite with it.
+        # 有上限：WSL 上曾在這個標題之後卡住一次，重複 300 次都沒有重現，成因不明，而卡住的套件
+        # 什麼都回報不了。因此讀取端放到背景並給它 30 秒；超過就把兩端都殺掉，讓這個案例
+        # **指名失敗**，而不是把整個套件一起帶走。
         { sleep 0.2; printf 'a,b\n1,x\n2,y\n' > "$TMP/t181.fifo.csv" } &
         _t181_w=$!
         "$CSV2" -r -t "-i" "$TMP/t181.fifo.csv" > "$TMP/t181.out" 2>&1 &
@@ -10513,38 +9434,28 @@ fi
 # ---------------------------------------------------------------------
 # T182 -- two names, one file.
 #
-# Round 66: `-i x -o y` was checked by comparing resolved PATHS, which catches
-# every spelling -- `./`, `../`, absolute, symlink -- and a hard link is not a
-# spelling. The edit broke the link at rc=0, leaving one name with the edit and
-# the other with what used to be shared.
+# `-i x -o y` compares resolved paths, which catches every spelling -- `./`,
+# `../`, absolute, symlink -- but a hard link is not a spelling: an edit through
+# one would break the link at rc=0, leaving one name with the edit and the
+# other with the old content. Round 66.
 #
 # T182 —— 兩個名字，一個檔案。
+# `-i x -o y` 比對的是解析後的路徑，抓得到每一種拼法，但硬連結不是拼法：透過它編輯會在
+# rc=0 下把連結拆開，一個名字拿到編輯、另一個留著舊內容。第 66 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T182: a hard link is not a spelling / T182：硬連結不是一種拼法 ---"
 
 printf 'a,b\n1,x\n' > "$TMP/t182.csv"
 rm -f "$TMP/t182_hard.csv"
-# Windows by NAME, and the reason is in the platform rather than in the test:
-# the CRT reports inode 0 for every file, so asking (dev, ino) there would say
-# every file is every other file. csv2 declines to ask, and MSYS2's `ln` still
-# produces something -- so the case would fail for a reason that is not a
-# defect. Writing it to accept either outcome would make a case that cannot
-# fail, which is the thing this suite exists not to do.
-# 以「平台名字」排除 Windows，而理由在平台身上、不在測試身上：那裡的 CRT 對每個檔案都回報
-# inode 0，因此在那裡去問 (dev, ino) 等於說「每個檔案都是彼此」。csv2 選擇不問，而 MSYS2 的
-# `ln` 仍然會生出東西——於是這個案例會因為一個「不是缺陷」的理由而失敗。把它寫成「兩種結果
-# 都接受」，會造出一個不可能失敗的案例，而那正是這套測試存在所要避免的事。
-# Windows used to skip here saying it "reports inode 0 for every file". That
-# was true of the CRT's stat(), which is what Platform.fileNode used, and never
-# true of Windows: GetFileInformationByHandle has the answer, and as of
-# 2026-08-26 that is what csv2 asks. Probed rather than named, because a
-# filesystem that keeps no file index -- FAT, some network redirectors -- still
-# cannot answer, and that is a property of the volume and not of the platform.
-# Windows 原本在這裡跳過，理由是它「對每個檔案都回報 inode 0」。那對 CRT 的 stat() 為真——那正是
-# Platform.fileNode 原本用的——而對 Windows 從來不為真：GetFileInformationByHandle 有那個答案，
-# 而自 2026-08-26 起 csv2 問的就是它。這裡用探測而不是點名平台，因為一個「不保存 file index」的
-# 檔案系統（FAT、某些網路 redirector）仍然答不出來，而那是那個磁碟區的性質，不是平台的。
+# Probed rather than skipped by platform name. csv2 asks Windows through
+# GetFileInformationByHandle, not the CRT's stat() (which reports inode 0 for
+# every file), but a filesystem that keeps no file index -- FAT, some network
+# redirectors -- still cannot answer, and that is a property of the volume,
+# not of the platform.
+# 用探測而不是以平台名字跳過。csv2 在 Windows 上透過 GetFileInformationByHandle 詢問，而不是
+# CRT 的 stat()（它對每個檔案都回報 inode 0）；但不保存 file index 的檔案系統（FAT、某些網路
+# redirector）仍然答不出來，而那是磁碟區的性質，不是平台的。
 _t182_probe=$TMP/t182_probe
 : > "$_t182_probe"
 HAVE_HARDLINKS=0
@@ -10573,26 +9484,24 @@ fi
 # ---------------------------------------------------------------------
 # T183 -- a key that is one byte repeated.
 #
-# Round 66: the 16-byte floor exists because "a key this short is searched
-# exhaustively in less time than this run took". Sixteen NUL bytes -- what a
-# truncated or never-written key file looks like -- passed it, and is guessed
-# in one attempt; fifteen random bytes, refused, are some 10^36 times stronger.
+# A key that is one byte repeated is refused even at 16 bytes: sixteen NULs is
+# what a truncated or never-written key file looks like, and it is guessed in
+# one attempt, while fifteen random bytes (refused by the length floor) are some
+# 10^36 times stronger. Round 66.
 #
 # T183 —— 一把「同一個位元組重複而成」的金鑰。
+# 由同一個位元組重複而成的金鑰即使有 16 位元組也被拒絕：十六個 NUL 正是被截斷或從未寫入的
+# 金鑰檔的樣子，一次就猜得中。第 66 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T183: a key file with one distinct byte / T183：只有一種位元組的金鑰檔 ---"
 
 printf 'a,secret\n1,x\n' > "$TMP/t183.csv"
-# Sixteen NUL bytes without python3: the guest has none, and `cmd || fallback`
-# does not help -- the shell's not-found handler records the call before the
-# fallback runs, so the suite reported a missing command that was never needed.
-# A key of sixteen identical NULs is what this case is about, and `head -c 16
-# /dev/zero` is the same sixteen bytes with nothing to install.
-# 不用 python3 生出十六個 NUL：guest 上沒有它，而 `cmd || fallback` 幫不上忙——shell 的
-# 「找不到指令」處理常式會在 fallback 執行之前就把那次呼叫記下來，於是測試回報了一個
-# 「其實從來不需要」的缺漏指令。這個案例要的就是十六個相同的 NUL，而 `head -c 16 /dev/zero`
-# 給的正是同樣那十六個位元組，還不必安裝任何東西。
+# `head -c 16 /dev/zero`, not python3: the guest has no python3, and
+# `cmd || fallback` does not help, because the shell's not-found handler
+# records the call before the fallback runs.
+# 用 `head -c 16 /dev/zero` 而不是 python3：guest 上沒有 python3，而 `cmd || fallback` 幫不上忙，
+# 因為 shell 的「找不到指令」處理常式會在 fallback 執行之前就把那次呼叫記下來。
 if ! head -c 16 /dev/zero > "$TMP/t183_zero.bin" 2>/dev/null; then
     printf '0000000000000000' > "$TMP/t183_zero.bin"
 fi
@@ -10609,23 +9518,17 @@ assert_succeeds "T183c while a real key of the same length is accepted / 而同�
 # ---------------------------------------------------------------------
 # T184 -- -o onto a device, and the trap a signed dev_t sets.
 #
-# Round 67. `csv2 -r -t -i f.csv -o /dev/null` died on SIGTRAP: exit 133, zero
-# bytes on stdout AND stderr. The refusal is written, correct, and one line
-# further down than the crash -- `Platform.fileNode`, added the day before for
-# hard links, does `UInt64(st.st_dev)`, and `st_dev` is a SIGNED 32-bit dev_t
-# on Darwin whose value for a device node is negative. `UInt64(-1)` is a Swift
-# trap.
-#
-# The README names `-o /dev/stdout` as its example of this refusal, so the one
-# case the document picks to illustrate the rule was the one that crashed. The
-# suite had no case for it, which is why a fix introduced on 2026-08-21 and a
-# round run on 2026-08-21 were needed to notice.
+# `-o` onto a device is refused with exit 1 and a message, not a crash. On
+# Darwin `st_dev` is a signed 32-bit dev_t that is negative for a device node,
+# so a plain `UInt64(st.st_dev)` in `Platform.fileNode` traps (SIGTRAP, exit
+# 133, nothing on stdout or stderr). The README uses `-o /dev/stdout` as its
+# example of this refusal. Round 67.
 #
 # T184 —— -o 指向一個裝置，以及一個有號 dev_t 設下的陷阱。
-# 第 67 回合。`csv2 -r -t -i f.csv -o /dev/null` 死在 SIGTRAP：exit 133，stdout 與 stderr
-# 都是零位元組。那條拒絕寫好好的、也是對的，就在當機的下一行——前一天為了硬連結而加的
-# `Platform.fileNode` 做了 `UInt64(st.st_dev)`，而 Darwin 上的 `st_dev` 是有號的 32 位元
-# dev_t，裝置節點的值是負的。`UInt64(-1)` 是一個 Swift trap。
+# `-o` 指向裝置時以 exit 1 加訊息拒絕，而不是當機。Darwin 上的 `st_dev` 是有號的 32 位元
+# dev_t，裝置節點的值是負的，所以 `Platform.fileNode` 裡直接寫 `UInt64(st.st_dev)` 會 trap
+# （SIGTRAP、exit 133、stdout 與 stderr 都沒有輸出）。README 正是以 `-o /dev/stdout` 舉例
+# 這條拒絕。第 67 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T184: -o onto a device / T184：-o 指向一個裝置 ---"
@@ -10651,11 +9554,11 @@ else
         "T184b and the refusal names the way through / 而那條拒絕指出走得通的那條路"
 fi
 
-# An empty -o resolves to the current directory, so the temp file lands in its
-# PARENT and the failure arrives as a raw rename errno quoting the internal
-# temp filename. Refused up front instead.
-# 空的 -o 會解析成目前目錄，於是暫存檔落在它的「上一層」，而失敗以一個原始的 rename errno
-# 抵達、還引用了內部暫存檔名。改成在最前面就拒絕。
+# An empty -o resolves to the current directory, so the temp file would land in
+# its PARENT and the failure would arrive as a raw rename errno quoting the
+# internal temp filename. So it is refused up front.
+# 空的 -o 會解析成目前目錄，暫存檔會落在它的「上一層」，失敗則以原始的 rename errno 抵達、
+# 還引用內部暫存檔名。所以在最前面就拒絕。
 _t184_empty=$("$CSV2" -r -t -i "$TMP/t184.csv" -o "" 2>&1)
 assert_contains "$_t184_empty" "-o is empty" \
     "T184c an empty -o is refused by name / 空的 -o 會被指名拒絕"
@@ -10668,20 +9571,17 @@ fi
 # ---------------------------------------------------------------------
 # T185 -- how many bytes --truncate-partial discarded.
 #
-# Round 67 measured `reported = 2·B + 1` where the truth is `B + prefix`: the
-# count added rawBuf and valBuf, which hold the same text twice -- as it
-# arrived and as it decoded. On a 38-byte file it reported 55, more bytes than
-# the file has; on a three-byte tail it reported 1.
-#
-# The other half of the same sentence -- "beginning at byte N" -- was right
-# every time, which is what made the wrong half credible. And nothing in the
-# tool could check it: there is no --json field, no -log entry and no -debug
-# line for this number, so the WARN is its only report and both READMEs promise
-# it.
+# The WARN's "discarded N bytes" is the bytes actually dropped, `B + prefix`.
+# Adding rawBuf and valBuf counts the same text twice (as it arrived and as it
+# decoded), giving `2·B + 1` -- 55 on a 38-byte file. "Beginning at byte N" is
+# right either way, which makes a wrong count credible. The WARN is this
+# number's only report (no --json field, -log entry or -debug line), and both
+# READMEs promise it. Round 67.
 #
 # T185 —— --truncate-partial 到底丟掉了幾個位元組。
-# 第 67 回合量到 `回報值 = 2·B + 1`，而真值是 `B + 前綴`：那個計數把 rawBuf 與 valBuf 相加，
-# 而它們裝的是同一段文字的兩種樣子。在一個 38 位元組的檔案上它說 55——比整個檔案還多。
+# WARN 裡的「discarded N bytes」就是實際丟掉的位元組數 `B + 前綴`。把 rawBuf 與 valBuf 相加
+# 會把同一段文字算兩次，得到 `2·B + 1`——在 38 位元組的檔案上是 55。這個 WARN 是該數字唯一
+# 的回報，兩份 README 都承諾了它。第 67 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T185: the discarded byte count / T185：被丟棄的位元組數 ---"
@@ -10705,12 +9605,14 @@ done
 # ---------------------------------------------------------------------
 # T186 -- --json says WHICH header row.
 #
-# Round 67: the locating report says `0a` and `0b`, and the stated reason for
-# those two labels is that a hit in the English title row and one in the
-# Chinese title row are distinguishable. `--json` -- the shape meant for
-# programs -- gave `"record":0` for both, leaving only a physical line number.
+# The text report labels header hits `0a` and `0b` so that the English and the
+# Chinese title rows are distinguishable; `--json`, the shape meant for
+# programs, carries the same distinction as `header_row` rather than
+# `"record":0` for both. Round 67.
 #
 # T186 —— --json 說得出「是哪一列標頭」。
+# 文字報告以 `0a`、`0b` 標示標頭命中，好區分英文與中文標題列；給程式用的 `--json` 也以
+# `header_row` 帶出同樣的區分，而不是兩者都給 `"record":0`。第 67 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T186: which header row, in JSON / T186：JSON 裡的「哪一列標頭」 ---"
@@ -10737,12 +9639,13 @@ fi
 # ---------------------------------------------------------------------
 # T187 -- --en with --zh is a request with two answers.
 #
-# Round 67: giving both was order-dependent and silent -- last one won, rc=0,
-# nothing said. This tool refuses `--headers 1 --headers 2` with a message
-# arguing that taking the last one silently is how `-hash note -hash ver`
-# leaves note in plaintext. Same hazard, two different handlings.
+# --en with --zh is refused in either order. Taking the last one silently is
+# the hazard the tool already refuses `--headers 1 --headers 2` for: it is how
+# `-hash note -hash ver` leaves note in plaintext. Round 67.
 #
 # T187 —— `--en` 與 `--zh` 併用，是一個有兩個答案的要求。
+# `--en` 與 `--zh` 併用時不論順序都被拒絕。安靜地取後面那個，正是本工具拒絕
+# `--headers 1 --headers 2` 的理由：`-hash note -hash ver` 就是這樣讓 note 留在明文。第 67 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T187: --en with --zh / T187：--en 與 --zh 併用 ---"
@@ -10760,21 +9663,15 @@ assert_succeeds "T187d one of them alone still works / 只給其中一個仍然�
 # ---------------------------------------------------------------------
 # T188 -- what a repeated flag does, measured rather than asserted.
 #
-# Round 68. The flag list said "giving the same flag twice is REFUSED, for
-# every flag except -A/-B/-C" -- a sentence written on 2026-08-21 from the
-# eleven value-taking flags that were checked, and never run against a boolean.
-# Sixteen boolean flags accept a repeat silently at rc=0. Nothing can be lost
-# that way, which is why the fix is the sentence; but the sentence promised a
-# universal and the flag list is where a reader looks for one.
-#
-# This case pins BOTH halves, so the next person to write that sentence has to
-# get it right in both directions.
+# Pins both halves of the repeat rule, as measured: a repeated value-taking
+# flag is refused; a repeated boolean is accepted silently and changes nothing;
+# -A/-B/-C take the last value. A repeated boolean cannot lose anything, so the
+# flag list states the rule this way rather than as one universal. Round 68.
 #
 # T188 —— 重複給同一個旗標會怎樣，用量的，不是用斷言的。
-# 第 68 回合。旗標清單說「重複給同一個旗標一律被拒絕，除了 -A/-B/-C」——那句話是 2026-08-21
-# 從「十一個帶值的旗標」寫出來的，從來沒有拿一個布林旗標去跑過。十六個布林旗標會安靜地
-# 接受重複，rc=0。那樣不會遺失任何東西，因此要改的是那句話；但那句話承諾的是一個全稱，
-# 而旗標清單正是讀者會去找全稱的地方。
+# 釘住重複規則的兩半：重複的帶值旗標被拒絕；重複的布林旗標被安靜接受、不改變任何事；
+# -A/-B/-C 取後面那個值。重複布林旗標不會遺失任何東西，所以旗標清單照這樣寫，而不是寫成
+# 一個全稱。第 68 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T188: repeating a flag / T188：重複給同一個旗標 ---"
@@ -10812,14 +9709,14 @@ assert_eq "$("$CSV2" -contains HIT -A 3 -A 1 -i "$TMP/t188c.csv" | wc -l | tr -d
 # ---------------------------------------------------------------------
 # T189 -- read_bytes on the seek path.
 #
-# Round 68. The metrics entry said read_bytes "moves in whole 64 KiB buffers,
-# never past the end of the file" -- true of a scan, false of a seek, which is
-# the path the number exists to show. `-tail 1` on a 29,790-byte indexed file
-# reads 3,328 bytes: not a multiple of 65536, and less than the file.
+# On the seek path read_bytes is less than the file and not a multiple of
+# 64 KiB: `-tail 1` on a 29,790-byte indexed file reads 3,328 bytes. "Whole
+# 64 KiB buffers, never past the end" is true only of a scan, and the seek is
+# the path the number exists to show. Round 68.
 #
 # T189 —— seek 路徑上的 read_bytes。
-# 第 68 回合。那個條目說 read_bytes「以 64 KiB 為單位推進、且不會超過檔案結尾」——那對「掃描」
-# 為真，對「seek」為假，而 seek 正是這個數字存在所要展示的那條路徑。
+# 在 seek 路徑上，read_bytes 比整個檔案少、也不是 64 KiB 的倍數。「以 64 KiB 為單位、不超過
+# 檔案結尾」只對掃描成立，而 seek 正是這個數字存在所要展示的路徑。第 68 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T189: read_bytes when the index seeks / T189：索引 seek 時的 read_bytes ---"
@@ -10848,12 +9745,13 @@ assert_eq "$_t189_scan" "$_t189_size" \
 # ---------------------------------------------------------------------
 # T190 -- a message that names columns from somebody else's file.
 #
-# Round 68: `-insert -cell` refused with "so status_notes ends up under
-# license" -- two columns from this project's own fixture, printed at a caller
-# whose file has neither. On a one-column file it named two columns that do not
-# exist, and it reads as a report about the file that was passed.
+# A refusal must not name columns the caller's file does not have. Naming
+# `status_notes` and `license` (from this project's own fixture) reads as a
+# report about the file that was passed, even on a one-column file. Round 68.
 #
 # T190 —— 一則指名了「別人檔案裡的欄位」的訊息。
+# 拒絕訊息不得指名呼叫端檔案裡沒有的欄位。指名 `status_notes` 與 `license`（本專案自己的
+# 測試資料）讀起來像是在描述傳進來的那個檔案，即使它只有一欄。第 68 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T190: an illustration must look like one / T190：舉例必須看得出來是舉例 ---"
@@ -10871,12 +9769,14 @@ assert_contains "$_t190" "does not exist" \
 # ---------------------------------------------------------------------
 # T191 -- a newly created -o destination is 0600.
 #
-# Round 68 needed this and could not find it: the mode carried onto the temp
-# file comes from the file being REPLACED, and when -o names a path that does
-# not exist there is nothing to carry, so the file keeps the temp file's own
-# 0600 rather than the umask's.
+# A file that -o creates is 0600: the mode carried onto the temp file comes
+# from the file being REPLACED, and when -o names a path that does not exist
+# there is nothing to carry, so the temp file's own 0600 stays rather than the
+# umask's. Round 68.
 #
 # T191 —— 新建的 -o 目的地是 0600。
+# -o 新建的檔案是 0600：帶到暫存檔上的權限來自被「取代」的那個檔案；-o 指向不存在的路徑時
+# 沒有東西可帶，於是保留暫存檔自己的 0600，而不是 umask 給的值。第 68 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T191: the mode of a file -o creates / T191：-o 新建的檔案的權限 ---"
@@ -10889,16 +9789,11 @@ else
     chmod 644 "$TMP/t191_src.csv"
     rm -f "$TMP/t191_new.csv"
     ( umask 022; "$CSV2" -r -t -i "$TMP/t191_src.csv" -o "$TMP/t191_new.csv" )
-    # file_mode, not zstat_mode. This dates from when the guest's busybox had no
-    # `stat` applet: the old stat_mode returned EMPTY there, so this compared ''
-    # with '600' and failed for a reason that had nothing to do with the mode.
-    # zstat works on every platform now, so the two are equivalent here -- but
-    # file_mode is the one with a fallback, and a caller that does not need to
-    # care should not have to.
-    # 用 file_mode 而不是 zstat_mode。這要追溯到「guest 的 busybox 沒有 `stat` applet」的時期：
-    # 舊的 stat_mode 在那裡回傳「空的」，於是這裡拿 '' 去比 '600'，因為一個與權限無關的理由而
-    # 失敗。現在 zstat 在每個平台都可用，兩者在這裡是等價的——但 file_mode 才是「有後備」的那一個，
-    # 而一個不需要在意這件事的呼叫端，就不該被迫在意。
+    # file_mode, not zstat_mode: the two are equivalent wherever zstat works,
+    # but file_mode is the one with a fallback, and a caller that does not need
+    # to care should not have to.
+    # 用 file_mode 而不是 zstat_mode：在 zstat 可用的地方兩者等價，但 file_mode 才是有後備的那一個，
+    # 而不需要在意這件事的呼叫端，就不該被迫在意。
     assert_eq "$(file_mode "$TMP/t191_new.csv")" "600" \
         "T191a a destination csv2 creates is 0600 / csv2 新建的目的地是 0600"
     printf 'x,y\n9,9\n' > "$TMP/t191_over.csv"
@@ -10912,30 +9807,25 @@ fi
 # ---------------------------------------------------------------------
 # T192 -- two appends racing on one file.
 #
-# Round 69. The append fast path did `seek(toFileOffset: size)` then `write`,
-# under a comment claiming POSIX O_APPEND atomicity. Two concurrent appends
-# then computed the same end offset and wrote there, and the shorter write
-# landed on top of the longer one:
+# Two concurrent appends must both land whole. `seek(toFileOffset: size)` then
+# `write` is not atomic: both writers compute the same end offset, and the
+# shorter write lands on top of the longer one, leaving either
 #
-#   * the surviving fragment was sometimes a bare newline, so csv2's own
-#     blank-line rule refused a file csv2 had just written, at rc=0 from both
-#     writers;
-#   * and sometimes a WELL-FORMED record nobody appended -- `A,BBBB` left over
-#     from `AAAA,BBBB` -- which read back at rc=0 with nothing anywhere
-#     reporting it. That one hit on the round's first trial.
+#   * a bare newline, so csv2's own blank-line rule refuses a file csv2 has
+#     just written, at rc=0 from both writers; or
+#   * a WELL-FORMED record nobody appended -- `A,BBBB` left over from
+#     `AAAA,BBBB` -- which reads back at rc=0 with nothing reporting it.
 #
-# The README's worst case for concurrent writers is "one edit is lost". This
-# was both edits lost and a file destroyed, or a record invented.
-#
-# The write now goes through a descriptor opened O_APPEND, where the kernel
-# makes finding the end and writing there one operation -- the same fix the
-# `-log` file received, one source file away, for the same reason.
+# Either is worse than the README's worst case for concurrent writers, "one
+# edit is lost". The write goes through a descriptor opened O_APPEND, where the
+# kernel makes finding the end and writing there one operation, as the `-log`
+# file does. Round 69.
 #
 # T192 —— 兩個追加在同一個檔案上競賽。
-# 第 69 回合。追加快路徑做的是 `seek(toFileOffset: size)` 再 `write`，而它上方的註解宣稱
-# 這是 POSIX 的 O_APPEND 原子性。兩個並行的追加於是算出同一個檔尾偏移量並寫在那裡，較短的
-# 那次蓋在較長的那次上面：留下的碎片有時是一個裸換行，於是 csv2 自己的空白行規則拒絕了一個
-# csv2 剛剛寫出來的檔案；有時是一筆「沒有任何人追加過、格式卻完整」的紀錄，以 rc=0 被讀回來。
+# 兩個並行的追加必須都完整落地。先 `seek(toFileOffset: size)` 再 `write` 不是原子的：兩個寫入端
+# 算出同一個檔尾偏移量，較短的那次蓋在較長的那次上面，留下一個裸換行（csv2 自己的空白行規則
+# 會拒絕它剛寫出的檔案），或一筆沒有人追加過、格式卻完整的紀錄，以 rc=0 被讀回來。寫入改走
+# 以 O_APPEND 開啟的描述子，由核心把「找檔尾」與「寫入」合成一個動作，與 `-log` 檔相同。第 69 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T192: two appends, one file / T192：兩個追加，一個檔案 ---"
@@ -11008,21 +9898,17 @@ fi
 # ---------------------------------------------------------------------
 # T193 -- what -md may put on a terminal.
 #
-# Round 70. The locating report escapes control characters and the README
-# gives the reason: an ESC recolours the output from inside a cell, and can
-# erase the line it is printed on. `-md` -- which the same document calls "a
-# RENDERING ... for reading" -- passed them through.
-#
-# The attack needs no pipes, so the `\|` escape never fires: a licence column
-# holding `GPL-3.0` followed by seven backspaces and `MIT` renders as `MIT` on
-# any terminal that moves the cursor for a backspace, while `-get` returns the
-# real bytes. An auditor running the documented reading command reads the
-# wrong licence, at rc=0, with nothing on stderr.
+# `-md` is a rendering for reading, so it escapes control characters as the
+# locating report does: an ESC can recolour the output from inside a cell or
+# erase the line. The attack needs no pipes, so the `\|` escape never fires: a
+# licence cell holding `GPL-3.0`, seven backspaces and `MIT` renders as `MIT`
+# on a terminal, while `-get` returns the real bytes -- the documented reading
+# command shows the wrong licence at rc=0. Round 70.
 #
 # T193 —— `-md` 可以把什麼放到終端機上。
-# 第 70 回合。定位報告會跳脫控制字元，而 README 給了理由：ESC 會從儲存格裡面把輸出重新上色，
-# 也能抹掉它正被印出的那一行。而 `-md`——同一份文件稱它為「一種算繪……拿來讀的」——原樣放行。
-# 那個攻擊不需要任何 `|`，因此 `\|` 那道跳脫從未觸發。
+# `-md` 是拿來讀的算繪，所以它像定位報告一樣跳脫控制字元：ESC 能從儲存格裡把輸出重新上色，
+# 也能抹掉那一行。這個攻擊不需要任何 `|`，所以 `\|` 的跳脫不會觸發：一格寫著 `GPL-3.0`、七個
+# 退格加 `MIT` 的授權欄，在終端機上顯示成 `MIT`，而 `-get` 交還真正的位元組。第 70 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T193: control characters in -md / T193：-md 裡的控制字元 ---"
@@ -11057,13 +9943,13 @@ assert_eq "$("$CSV2" -get 2:2 -i "$TMP/t193.csv" | od -A n -t x1 | tr -s ' ' | t
 # ---------------------------------------------------------------------
 # T194 -- a metrics line on every path.
 #
-# Round 70 measured ten paths and found five without one: both index commands
-# and every --in-place edit. The flag entry says "on every path", and the
-# missing half is the writes -- the runs whose cost a caller most wants to see.
+# The flag entry says "on every path", and that includes both index commands
+# and every --in-place edit -- the writes, whose cost a caller most wants to
+# see. Round 70.
 #
 # T194 —— 每一條路徑都有一行 metrics。
-# 第 70 回合量了十條路徑，其中五條沒有：兩個索引指令，以及每一次 --in-place 編輯。
-# 而旗標條目說的是「每一條路徑」，缺掉的那一半全是「寫入」。
+# 旗標條目說的是「每一條路徑」，其中包括兩個索引指令與每一次 --in-place 編輯——也就是寫入，
+# 呼叫端最想看見成本的那些執行。第 70 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T194: metrics on every path / T194：每一條路徑上的 metrics ---"
@@ -11094,11 +9980,8 @@ assert_eq "$_t194_r" "0" \
 # ---------------------------------------------------------------------
 # T195 -- the other files a run touches.
 #
-# Round 71. The same-file guard compared `-i` against `-o` and nothing else,
-# and the document describes THAT comparison in detail -- spellings, symlinks,
-# (device, inode), a POSIX-only caveat -- while never saying which files it
-# does not cover. Three of them destroy something at rc=0 with both streams
-# empty:
+# The same-file guard covers more than `-i` against `-o`. Three other aliases
+# each destroy something at rc=0 with both streams empty:
 #
 #   -o naming the keyfile     the ciphertext lands on the only key that
 #                             decrypts it, and nothing is left to report it
@@ -11107,12 +9990,11 @@ assert_eq "$_t194_r" "0" \
 #                             being read, which then fails its own field-count
 #                             check for ever
 #
-# Each is a run that did what it was told. The remedy is the comparison that
-# already exists, asked three more times.
+# The remedy is the existing comparison, asked three more times. Round 71.
 #
 # T195 —— 一次執行會碰到的其他檔案。
-# 第 71 回合。那道同檔案守衛只比對 `-i` 與 `-o`，而文件把那次比對描述得非常仔細，卻從未說出
-# 它「沒有涵蓋」哪些檔案。其中三種會以 rc=0、兩條輸出流皆空的方式毀掉東西。
+# 同檔案守衛涵蓋的不只是 `-i` 對 `-o`。另外三種別名各自會以 rc=0、兩條輸出流皆空的方式毀掉
+# 東西：-o 指向金鑰檔、-o 指向 -log 檔、-log 指向輸入檔。補救就是把既有的比對多問三次。第 71 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T195: -o, -log and -keyfile as each other / T195：-o、-log 與 -keyfile 互相指向 ---"
@@ -11149,25 +10031,22 @@ assert_succeeds "T195g -log to its own file still works / -log 寫到它自己�
 # ---------------------------------------------------------------------
 # T196 -- a diagnostic that dumps the whole header.
 #
-# Round 71: a file whose first column name is 50,000 characters long put a
-# 50 KB line on stderr -- on the line carrying the diagnosis, from a message
-# whose documented example is `no column named "caf<U+FFFD>"`. The locating
-# report cuts a value at 200 characters for exactly this reason and says so; a
-# diagnostic listing what IS available had no such rule.
+# A diagnostic cuts long names, as the locating report cuts a value at 200
+# characters: a 50,000-character first column name would otherwise put a 50 KB
+# line on stderr, on the line carrying the diagnosis. Round 71.
 #
 # T196 —— 一則把整列標頭倒出來的診斷。
-# 第 71 回合：一個「第一欄名字有 50,000 個字元」的檔案，會在 stderr 上放一行 50 KB。
+# 診斷訊息會截斷過長的名字，就像定位報告把值截在 200 個字元：否則一個 50,000 字元的第一欄
+# 名字會在 stderr 上、正好在承載診斷的那一行放進 50 KB。第 71 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T196: how long a refusal may be / T196：一條拒絕可以多長 ---"
 
 # A 20,000-character column name, built in the shell so this case does not
-# depend on python3 -- the guest has none, and wrapping a heredoc in
-# `cmd || { ... }` is a zsh parse error that took the whole rest of the suite
-# with it when this case was first written.
-# 一個 20,000 字元的欄名，用 shell 造出來，好讓這個案例不依賴 python3——guest 上沒有它；
-# 而把一個 heredoc 包進 `cmd || { ... }` 是一個 zsh 語法錯誤，這個案例第一次寫成時，
-# 那個錯誤把整份測試的其餘部分一起帶走了。
+# depend on python3 (the guest has none). A heredoc inside `cmd || { ... }` is
+# a zsh parse error that takes the rest of the suite with it.
+# 一個 20,000 字元的欄名，用 shell 造出來，好讓這個案例不依賴 python3（guest 上沒有它）。
+# 把 heredoc 包進 `cmd || { ... }` 是 zsh 語法錯誤，會把整份測試的其餘部分一起帶走。
 _t196_name=""
 _i=0
 while (( _i < 500 )); do
@@ -11208,22 +10087,21 @@ assert_contains "$("$CSV2" -hash NOPE -i "$TMP/t196w.csv" -o "$TMP/t196wo.csv" -
 # ---------------------------------------------------------------------
 # T197 -- the header rows must agree about protection.
 #
-# Round 72. Every guard that asks "does the file's own header declare this
-# column transformed" asked row 0a. A `.csv2` whose 0b carries `:enc:` and
-# whose 0a does not walked past all of them: `-update` wrote plaintext into an
-# encrypted column, `-insert` was accepted, `--json`'s meta said nothing was
-# protected, and `-hash` did what the README calls the worst thing this tool
-# can do -- hashed the CIPHERTEXT and overwrote the `:enc:` marker together
-# with its salt, at rc=0, on a file whose Chinese header row still said
-# `:enc:`.
+# Both header rows must agree about protection. A guard that asks only row 0a
+# lets a `.csv2` with `:enc:` on 0b alone through every check: `-update` writes
+# plaintext into an encrypted column, `-insert` is accepted, `--json`'s meta
+# says nothing is protected, and `-hash` hashes the CIPHERTEXT and overwrites
+# the `:enc:` marker together with its salt -- what the README calls the worst
+# thing this tool can do -- at rc=0.
 #
-# Reading both rows and taking the union would fix the misses and leave the
-# file incoherent. Refusing is what the rest of this program does when two
-# sources disagree.
+# Taking the union of both rows would fix the misses and leave the file
+# incoherent; refusing is what the rest of this program does when two sources
+# disagree. Round 72.
 #
 # T197 —— 兩列標頭對「保護」必須說同一件事。
-# 第 72 回合。每一道「這個檔案自己的標頭有沒有宣告這一欄已被轉換」的守衛問的都是 0a 列。
-# 一個 0b 帶著 `:enc:`、0a 沒有的 `.csv2`，從它們全部旁邊走了過去。
+# 兩列標頭對「保護」必須一致。只問 0a 的守衛，會讓只有 0b 帶 `:enc:` 的 `.csv2` 通過每一道檢查：
+# `-update` 把明文寫進加密欄，`-hash` 雜湊密文並把 `:enc:` 標記連同鹽一起覆寫，rc=0。取兩列的
+# 聯集能補上漏洞卻讓檔案自相矛盾；兩個來源不一致時，本程式的做法是拒絕。第 72 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T197: two header rows, one answer / T197：兩列標頭，一個答案 ---"
@@ -11237,13 +10115,10 @@ printf 'pkg,ver,secret\n套件,版本,機密\nzlib,1.3,s1\nzstd,1.5,s2\n' > "$TM
 # 只把 0a 那一列的標記拿掉，讓 0b 仍然宣告該欄已加密。用 shell 做：這是一個「有人把英文標頭
 # 整理乾淨」就會產生的狀態，而沒有任何 csv2 指令造得出它。
 {
-    # header_cell(), not `${a%%,*}` and `${${a#*,}%%,*}`. Those were right
-    # because this fixture's header names carry no comma -- an assumption about
-    # a fixture, and the expansion that rewrote TARGET_PACKAGES.csv on
-    # 2026-08-15. QH.
-    # 用 header_cell()，不用 `${a%%,*}` 與 `${${a#*,}%%,*}`。那兩個之所以是對的，是因為這個
-    # fixture 的標頭名稱裡沒有逗號——那是一個對 fixture 的假設，而那個展開正是 2026-08-15 改寫
-    # TARGET_PACKAGES.csv 的那一個。QH。
+    # header_cell(), not `${a%%,*}` and `${${a#*,}%%,*}`: those are right only
+    # while the fixture's header names carry no comma. QH.
+    # 用 header_cell()，不用 `${a%%,*}` 與 `${${a#*,}%%,*}`：那兩者只在 fixture 的標頭名稱
+    # 沒有逗號時才對。QH。
     print -r -- "$(header_cell "$TMP/t197e.csv2" 1),$(header_cell "$TMP/t197e.csv2" 2),secret"
     sed -n '2,$p' "$TMP/t197e.csv2"
 } > "$TMP/t197bad.csv2"
@@ -11271,15 +10146,16 @@ assert_succeeds "T197e and still decrypts / 也仍然解得開" -- \
 # ---------------------------------------------------------------------
 # T198 -- -log naming the keyfile.
 #
-# Round 72, and the worst of the six pairs: the invocation line is appended to
+# -log naming the keyfile is refused. The invocation line would be appended to
 # the key BEFORE the key is derived, so the run encrypts with "the original
-# bytes plus one log line" -- a value that existed for a few milliseconds and
-# was never written anywhere as such. The file on disk is then one line too
-# long and any backup one line too short, and neither decrypts. rc=0, nothing
-# on either stream.
+# bytes plus one log line" -- a value never written anywhere as such. The file
+# on disk is then one line too long and any backup one line too short, and
+# neither decrypts. rc=0, nothing on either stream. Round 72.
 #
 # T198 —— `-log` 指向金鑰檔。
-# 第 72 回合，也是六對裡最糟的一對：呼叫紀錄在金鑰被推導「之前」被追加到那把金鑰上。
+# `-log` 指向金鑰檔會被拒絕。呼叫紀錄會在金鑰被推導「之前」追加到金鑰上，於是這次執行用的是
+# 「原本的位元組加一行 log」——一個從未被如實寫下的值。磁碟上的檔案多一行、任何備份少一行，
+# 兩者都解不開。第 72 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T198: -log onto the key / T198：-log 寫到金鑰上 ---"
@@ -11300,18 +10176,17 @@ assert_succeeds "T198c while a log of its own still works / 而寫到它自己�
 # ---------------------------------------------------------------------
 # T199 -- a body with CR line endings under a header that ends properly.
 #
-# Round 66 moved the CR test to the header row, which is exact for a file whose
-# lines all end in CR. Round 72 found the file that test cannot see: an LF
-# header over a legacy body, which `(echo a; cat old_mac_body) > f.csv`
-# produces. It read as ONE record at rc=0 with `records:1` -- every count in
-# the file wrong by the number of lines in it.
-#
-# The new test is the last byte: a file that ends on a bare CR is refused, one
-# that ends with a newline is not, whatever its records contain.
+# The header-row CR test (T180) is exact only when every line ends in CR. An LF
+# header over a legacy CR body -- what `(echo a; cat old_mac_body) > f.csv`
+# produces -- otherwise reads as ONE record at rc=0, every count wrong by the
+# number of lines. So the last byte is tested too: a file ending on a bare CR
+# is refused, one ending with a newline is not, whatever its records contain.
+# Round 72.
 #
 # T199 —— 一個「標頭正常結束、內文以 CR 分行」的檔案。
-# 第 66 回合把 CR 的判斷移到標頭列，那對「每一行都以 CR 結尾」的檔案是精確的。第 72 回合
-# 找到了那個判斷看不見的檔案：LF 標頭配上一段舊式內文。
+# 標頭列的 CR 判斷（T180）只在每一行都以 CR 結尾時才精確。LF 標頭配上舊式 CR 內文，否則會在
+# rc=0 下被讀成「一筆」紀錄。所以最後一個位元組也要檢查：以裸 CR 結尾的檔案被拒絕，以換行
+# 結尾的不會，不論紀錄裡裝了什麼。第 72 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T199: a CR body under an LF header / T199：LF 標頭配 CR 內文 ---"
@@ -11328,9 +10203,9 @@ assert_fails "T199b and a two-column one / 兩欄的也是" -- \
 assert_contains "$("$CSV2" -r -i "$TMP/t199_one.csv" 2>&1)" "last byte is a bare carriage return" \
     "T199c the message names what was seen / 訊息指出看到的是什麼"
 
-# The round-66 false positive must stay legal: CRs INSIDE a record, file ending
-# with a newline.
-# 第 66 回合那個誤判必須繼續合法：CR 在「紀錄裡面」，而檔案以換行結尾。
+# CRs INSIDE a record of a file ending with a newline stay legal; a count-based
+# test refused them (T180).
+# CR 在「紀錄裡面」、而檔案以換行結尾，必須繼續合法；以數量判斷時曾誤判它（T180）。
 assert_succeeds "T199d three CRs inside a record are still data / 一筆紀錄裡的三個 CR 仍然是資料" -- \
     "$CSV2" -r -t -i "$TMP/t199_data.csv" -o "$TMP/t199_rt.csv"
 assert_same "$TMP/t199_data.csv" "$TMP/t199_rt.csv" \
@@ -11341,15 +10216,17 @@ assert_succeeds "T199f a .csv with no trailing newline is still fine / 沒有結
 # ---------------------------------------------------------------------
 # T200 -- gzip named .csv, and the output suffix that is a promise.
 #
-# Round 72. `1F 8B` cannot begin a UTF-8 CSV any more than `FF FE` can, and a
-# compressed file named `.csv` was read at rc=0 as one record of binary --
-# `-contains` found nothing in it and said so.
+# `1F 8B` cannot begin a UTF-8 CSV any more than `FF FE` can, so a gzip file
+# named `.csv` is refused rather than read as one record of binary.
 #
-# And the `-t` guard tested the suffix case-sensitively, so `-o sel.csv2` was
-# refused and `-o SEL.CSV2` accepted: same directory, same file on macOS and
-# Windows, and the result read back as two data records eaten as header rows.
+# The `-t` guard compares suffixes case-insensitively: `-o SEL.CSV2` is the
+# same file as `-o sel.csv2` on macOS and Windows, and accepting it would read
+# back two data records eaten as header rows. Round 72.
 #
 # T200 —— 叫做 .csv 的 gzip，以及「輸出副檔名是一個承諾」。
+# `1F 8B` 與 `FF FE` 一樣不可能是 UTF-8 CSV 的開頭，所以叫做 `.csv` 的 gzip 檔會被拒絕，而不是被
+# 讀成一筆二進位紀錄。`-t` 守衛比對副檔名時不分大小寫：在 macOS 與 Windows 上 `-o SEL.CSV2`
+# 與 `-o sel.csv2` 是同一個檔案。第 72 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T200: what a name promises / T200：一個名字承諾了什麼 ---"
@@ -11375,16 +10252,13 @@ assert_succeeds "T200d and -t makes both acceptable / 而 -t 讓兩者都可以"
     "$CSV2" -head 1 -t -i "$TMP/t200.csv2" -o "$TMP/T200SEL2.CSV2"
 assert_contains "$("$CSV2" -r -i "$TMP/t200.csv2" --headers 1 2>&1)" "declares 2 header row" \
     "T200e while a --headers that disagrees with the suffix is still refused / 而與副檔名不符的 --headers 仍然被拒絕"
-# ONE suffix rule, both sides. The reading side was case-sensitive and the
-# writing side was not, for one day: `-o x.CSV2` was refused for declaring a
-# format with a header while `-i x.CSV2` was refused for declaring nothing,
-# and the never-convert guard -- which reads the READING side -- let a
-# one-header input be written to `.CSV2`, which on this filesystem is the
-# `.csv2` you read back a record short.
-# 一個副檔名規則，兩側共用。「讀取」那一側曾經區分大小寫、「寫出」那一側不區分，為時一天：
-# `-o x.CSV2` 以「它宣告了一個帶標頭的格式」被拒絕，而 `-i x.CSV2` 以「它什麼都沒宣告」被拒絕；
-# 而「絕不轉換格式」那道守衛讀的是「讀取」那一側，於是一個單列標頭的輸入被寫進了 `.CSV2`
-# ——在這個檔案系統上，那正是你之後讀回來、少了一筆紀錄的那個 `.csv2`。
+# ONE suffix rule, both sides. If reading were case-sensitive and writing not,
+# the never-convert guard -- which reads the reading side -- would let a
+# one-header input be written to `.CSV2`, which on a case-insensitive
+# filesystem is the `.csv2` that reads back a record short.
+# 一個副檔名規則，讀寫兩側共用。若「讀取」區分大小寫而「寫出」不區分，讀的是讀取側的
+# 「絕不轉換格式」守衛就會讓單列標頭的輸入寫進 `.CSV2`——在不分大小寫的檔案系統上，那正是
+# 之後讀回來會少一筆的那個 `.csv2`。
 printf 'a,b\n1,x\n2,y\n' > "$TMP/t200one.csv"
 assert_fails "T200f a one-header input to .CSV2 is refused like .csv2 / 單列標頭的輸入寫到 .CSV2 與寫到 .csv2 一樣被拒絕" -- \
     "$CSV2" -r -t -i "$TMP/t200one.csv" -o "$TMP/T200CONV.CSV2"
@@ -11396,12 +10270,14 @@ assert_succeeds "T200h including reading it back with no --headers / 包括不�
 # ---------------------------------------------------------------------
 # T201 -- a row you supply is a field csv2 writes.
 #
-# Round 72: `-append 'r2, leading'` wrote ` leading` unquoted while
-# `-update 1:2 ' leading'` quoted the identical value. csv2 reads both back
-# correctly; the spreadsheets and "several parsers" the quoting rule exists for
-# do not, and the README states the rule as covering "a value you supply".
+# A row you supply is quoted by the same rule as `-update`: ` leading` gets
+# quotes in `-append`, `-insert` and the in-place fast path. csv2 reads either
+# back, but the spreadsheets and other parsers the rule exists for do not, and
+# the README states it as covering "a value you supply". Round 72.
 #
 # T201 —— 你交進來的一列，是 csv2 寫出去的欄位。
+# 交進來的一列與 `-update` 依同一條規則加引號：` leading` 在 `-append`、`-insert` 與就地快路徑
+# 都會被加引號。csv2 兩種都讀得回來，但那條規則所顧及的試算表與其他剖析器讀不回來。第 72 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T201: quoting a supplied row / T201：對「交進來的一列」加引號 ---"
@@ -11425,38 +10301,34 @@ assert_eq "$("$CSV2" -get 2:2 -i "$TMP/t201a.csv")" " leading" \
 # T202 -- an append follows the file's line endings, including when the
 # file's last record has none.
 #
-# Round 73. The fast path decided CRLF from the file's LAST TWO BYTES, which
-# answers the question only when the last record is terminated. On a CRLF file
-# whose tail is not -- an exporter cut off, a torn write, anything ending
-# mid-record -- those two bytes are the end of a VALUE, so the probe said LF
-# and the append wrote LF into a file where every other record ends CRLF, and
-# supplied a bare LF to close the record before it.
-#
-# The scan the append already performs knows what the file's last terminator
-# was. This is the same rule the probe states, asked of the file rather than
-# of its last two bytes.
+# An append follows the file's line endings. The last two bytes answer that
+# only when the last record is terminated; on a CRLF file cut off mid-record
+# they are the end of a VALUE, and probing them would write LF into a CRLF
+# file and close the previous record with a bare LF. The append's own scan
+# knows the file's last terminator, so the same rule is asked of the file
+# rather than of its last two bytes. Round 73.
 #
 # T202 —— 一次追加會跟隨檔案的行尾，包括「檔案最後一筆沒有終止符」時。
-# 第 73 回合。快路徑是用「檔案的最後兩個位元組」判斷 CRLF 的，而只有在最後一筆有終止符時，
-# 那兩個位元組才回答得了這個問題。
+# 追加會跟隨檔案的行尾。只有最後一筆有終止符時，最後兩個位元組才回答得了這個問題；CRLF 檔案
+# 若在紀錄中途被切斷，那兩個位元組是某個「值」的結尾，拿它們判斷會把 LF 寫進 CRLF 檔案。
+# 追加本身的掃描知道檔案最後的終止符，所以同一條規則改問檔案。第 73 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T202: which line ending an append writes / T202：一次追加寫的是哪一種行尾 ---"
 
-# CRLF file, last record terminated: the case the probe always handled.
-# CRLF 檔案、最後一筆有終止符：探測一直處理得了的那個情況。
+# CRLF file, last record terminated.
+# CRLF 檔案、最後一筆有終止符。
 printf 'a,b\r\n1,x\r\n' > "$TMP/t202_ok.csv"
 "$CSV2" -append '2,y' -i "$TMP/t202_ok.csv" --in-place
-# The last two bytes, read as bytes. Matching `od -c` text was the first
-# attempt and it compared od's SPACING, not the file's contents.
-# 讀「最後兩個位元組」，當成位元組來讀。第一次的寫法是比對 `od -c` 的文字，而那比到的是
-# od 的「排版」，不是檔案的內容。
+# The last two bytes, read as bytes: matching `od -c` text compares od's
+# spacing, not the file's contents.
+# 把最後兩個位元組當位元組讀：比對 `od -c` 的文字，比到的是 od 的排版，不是檔案內容。
 _t202_tail() { tail -c 2 "$1" | od -A n -t x1 | tr -s ' ' | sed 's/^ //;s/ $//' }
 assert_eq "$(_t202_tail "$TMP/t202_ok.csv")" "0d 0a" \
     "T202a a terminated CRLF file gets a CRLF record / 有終止符的 CRLF 檔案得到一筆 CRLF 紀錄"
 
-# CRLF file, last record UNTERMINATED: the case it did not.
-# CRLF 檔案、最後一筆「沒有」終止符：它處理不了的那個情況。
+# CRLF file, last record UNTERMINATED.
+# CRLF 檔案、最後一筆「沒有」終止符。
 printf 'a,b\r\n1,x\r\n2,y' > "$TMP/t202_cut.csv"
 "$CSV2" -append '3,z' -i "$TMP/t202_cut.csv" --in-place
 assert_eq "$(_t202_tail "$TMP/t202_cut.csv")" "0d 0a" \
@@ -11479,14 +10351,11 @@ else
     ok "T202d an LF file gains no CR / LF 檔案不會多出 CR"
 fi
 
-# With -o there is no append: the whole file is rewritten and comes out LF.
-# The flag's own entry promised the CRLF behaviour unconditionally until round
-# 74 measured this and got LF. The behaviour is deliberate -- every other edit
-# rewrites separators the same way -- so what was wrong was the sentence, and
-# this case is what keeps the corrected one honest.
-# 搭配 -o 時沒有「追加」這回事：整個檔案會被重寫，出來是 LF。那個旗標自己的條目把 CRLF 那個
-# 行為寫成無條件成立，直到第 74 回合實測 -o 拿到 LF。這個行為是刻意的——其他每一種編輯都以
-# 同樣方式重寫分隔符——因此錯的是那句話，而這個案例是用來讓改過的那句話保持誠實的。
+# With -o there is no append: the whole file is rewritten and comes out LF,
+# as every other edit rewrites separators. This is deliberate, and the flag's
+# entry must say so rather than promise CRLF unconditionally. Round 74.
+# 搭配 -o 時沒有「追加」：整個檔案會被重寫，出來是 LF，與其他每一種編輯重寫分隔符的方式相同。
+# 這是刻意的，而旗標條目必須照實寫，不能無條件承諾 CRLF。第 74 回合。
 printf 'a,b\r\n1,x\r\n' > "$TMP/t202_o.csv"
 "$CSV2" -append '2,y' -i "$TMP/t202_o.csv" -o "$TMP/t202_output.csv" -t
 _t202f=$(od -A n -c < "$TMP/t202_output.csv" | tr -s ' ')
@@ -11509,70 +10378,44 @@ assert_succeeds "T202e and the index still describes the file / 而索引仍然�
 # T203 -- install.zsh puts the PATH line where the ACCOUNT's shell reads it,
 # and proves reachability from a shell started with nothing.
 #
-# 2026-08-25. Four separate faults, all of the same family: a check that
-# measured something adjacent to what it claimed.
+# Four checks, each of which could measure something adjacent to what it
+# claims:
 #
-#   * the rc file was chosen from the shell RUNNING install.zsh, which is
-#     always zsh (it is `#!/usr/bin/env zsh`) and says nothing about the
-#     account. The WSL node's login shell was bash and the only rc file in
-#     that home directory was .zshrc -- the right line would have gone into
-#     the one file nothing reads;
-#   * for zsh it went to .zshrc, which only INTERACTIVE shells read, while
-#     the thing that needed csv2 there was a script over ssh, which reads
-#     .zshenv and nothing else;
-#   * `--uninstall` stripped the block from one of the two files the bash
-#     install writes, leaving the other still marked as ours;
-#   * the reachability probe ran `$SHELL -c`, which INHERITS the caller's
-#     PATH, so "a fresh shell finds it" was never actually asked.
+#   * the rc file follows the ACCOUNT's shell, not the shell running
+#     install.zsh, which is always zsh (`#!/usr/bin/env zsh`);
+#   * for zsh it is .zshenv, because .zshrc is read only by INTERACTIVE
+#     shells and a script over ssh reads .zshenv and nothing else;
+#   * `--uninstall` strips the block from every file the install wrote;
+#   * the reachability probe must not run `$SHELL -c`, which INHERITS the
+#     caller's PATH, so "a fresh shell finds it" is asked of a shell started
+#     with nothing.
 #
 # T203 —— install.zsh 把 PATH 那一行寫到「這個帳號的 shell」會讀的地方，並以一個
-# 「從零開始的 shell」證明可及性。四個各自獨立的問題，同一個家族：一個量到了「與它宣稱
-# 的東西相鄰」的檢查。
+# 「從零開始的 shell」證明可及性。rc 檔跟著帳號的 shell 走，而不是執行 install.zsh 的 shell；
+# zsh 寫 .zshenv，因為 ssh 上的腳本只讀它；--uninstall 收回寫過的每一個檔案；可及性探測不能
+# 用會繼承呼叫端 PATH 的 `$SHELL -c`。
 # ---------------------------------------------------------------------
 echo
 echo "--- T203: where install.zsh writes, and what it can prove / T203：install.zsh 寫到哪裡，以及它證明得了什麼 ---"
 
 if (( IS_WINDOWS )); then
-    # The reason this case skips here is that on Windows PATH comes from the
-    # PROCESS ENVIRONMENT, not from any rc file, so writing a line into one
-    # proves nothing about whether a new shell will find the binary. The case
-    # would pass while testing nothing.
+    # Skipped because on Windows PATH comes from the PROCESS ENVIRONMENT, not
+    # from any rc file, so writing a line into one proves nothing about whether
+    # a new shell finds the binary; the case would pass while testing nothing.
+    # (`env -i` does start an MSYS zsh, and the install target is an ordinary
+    # path, not a scoop shim, so neither of those is the reason.)
     #
-    # The two reasons that used to be written here were both MEASURED FALSE on
-    # 2026-09-02, and they are kept alongside because a skip reason nobody
-    # rechecks is how a stale one survives:
-    #   * "env -i drops the variables an MSYS shell needs to start at all" --
-    #     `env -i /usr/bin/zsh -c 'echo alive'` prints `alive` on that node.
-    #   * "the target is a scoop shim path" -- it is
-    #     C:/Users/<user>/AppData/Local/csv2/csv2.exe, an ordinary path.
-    # The skip was right and its stated reason had drifted away from it, which
-    # is the same failure as a defect list kept in an instruction file: nothing
-    # reports the drift, and the next reader spends a round measuring two
-    # premises that stopped being true.
-    #
-    # 這個案例在這裡跳過的理由是：Windows 上的 PATH 來自**行程環境**，不是任何 rc 檔，因此
-    # 往 rc 檔寫一行，對「新開的 shell 找不找得到那個執行檔」不構成任何證明。這個案例會通過，
-    # 而它什麼都沒測到。
-    #
-    # 先前寫在這裡的兩個理由在 2026-09-02 **實測皆不成立**，一併留著，因為「沒有人回頭複查的
-    # skip 理由」正是一個過期理由能存活的方式：
-    #   * 「env -i 會拿掉 MSYS shell 啟動所必需的變數」——在那個節點上
-    #     `env -i /usr/bin/zsh -c 'echo alive'` 印出 `alive`。
-    #   * 「目標是一條 scoop shim 路徑」——它是
-    #     C:/Users/<user>/AppData/Local/csv2/csv2.exe，一條普通路徑。
-    # 跳過是對的，而它寫下的理由已經與它漂開——那與「把缺陷清單放進指令檔」是同一種失敗：
-    # 沒有任何東西會回報這件漂移，而下一個讀者要花一整輪去量兩個已經不成立的前提。
+    # 跳過的理由：Windows 上的 PATH 來自**行程環境**，不是任何 rc 檔，因此往 rc 檔寫一行，
+    # 對「新開的 shell 找不找得到執行檔」不構成任何證明；這個案例會通過，而什麼都沒測到。
+    # （`env -i` 確實啟動得了 MSYS 的 zsh，安裝目標也是普通路徑而非 scoop shim，所以理由不是那兩者。）
     skipt "T203 install.zsh rc placement -- on Windows PATH comes from the process environment, not an rc file / Windows 的 PATH 來自行程環境而非 rc 檔"
     T203_SKIPPED=1
 else
-    # Say once that the file is missing, rather than five times that its
-    # absence produced surprising output. In the guest on 2026-08-25 the
-    # payload did not carry install.zsh, and this case reported five failures
-    # whose text was about `env: can't execute` and an empty directory listing
-    # -- true, and about the harness rather than about csv2.
-    # 「檔案不在」只說一次，而不是說五次「它不在所造成的奇怪輸出」。2026-08-25 在 guest 裡，
-    # payload 沒有帶 install.zsh，於是這個案例回報了五個失敗，內容是 `env: can't execute`
-    # 與一個空目錄列表——都是真的，但講的是測試環境而不是 csv2。
+    # Say once that install.zsh is missing, rather than reporting five failures
+    # whose text is about the harness (`env: can't execute`, an empty listing)
+    # rather than about csv2.
+    # 「install.zsh 不在」只說一次，而不是回報五個內容關於測試環境（`env: can't execute`、
+    # 空目錄列表）而非 csv2 的失敗。
     _t203_home="$TMP/t203home"; _t203_pfx="$TMP/t203bin"
     mkdir -p "$_t203_home" "$_t203_pfx"
     _t203_run() {   # <shell> <extra args...>
@@ -11597,15 +10440,11 @@ else
     # 換不到的東西。
     case $_t203_out in
     # Matches the SUBSTANCE -- a non-interactive shell finds it -- not the exact
-    # sentence. On 2026-09-08 that sentence gained a qualified form: when a
-    # login shell resolves a DIFFERENT csv2 first, the report names the
-    # competitor instead of claiming every shell. The fact `.zshenv` buys over
-    # `.zshrc` is unchanged; only the wording moved, and matching wording made a
-    # correct program fail.
-    # 比對的是**實質**——非互動 shell 找得到——而不是那個確切的句子。2026-09-08 那個句子多了一個
-    # 限定形式：當登入 shell 先解析到**另一個** csv2 時，那份回報會指名那個競爭者，而不是宣稱
-    # 每一種 shell。`.zshenv` 相對於 `.zshrc` 換來的那個事實沒有變；動的只有措辭，
-    # **而比對措辭讓一個正確的程式失敗了。**
+    # sentence: when a login shell resolves a DIFFERENT csv2 first, the report
+    # names the competitor instead of claiming every shell, and matching wording
+    # would fail a correct program.
+    # 比對的是**實質**——非互動 shell 找得到——而不是確切的句子：登入 shell 先解析到**另一個**
+    # csv2 時，回報會指名那個競爭者而不是宣稱每一種 shell，比對措辭會讓正確的程式失敗。
         *"every shell, scripts over ssh included"*|*"non-login shells"*)
             ok "T203b and reports it is reachable from a non-interactive shell / 並回報非互動 shell 也找得到" ;;
         *) bad "T203b got: $_t203_out / 實得如上" ;;
@@ -11624,68 +10463,23 @@ else
     assert_eq "$_t203_blocks" "1" \
         "T203d installing twice leaves one block, not two / 裝兩次留下一個區塊而不是兩個"
 
-    # --uninstall takes back every file the install wrote to. bash is the case
-    # that has two of them, so bash is the case this asks about.
-    # --uninstall 要收回安裝寫過的每一個檔案。bash 是「有兩個」的那種情況，因此就問 bash。
-    # `SHELL=` cannot simulate an account. install.zsh asks `getent passwd`
-    # first and falls back to $SHELL only where getent does not exist -- which
-    # is the whole point of JM, and macOS is a platform without getent. So this
-    # case passed on macOS by ACCIDENT: it was exercising the fallback, not the
-    # bash path. On WSL, where getent exists and the login shell was changed to
-    # zsh this morning, the same case wrote .zshenv and the assertion failed.
-    #
-    # Probed rather than assumed: ask install.zsh's own rule what it thinks the
-    # login shell is, and skip by name when it is not bash. A test that can
-    # only pass where a command is missing is not testing what it says.
-    #
-    # `SHELL=` 模擬不了一個帳號。install.zsh 會先問 `getent passwd`，只有在沒有 getent 的地方才
-    # 退回 $SHELL——那正是 JM 的全部重點，而 macOS 是一個沒有 getent 的平台。因此這個案例在 macOS
-    # 上是**碰巧**通過的：它運動到的是那條退路，不是 bash 那條路。在 WSL 上（有 getent，而登入 shell
-    # 今天早上被改成了 zsh），同一個案例寫出了 .zshenv，於是那條斷言失敗。
-    # 改成探測而不是假設：問 install.zsh 自己那條規則「它認為登入 shell 是什麼」，不是 bash 就以
-    # 具名理由跳過。一個「只有在某個指令缺席時才會通過」的測試，測的不是它自己說的東西。
-    # Asked the way install.zsh asks it, INCLUDING the guard: `getent` does not
-    # exist on macOS, and calling a missing command is a failure in this suite
-    # by design -- so the probe for a portability problem tripped the guard
-    # against typos. The same lesson stat_mode learned, in the case written to
-    # apply it.
-    # 以 install.zsh 的問法去問，**連同那道守衛**：macOS 上沒有 `getent`，而在這份測試裡「呼叫一個
-    # 不存在的指令」依設計就是一次失敗——於是一個為了「可攜性問題」而寫的探測，觸發了那道「防打錯字」
-    # 的守衛。與 stat_mode 學到的是同一課，發生在一個「為了套用那一課而寫」的案例裡。
-    # T203e/f were here and have been removed with the bash branch they tested.
-    #
-    # They asked whether a bash ACCOUNT gets both an interactive and a login
-    # file. No node has one: macOS and WSL log in with zsh, Windows uses the
-    # MSYS zsh, and the guest has no bash at all. Worse, on macOS the case did
-    # not skip -- it RAN, on a false premise. The probe reads the account's
-    # shell with `getent`, macOS has no getent, and the fallback is
-    # `command -v bash`, which finds /bin/bash on a machine whose account uses
-    # /bin/zsh. So it believed it was testing a bash account and was testing
-    # "this machine has bash installed". It never once ran where a login shell
-    # really was bash.
-    #
-    # Removing the branch does not leave bash users with nothing: they fall to
-    # the `*)` case and get ~/.profile, which a bash LOGIN shell reads, and
-    # install.zsh reports that honestly as "login shells only". zsh is the one
-    # shell where a single file (.zshenv) is read by every invocation, which is
-    # why it is the one this tree targets -- see IW.
-    # T203e/f 曾經在這裡，已隨著它們所測試的那個 bash 分支一起移除。
-    #
-    # 它們問的是「一個 bash **帳號**會不會同時拿到互動與登入兩個檔案」。沒有任何一個節點是那樣：
-    # macOS 與 WSL 以 zsh 登入，Windows 用 MSYS 的 zsh，而 guest 根本沒有 bash。更糟的是，在
-    # macOS 上這個案例並沒有跳過——它**執行了**，而且建立在一個假前提上。那個探測用 `getent` 讀
-    # 帳號的 shell，而 macOS 沒有 getent，退路是 `command -v bash`，它在一台「帳號用 /bin/zsh」的
-    # 機器上找到了 /bin/bash。於是它以為自己在測一個 bash 帳號，實際上測的是「這台機器裝了 bash」。
-    # 它從來沒有在「登入 shell 真的是 bash」的地方執行過。
-    #
-    # 移除那個分支不會讓 bash 使用者一無所有：他們會落到 `*)` 那一支、拿到 ~/.profile，而 bash 的
-    # **登入** shell 會讀它，install.zsh 也會誠實地把那回報成「只有登入 shell」。zsh 是唯一一個
-    # 「單一檔案（.zshenv）會被每一種呼叫讀到」的 shell，那正是這棵樹以它為目標的原因——見 IW。
+    # No bash-account case (formerly T203e/f). No node logs in with bash, and
+    # on macOS, which has no `getent`, the account probe fell back to
+    # `command -v bash` and so tested "this machine has bash installed". A bash
+    # account falls to the `*)` case and gets ~/.profile, which a bash LOGIN
+    # shell reads, and install.zsh reports that as "login shells only". zsh is
+    # the one shell where a single file (.zshenv) is read by every invocation,
+    # which is why this tree targets it. JM, IW.
+    # 這裡沒有 bash 帳號的案例（原本的 T203e/f）。沒有任何節點以 bash 登入，而在沒有 `getent` 的
+    # macOS 上，帳號探測會退回 `command -v bash`，測到的其實是「這台機器裝了 bash」。bash 帳號會
+    # 落到 `*)` 那一支、拿到 bash **登入** shell 會讀的 ~/.profile，install.zsh 也把那回報成
+    # 「只有登入 shell」。zsh 是唯一「單一檔案（.zshenv）會被每一種呼叫讀到」的 shell，所以這棵樹
+    # 以它為目標。JM、IW。
 
-    # The probe must not answer out of the caller's PATH. With --no-rc and the
-    # prefix exported into PATH, the OLD code called that a verified install.
-    # 探測不得用「呼叫端的 PATH」來回答。加上 --no-rc 並把 prefix 放進 PATH 之後，舊的程式
-    # 會把那稱為一次「已驗證」的安裝。
+    # The probe must not answer out of the caller's PATH: with --no-rc and the
+    # prefix in PATH, that would call an unverified install verified.
+    # 探測不得用呼叫端的 PATH 來回答：加上 --no-rc 並把 prefix 放進 PATH 時，那會把一次未驗證的
+    # 安裝稱為「已驗證」。
     _t203_home2="$TMP/t203home2"; mkdir -p "$_t203_home2"
     _t203_out2=$(env HOME="$_t203_home2" SHELL="$(command -v zsh)" PATH="$_t203_pfx:$PATH" \
         "$ROOT/install.zsh" --dir "$_t203_pfx" 2>&1)
@@ -11695,23 +10489,17 @@ else
         *) ok "T203g an inherited PATH is not reported as a fresh shell's / 繼承來的 PATH 不會被當成全新 shell 的" ;;
     esac
 
-    # And when the caller's PATH really does reach the file just installed,
-    # nothing is written. This is the Windows node: csv2 resolves through a
-    # scoop shim while the install directory is not on PATH at all, and an
-    # installer that edited that machine's rc files would be fixing something
-    # that was not broken.
-    # 而當呼叫端的 PATH 真的通到剛裝好的那個檔案時，什麼都不寫。這就是 Windows 節點的情況：
-    # csv2 經由一個 scoop shim 解析得到，而安裝目錄根本不在 PATH 上；一個會去改那台機器 rc 檔
-    # 的安裝程式，修的是一個沒有壞的東西。
-    # The rc files install.zsh writes, not "the directory is empty". Starting a
-    # zsh in a fresh HOME leaves a `.zcompdump` behind -- zsh's own completion
-    # cache, written by the probe install.zsh runs, not by install.zsh -- and
-    # asserting an empty directory made that count as a failure. What this case
-    # is about is whether the INSTALLER wrote anything.
-    # 檢查的是 install.zsh 會寫的那些 rc 檔，不是「這個目錄是空的」。在一個全新的 HOME 裡啟動一個
-    # zsh，會留下一個 `.zcompdump`——那是 zsh 自己的補全快取，由 install.zsh 執行的那次探測寫的，
-    # 不是 install.zsh 寫的——而斷言「目錄是空的」會把它算成一次失敗。這個案例要問的是「**安裝程式**
-    # 有沒有寫東西」。
+    # When the caller's PATH already reaches the file just installed, nothing
+    # is written -- as on a machine where csv2 resolves through a scoop shim
+    # while the install directory is not on PATH at all: editing its rc files
+    # would fix something that is not broken.
+    # 當呼叫端的 PATH 已經通到剛裝好的那個檔案時，什麼都不寫——就像 csv2 經由 scoop shim 解析、
+    # 而安裝目錄根本不在 PATH 上的機器：去改它的 rc 檔，修的是一個沒有壞的東西。
+    # Checked by the installer's own marker in the rc files, not by "the
+    # directory is empty": starting a zsh in a fresh HOME leaves zsh's own
+    # `.zcompdump`, written by the probe, not by install.zsh.
+    # 以安裝程式在 rc 檔裡的標記來檢查，而不是「目錄是空的」：在全新的 HOME 裡啟動 zsh 會留下
+    # zsh 自己的 `.zcompdump`，那是探測寫的，不是 install.zsh 寫的。
     _t203_left=$(grep -lF '>>> csv2 install.zsh >>>' "$_t203_home2"/.* 2>/dev/null | wc -l | tr -d ' ')
     assert_eq "$_t203_left" "0" \
         "T203h the installer writes no rc file when the shell already runs that very file / shell 已經在執行那個檔案時，安裝程式不寫任何 rc 檔"
@@ -11740,22 +10528,18 @@ fi
 # T204 -- a sidecar the O(1) stamp accepts, whose offsets have drifted, costs
 # a SCAN and not an answer.
 #
-# Round 74, defect JB. The contract is stated twice in the README and is the
-# reason the index exists: it is an optimisation and never a precondition.
-# That held whenever the stamp REJECTED a sidecar. When the stamp accepted one
-# whose offsets were off by a byte, the seek landed on the previous record's
-# terminator, the parser read an empty line, and `-mid` refused a file with no
-# blank line in it -- naming a record number and a line number both computed
-# from the index that was wrong. `--no-index` returned the record. An index had
-# become a precondition.
-#
-# The fixture must defeat the stamp, which is size + mtime to the nanosecond +
-# the first and last 64 bytes. So: lengthen one record and shorten a later one
-# by the same amount, in place, and put the mtime back.
+# A sidecar the O(1) stamp accepts but whose offsets have drifted must cost a
+# scan, not change the answer: the index is an optimisation and never a
+# precondition, as the README states twice. Otherwise the seek lands on the
+# previous record's terminator, the parser reads an empty line, and `-mid`
+# refuses a file with no blank line in it, naming record and line numbers
+# computed from the wrong index, while `--no-index` returns the record. JB,
+# round 74.
 #
 # T204 —— 一份「戳記接受、偏移量已漂掉」的 sidecar，代價應該是一次掃描，而不是一個答案。
-# 第 74 回合，缺陷 JB。契約在 README 裡寫了兩次，也正是索引存在的理由：它是最佳化，永遠不是
-# 必要條件。而那條契約只在「戳記拒絕」時成立。
+# 戳記接受、偏移量卻已漂掉的 sidecar，代價必須是一次掃描，而不是改變答案：索引是最佳化，
+# 永遠不是必要條件，README 寫了兩次。否則 seek 會落在前一筆的終止符上，解析器讀到空行，
+# `-mid` 就拒絕一個根本沒有空白行的檔案。JB，第 74 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T204: a drifted index costs a scan, not an answer / T204：漂掉的索引代價是一次掃描，不是一個答案 ---"
@@ -11764,29 +10548,18 @@ _t204=$TMP/t204.csv
 _t204_drift=$TMP/t204.drift
 
 # The fixture has to defeat the O(1) stamp: size + mtime to the NANOSECOND +
-# the first and last 64 bytes. Two earlier versions of this fixture could not,
-# on the platforms that matter.
+# the first and last 64 bytes. So one record is lengthened and a later one
+# shortened by the same amount. Neither python3 (absent in the aarch64 guest)
+# nor `touch -r` (it drops nanoseconds there; see T143) can be used. `touch -t`
+# sets a timestamp whose nanoseconds are ZERO everywhere, so both files get the
+# same one and nothing is left to truncate; then `mv`, a rename that leaves
+# mtime alone, puts the drifted content under the stamp the index recorded.
 #
-#   python3 heredoc     -- the aarch64 guest has no python3, so the fix ran
-#                          nowhere on Linux;
-#   printf + `touch -r` -- `touch -r` does not carry nanoseconds in the guest
-#                          (it is why T143 skips there), so the stamp rejected
-#                          the fixture on mtime and the seek never happened.
-#
-# The way out is not more precision, it is less: `touch -t` sets a timestamp
-# whose nanoseconds are ZERO, everywhere. Give both files the same one and
-# there is nothing left for a truncating touch to lose. Then `mv` -- a rename,
-# which does not touch mtime at all -- puts the drifted content in place under
-# the stamp the index recorded.
-#
-# 這份 fixture 必須擊敗 O(1) 戳記：大小 + **奈秒級** mtime + 頭尾各 64 個位元組。這份 fixture
-# 先前的兩個版本，在真正要緊的那些平台上都做不到：
-#   python3 heredoc     —— aarch64 guest 沒有 python3，於是這個修正在 Linux 上哪裡都沒跑到；
-#   printf + `touch -r` —— guest 的 `touch -r` 不帶奈秒（那正是 T143 在那裡跳過的原因），
-#                          於是戳記因 mtime 而拒絕這份 fixture，那個 seek 根本不會發生。
-# 出路不是更高的精度，是更低的：`touch -t` 設出來的時間戳，奈秒是 **0**，每個平台都是。讓兩個
-# 檔案拿到同一個，就沒有東西留給一個會截斷的 touch 去弄丟。接著用 `mv`——一次 rename，它完全
-# 不動 mtime——把偏移過的內容放到「索引所記錄的那個戳記」底下。
+# 這份 fixture 必須擊敗 O(1) 戳記：大小 + **奈秒級** mtime + 頭尾各 64 個位元組。因此把一筆
+# 加長、後面一筆縮短同樣的量。不能用 python3（aarch64 guest 沒有）也不能用 `touch -r`（它在那裡
+# 不帶奈秒，見 T143）。`touch -t` 設出的時間戳奈秒在每個平台都是 **0**，讓兩個檔案拿到同一個，
+# 就沒有東西可被截斷；接著用 `mv`——一次不動 mtime 的 rename——把偏移過的內容放到索引所記錄
+# 的戳記底下。
 {
     print -r -- "id,value"
     for _i in {1..2000}; do printf '%d,value%06d\n' $_i $_i; done
@@ -11809,11 +10582,11 @@ touch -t 202601010000 "$_t204" "$_t204_drift"
 CSV2_INDEX_MIN_BYTES=10 "$CSV2" --build-index -i "$_t204" > /dev/null
 mv "$_t204_drift" "$_t204"
 
-# The fixture is only a fixture if the stamp ACCEPTS it. If some platform still
-# rejects it, this case would pass through the path that already worked and
-# prove nothing; say so rather than count it.
-# 這個 fixture 只有在「戳記接受它」時才算數。若某個平台仍然拒絕它，這個案例會走上一條本來就
-# 正常的路、什麼也證明不了；把這件事說出來，而不是把它算成一分。
+# The fixture counts only if the stamp ACCEPTS it. If a platform rejects it,
+# this case would pass through the path that already works and prove nothing,
+# so it is a SKIP, not a pass.
+# 這個 fixture 只有在戳記「接受」它時才算數。若某個平台拒絕它，這個案例會走上本來就正常的
+# 路、什麼也證明不了，所以記為 SKIP 而不是通過。
 _t204_hit=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$_t204" -debug 2>&1 | grep -c 'index hit')
 if [[ $_t204_hit == 0 ]]; then
     skipt "T204 the stamp rejected the drifted fixture, so the seek never happened / 戳記拒絕了這份 fixture，於是那個 seek 根本沒發生"
@@ -11857,14 +10630,10 @@ assert_eq "$_t204_fell" "0" \
     "T204g and does not fall back when it does not have to / 而且在不必要時不會走退路"
 
 # Reading a sidecar is NOT gated by CSV2_INDEX_MIN_BYTES; only side-effect
-# WRITING is. The env-var table said "no index is read or written as a SIDE
-# EFFECT", which parses two ways and is false under one of them -- round 74
-# measured a 33 KB file consulting its sidecar. Note the absence of any
-# CSV2_INDEX_MIN_BYTES here: this runs at the 16 MiB default, on a 33 KB file.
-# 「讀」sidecar 不受 CSV2_INDEX_MIN_BYTES 管，只有「副作用式的寫」受它管。環境變數那張表原本
-# 寫的是「不會以副作用的方式讀寫索引」，那句話有兩種讀法，其中一種是錯的——第 74 回合實測到一個
-# 33 KB 的檔案採用了它的 sidecar。注意這裡沒有設 CSV2_INDEX_MIN_BYTES：它跑在 16 MiB 的預設值上，
-# 而檔案是 33 KB。
+# WRITING is. Hence no CSV2_INDEX_MIN_BYTES here: this runs at the 16 MiB
+# default, on a 33 KB file. Round 74.
+# 「讀」sidecar 不受 CSV2_INDEX_MIN_BYTES 管，只有「副作用式的寫」受它管。所以這裡沒有設
+# CSV2_INDEX_MIN_BYTES：它跑在 16 MiB 的預設值上，而檔案是 33 KB。第 74 回合。
 rm -f "$_t204.index"
 "$CSV2" --build-index -i "$_t204" > /dev/null
 _t204_small=$("$CSV2" -mid 1500,1500 -i "$_t204" -debug 2>&1 | grep -c 'index hit')
@@ -11883,18 +10652,14 @@ fi
 # ---------------------------------------------------------------------
 # T205 -- a refusal's prescription has to be runnable.
 #
-# Round 74, JC and JD. Two refusals told the reader exactly what to do and the
-# instruction did not work: one printed a whole command reconstructed from a
-# verb that takes two arguments as though it took one, and the other suggested
-# a flag that the verb it was refusing rejects outright.
-#
-# What these assert is not the wording. It is that the fix each message
-# prescribes, run verbatim, succeeds.
+# A refusal's prescription, run verbatim, must succeed; the wording is not
+# what is asserted. One refusal must not rebuild a command treating a
+# two-argument verb as one-argument (JC); the other must not suggest a flag
+# the refused verb itself rejects (JD). Round 74.
 #
 # T205 —— 一則拒絕開出的處方，必須是跑得起來的。
-# 第 74 回合，JC 與 JD。兩則拒絕都明確告訴讀者該怎麼做，而那個指示行不通：一則把「吃兩個
-# 引數的動詞」當成吃一個，重建出一整個指令；另一則建議了一個「那個動詞本身會拒絕」的旗標。
-# 這裡斷言的不是措辭，而是「照著它的處方逐字執行會成功」。
+# 拒絕所開出的處方，逐字執行必須成功；斷言的不是措辭。一則不得把「吃兩個引數的動詞」當成
+# 吃一個去重建指令（JC）；另一則不得建議被拒絕的那個動詞本身會拒絕的旗標（JD）。第 74 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T205: the fix a refusal prescribes / T205：拒絕所開出的處方 ---"
@@ -11943,28 +10708,20 @@ assert_succeeds "T205f and appending to the clean copy works / 而對那份乾�
     "$CSV2" -append '2,y' -i "$TMP/t205clean.csv" --in-place
 
 # ---------------------------------------------------------------------
-# T206 -- three things the README now states that it did not, each of which
-# round 75 either had to guess or had to derive.
+# T206 -- three things the README states, each of which a reader would
+# otherwise have to guess or derive.
 #
 #   a/b  edit verbs mix in one run, and a -delete renumbers what follows.
-#        Both were true and neither was written down; the round ran the
-#        mixture "as a bet" and inferred the renumbering from one example's
-#        output.
-#   c/d  `-tail 1 --json` gives the record count for a seek instead of a full
-#        read -- but ONLY when a sidecar exists. The round measured the cheap
-#        case and the README now says so; d is the half that keeps the new
-#        sentence honest, because below CSV2_INDEX_MIN_BYTES `-tail` reads
-#        every byte and leaves no sidecar behind, so an unconditional claim
-#        would be the next round's DOC WRONG.
+#   c/d  `-tail 1 --json` gives the record count by a seek instead of a full
+#        read -- but ONLY when a sidecar exists. d keeps that sentence honest:
+#        below CSV2_INDEX_MIN_BYTES `-tail` reads every byte and leaves no
+#        sidecar, so an unconditional claim would be wrong. Round 75.
 #
-# T206 —— README 現在寫出來、而先前沒有寫的三件事，每一件在第 75 回合都得靠猜或靠推導。
-#   a/b  編輯動詞可以在一次執行裡混用，而一次 -delete 會把後面的紀錄重新編號。兩件事都成立、
-#        而且都沒被寫下來；那個回合說那次混用是它「賭的」，重新編號則是從某個例子的輸出推斷的。
+# T206 —— README 寫出來的三件事，否則讀者都得靠猜或靠推導。
+#   a/b  編輯動詞可以在一次執行裡混用，而一次 -delete 會把後面的紀錄重新編號。
 #   c/d  `-tail 1 --json` 用一次 seek 取代整檔讀取來得到紀錄數——但**只有在有 sidecar 時**。
-#        那個回合量到的是便宜的那一半，而 d 是讓那句新加的話保持誠實的另一半：在
-#        CSV2_INDEX_MIN_BYTES 以下，`-tail` 會讀完每一個位元組、也不會留下 sidecar，
-#        因此一句無條件的宣稱會變成下一個回合的 DOC WRONG。
-# ---------------------------------------------------------------------
+#        d 讓那句話保持誠實：在 CSV2_INDEX_MIN_BYTES 以下，`-tail` 會讀完每一個位元組、也不會
+#        留下 sidecar，因此無條件的宣稱會是錯的。第 75 回合。
 echo
 echo "--- T206: things the README now says / T206：README 現在說出來的那幾件事 ---"
 
@@ -12000,9 +10757,9 @@ else
     bad "T206c2 read $_t206_read of $_t206_size bytes / 讀了 $_t206_read／$_t206_size 個位元組"
 fi
 
-# Without a sidecar the same command reads everything. This is the clause that
-# keeps the README's new sentence from being false.
-# 沒有 sidecar 時，同一個指令會讀完全部。這一條正是讓 README 那句新加的話不至於變成假話的那半句。
+# Without a sidecar the same command reads everything: the clause that keeps
+# the README's sentence from being false.
+# 沒有 sidecar 時，同一個指令會讀完全部：這正是讓 README 那句話不至於變成假話的那半句。
 rm -f "$TMP/t206big.csv.index"
 _t206_nosidecar=$("$CSV2" -tail 1 --json -i "$TMP/t206big.csv" -debug 2>&1 | sed -n 's/.*read_bytes=\([0-9]*\).*/\1/p' | tail -1)
 assert_eq "$_t206_nosidecar" "$_t206_size" \
@@ -12014,27 +10771,21 @@ else
 fi
 
 # ---------------------------------------------------------------------
-# T207 -- four claims round 76 made the README state, each of which it had to
-# establish by experiment because the document did not say.
+# T207 -- four facts the README states, each established by experiment.
 #
-#   a/b  --normalize can REMOVE a hit. The README described it only as
-#        widening the net; the fold applies to the cell too, so a match that
-#        existed only in the stored bytes stops existing. A script adding the
-#        flag defensively finds LESS, silently.
-#   c    a raw tab in a .csv2 cell is legal and stored raw. The escapes were
-#        listed as \n, \r, \\ and the character next to them on the keyboard
-#        went unmentioned.
+#   a/b  --normalize can REMOVE a hit: the fold applies to the cell too, so a
+#        match that exists only in the stored bytes stops existing. A script
+#        adding the flag defensively finds LESS, silently.
+#   c    a raw tab in a .csv2 cell is legal and stored raw; the escapes are
+#        only \n, \r and \\.
 #   d    a stream is not a file with a different name: no index is consulted,
-#        and --build-index is refused. The pipeline section used to open
-#        "there is nothing special about a pipeline except that stdin has no
-#        suffix".
+#        and --build-index is refused. Round 76.
 #
-# T207 —— 第 76 回合讓 README 寫出來的四件事，每一件它都得靠實驗確立，因為文件沒有說。
-#   a/b  --normalize 可能「拿走」一個命中。README 只把它描述成「把網撒寬」；而那個折疊同樣
-#        作用在儲存格上，於是一個「只存在於已儲存位元組裡」的相符會就此不存在。一支為了保險
-#        而加上這個旗標的腳本，會安靜地找到更少。
-#   c    .csv2 儲存格裡的原始 tab 是合法的，而且原樣儲存。
-#   d    串流不是「換了個名字的檔案」：索引不會被採用，`--build-index` 會被拒絕。
+# T207 —— README 寫出的四件事，每一件都由實驗確立。
+#   a/b  --normalize 可能「拿走」一個命中：折疊同樣作用在儲存格上，於是只存在於已儲存位元組
+#        裡的相符會就此不存在。為了保險而加上這個旗標的腳本，會安靜地找到更少。
+#   c    .csv2 儲存格裡的原始 tab 是合法的，而且原樣儲存；跳脫只有 \n、\r 與 \\。
+#   d    串流不是「換了個名字的檔案」：索引不會被採用，`--build-index` 會被拒絕。第 76 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T207: what a stream, a tab and a fold actually do / T207：串流、tab 與折疊實際上做了什麼 ---"
@@ -12057,9 +10808,9 @@ assert_eq "$_t207_plain" "2" \
 assert_eq "$_t207_norm" "1" \
     "T207b and --normalize takes that hit away / 而 --normalize 會把那個命中拿走"
 
-# The widening the README always described still happens, in the other
-# direction -- so the flag is not simply narrower.
-# README 一直在描述的那個「變寬」仍然存在，只是方向相反——因此這個旗標並不是單純比較窄。
+# The widening the README describes still happens, in the other direction --
+# so the flag is not simply narrower.
+# README 描述的那個「變寬」仍然存在，只是方向相反——因此這個旗標並不是單純比較窄。
 _t207_nfc=$(printf 'caf\xc3\xa9')
 _t207_w1=$("$CSV2" -contains "$_t207_nfc" -i "$TMP/t207.csv" | wc -l | tr -d ' ')
 _t207_w2=$("$CSV2" -contains "$_t207_nfc" --normalize -i "$TMP/t207.csv" | wc -l | tr -d ' ')
@@ -12096,27 +10847,23 @@ assert_fails "T207g --build-index is refused on a stream / 對串流執行 --bui
     "$CSV2" -si --headers 1 --build-index < "$TMP/t207big.csv"
 
 # ---------------------------------------------------------------------
-# T208 -- round 77. The document promised something --json could not do, and
-# was silent about three things a reader has to know.
+# T208 -- what --json carries for a .csv2, and what the README must say.
 #
-#   a/b/c  "--json always carries both names" was true only of the locating
-#          report. In a SELECTION the record object keys `fields` by the first
-#          header row, so on a .csv2 the SECOND row had no way out through
-#          --json at all -- not per record, not on the meta line, and --zh
-#          changed nothing and said nothing. A consumer wanting the Chinese
-#          titles had to parse the raw header row, which is the thing this tool
-#          exists to stop. It now travels on the meta line, as an array.
-#   d      where r:c splits when a column NAME contains a colon: at the first.
+#   a/b/c  --json carries both header names in a SELECTION too. The record
+#          object keys `fields` by the first header row, so the second row
+#          travels on the meta line, as an array; otherwise a consumer wanting
+#          the Chinese titles has to parse the raw header row, which is what
+#          this tool exists to stop.
+#   d      a colon in a column name is refused (r:c syntax).
 #   e      nothing scopes a search to one column, which is what makes the
-#          obvious counting idiom silently wrong.
+#          obvious counting idiom silently wrong. Round 77.
 #
-# T208 —— 第 77 回合。文件承諾了一件 --json 做不到的事，並對三件讀者必須知道的事保持沉默。
-#   a/b/c  「--json 一律帶著兩個名字」只對定位報告為真。在「選取」裡，紀錄物件是以第一列標頭
-#          為鍵的，於是在 .csv2 上第二列根本沒有出口——不在每一筆裡、不在 meta 行上，而 --zh
-#          什麼也沒改、什麼也沒說。想要中文欄名的消費端只能自己去剖析原始標頭列，而那正是這個
-#          工具存在所要阻止的事。它現在走 meta 行，以陣列形式。
-#   d      欄名含冒號時 r:c 分在哪裡：第一個。
-#   e      沒有任何東西能把搜尋限定在一欄，而那正是最直覺的計數寫法安靜地錯掉的原因。
+# T208 —— 對 .csv2 而言 --json 帶得走什麼，以及 README 必須說出什麼。
+#   a/b/c  在「選取」裡 --json 同樣帶著兩列標頭名稱。紀錄物件以第一列標頭為鍵，所以第二列
+#          以陣列形式走 meta 行；否則想要中文欄名的消費端只能自己剖析原始標頭列，而那正是
+#          這個工具存在所要阻止的事。
+#   d      欄名含冒號會被拒絕（r:c 語法）。
+#   e      沒有任何東西能把搜尋限定在一欄，而那正是最直覺的計數寫法安靜地錯掉的原因。第 77 回合。
 # ---------------------------------------------------------------------
 echo
 echo "--- T208: what --json carries, and what nothing scopes / T208：--json 帶得走什麼，以及沒有東西能限定什麼 ---"
@@ -12154,9 +10901,9 @@ esac
 
 # --json-ascii reaches it, like every other string on the line. Compared with
 # printf, never with echo: zsh's echo decodes \u escapes and makes correctly
-# escaped output look unescaped -- which cost half an hour on 2026-08-26.
+# escaped output look unescaped.
 # --json-ascii 也管得到它，與那一行上其他每個字串一樣。用 printf 比對，絕不要用 echo：
-# zsh 的 echo 會解讀 \u 逸出序列，讓「正確跳脫的輸出」看起來沒有跳脫——2026-08-26 為此花了半小時。
+# zsh 的 echo 會解讀 \u 逸出序列，讓正確跳脫的輸出看起來沒有跳脫。
 _t208_ascii=$("$CSV2" -r --json --json-ascii -i "$TMP/t208.csv2" | head -1)
 case $_t208_ascii in
     *'"header_zh":["\u5957\u4ef6","\u7248\u672c"]'*)
@@ -12173,11 +10920,11 @@ printf 'pkg,a:b\nx,y\n' > "$TMP/t208colon.csv"
 assert_fails "T208e a colon in a column name is refused / 欄名含冒號會被拒絕" -- \
     "$CSV2" -r -i "$TMP/t208colon.csv"
 
-# Nothing scopes a search to one column. Asserted so the README's new warning
-# has something behind it -- and so the day a -col filter appears, this case
-# says the warning is now wrong.
-# 沒有任何東西能把搜尋限定在一欄。在此斷言，讓 README 那段新加的警告有東西撐著——也讓哪天真的
-# 出現了 -col 之類的篩選時，這個案例會說「那段警告現在錯了」。
+# Nothing scopes a search to one column. Asserted so the README's warning has
+# something behind it, and so that if a -col filter ever appears, this case
+# says the warning is wrong.
+# 沒有任何東西能把搜尋限定在一欄。在此斷言，讓 README 那段警告有東西撐著；若哪天出現了 -col
+# 之類的篩選，這個案例會說那段警告錯了。
 printf 'pkg,license,source\nlibA,MIT,upstream\ntransMITter,BSD,relicensed from MIT in 2019\n' > "$TMP/t208lic.csv"
 _t208_hits=$("$CSV2" -contains MIT -i "$TMP/t208lic.csv" | wc -l | tr -d ' ')
 assert_eq "$_t208_hits" "3" \
@@ -12191,23 +10938,16 @@ esac
 # ---------------------------------------------------------------------
 # T209 -- phase 8a: a Markdown table read back.
 #
-# `-md` could render a table and nothing could read one. The round trip is the
-# whole feature, so the fixture is built to break it: a `|`, an embedded
-# newline, a LITERAL `<br>`, a value with leading and trailing spaces, and two
-# header rows joined with `<br>`.
-#
-# The two that mattered are the last two. A literal `<br>` and a real newline
-# rendered identically until this phase -- T136c asserted that collision as a
-# fact, and it had to be inverted here. And leading spaces are indistinguishable
-# from `--pretty`'s padding unless they are escaped, which is why they are.
+# The round trip is the whole feature, so the fixture is built to break it: a
+# `|`, an embedded newline, a LITERAL `<br>`, a value with leading and trailing
+# spaces, and two header rows joined with `<br>`. A literal `<br>` must render
+# differently from a real newline (T136c now asserts that too), and leading spaces are escaped because otherwise they are
+# indistinguishable from `--pretty`'s padding.
 #
 # T209 —— 第 8a 階段：把一張 Markdown 表讀回來。
-# `-md` 算繪得出一張表，而沒有任何東西讀得回一張。那趟往返就是這個功能的全部，因此這份 fixture
-# 是為了弄壞它而造的：一個 `|`、一個內嵌換行、一個**字面的** `<br>`、一個前後帶空白的值，以及
-# 兩列以 `<br>` 接起來的標頭。
-# 要緊的是最後兩個。在這個階段之前，字面的 `<br>` 與真正的換行算繪得一模一樣——T136c 把那個碰撞
-# 當成事實斷言下來，而它在這裡必須被反過來。而開頭的空白，若不跳脫就與 `--pretty` 的補白分不出來，
-# 那正是它們被跳脫的原因。
+# 往返就是這個功能的全部，因此 fixture 是為了弄壞它而造的：一個 `|`、一個內嵌換行、一個
+# **字面的** `<br>`、一個前後帶空白的值，以及兩列以 `<br>` 接起來的標頭。字面的 `<br>` 必須
+# 與真正的換行算繪得不同（T136c），而開頭的空白要跳脫，否則與 `--pretty` 的補白分不出來。
 # ---------------------------------------------------------------------
 echo
 echo "--- T209: Markdown, both ways / T209：Markdown，雙向 ---"
@@ -12242,13 +10982,11 @@ assert_same "$TMP/t209one.csv" "$TMP/t209one_back.csv" \
 assert_fails "T209d --headers is refused on a .md / --headers 用在 .md 上會被拒絕" -- \
     "$CSV2" -r -t --headers 2 -i "$TMP/t209one.md"
 
-# Two tables in one file. Before this refusal existed the second table's header
-# and its |---| separator were read as DATA, at exit 0 -- `---,---` became a
-# record. That is the failure this whole tool exists to refuse, introduced by
-# the commit that added the feature and found by a question rather than a test.
-# 一個檔案裡兩張表。在這條拒絕存在之前，第二張表的標頭與它的 |---| 分隔列會被讀成**資料**，
-# 而且 exit 0——`---,---` 成了一筆紀錄。那正是這整個工具存在所要拒絕的那種失敗，它是被「加入這個
-# 功能」的那個 commit 帶進來的，而發現它的是一個問題，不是一個測試。
+# Two tables in one file are refused; otherwise the second table's header and
+# its |---| separator are read as DATA at exit 0 (`---,---` becomes a record),
+# the failure this whole tool exists to refuse.
+# 一個檔案裡有兩張表會被拒絕；否則第二張表的標頭與它的 |---| 分隔列會以 exit 0 被讀成**資料**
+# （`---,---` 成了一筆紀錄），那正是這整個工具存在所要拒絕的失敗。
 {
     print -r -- "|a|b|"; print -r -- "|---|---|"; print -r -- "|1|2|"
     print -r -- ""
@@ -12306,21 +11044,20 @@ esac
 # T210 -- phase 8b: a file with no suffix is one column.
 #
 # One column, ZERO header rows, and the line's bytes verbatim. Each third of
-# that was measured, not chosen: with the documented `--headers 1` the first
-# line is EATEN as a header; a comma in a path turns a find dump into a
-# two-column table that then fails on the first line without one; and .csv2
+# that is required: with `--headers 1` the first line would be EATEN as a
+# header; splitting on commas would turn a find dump with a comma in a path
+# into a two-column table that fails on the first line without one; and .csv2
 # escaping would change the meaning of a line holding a literal \n.
 #
-# Four SIGTRAPs came out of this -- exit 133, nothing on either stream -- all
-# the same shape: code written when every file had a header, meeting one that
-# has none. The cases below are the shapes that found them.
+# Code that assumes every file has a header traps (SIGTRAP, exit 133, nothing
+# on either stream) on one that has none; the cases below are the shapes that
+# hit it.
 #
 # T210 —— 第 8b 階段：沒有副檔名的檔案就是一欄。
-# 一欄、**零列**標頭、那一行的位元組原樣。這三分之一都是量出來的，不是挑出來的：用有記載的
-# `--headers 1`，第一行會被當成標頭吃掉；路徑裡的一個逗號會把 find 輸出變成兩欄的表，接著在
-# 第一個沒有逗號的行上失敗；而 .csv2 的跳脫會改變「含字面 \n 的那一行」的意思。
-# 這裡挖出四個 SIGTRAP——exit 133、兩條輸出流上都沒有東西——形狀完全相同：在「每個檔案都有標頭」
-# 的年代寫下的程式碼，遇到一個沒有標頭的檔案。底下的案例就是找到它們的那些形狀。
+# 一欄、**零列**標頭、那一行的位元組原樣，三者缺一不可：用 `--headers 1`，第一行會被當成標頭
+# 吃掉；以逗號切分，路徑裡有逗號的 find 輸出會變成兩欄的表，接著在第一個沒有逗號的行上失敗；
+# 而 .csv2 的跳脫會改變「含字面 \n 的那一行」的意思。假設「每個檔案都有標頭」的程式碼，遇到沒有
+# 標頭的檔案會 trap（SIGTRAP、exit 133、兩條輸出流都沒有東西）；底下的案例就是會撞上它的形狀。
 # ---------------------------------------------------------------------
 echo
 echo "--- T210: no suffix, one column / T210：沒有副檔名，一欄 ---"
@@ -12331,10 +11068,9 @@ print -r -- "/etc/hosts"   >> "$TMP/t210list"
 assert_eq "$("$CSV2" -r -i "$TMP/t210list" | tr '\n' ' ')" "/usr/bin/env /usr/bin/zsh /etc/hosts " \
     "T210a every line survives; none is eaten as a header / 每一行都活下來，沒有一行被當成標頭吃掉"
 
-# A comma and a quote are DATA. This is the case that decided the format: a
-# find dump with a comma in a path was a two-column table before.
-# 逗號與引號是**資料**。決定這個格式的正是這個案例：先前一份「路徑裡有逗號」的 find 輸出會變成
-# 一張兩欄的表。
+# A comma and a quote are DATA: a find dump with a comma in a path must stay
+# one column.
+# 逗號與引號是**資料**：路徑裡有逗號的 find 輸出必須仍然是一欄。
 print -r -- "a,b"            > "$TMP/t210c"
 print -r -- 'plain'         >> "$TMP/t210c"
 print -r -- '"quoted,thing"'>> "$TMP/t210c"
@@ -12349,10 +11085,10 @@ assert_eq "$("$CSV2" -get 3:1 -i "$TMP/t210c")" '"quoted,thing"' \
 assert_same "$TMP/t210c" "$TMP/t210out" \
     "T210d a suffix-less file round-trips byte for byte / 沒有副檔名的檔案逐位元往返"
 
-# The four verbs. Each of these crashed with SIGTRAP before the header reads
-# were guarded, which is why they are asserted one by one rather than in a loop.
-# 那四個動詞。在那些「讀標頭」的地方被守衛起來之前，每一個都會以 SIGTRAP 當掉——這正是它們
-# 被一個一個斷言、而不是寫成迴圈的原因。
+# The four verbs, asserted one by one rather than in a loop: each read a
+# header that a suffix-less file does not have, and each trapped on it.
+# 那四個動詞一個一個斷言，而不是寫成迴圈：每一個都會去讀無副檔名檔案所沒有的標頭，
+# 也都曾因此 trap。
 cp "$TMP/t210list" "$TMP/t210e"
 assert_succeeds "T210e -delete works with no header row / 沒有標頭列時 -delete 可用" -- \
     "$CSV2" -delete 2 -i "$TMP/t210e" --in-place
@@ -12374,19 +11110,18 @@ assert_succeeds "T210j -append works with no header row / 沒有標頭列時 -ap
 assert_eq "$("$CSV2" -get 4:1 -i "$TMP/t210j")" "has,comma" \
     "T210k and the appended line keeps its comma / 而被追加的那一行留著它的逗號"
 
-# A name cannot be resolved without a header, and the refusal says so instead
-# of the older sentence, which claimed -get needs a header at all.
-# 沒有標頭就解析不了「名稱」，而那句拒絕會這樣說，不是說「-get 一定需要標頭」——那是舊的說法。
+# A name cannot be resolved without a header, and the refusal says exactly
+# that, not that -get needs a header at all.
+# 沒有標頭就解析不了「名稱」，而那句拒絕說的正是這件事，不是「-get 一定需要標頭」。
 _t210_name=$("$CSV2" -get 1:name -i "$TMP/t210c" 2>&1)
 case $_t210_name in
     *"only be addressed by NUMBER"*) ok "T210l a column NAME is refused, by number is not / 欄位「名稱」被拒絕，而「編號」不會" ;;
     *) bad "T210l got: $_t210_name / 實得如上" ;;
 esac
 
-# --headers still overrides: a file called `data` that IS a CSV was readable
-# that way before this phase and has to stay readable.
-# --headers 仍然可以覆蓋：一個叫 `data`、而且確實是 CSV 的檔案，在這個階段之前就是這樣讀的，
-# 現在也必須還能這樣讀。
+# --headers still overrides: a file called `data` that IS a CSV must stay
+# readable that way.
+# --headers 仍然可以覆蓋：一個叫 `data`、而且確實是 CSV 的檔案，必須還能這樣讀。
 print -r -- "k,v"  > "$TMP/t210h1"
 print -r -- "1,x" >> "$TMP/t210h1"
 assert_eq "$("$CSV2" -r --headers 1 --json -i "$TMP/t210h1" | sed -n 2p)" \
@@ -12394,20 +11129,15 @@ assert_eq "$("$CSV2" -r --headers 1 --json -i "$TMP/t210h1" | sed -n 2p)" \
     "T210m --headers still reads a suffix-less file as CSV / --headers 仍然能把沒有副檔名的檔案當成 CSV 讀"
 
 # ---------------------------------------------------------------------
-# T211 -- round 78, on two features that were days old and had been used by
-# nobody. Ten defects, and every one of them in code written in the two days
-# before it ran.
+# T211 -- the `.lines` and `.md` formats against the existing guards. Round 78.
 #
-# The four that matter most are one root: the never-convert guard did not know
-# about `.lines`, so csv2 WROTE FILES CSV2 COULD NOT READ BACK, at rc=0 -- the
-# exact damage the README describes for a hand-renamed file while saying csv2
-# will not itself produce it.
+# The never-convert guard must know about `.lines`; otherwise csv2 WRITES
+# FILES CSV2 CANNOT READ BACK, at rc=0 -- the damage the README describes for
+# a hand-renamed file while saying csv2 will not itself produce it. JV, JW, JX.
 #
-# T211 —— 第 78 回合，針對兩個「只有幾天大、除了作者以外沒有人用過」的功能。十個缺陷，而每一個
-# 都在它執行前兩天內寫下的程式碼裡。
-# 其中最要緊的四個同一個根源：never-convert 那道守衛不認識 `.lines`，於是 csv2 **寫出了 csv2 自己
-# 讀不回來的檔案**，而且 rc=0——那正是 README 描述「手動改名一個檔案」會造成的損害，同時說 csv2
-# 自己不會製造它。
+# T211 —— `.lines` 與 `.md` 格式對上既有的守衛。第 78 回合。
+# never-convert 守衛必須認得 `.lines`；否則 csv2 會在 rc=0 下**寫出 csv2 自己讀不回來的檔案**
+# ——那正是 README 描述「手動改名一個檔案」會造成的損害，同時說 csv2 自己不會製造它。JV、JW、JX。
 # ---------------------------------------------------------------------
 echo
 echo "--- T211: what round 78 found / T211：第 78 回合找到的東西 ---"
@@ -12415,8 +11145,8 @@ echo "--- T211: what round 78 found / T211：第 78 回合找到的東西 ---"
 print -r -- "one" > "$TMP/t211l"; print -r -- "two" >> "$TMP/t211l"
 printf 'k,v\n1,x\n' > "$TMP/t211h.csv"
 
-# JV: the four writes that produced unreadable files.
-# JV：那四次「產出讀不回來的檔案」的寫入。
+# JV: writes that would produce unreadable files.
+# JV：會產出讀不回來的檔案的寫入。
 assert_fails "T211a zero header rows into a .csv is refused / 零列標頭寫進 .csv 會被拒絕" -- \
     "$CSV2" -r -t -i "$TMP/t211l" -o "$TMP/t211a.csv"
 # Writing a header-ed file to a suffix-less name is ALLOWED, and T145e is why.
@@ -12445,8 +11175,8 @@ assert_succeeds "T211d lines to lines still writes / lines 寫到 lines 仍然�
 assert_succeeds "T211e csv to csv still writes / csv 寫到 csv 仍然可用" -- \
     "$CSV2" -r -t -i "$TMP/t211h.csv" -o "$TMP/t211e.csv"
 
-# JW: a CR must survive -md, and so must a CRLF -- neither did.
-# JW：CR 必須撐過 -md，CRLF 也是——兩者都沒有。
+# JW: a CR must survive -md, and so must a CRLF.
+# JW：CR 必須撐過 -md，CRLF 也是。
 print -r -- "k" > "$TMP/t211cr.csv"
 printf '"a\rb"\n"c\r\nd"\n"e\nf"\n' >> "$TMP/t211cr.csv"
 "$CSV2" -r -t -md -i "$TMP/t211cr.csv" > "$TMP/t211cr.md"
@@ -12458,16 +11188,16 @@ case "$(cat "$TMP/t211cr.md")" in
     *) bad "T211g the CR is not \\x0D / 那個 CR 不是 \\x0D" ;;
 esac
 
-# The same-format escaping bug found while fixing JW: a ONE-header table wrote
-# .csv2 escapes and was parsed as .csv, leaving a newline as a literal \n.
-# 修 JW 時撞到的「格式不一致」缺陷：一張**單列標頭**的表寫出 .csv2 的跳脫，卻被當成 .csv 解析，
-# 於是一個換行以字面 \n 留在資料裡。
+# A ONE-header table must not be written with .csv2 escapes, since it is
+# parsed back as .csv and a newline would stay a literal \n. Found with JW.
+# **單列標頭**的表不得以 .csv2 的跳脫寫出，因為它會被當成 .csv 解析回來，換行會以字面 \n
+# 留在資料裡。與 JW 一起發現。
 assert_eq "$("$CSV2" -get 3:1 -i "$TMP/t211cr.md" | od -A n -c | tr -s ' ')" \
     "$("$CSV2" -get 3:1 -i "$TMP/t211cr.csv" | od -A n -c | tr -s ' ')" \
     "T211h a one-header table's newline comes back as a newline / 單列標頭的表，換行回來時仍是換行"
 
-# JX: five guards that existed, were right, and did not fire.
-# JX：五個「存在、正確、卻沒有觸發」的守衛。
+# JX: guards that must fire on these formats.
+# JX：在這些格式上必須觸發的守衛。
 assert_fails "T211i --md-table is refused on input that is not a .md / --md-table 用在不是 .md 的輸入上會被拒絕" -- \
     "$CSV2" -r --headers 1 --md-table 2 -i "$TMP/t211h.csv"
 assert_fails "T211j a .md destination without -md is refused / 沒有 -md 卻指定 .md 目的地會被拒絕" -- \
@@ -12486,15 +11216,13 @@ assert_eq "$("$CSV2" -get 1:1 -i "$TMP/t211n")" "zero" \
     "T211o and it lands at position 1 / 而且它落在位置 1"
 
 # A destination that is not a regular file declares no format. `/dev/stdout`
-# has no suffix, and the JV fix treated "no suffix" as "zero header rows" --
-# so it refused with the WRONG REASON, one step before the right refusal
-# ("-o needs a regular file; use -so") could speak. macOS reached the right one
-# first and the guest did not, so it showed up only in the guest, on a case
-# macOS skips. Asserted here on the MESSAGE, so both platforms check it.
-# 一個不是一般檔案的目的地，什麼格式也沒宣告。`/dev/stdout` 沒有副檔名，而 JV 的修正把「沒有副
-# 檔名」當成「零列標頭」——於是它以**錯的理由**拒絕，就在對的那句拒絕（「-o 需要一般檔案，請用
-# -so」）說話的前一步。macOS 先走到對的那一句，guest 沒有，於是它只在 guest、而且只在一個 macOS
-# 會跳過的案例上現形。這裡斷言的是**訊息**，因此兩個平台都會檢查它。
+# has no suffix, and treating "no suffix" as "zero header rows" refuses it for
+# the WRONG REASON, one step before the right refusal ("-o needs a regular
+# file; use -so"). Platforms reach the two checks in different orders, so this
+# asserts the MESSAGE, which every platform checks. JV.
+# 不是一般檔案的目的地，什麼格式也沒宣告。`/dev/stdout` 沒有副檔名，把「沒有副檔名」當成
+# 「零列標頭」會以**錯的理由**拒絕它，就在對的那句（「-o 需要一般檔案，請用 -so」）之前一步。
+# 各平台走到兩道檢查的順序不同，所以這裡斷言的是**訊息**，每個平台都會檢查它。JV。
 _t211_dev=$("$CSV2" -r -t -i "$TMP/t211h.csv" -o /dev/stdout 2>&1 >/dev/null)
 case $_t211_dev in
     *"header row(s)"*)
@@ -12510,16 +11238,13 @@ case $_t211_dev in
         ok "T211p native Windows sees the translated stream path as missing / 原生 Windows 看見轉換後的串流路徑不存在" ;;
     "")
         # It SUCCEEDED, and on some systems that is right: with stdout on a
-        # file, /dev/stdout resolves to /dev/fd/1 and a process that may write
-        # beside it -- the guest, running as root -- has nothing to refuse.
-        # T145e says exactly this, twenty lines up, and I wrote this case
-        # without reading to the end of it. The property under test is what the
-        # message says WHEN there is one; where there is none there is nothing
-        # to check rather than something that failed.
-        # 它**成功**了，而在某些系統上那是對的：stdout 落在一個檔案上時，/dev/stdout 解析成
-        # /dev/fd/1，而一個可以在它旁邊寫入的行程（以 root 執行的 guest 就是）沒有東西可以拒絕。
-        # T145e 在上面二十行處講的正是這件事，而我寫這個案例時沒有把它讀完。這裡要驗的性質是
-        # 「**當**有訊息時，那則訊息說了什麼」；沒有訊息時，這裡沒有東西要檢查，而不是有東西失敗了。
+        # file, /dev/stdout resolves to /dev/fd/1, and a process that may write
+        # beside it (the guest, running as root) has nothing to refuse; see
+        # T145e. The property under test is what the message says WHEN there is
+        # one; with none there is nothing to check.
+        # 它**成功**了，而在某些系統上那是對的：stdout 落在檔案上時，/dev/stdout 解析成 /dev/fd/1，
+        # 而可以在它旁邊寫入的行程（以 root 執行的 guest）沒有東西可以拒絕；見 T145e。這裡要驗的是
+        # 「**當**有訊息時，訊息說了什麼」；沒有訊息時就沒有東西要檢查。
         ok "T211p -o /dev/stdout succeeded here, so there is no refusal to judge / 這裡的 -o /dev/stdout 成功了，因此沒有拒絕可以評斷" ;;
     *) bad "T211p got: $_t211_dev / 實得如上" ;;
 esac
@@ -12534,34 +11259,29 @@ esac
 #
 # The surface exists because spawning csv2 costs 72 ms from a process that has
 # loaded AppKit against 3.4 ms from python -- the caller's size, not csv2's --
-# which on a per-batch path is a visible freeze. Measured by the SoftPCB
-# session; the six-file subset is what it found sufficient.
+# which on a per-batch path is a visible freeze. The six-file subset is what a
+# caller found sufficient.
 #
 # T212 —— 那個 library 表面，用唯一有意義的方式檢查。
-# `public` 在一個 module 內部什麼也不改變，因此一般建置成功，對「呼叫端能不能用這些型別」什麼也
+# `public` 在 module 內部什麼也不改變，因此一般建置成功，對「呼叫端能不能用這些型別」什麼也
 # 沒說。要做的檢查是呼叫端會做的那個：把子集建成 module、從一個獨立檔案 import 它，並且**執行**
-# 產物。
-# 這個表面之所以存在，是因為從一個載入了 AppKit 的行程 spawn csv2 要 72 ms，而從 python 只要
-# 3.4 ms——那是呼叫端的大小，不是 csv2 的——在一條「每批一次」的路徑上那是一次看得見的凍結。
-# 由 SoftPCB session 量測；那六個檔案的子集是它找出來「足夠」的那一份。
+# 產物。這個表面之所以存在，是因為從載入了 AppKit 的行程 spawn csv2 要 72 ms，從 python 只要
+# 3.4 ms——那是呼叫端的大小，不是 csv2 的——在「每批一次」的路徑上那是看得見的凍結。
 # ---------------------------------------------------------------------
 
 # ---------------------------------------------------------------------
-# T213 -- --version and --help, which nothing asserted until 2026-08-27.
+# T213 -- --version and --help.
 #
-# They were the two things every caller reaches for first and the two things
-# no case checked. The cost was not hypothetical: `csv2 --version` answered
-# `csv2 0.1.0` from the first commit to that day, so it could not tell two
-# builds apart -- and this tree paid for that twice, with a scoop shim
-# resolving to a year-old binary (NN) and an install copying a 496,128-byte
-# file instead of the 543,744-byte one just built. Both reported the same
-# string. The version now carries the build.
+# The two things every caller reaches for first. The version must carry the
+# BUILD, not just the number: a version that answers `csv2 0.1.0` for every
+# build cannot tell a stale binary from the one just built -- a scoop shim
+# resolving to a year-old binary (NN), or an install copying the wrong file,
+# both report the same string.
 #
-# T213 —— `--version` 與 `--help`，在 2026-08-27 之前沒有任何案例斷言過它們。
-# 它們是每一個呼叫端最先伸手去拿的兩樣東西，也是沒有任何案例檢查過的兩樣東西。代價不是假設性的：
-# `csv2 --version` 從第一個 commit 起到那一天為止都回答 `csv2 0.1.0`，因此它分不出兩個建置
-# ——而這棵樹為此付過兩次代價：一個 scoop shim 解析到一年前的二進位檔（NN），以及一次安裝複製了
-# 496,128 位元組的檔案而不是剛建好的 543,744 位元組那個。兩者回報的字串相同。版本現在帶著建置。
+# T213 —— `--version` 與 `--help`。
+# 它們是每個呼叫端最先伸手去拿的兩樣東西。版本必須帶著**建置**，不只是號碼：對每個建置都回答
+# `csv2 0.1.0` 的版本，分不出過期的二進位檔與剛建好的那一個——scoop shim 解析到一年前的
+# 二進位檔（NN）、或安裝複製了錯的檔案，回報的字串都一樣。
 # ---------------------------------------------------------------------
 echo
 echo "--- T213: --version and --help / T213：--version 與 --help ---"
@@ -12579,9 +11299,9 @@ for _t213_f in --version -version -V; do
 done
 
 # It must carry the BUILD, not just the number, or it cannot answer the
-# question anyone asks it: is this node running what I just made?
+# question anyone asks it: is this node running the build just made?
 # 它必須帶著**這次建置**，不只是那個號碼，否則它答不了任何人問它的那個問題：這個節點跑的是不是
-# 我剛做出來的那一個？
+# 剛做出來的那一個？
 _t213_v=$("$CSV2" --version)
 case $_t213_v in
     *"("*")"*) ok "T213b the version names the build, so two builds are distinguishable / 版本說出了這次建置，因此兩個建置分得出來" ;;
@@ -12627,15 +11347,14 @@ fi
 # ---------------------------------------------------------------------
 # T214 -- warnings are repaired, not hidden.
 #
-# The Windows Swift 6 build first warned about strerror and strdup. Replacing
-# those exposed a third deprecated API, String(cString:) on an array. All
-# three were repaired. This pins the other half of that decision: every build
-# entry point must make the NEXT warning fail, and none may silence it.
+# Every build entry point must make the NEXT warning fail, and none may
+# silence it. The Windows Swift 6 warnings (strerror, strdup, and
+# String(cString:) on an array) were repaired rather than suppressed; this
+# pins the other half of that decision.
 #
 # T214 —— 警告要修好，不是藏起來。
-# Windows Swift 6 建置先警告 strerror 與 strdup；修掉後又露出第三個棄用
-# API：對陣列使用 String(cString:)。三個都已修正。這裡釘住該決定的另一半：
-# 每個建置入口都必須讓「下一個警告」失敗，而且沒有任何一個可以把它壓掉。
+# 每個建置入口都必須讓「下一個警告」失敗，而且沒有任何一個可以把它壓掉。Windows Swift 6 的
+# 警告（strerror、strdup、對陣列使用 String(cString:)）都是修好而不是壓掉；這裡釘住該決定的另一半。
 # ---------------------------------------------------------------------
 echo
 echo "--- T214: warnings fail the build / T214：警告會讓建置失敗 ---"
@@ -12677,11 +11396,10 @@ if (( ! $+commands[swiftc] )); then
 else
     if "$ROOT/verifications/module_api.zsh" > "$TMP/t212.log" 2>&1; then
         # Say whether the SwiftPM half ran. module_api.zsh exits 0 when SwiftPM
-        # cannot build here, and its SKIP line used to stay in a log that was
-        # thrown away on success -- so a path nobody checked read exactly like
-        # one that passed. QV.
-        # 說出 SwiftPM 那一半有沒有跑。SwiftPM 在這裡建不起來時 module_api.zsh 以 0 結束，而它那一行
-        # SKIP 原本留在一個通過後就丟掉的紀錄裡——於是一條沒人檢查的路徑，讀起來與通過的一模一樣。QV。
+        # cannot build here, so without this a path nobody checked reads exactly
+        # like one that passed. QV.
+        # 說出 SwiftPM 那一半有沒有跑。SwiftPM 在這裡建不起來時 module_api.zsh 以 0 結束，少了這一行，
+        # 一條沒人檢查的路徑讀起來與通過的一模一樣。QV。
         if LC_ALL=C grep -q '^SKIP .*SPM path is unchecked' "$TMP/t212.log"; then
             _t212_spm="SwiftPM path NOT checked here / SwiftPM 那條路徑在這裡沒有檢查"
         elif LC_ALL=C grep -q '^PASS  and it builds through SPM' "$TMP/t212.log"; then
@@ -12745,13 +11463,11 @@ echo "--- T215: -add-column / T215：-add-column ---"
 # Phase 10. The counterpart -delete -col never had. Every case here writes in
 # place and reads the file back with csv2 itself: a column added to the data
 # records but not to the header produces a file that csv2's own reader
-# refuses, and the first working version did exactly that -- the header write
-# sat inside the `-delete -col` block, so it ran only when something was also
-# being deleted.
+# refuses, and the header write must not depend on `-delete -col` also
+# running.
 # 第 10 階段。`-delete -col` 一直沒有的那個對應動詞。這裡每一個案例都就地寫入、再用 csv2
-# 自己把檔案讀回來：一個「加進了資料列卻沒加進標頭」的欄位，會產生一份 csv2 自己的讀取器
-# 會拒絕的檔案，而第一個能動的版本正是那樣——寫標頭那一行落在 `-delete -col` 的區塊裡，
-# 於是只有在「同時也要刪掉某樣東西」時才會執行。
+# 自己把檔案讀回來：加進了資料列卻沒加進標頭的欄位，會產生 csv2 自己的讀取器會拒絕的檔案，
+# 而寫標頭不得依賴 `-delete -col` 同時執行。
 _t215_src="$TMP/t215.csv2"
 printf 'pkg,ver\n套件,版本\nzlib,1.3\nlz4,1.9\n' > "$_t215_src"
 
@@ -12802,11 +11518,11 @@ else
     bad "T215d rc=$_t215_rc: $(head -1 "$TMP/t215w.csv2") | $_t215_out / 實得如上"
 fi
 
-# Clamping is the failure this tool is named after: -add-column 9 on a
-# two-column file landed at the end and exited 0, and nothing ever said the 9
-# had been ignored.
-# 夾取正是這個工具最在意的那種失敗：兩欄檔案上的 -add-column 9 會落在最後並以 0 結束，
-# 而沒有任何東西說過那個 9 被忽略了。
+# Clamping is the failure this tool exists to refuse: -add-column 9 on a
+# two-column file would land at the end, exit 0, and never say the 9 was
+# ignored.
+# 夾取正是這個工具要拒絕的那種失敗：兩欄檔案上的 -add-column 9 會落在最後、以 0 結束，
+# 而且從不說那個 9 被忽略了。
 _t215_run -add-column 9 'x,y'
 if [[ $_t215_rc != 0 && $_t215_err == *"has 2 columns"* ]] && cmp -s "$_t215_src" "$TMP/t215w.csv2"; then
     ok "T215e N beyond that is refused, and the file is untouched / 再往後的 N 會被拒絕，而檔案未被動過"
@@ -12878,16 +11594,13 @@ else
 fi
 
 # KB. The batch rule -- "All indexes refer to the INPUT and are applied in one
-# pass" -- has to hold BETWEEN two -add-column too, not only between this verb
-# and -delete -col. The first version applied each insert to the file the
-# previous insert had already widened, so `-add-column 2 ... -add-column 3 ...`
-# on a two-column file put the second one BEFORE ver instead of after it, at
-# rc=0. Refusing the cross-verb case and missing this one is the same rule
-# applied to only part of where it holds.
-# KB。批次規則——「所有索引都指向輸入，並在一遍之內套用」——在**兩個 -add-column 之間**也必須
-# 成立，不只在這個動詞與 -delete -col 之間。第一版把每一次插入套用在「前一次插入已經加寬過」的
-# 檔案上，於是兩欄檔案上的 `-add-column 2 ... -add-column 3 ...` 把第二個放在 ver 之**前**而不是
-# 之後，且 rc=0。擋住了跨動詞那一半、卻漏掉這一半，是同一條規則只被套用到它成立範圍的一部分。
+# pass" -- holds BETWEEN two -add-column too, not only between this verb and
+# -delete -col. Applying each insert to the file the previous one widened puts
+# the second of `-add-column 2 ... -add-column 3 ...` BEFORE ver instead of
+# after it, at rc=0.
+# KB。批次規則——「所有索引都指向輸入，並在一遍之內套用」——在**兩個 -add-column 之間**也成立，
+# 不只在這個動詞與 -delete -col 之間。若每次插入都套用在前一次已加寬的檔案上，
+# `-add-column 2 ... -add-column 3 ...` 的第二個會落在 ver 之**前**而不是之後，且 rc=0。
 cp "$_t215_src" "$TMP/t215n.csv2"
 "$CSV2" -add-column 2 'a,甲' 'x' -add-column 3 'b,乙' 'y' -i "$TMP/t215n.csv2" --in-place 2>/dev/null
 if [[ $(head -1 "$TMP/t215n.csv2") == 'pkg,a,ver,b' ]]; then
@@ -12917,14 +11630,12 @@ else
     bad "T215p said: $_t215_n3 / 實得如上"
 fi
 
-# The plan said to CHECK this rather than assume it: rawRowWriteRefusal stops
-# -append on a file with a protected column, and there was no reason to be sure
-# it did not also stop this. It does not, and the round trip still closes --
-# which is the part that would have been silent if it had broken, because a
-# ciphertext that no longer decrypts looks exactly like a ciphertext.
-# 計畫要求**查證**而不是假設這一點：rawRowWriteRefusal 會擋住「含受保護欄位的檔案」上的
-# -append，而沒有理由確定它不會也擋住這個。它不會擋，而且那趟往返仍然合得起來——那才是
-# 「萬一壞掉會是無聲的」那一部分，因為一段解不開的密文，看起來與一段密文一模一樣。
+# rawRowWriteRefusal stops -append on a file with a protected column; this
+# checks it does not also stop -add-column, and that the round trip still
+# closes. A break there would be silent, because a ciphertext that no longer
+# decrypts looks exactly like a ciphertext.
+# rawRowWriteRefusal 會擋住含受保護欄位的檔案上的 -append；這裡確認它不會也擋住 -add-column，
+# 而且往返仍然合得起來。那裡若壞掉會是無聲的，因為一段解不開的密文看起來與一段密文一模一樣。
 printf 'pkg,ver\n套件,版本\nzlib,1.3\nlz4,1.9\n' > "$TMP/t215p.csv2"
 if "$CSV2" -encrypt ver -keyfile "$KEY" -i "$TMP/t215p.csv2" -o "$TMP/t215e.csv2" 2>/dev/null \
    && "$CSV2" -add-column 2 'note,備註' 'todo' -i "$TMP/t215e.csv2" --in-place 2>/dev/null \
@@ -12953,15 +11664,13 @@ else
 fi
 
 # KC. A suffix-less file is `.lines`: ONE column, zero header rows, bytes
-# verbatim, so a comma in it is DATA. Adding a column wrote `v,alpha` and
-# reading it back gave ONE field containing a comma -- csv2 writing a file
-# csv2 misreads, at rc=0. Same hole JV came through earlier the same day: a
-# format added in phase 8 is not automatically remembered by a verb added in
-# phase 10.
+# verbatim, so a comma in it is DATA. Adding a column would write `v,alpha`,
+# which reads back as ONE field containing a comma -- csv2 writing a file
+# csv2 misreads, at rc=0. A format added in phase 8 is not automatically
+# known to a verb added in phase 10; see JV.
 # KC。沒有副檔名的檔案是 `.lines`：一欄、零列標頭、位元組原樣，因此裡面的逗號是**資料**。
-# 新增一欄會寫出 `v,alpha`，而讀回來得到的是**一個**含逗號的欄位——csv2 在 rc=0 之下寫出一個
-# csv2 自己會誤讀的檔案。與 JV 同一天稍早走過的是同一個缺口：第 8 階段加的格式，不會自動被
-# 第 10 階段加的動詞想起來。
+# 新增一欄會寫出 `v,alpha`，讀回來卻是**一個**含逗號的欄位——csv2 在 rc=0 下寫出自己會誤讀的
+# 檔案。第 8 階段加的格式，不會自動被第 10 階段加的動詞認得；見 JV。
 printf 'alpha\nbeta\n' > "$TMP/t215plain"
 _t215_lines=$("$CSV2" -add-column 1 'x' 'v' -i "$TMP/t215plain" --in-place 2>&1 >/dev/null)
 _t215_lrc=$?
@@ -12974,30 +11683,22 @@ fi
 
 echo
 echo "--- T216: --help describes the shape --json actually emits / T216：--help 描述的形狀就是 --json 真的吐出來的那個 ---"
-# KD. --help described --json in five words -- "JSON Lines; --json-ascii
-# escapes non-ASCII" -- and said nothing about the two meta lines it emits or
-# the records count on the last one. A parser written from those five words
-# meets a line with no "record" key as its very first input. README documented
-# all of it, which made the gap harder to find: every check against the README
-# passed.
-# KD。--help 用五個字描述 --json——「JSON Lines; --json-ascii escapes non-ASCII」——而它自己輸出的
-# 兩行 meta、以及最後一行上的 records 計數，一個字都沒提。照著那五個字寫出來的解析器，第一筆輸入
-# 就會撞上一個沒有 "record" 鍵的行。README 全都寫了，這反而讓那個缺口更難被發現：每一次對照
-# README 的檢查都會通過。
+# KD. --help must document the whole --json shape, including the meta lines
+# and the records count on the last one; a parser written from --help alone
+# otherwise meets a line with no "record" key first.
+# KD。--help 必須記載 --json 的完整形狀，包括 meta 行與最後一行的 records 計數；否則只照
+# --help 寫的解析器，第一筆就會遇到沒有 "record" 鍵的行。
 #
-# Asserting that "meta" appears in the help text would be a test of the
-# WORDING: it breaks when someone rewrites the paragraph and survives when the
-# output changes, which is backwards. This compares the KEY NAMES the help
-# quotes against the key names the program emits, in both directions.
-# 斷言說明文字裡有「meta」這個字，測到的是**措辭**：有人重寫那一段時它會壞，而輸出改變時它會活著
-# ——那是反的。這裡比的是「說明引用的鍵名」與「程式真的吐出來的鍵名」，而且是雙向比。
-# `head -n -1` to drop the terminator line is a GNU extension; macOS head
-# rejects a negative count, the pipeline produced an EMPTY help section, and
-# T216b then PASSED -- because every key in an empty set is trivially emitted.
-# A vacuous pass is the exact failure this file keeps writing tests about.
-# 用 `head -n -1` 去掉結尾那一行是 GNU 擴充；macOS 的 head 不收負數，那條管線於是給出一段**空的**
-# 說明文字，而 T216b 因此**通過**了——因為空集合裡的每一個鍵都「當然」被吐出來過。一次空洞的通過，
-# 正是這個檔案不斷在為它寫測試的那種失敗。
+# This compares the KEY NAMES the help quotes against the key names the program
+# emits, in both directions. Grepping for the word "meta" would test the
+# wording: it breaks on a rewrite and survives an output change.
+# 這裡雙向比對「說明引用的鍵名」與「程式實際輸出的鍵名」。只 grep「meta」這個字測到的是措辭：
+# 改寫段落時會壞，輸出改變時反而通過。
+# The section is cut with awk, not `head -n -1`: a negative count is a GNU
+# extension, macOS head rejects it, and an empty help section makes T216b pass
+# vacuously.
+# 用 awk 切段而不用 `head -n -1`：負數是 GNU 擴充，macOS 的 head 不收；說明段落一旦為空，
+# T216b 就會空洞地通過。
 _t216_help=$("$CSV2" --help 2>/dev/null | awk '/^  --json /{f=1} /^  --en /{f=0} f')
 # Column names in UPPERCASE on purpose. The key names are extracted with
 # `"[a-z_]*":`, and a lowercase column name is indistinguishable from a
@@ -13021,11 +11722,9 @@ else
     bad "T216a emitted but not in --help: ${_t216_unmentioned[*]} / 有吐出來卻不在 --help 裡的鍵"
 fi
 
-# The other direction: a key the help promises and the program never emits is
-# the worse half of the same defect -- it sends the reader looking for
-# something that is not there.
-# 反方向：一個「說明承諾了、而程式從不吐出」的鍵，是同一個缺陷裡更糟的那一半——它會讓讀者去找
-# 一個根本不存在的東西。
+# The other direction: a key the help promises but the program never emits
+# sends the reader looking for something that is not there.
+# 反方向：說明承諾了、程式卻從不輸出的鍵，會讓讀者去找一個不存在的東西。
 _t216_phantom=()
 for _k in ${(f)"$(print -r -- "$_t216_help" | grep -o '"[a-z_]*"' | tr -d '"' | sort -u)"}; do
     print -r -- "$_t216_emitted" | grep -qx "$_k" || _t216_phantom+=($_k)
@@ -13036,11 +11735,8 @@ else
     bad "T216b named in --help but never emitted: ${_t216_phantom[*]} / 有在 --help 裡卻從不出現的鍵"
 fi
 
-# The specific claim the user's report was about: `records` is what the README
-# offers as the answer to counting, and a reader of --help alone could not
-# find it.
-# 使用者那份回報針對的那一項具體宣稱：`records` 是 README 給「計數」的答案，而一個只讀 --help
-# 的人找不到它。
+# `records` is the README's answer to counting, so --help must name it too.
+# `records` 是 README 給「計數」的答案，所以 --help 也必須指名它。
 if [[ $_t216_help == *'"records"'* && $("$CSV2" -r --json -i "$TMP/t216.csv2" | tail -1) == *'"records":2'* ]]; then
     ok "T216c --help names records, and it is the count of data records / --help 指名了 records，而它就是資料紀錄的筆數"
 else
@@ -13049,16 +11745,13 @@ fi
 
 echo
 echo "--- T217: --md-style / T217：--md-style ---"
-# Reported from the Windows node: `-md` could not reproduce the input table's
-# spacing, so a one-cell edit came back as a rewrite of every row -- six diff
-# lines on a four-line table, in BOTH render modes, with no third mode. Not
-# data loss (values round-trip byte for byte, measured on escaped pipes and
-# backtick spans) but diff noise, and it cost the feature its main use: editing
-# a table that lives in a version-controlled document.
-# 由 Windows 節點回報：`-md` 無法重現輸入表的排版，於是一格的編輯回來時是整表重寫——四行的表
-# 產生六行 diff，**兩種**算繪模式都是，而且沒有第三種模式。這不是資料遺失（值是逐位元往返的，
-# 在被跳脫的 `|` 與 backtick 段落上都量過），是 diff 雜訊；而它讓這個功能失去了它主要的用途：
-# 編輯一張活在版控文件裡的表。
+# `--md-style preserve` reproduces the input table's spacing, so a one-cell
+# edit diffs as one row rather than the whole table. Without it the feature
+# loses its main use: editing a table inside a version-controlled document.
+# Values round-trip in every style; this is about diff noise, not data loss.
+# `--md-style preserve` 會重現輸入表的排版，因此改一格只會讓那一列出現在 diff 裡，而不是整張表。
+# 少了它，這個功能就失去主要用途：編輯版控文件裡的表。各種樣式下值都能往返；這裡處理的是
+# diff 雜訊，不是資料遺失。
 cat > "$TMP/t217.md" <<'T217EOF'
 # Notes
 
@@ -13080,12 +11773,9 @@ else
     bad "T217a $(diff "$TMP/t217orig.md" "$TMP/t217p.md" | tr '\n' ' ') / 實得如上"
 fi
 
-# compact is the pre-2026-08-29 default and has to stay reachable, because the
-# narrower landing the report offered was "keep compact, make preserve
-# reachable" -- the reverse of what was built, and the fallback if preserve
-# ever has to be withdrawn.
-# compact 是 2026-08-29 之前的預設，必須保持可指名使用——因為那份報告提出的較小落地方式是
-# 「保留 compact，讓 preserve 可用」，那正好與實際建的相反，也是萬一 preserve 必須被撤回時的退路。
+# compact is the former default and must stay reachable by name: it is the
+# fallback if preserve ever has to be withdrawn.
+# compact 是先前的預設，必須仍可指名使用：萬一 preserve 必須撤回，它就是退路。
 _t217c=$("$CSV2" -r -t -md --md-style compact -i "$TMP/t217.md" --md-table 1 2>/dev/null | head -1)
 if [[ $_t217c == '|pkg|ver|note|' ]]; then
     ok "T217b compact is still reachable by name / compact 仍然可以指名使用"
@@ -13114,11 +11804,9 @@ else
     bad "T217d pretty sep=$(print -r -- "$_t217d" | sed -n 2p) preserve sep=$(sed -n 2p "$TMP/t217p.md") / 實得如上"
 fi
 
-# From a .csv there is no layout to copy. That is not a fallback to apologise
-# for -- it is what "preserve" means when nothing was there to preserve, and
-# the README says so rather than leaving the reader to discover it.
-# 來源是 .csv 時沒有排版可抄。那不是一個需要道歉的退路——那就是「保留」在無物可保留時的意思，
-# 而 README 說出了它，不是留給讀者自己去撞到。
+# From a .csv there is no layout to copy, so preserve renders as compact; the
+# README states this.
+# 來源是 .csv 時沒有排版可抄，因此 preserve 以 compact 算繪；README 有寫明這點。
 printf 'a,b\n1,2\n' > "$TMP/t217.csv"
 if [[ $("$CSV2" -r -t -md -i "$TMP/t217.csv" 2>/dev/null | head -1) == '|a|b|' ]]; then
     ok "T217e preserve renders as compact when the input carried no layout / 輸入沒有帶排版時，preserve 以 compact 算繪"
@@ -13135,10 +11823,9 @@ else
     bad "T217f said: $_t217f / 實得如上"
 fi
 
-# The values were never the problem and must not become one: escaped pipes,
-# backtick spans and bold survive preserve exactly as they survived compact.
-# 值從來就不是問題所在，而且不能因此變成問題：被跳脫的 `|`、backtick 段落與粗體，在 preserve
-# 下的存活情況與它們在 compact 下完全相同。
+# Escaped pipes, backtick spans and bold must survive preserve exactly as they
+# survive compact.
+# 被跳脫的 `|`、backtick 段落與粗體，在 preserve 下必須與在 compact 下一樣完整保留。
 printf '| a | b |\n|---|---|\n| pipe \\| here | `code` |\n| **bold** | x\\|y |\n' > "$TMP/t217v.md"
 "$CSV2" -r -t -i "$TMP/t217v.md" --md-table 1 -o "$TMP/t217v1.csv" 2>/dev/null
 "$CSV2" -r -t -md -i "$TMP/t217v.md" --md-table 1 > "$TMP/t217v.back.md" 2>/dev/null
@@ -13149,22 +11836,17 @@ else
     bad "T217g $(diff "$TMP/t217v1.csv" "$TMP/t217v2.csv" | tr '\n' ' ') / 實得如上"
 fi
 
-# Both READMEs now state a NUMBER -- "on a four-row table a one-cell edit
-# arrived as a six-line diff" -- and a number in prose decays unless something
-# measures it. This is the measurement, on the reporter's own fixture: compact
+# Both READMEs quote a number ("a one-cell edit on a four-row table arrived as
+# a six-line diff"); this measures it so the prose cannot drift. compact
 # rewrites the whole table, preserve rewrites the row.
-# 兩份 README 現在都寫下了一個**數字**——「在一張四列的表上，一格的編輯會以六行 diff 的樣子
-# 抵達」——而一個寫在散文裡的數字，除非有東西去量它，否則就會腐爛。這裡就是那個量測，用的是
-# 回報者自己的 fixture：compact 重寫整張表，preserve 只重寫那一列。
+# 兩份 README 都引用了一個數字（「四列的表改一格，產生六行 diff」）；這裡實際量它，讓文字不會
+# 漂移。compact 重寫整張表，preserve 只重寫那一列。
 "$CSV2" -r -t -md --md-style compact -i "$TMP/t217.md" --md-table 1 > "$TMP/t217c.md" 2>/dev/null
-# Counted line by line rather than by grepping diff's output. The first version
-# used `diff | grep -c '^[<>]'` and it reported 0 in the guest while giving 6
-# here -- not a behaviour difference in csv2 but in DIFF: the `<`/`>` prefixes
-# are the traditional format, and the guest's diff does not print them. The
-# test was measuring the diff program.
-# 逐行數，而不是去 grep diff 的輸出。第一版用 `diff | grep -c '^[<>]'`，它在 guest 回報 0、
-# 在這裡給 6——那不是 csv2 的行為差異，是 **diff** 的差異：`<`／`>` 前綴是傳統格式，而 guest 的
-# diff 不印它們。那個測試量到的是 diff 這支程式。
+# Counted line by line, not by grepping diff's output: the `<`/`>` prefixes
+# are diff's traditional format and the guest's diff does not print them, so
+# `diff | grep -c '^[<>]'` measures the diff program, not csv2.
+# 逐行計數，不 grep diff 的輸出：`<`／`>` 前綴是 diff 的傳統格式，guest 的 diff 不印它們，
+# 所以 `diff | grep -c '^[<>]'` 量到的是 diff 這支程式，不是 csv2。
 _t217_a=("${(@f)$(cat "$TMP/t217orig.md")}")
 _t217_b=("${(@f)$(cat "$TMP/t217c.md")}")
 _t217_changed=0
@@ -13218,34 +11900,25 @@ assert_fails "T223h a scope outside -head is refused before an early stop can li
 
 echo
 echo "--- T218: the zstat rule holds across every script here / T218：zstat 規則在這裡每一支腳本上都成立 ---"
-# The rule has been in this file's comments since 2026-08-26 and in AGENTS.md
-# since 2026-08-29, and until now nothing enforced it: a new script could call
-# `stat -c` and no check would say a word. A rule that lives only in prose is
-# the shape this tree keeps paying for -- see mistakes.md, where the entry with
-# five occurrences across three days is waiting on exactly this kind of check.
-# 這條規則從 2026-08-26 起就寫在這個檔案的註解裡、從 2026-08-29 起寫在 AGENTS.md 裡，而在此之前
-# 沒有任何東西強制它：一支新腳本可以呼叫 `stat -c`，而不會有任何檢查說一句話。一條只活在散文裡的
-# 規則，正是這棵樹一再付帳的那個形狀——見 mistakes.md，那條「跨三天、五次」的條目等的就是這一類檢查。
+# Enforces the zstat rule from AGENTS.md: no script here may call stat(1),
+# whose flags differ by platform. A rule that lives only in prose is not
+# enforced; see mistakes.md.
+# 強制 AGENTS.md 的 zstat 規則：這裡任何腳本都不得呼叫旗標因平台而異的 stat(1)。只寫在文字裡的
+# 規則等於沒有強制；見 mistakes.md。
 #
-# Comment lines are excluded on purpose: the two `stat -c` / `stat -f` lines at
-# the top of this file are the rule's own counter-example, and a check that
-# flagged them would be unusable.
-# 註解行被刻意排除：這個檔案頂端那兩行 `stat -c`／`stat -f` 是這條規則自己的反面示範，一個會
-# 標記它們的檢查是不能用的。
-# The file list comes from a zsh glob, not from `grep --include`. That option
-# is GNU-only: the guest's grep does not have it, so the first version scanned
-# NOTHING there and T218a passed on an empty result -- a vacuous pass inside
-# the check written to enforce a rule against exactly this. T218b is what
-# caught it, one commit after being added for precisely that reason.
-# 檔案清單來自 zsh 的 glob，不是來自 `grep --include`。那個選項是 GNU 專屬的：guest 的 grep
-# 沒有它，於是第一版在那裡**什麼都沒掃**，而 T218a 以一個空結果通過了——一次空洞的通過，
-# 發生在「為了強制一條正是針對這種事的規則」而寫的檢查裡。抓到它的是 T218b，就在它為了這個
-# 理由被加進來的一個 commit 之後。
+# Comment lines are excluded on purpose: comments may name `stat -c` /
+# `stat -f` as counter-examples, and a check that flagged them would be
+# unusable.
+# 刻意排除註解行：註解可能以 `stat -c`／`stat -f` 作為反例，會標記它們的檢查無法使用。
+# The file list comes from a zsh glob, not `grep --include`: that option is
+# GNU-only, and without it the guest scans nothing and T218a passes on an
+# empty result. T218b guards against that.
+# 檔案清單來自 zsh 的 glob，不用 `grep --include`：那個選項是 GNU 專屬，guest 上會什麼都沒掃，
+# T218a 便以空結果通過。T218b 防的就是這個。
 _t218_files=($ROOT/**/*.zsh(N))
-# Zero files means the glob failed, not that the tree is clean. Without this
-# the check would pass hardest at the moment it stopped working.
-# 零個檔案代表 glob 失敗了，不代表這棵樹是乾淨的。少了這一行，這個檢查會在它停止運作的那一刻
-# 通過得最徹底。
+# Zero files means the glob failed, not that the tree is clean; without this
+# the check would pass precisely when it stopped working.
+# 零個檔案代表 glob 失敗，不代表樹是乾淨的；少了這行，檢查會在失效時照樣通過。
 if (( ${#_t218_files} < 4 )); then
     bad "T218a the glob found ${#_t218_files} .zsh files, so nothing was scanned / glob 只找到 ${#_t218_files} 個 .zsh 檔，等於什麼都沒掃"
     _t218_files=()
@@ -13258,19 +11931,12 @@ else
     bad "T218a stat(1) called at: $(print -r -- "$_t218_hits" | head -3 | tr '\n' ' ') / 有地方呼叫了 stat(1)"
 fi
 
-# The check must actually bite. Written after KF, where a test reported 0 for a
-# reason that had nothing to do with what it claimed to measure -- an empty
-# result proves nothing until an intentional break has been shown to produce a
-# non-empty one.
-# 這個檢查必須真的會咬。寫在 KF 之後——那次一個測試回報 0，而那個 0 與它宣稱在量的東西毫無關係；
-# 在「故意弄壞會產生非空結果」被證明之前，一個空的結果什麼都證明不了。
+# The check must actually bite: an empty result proves nothing until an
+# intentional break is shown to produce a non-empty one. KF.
+# 這個檢查必須真的會咬：在證明「故意弄壞會產生非空結果」之前，空結果什麼都證明不了。KF。
 # The probe's text is ASSEMBLED rather than written literally, because T218a
-# scans this file too and caught this very line on its first run -- a correct
-# catch of a string that is not a call. That the check reads the suite itself
-# is worth keeping; hiding the literal is the smaller change.
-# 探針的文字是**組出來的**而不是寫成字面值，因為 T218a 連這個檔案也掃，而它第一次執行時抓到的
-# 正是這一行——一次正確的命中，對象是一個字串而不是一次呼叫。「這個檢查會讀測試檔自己」這件事
-# 值得留著；把字面值藏起來是比較小的那個改動。
+# scans this file too and would flag a literal here.
+# 探針文字是**組出來的**而非字面值，因為 T218a 也掃這個檔案，字面值會被它標記。
 _t218_cmd=stat
 print -r -- "x=\$($_t218_cmd -c '%a' \"\$1\")" > "$TMP/t218probe.zsh"
 _t218_probe=$(grep -nE '(^|[;&|(`]|\$\(|=)[[:space:]]*stat[[:space:]]+-' \
@@ -13285,15 +11951,12 @@ rm -f "$TMP/t218probe.zsh"
 
 echo
 echo "--- T230: a '#' comment line names itself / T230：`#` 註解行會指名自己 ---"
-# KP. Many tools put a `# ...` line at the top of a CSV. csv2 refuses those --
-# correctly, because CSV has no comment syntax and `#id` is a legal column
-# name, so skipping one would mean guessing which lines are data. What was
-# missing is that the refusal talked about FIELD COUNTS: a reader sees "record
-# 1 has 2 fields but the header has 1" and goes looking for a missing comma,
-# when the answer is the line they wrote themselves.
-# KP。許多工具會在 CSV 最前面放一行 `# ...`。csv2 拒絕它們——而那是對的，因為 CSV 沒有註解語法，
-# 而 `#id` 是合法的欄名，跳過它就等於去猜哪些行是資料。缺的是：那道拒絕講的是**欄數**。讀者看到
-# 「record 1 有 2 欄，標頭有 1 欄」就去找一個少掉的逗號，而答案是他自己寫的那一行。
+# KP. csv2 refuses a `# ...` line, because CSV has no comment syntax and `#id`
+# is a legal column name, so skipping one would mean guessing which lines are
+# data. The refusal must name the comment line itself; a field-count message
+# sends the reader looking for a missing comma.
+# KP。csv2 拒絕 `# ...` 行，因為 CSV 沒有註解語法，而 `#id` 是合法欄名，跳過它就等於猜哪些行是
+# 資料。拒絕訊息必須指出那一行註解本身；只講欄數會讓讀者去找少掉的逗號。
 printf '# this is a comment\nk,v\na,b\n' > "$TMP/t230head.csv"
 printf 'k,v\n# mid comment\na,b\n' > "$TMP/t230mid.csv"
 printf '# c\nk,v\n甲,乙\na,b\n' > "$TMP/t230.csv2"
@@ -13307,10 +11970,9 @@ for _t230_f in t230head.csv t230mid.csv t230.csv2; do
 done
 (( _t230_ok )) && ok "T230a a '#' line is refused by naming itself, at the head of a .csv, mid-file, and in a .csv2 / `#` 開頭的一行會以「指名自己」的方式被拒絕——.csv 的開頭、檔案中段，以及 .csv2 裡"
 
-# The claim the message itself makes, and the one that would break real files
-# if the recognition were turned into a skip: `#id` is a legal column name.
-# 那則訊息自己做出的宣稱，也是「如果把『認出』變成『跳過』就會弄壞真實檔案」的那一項：
-# `#id` 是一個合法的欄名。
+# `#id` is a legal column name; turning the recognition into a skip would
+# break real files.
+# `#id` 是合法欄名；若把「認出」改成「跳過」，就會弄壞真實檔案。
 printf '#id,v\n1,b\n' > "$TMP/t230legal.csv"
 if [[ $("$CSV2" -r -i "$TMP/t230legal.csv" 2>/dev/null) == '1,b' \
       && $("$CSV2" -get 1:'#id' -i "$TMP/t230legal.csv" 2>/dev/null) == '1' ]]; then
@@ -13332,22 +11994,15 @@ fi
 
 echo
 echo "--- T231: no case number is used twice / T231：沒有案例編號被用兩次 ---"
-# Written after colliding twice. T214 collided with the Windows node's
-# warnings-as-errors cases; T219 collided with -update-where's. The second
-# time the evidence was on screen -- `grep -c 'T219'` printed 10 -- and it was
-# not read. Numbers had reached 229 while I assumed the next free one was 219.
-# 寫在撞號兩次之後。T214 與 Windows 節點那組「警告即錯誤」的案例撞號；T219 與 -update-where 的
-# 撞號。第二次時證據就在螢幕上——`grep -c 'T219'` 印出 10——而它沒有被讀。編號早已到 229，
-# 而我假設下一個空號是 219。
+# Two cases sharing a number make a failure point at the wrong case; T214 and
+# T219 have each collided before.
+# 兩個案例共用編號，失敗時就會指向錯的案例；T214 與 T219 都曾撞號。
 #
 # The test is a SPAN, not a count: one case legitimately has several ok/bad
-# lines (loops, multiple failure branches), so counting occurrences flags a
-# dozen false positives. A collision instead puts the same number in two parts
-# of the file far apart. At 1135 cases the only span over 100 lines was the
-# real collision -- zero false positives.
-# 這個測試看的是**跨度**，不是次數：一個案例合理地會有好幾行 ok/bad（迴圈、多個失敗分支），
-# 因此用「出現次數」去判會標出十幾個誤報。而撞號會把同一個編號放在檔案裡相距很遠的兩處。
-# 在 1135 個案例上，唯一跨度超過 100 行的就是那個真正的撞號——零誤報。
+# lines (loops, multiple failure branches), so counting occurrences gives false
+# positives. A collision puts the same number in two distant parts of the file.
+# 這個測試看的是**跨度**而非次數：一個案例本來就可能有好幾行 ok/bad（迴圈、多個失敗分支），
+# 數次數會產生誤報。撞號則會讓同一個編號出現在檔案裡相距很遠的兩處。
 _t231_dups=$(awk '
   match($0, /^[[:space:]]*(ok|bad)[[:space:]]+"T[0-9]+[a-z]*/) {
     s = substr($0, RSTART, RLENGTH)
@@ -13364,19 +12019,14 @@ else
 fi
 
 # The span rule only works if the scan sees the file at all. Same guard as
-# T218a: a check that silently reads nothing passes hardest when it has
-# stopped working.
-# 跨度規則只在「掃描真的讀到這個檔案」時才有效。與 T218a 同一道守衛：一個安靜地什麼都沒讀的
-# 檢查，會在它停止運作時通過得最徹底。
+# T218a: a check that silently reads nothing would pass.
+# 跨度規則只在掃描真的讀到檔案時才有效。與 T218a 同一道守衛：什麼都沒讀到的檢查會照樣通過。
 _t231_seen=$(awk 'match($0, /^[[:space:]]*(ok|bad)[[:space:]]+"T[0-9]+/) { n++ } END { print n+0 }' "${0:A}")
-# The threshold is far below the real figure on purpose. It was first written
-# as 500 against an actual 502 -- a guard two lines from firing on an unrelated
-# edit, and a guard that cries wolf is one somebody switches off. What it has
-# to tell apart is "read the file" from "read nothing", and those differ by
-# hundreds, not by two.
-# 這個門檻刻意遠低於實際數字。它第一版寫的是 500，而實際是 502——一道「差兩行就會被無關改動觸發」
-# 的守衛，而一道會亂叫的守衛，是會被人關掉的那種。它要分辨的是「讀到了檔案」與「什麼都沒讀到」，
-# 而那兩者相差的是好幾百，不是二。
+# The threshold is far below the real figure on purpose: it only has to tell
+# "read the file" from "read nothing", and a threshold near the real count
+# fires on unrelated edits until someone switches it off.
+# 門檻刻意遠低於實際數字：它只需分辨「讀到檔案」與「什麼都沒讀到」；門檻貼近實際數字，就會被
+# 無關的改動觸發，直到有人把它關掉。
 if (( _t231_seen > 100 )); then
     ok "T231b and the scan actually read this file ($_t231_seen case lines) / 而那次掃描真的讀到了這個檔案（$_t231_seen 行案例）"
 else
@@ -13385,22 +12035,14 @@ fi
 
 echo
 echo "--- T232: every example in both READMEs still prints what it claims / T232：兩份 README 裡的每一個範例，仍然印出它宣稱的東西 ---"
-# The README was rewritten from 2722 lines to 297 for public readers, and the
-# worked examples went with it: 62 blocks showing a command AND its output
-# became one. A reader cannot confirm they did it right without seeing what
-# right looks like -- and this tool's whole subject is output SHAPE (--json's
-# two meta lines, the TAB-separated locating report, the Markdown table).
-# The examples were put back. This is what stops them going stale.
-# README 為了公開讀者從 2722 行改寫成 297 行，而那些「做過一遍」的範例也跟著走了：62 個「指令
-# 加上它的輸出」的區塊變成一個。一個讀者若看不到「對的樣子」，就無法確認自己做對了——而這個工具
-# 的全部主題就是輸出的**形狀**（`--json` 的兩行 meta、TAB 分隔的定位報告、Markdown 表）。
-# 範例被放了回去。這個案例就是阻止它們腐爛的東西。
-#
-# It found a real error before it was even a test: the -update-where refusal is
-# two lines, English then Chinese, and the README carried only the first --
-# because the sample had been taken with `head -1`.
-# 它在還沒成為測試之前就找到了一個真的錯誤：-update-where 那道拒絕是兩行、英文在前中文在後，
-# 而 README 裡只有第一行——因為當初取樣本時用了 `head -1`。
+# Runs every `$ command` in the README Examples sections and compares the
+# output shown below it. A reader needs to see what right looks like, and this
+# tool's subject is output SHAPE (--json's meta lines, the TAB-separated
+# locating report, the Markdown table); this keeps those examples from going
+# stale. Multi-line output, such as a bilingual refusal, must be shown whole.
+# 執行 README 範例一節裡的每一道 `$ 指令`，並與其下方列出的輸出比對。讀者需要看到「對的樣子」，
+# 而這個工具的主題正是輸出的**形狀**（`--json` 的 meta 行、TAB 分隔的定位報告、Markdown 表）；
+# 這個案例讓那些範例不會過時。多行輸出（例如雙語的拒絕訊息）必須完整列出。
 _t232_check() {   # $1 = README path -> prints "checked bad"
     local readme=${1:A} work=$(mktemp -d "$TMP/t232.XXXXXX")
     local -i checked=0 nbad=0
@@ -13437,11 +12079,9 @@ _t232_check() {   # $1 = README path -> prints "checked bad"
 }
 for _t232_r in README.md README.zh-TW.md; do
     _t232_res=($(_t232_check "$ROOT/$_t232_r"))
-    # Zero commands checked means the section was not found or the extraction
-    # broke -- and "0 mismatches out of 0" is the vacuous pass this file keeps
-    # writing guards against.
-    # 檢查了零道指令，代表那一節沒被找到、或抽取壞了——而「0 個不符，總共 0 個」正是這個檔案
-    # 一再為它加守衛的那種空洞通過。
+    # Too few commands checked means the section was not found or the
+    # extraction broke; "0 mismatches out of 0" would be a vacuous pass.
+    # 檢查的指令太少，代表那一節沒找到或抽取壞了；「0 個裡 0 個不符」是空洞的通過。
     if (( ${_t232_res[1]:-0} < 8 )); then
         bad "T232 $_t232_r: only ${_t232_res[1]:-0} commands were checked, so nothing was verified / 只檢查了 ${_t232_res[1]:-0} 道指令，等於什麼都沒驗證"
     elif (( ${_t232_res[2]:-1} == 0 )); then
@@ -13453,22 +12093,18 @@ done
 
 echo
 echo "--- T233: stdout messages end in LF, like everything else / T233：stdout 上的訊息以 LF 結尾，與其他一切相同 ---"
-# KT. "Output always uses LF as the end of line" is the constraint phase 11 was
-# given, and phase 11's own --dry-run broke it: `print()` goes through the
-# CRT's TEXT-mode stdout on Windows and turns every LF into CRLF. --version and
-# --help went the same way. The data path and stderr never did, because they
-# write bytes through writeAll.
-# KT。「輸出永遠以 LF 作為行尾」是第 11 階段被給予的約束，而第 11 階段自己的 --dry-run 違反了它：
-# `print()` 在 Windows 上走 CRT 的**文字模式** stdout，把每一個 LF 換成 CRLF。--version 與
-# --help 也是同一條路。資料路徑與 stderr 從來沒有這個問題，因為它們是用 writeAll 直接寫位元組。
+# KT. Output always uses LF as the end of line, messages on stdout included.
+# On Windows `print()` goes through the CRT's TEXT-mode stdout and turns every
+# LF into CRLF; the data path and stderr are safe because they write bytes
+# through writeAll. --dry-run, --version and --help are the stdout messages.
+# KT。輸出一律以 LF 為行尾，stdout 上的訊息也一樣。Windows 上的 `print()` 走 CRT 的**文字模式**
+# stdout，會把每個 LF 換成 CRLF；資料路徑與 stderr 不受影響，因為它們用 writeAll 直接寫位元組。
+# --dry-run、--version 與 --help 就是 stdout 上的訊息。
 #
-# It survived because nothing had ever compared the BYTES of a message on
-# stdout. T47 compares the data path sha256 by sha256; T58 compares the TEXT of
-# messages on stderr. This is the gap between them, and T232 fell into it by
-# accident -- one of its twelve README examples is a --dry-run.
-# 它之所以活下來，是因為從來沒有東西比對過 stdout 上一則**訊息的位元組**。T47 逐一以 sha256
-# 比對資料路徑；T58 比對 stderr 上訊息的**文字**。這是那兩者之間的縫，而 T232 是意外掉進去的
-# ——它十二道 README 範例裡有一道正好是 --dry-run。
+# This covers the gap between T47 (data path bytes, by sha256) and T58 (the
+# TEXT of stderr messages): the BYTES of a message on stdout.
+# 這補上 T47（以 sha256 比對資料路徑位元組）與 T58（比對 stderr 訊息**文字**）之間的縫：
+# stdout 上訊息的**位元組**。
 printf 'k,v\n甲,乙\na,1\n' > "$TMP/t233.csv2"
 _t233_bad=""
 for _t233_case in version help dryrun; do
@@ -13486,10 +12122,8 @@ else
     bad "T233a CR on stdout from:${_t233_bad} / 這些在 stdout 上帶了 CR"
 fi
 
-# The guard: an empty capture would make the CR test vacuously true, and this
-# is a test whose whole subject is a byte that is easy not to look for.
-# 守衛：一個空的捕捉會讓上面那個 CR 檢查空洞地成立，而這正是一個「全部主題就是一個很容易不去找
-# 的位元組」的測試。
+# The guard: an empty capture would make the CR test vacuously true.
+# 守衛：空的捕捉會讓上面的 CR 檢查空洞地成立。
 if [[ $("$CSV2" --version 2>/dev/null | wc -c) -gt 10 && $("$CSV2" --help 2>/dev/null | wc -l) -gt 50 ]]; then
     ok "T233b and both actually produced output to inspect / 而兩者確實產生了可供檢查的輸出"
 else
@@ -13498,18 +12132,16 @@ fi
 
 echo
 echo "--- T234: a separator row is data in a suffix-less file / T234：無後綴檔案裡的分隔列是資料 ---"
-# KU. The guard that refuses a Markdown separator row had no format condition,
-# and a file with no .csv/.csv2 suffix IS one column by definition -- so
-# `r.count == 1` was true of every record in it, and a check aimed at "a file
-# that CLAIMS to be CSV yet looks like Markdown" fired unconditionally there.
-# KU。那道拒絕 Markdown 分隔列的守衛沒有格式條件，而一個沒有 .csv／.csv2 副檔名的檔案依定義
-# **就是**一欄——因此 `r.count == 1` 對它裡面每一筆都成立，一道瞄準「自稱是 CSV 卻長得像
-# Markdown 的檔案」的檢查，在那裡無條件地觸發。
+# KU. The guard that refuses a Markdown separator row applies only to a file
+# whose suffix claims CSV. A suffix-less file is one column by definition, so
+# without that condition `r.count == 1` holds for every record and the guard
+# fires unconditionally.
+# KU。拒絕 Markdown 分隔列的守衛只適用於副檔名宣稱是 CSV 的檔案。無副檔名的檔案依定義就是
+# 一欄，少了這個條件，`r.count == 1` 對每一筆都成立，守衛就會無條件觸發。
 #
-# The inconsistency is visible within one table: every other kind of
-# foreign-looking line passed through, INCLUDING the table's own data rows.
-# 那個不一致在一張表裡就看得出來：其他每一種「長得像別的格式」的行都通過了，**包括那張表自己的
-# 資料列**。
+# In a suffix-less file every foreign-looking line is data, the table's own
+# rows included; the separator must be no exception.
+# 在無副檔名的檔案裡，每一種「像別的格式」的行都是資料，包括表本身的資料列；分隔列不該例外。
 printf '# Notes\n\nprose\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nmore prose\n' > "$TMP/t234doc"
 if [[ $("$CSV2" -r -i "$TMP/t234doc" 2>/dev/null | wc -l) -eq 9 ]]; then
     ok "T234a a suffix-less document containing a Markdown table reads line by line / 一份含 Markdown 表、沒有副檔名的文件，逐行讀得出來"
@@ -13517,10 +12149,8 @@ else
     bad "T234a $("$CSV2" -r -i "$TMP/t234doc" 2>&1 | head -1) / 實得如上"
 fi
 
-# Every foreign-looking line is data there, and the separator was the only one
-# singled out. Listing them together is what made the inconsistency obvious.
-# 在那裡，每一種「長得像別的格式」的行都是資料，而分隔列是唯一被挑出來的。把它們並列，正是那個
-# 不一致變得明顯的原因。
+# Each foreign-looking line, separators included, comes back as its own bytes.
+# 每一種「像別的格式」的行（含分隔列）都以原本的位元組回來。
 _t234_odd=""
 for _t234_line in '# comment' '{"json":1}' '<?xml?>' '| a | b |' '|---|---|' '|:--:|:--|'; do
     printf '%s\n' "$_t234_line" > "$TMP/t234probe"
@@ -13532,9 +12162,9 @@ else
     bad "T234b these did not survive:${_t234_odd} / 這些沒有原樣回來"
 fi
 
-# The use the user actually wanted: edit one line of a document that has a
-# table in it, and leave the table alone.
-# 使用者真正要的用途：編輯一份「裡面有表」的文件中的某一行，而不動那張表。
+# The intended use: edit one line of a document that contains a table, and
+# leave the table alone.
+# 預期用途：編輯一份含表格的文件中的某一行，而不動那張表。
 cp "$TMP/t234doc" "$TMP/t234edit"
 "$CSV2" -update 3:1 'edited prose' -i "$TMP/t234edit" --in-place 2>/dev/null
 if [[ $(sed -n 3p "$TMP/t234edit") == 'edited prose' \
@@ -13545,10 +12175,9 @@ else
     bad "T234c line 3=$(sed -n 3p "$TMP/t234edit") line 6=$(sed -n 6p "$TMP/t234edit") / 實得如上"
 fi
 
-# The guard is still right where the suffix DOES claim a structure, and that
-# half must not be lost: a .csv holding a separator row is genuinely suspect.
-# 在副檔名**確實**宣告了結構的地方，那道守衛仍然是對的，而那一半不能弄丟：一個 .csv 裡出現分隔列，
-# 是真的可疑。
+# Where the suffix DOES claim a structure the guard still applies: a .csv
+# holding a separator row is genuinely suspect.
+# 副檔名**確實**宣告結構時，守衛仍然有效：.csv 裡出現分隔列確實可疑。
 _t234_kept=1
 printf 'a,b\n|---|---|\n' > "$TMP/t234.csv"
 printf 'a,b\n甲,乙\n|---|---|\n' > "$TMP/t234.csv2"
@@ -13561,13 +12190,11 @@ done
 echo
 echo "--- T235: --headers 0 names the line-oriented format / T235：--headers 0 指名那個「逐行」的格式 ---"
 # Phase 12. `.lines` -- zero header rows, one field per line, bytes verbatim --
-# is a first-class format in both READMEs and was the only one that could not
-# be ASKED for: it is declared by the ABSENCE of a suffix, and absence is not
-# something a caller can supply. stdin has no suffix at all, so the format
-# built for exactly that case was the one it could not name.
-# 第 12 階段。`.lines`——零列標頭、每行一個欄位、位元組原樣——在兩份 README 裡都是一等格式，
-# 而它是唯一一個**無法被指名**的：它靠「沒有副檔名」宣告，而「沒有」不是呼叫端給得出來的東西。
-# stdin 根本沒有副檔名，於是那個正是為這種情況而生的格式，恰恰是它指名不了的那一個。
+# is declared by the ABSENCE of a suffix, which a caller cannot supply.
+# --headers 0 lets it be asked for by name, which matters most for stdin, which
+# has no suffix at all.
+# 第 12 階段。`.lines`——零列標頭、每行一個欄位、位元組原樣——靠「沒有副檔名」宣告，而「沒有」
+# 是呼叫端給不出來的。--headers 0 讓它可以被指名，這對完全沒有副檔名的 stdin 最重要。
 printf '# Notes\n\nprose here\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nmore prose\n' > "$TMP/t235.md"
 cp "$TMP/t235.md" "$TMP/t235orig.md"
 
@@ -13577,18 +12204,16 @@ else
     bad "T235a $("$CSV2" -r --headers 0 -i "$TMP/t235.md" 2>&1 | head -1) / 實得如上"
 fi
 
-# stdin could not reach this format at all before: --headers took 1 or 2, and
-# there was no suffix to declare 0 with.
-# stdin 在此之前根本到不了這個格式：--headers 只收 1 或 2，而它沒有副檔名可以用來宣告 0。
+# stdin has no suffix to declare 0 with, so --headers 0 is its only way in.
+# stdin 沒有副檔名可用來宣告 0，--headers 0 是它唯一的入口。
 if [[ $("$CSV2" -r -si --headers 0 < "$TMP/t235.md" 2>/dev/null | wc -l) -eq 9 ]]; then
     ok "T235b and stdin can name it too, which it never could / 而 stdin 也指名得到它了——它從來做不到這件事"
 else
     bad "T235b stdin gave: $("$CSV2" -r -si --headers 0 < "$TMP/t235.md" 2>&1 | head -1) / 實得如上"
 fi
 
-# Reading is only half. A flag that reads a prose .md and can never write one
-# back solves nothing for the case it was asked for.
-# 讀只是一半。一個「讀得了散文 .md、卻永遠寫不回去」的旗標，對它被要求的那個情況等於沒解決。
+# Reading is only half: the flag must also let a prose .md be written back.
+# 讀只是一半：這個旗標也必須讓散文 .md 寫得回去。
 "$CSV2" -update 3:1 'edited prose' --headers 0 -i "$TMP/t235.md" --in-place 2>/dev/null
 if [[ $(sed -n 3p "$TMP/t235.md") == 'edited prose' \
       && $(sed -n 6p "$TMP/t235.md") == '|---|---|' \
@@ -13599,9 +12224,9 @@ else
 fi
 
 # Without the flag a .md still means a table, and the refusal still points at
-# --md-table. Phase 12 adds a way in; it does not change what .md means.
-# 不給那個旗標時，`.md` 仍然表示一張表，而那道拒絕仍然指向 --md-table。第 12 階段加的是一條進得去
-# 的路，它沒有改變 `.md` 的意思。
+# --md-table: --headers 0 adds a way in without changing what .md means.
+# 不給那個旗標時，`.md` 仍然表示一張表，拒絕訊息仍指向 --md-table：--headers 0 只是多一條路，
+# 不改變 `.md` 的意思。
 _t235_e=$("$CSV2" -r -i "$TMP/t235orig.md" 2>&1 >/dev/null)
 if [[ $? != 0 && $_t235_e == *"--md-table"* ]]; then
     ok "T235d while a .md without it is still a table, and still says so / 而不給它的 .md 仍然是一張表，也仍然這麼說"
@@ -13609,11 +12234,9 @@ else
     bad "T235d rc=$? said: ${_t235_e:0:70} / 實得如上"
 fi
 
-# 1 and 2 argue about how many header rows a CSV has, and a declaring suffix
-# has already answered that -- so they are still refused. 0 declines the
-# question instead, which is why it is exempt.
-# 1 與 2 在爭論「這個 CSV 有幾列標頭」，而一個會宣告的副檔名已經回答過了——因此它們仍然被拒。
-# 0 是拒絕回答那個問題，那正是它獲得豁免的原因。
+# 1 and 2 contradict the header count a declaring suffix already gives, so
+# they are refused; 0 declines the question instead, which is why it is exempt.
+# 1 與 2 會與副檔名已宣告的標頭列數衝突，因此被拒；0 則是不回答這個問題，所以豁免。
 printf 'a,b\n1,2\n' > "$TMP/t235.csv"
 _t235_h1=$("$CSV2" -r --headers 2 -i "$TMP/t235.csv" 2>&1 >/dev/null); _t235_h1rc=$?
 _t235_h0=$("$CSV2" -r --headers 0 -i "$TMP/t235.csv" 2>/dev/null)
@@ -13624,8 +12247,8 @@ else
     bad "T235e h2rc=$_t235_h1rc h0=${_t235_h0//$'\n'/ | } / 實得如上"
 fi
 
-# An out-of-range value now names all three, and says what the new one means.
-# 超出範圍的值現在會指名全部三個，並說出新的那個是什麼意思。
+# An out-of-range value names all three, and says what 0 means.
+# 超出範圍的值會指名全部三個，並說明 0 的意思。
 _t235_bad=$("$CSV2" -r --headers 3 -i "$TMP/t235.csv" 2>&1 >/dev/null)
 if [[ $? != 0 && $_t235_bad == *"0, 1 or 2"* && $_t235_bad == *"bytes verbatim"* ]]; then
     ok "T235f and an invalid count names all three, saying what 0 does / 而無效的數字會指名全部三個，並說出 0 的作用"
@@ -13635,24 +12258,16 @@ fi
 
 echo
 echo "--- T236: --prefix means DIR/bin, as it does everywhere else / T236：--prefix 表示 DIR/bin，與它在其他每個地方一樣 ---"
-# KV. `--prefix /usr/local` installed into /usr/local/csv2 -- a file on no
-# PATH -- and then offered to add a PATH line to an rc file to reach it,
-# turning a misreading into configuration. install.zsh already handled the
-# convention correctly six lines away: `brew --prefix` returns /opt/homebrew
-# and the code appends /bin to it.
-# KV。`--prefix /usr/local` 會裝進 /usr/local/csv2——一個不在任何 PATH 上的檔案——然後主動提議
-# 在 rc 檔裡加一行 PATH 去搆到它，把一個誤讀固化成設定。而 install.zsh 在相隔六行的地方本來就
-# 正確地處理了那個慣例：`brew --prefix` 回傳 /opt/homebrew，程式碼替它補上 /bin。
-# The binary is csv2.exe on Windows, and the first version of these two cases
-# asserted a bare `csv2`. They failed there while REPORTING the correct path --
-# `--prefix gave .../t236p/bin/csv2.exe` is exactly right, and the assertion
-# was what was wrong. This tree has paid for the missing `.exe` before: an
-# install that copied a file beside the one just built, and a stale-binary
-# guard that compared release/csv2 while the build wrote release/csv2.exe.
-# 那個執行檔在 Windows 上是 csv2.exe，而這兩個案例的第一版斷言的是不帶副檔名的 `csv2`。它們在
-# 那裡失敗，而**回報的路徑是正確的**——`--prefix gave .../t236p/bin/csv2.exe` 完全正確，錯的是
-# 那個斷言。這棵樹為「少了 .exe」付過帳：一次安裝複製了剛建好那個檔案「旁邊」的檔案，以及一道
-# 比對 release/csv2 而建置寫的是 release/csv2.exe 的過期守衛。
+# KV. `--prefix DIR` installs into DIR/bin, the same convention as
+# `brew --prefix` + /bin elsewhere in install.zsh. Installing into DIR itself
+# puts the binary on no PATH, and the offer to add a PATH line would then turn
+# the misreading into configuration.
+# KV。`--prefix DIR` 裝進 DIR/bin，與 install.zsh 他處 `brew --prefix` 再補 /bin 的慣例相同。
+# 若裝進 DIR 本身，執行檔就不在任何 PATH 上，而「幫你加一行 PATH」的提議會把這個誤讀固化成設定。
+# The binary is csv2.exe on Windows, so the expected name follows $CSV2; a
+# bare `csv2` assertion would fail there against a correct path.
+# 執行檔在 Windows 上是 csv2.exe，所以預期名稱跟著 $CSV2 走；斷言不帶副檔名的 `csv2`，會在那裡
+# 對著正確的路徑失敗。
 _t236_bin=csv2
 [[ $CSV2 == *.exe ]] && _t236_bin=csv2.exe
 _t236_run() { "$ROOT/install.zsh" "$@" --dry-run 2>&1 | grep -m1 '^  to  ' | sed 's/.*: //' }
@@ -13669,9 +12284,9 @@ else
     bad "T236b --dir gave $_t236_d / 實得如上"
 fi
 
-# Two ways to name one destination. Picking a winner silently would put the
+# Two ways to name one destination: picking a winner silently would put the
 # binary somewhere the caller did not ask for and report success.
-# 指定同一個目的地的兩種方式。靜默地挑一個贏家，會把執行檔放到呼叫端沒有要求的地方，並回報成功。
+# 兩種方式指定同一個目的地：靜默挑一個贏家，會把執行檔放到呼叫端沒要求的地方，還回報成功。
 _t236_both=$("$ROOT/install.zsh" --prefix "$TMP/a" --dir "$TMP/b" --dry-run 2>&1)
 if [[ $? != 0 && $_t236_both == *"give one"* ]]; then
     ok "T236c and giving both is refused rather than resolved by precedence / 而同時給兩個會被拒絕，不是靠優先順序解決"
@@ -13679,47 +12294,27 @@ else
     bad "T236c rc=$? said: ${_t236_both:0:70} / 實得如上"
 fi
 
-# T236d was here and has been removed. It asserted that a clean non-login PATH
-# holds /usr/local/bin and not /opt/homebrew/bin -- an ENVIRONMENT FACT, not a
-# behaviour of csv2, and the exact shape mistakes.md entry 1 is about. It also
-# skipped on three of four platforms, which is what made the mismatch visible:
-# a case that can only run in one place is usually measuring that place.
-#
-# What it meant to guard -- that install.zsh's reachability report is true --
-# is already guarded by T203g, "claimed every shell finds it, on the strength
-# of the caller's PATH", which is the name of defect KW itself.
-# T236d 曾經在這裡，已經移除。它斷言的是「乾淨的非登入 PATH 裡有 /usr/local/bin、沒有
-# /opt/homebrew/bin」——那是一個**環境事實**，不是 csv2 的行為，也正是 mistakes.md 第 1 條講的
-# 形狀。它同時在四個平台中的三個跳過，而那正是讓這個不搭調變得看得見的東西：一個「只能在一個
-# 地方執行」的案例，通常量的就是那個地方。
-#
-# 它原本想守的東西——install.zsh 對可及性的回報必須為真——早已由 T203g 守著，那個案例的名字
-# 就是缺陷 KW 本身：「憑呼叫端的 PATH 就宣稱每一種 shell 都找得到」。
+# T236d is intentionally absent: asserting what a clean non-login PATH holds
+# tests the ENVIRONMENT, not csv2 (mistakes.md entry 1). That install.zsh's
+# reachability report is true is guarded by T203g. KW.
+# T236d 刻意不存在：斷言乾淨的非登入 PATH 裡有什麼，測的是**環境**而不是 csv2（mistakes.md
+# 第 1 條）。install.zsh 的可及性回報是否為真，由 T203g 守著。KW。
 echo
 echo "--- T237: a blank line is a record where nothing was declared / T237：在什麼都沒被宣告的地方，空行是一筆紀錄 ---"
-# KX. Reported by a user editing prose .md: a prose document is full of blank
-# lines and -insert could not put one in. The refusal was never a deliberate
-# rule -- the parser emits nothing for empty input, and `guard let out else`
-# reported that as "empty row", turning a parser detail into a rule.
-# KX。由一位編輯散文 .md 的使用者回報：一份散文文件充滿空行，而 -insert 放不進去。那道拒絕
-# 從來不是一條刻意的規則——解析器對空輸入不吐出任何東西，而 `guard let out else` 把那件事
-# 回報成「空的一列」，於是一個解析器的細節變成了一條規則。
-#
-# csv2 had already disagreed with it twice in the same format, which is what
-# made it a contradiction rather than a design: a blank line reads back whole,
-# and -update makes one happily. Only -insert/-append refused.
-# csv2 自己在同一個格式裡已經反對過它兩次，那正是「它是矛盾而不是設計」的原因：空行讀得回來，
-# 而 -update 做得出一個。只有 -insert／-append 拒絕。
+# KX. In a suffix-less file (or --headers 0) a blank line is a record, so
+# -insert/-append '' must add one, consistent with reading (a blank line reads
+# back whole) and -update (which can make one). The parser emits nothing for
+# empty input; that detail must not be reported as "empty row" here.
+# KX。在無副檔名的檔案（或 --headers 0）裡，空行就是一筆紀錄，因此 -insert／-append '' 必須能
+# 加入一行，與讀取（空行讀得回來）及 -update（做得出空行）一致。解析器對空輸入不輸出任何東西；
+# 這個細節在這裡不能被回報成「空的一列」。
 printf 'para one\npara two\n' > "$TMP/t237doc"
 
 cp "$TMP/t237doc" "$TMP/t237i"
 "$CSV2" -insert 2 '' -i "$TMP/t237i" --in-place 2>/dev/null
-# Compared against the bytes themselves. The first version ran the file
-# through `od -An -c | tr -s ' '` and matched a pattern with TWO spaces in it
-# -- which `tr -s` had just squeezed to one. The program was right and the
-# assertion could not match anything.
-# 直接與位元組本身比對。第一版把檔案送過 `od -An -c | tr -s ' '`，然後拿一個「含兩個空白」的
-# 樣式去比——而 `tr -s` 剛剛才把它壓成一個。程式是對的，而那個斷言不可能比中任何東西。
+# Compared against the bytes themselves with cmp, not through
+# `od | tr -s ' '`, whose squeezing makes a pattern with two spaces unmatchable.
+# 用 cmp 直接比對位元組，不經過 `od | tr -s ' '`：它會壓縮空白，使含兩個空白的樣式永遠比不中。
 printf 'para one\n\npara two\n' > "$TMP/t237want"
 if cmp -s "$TMP/t237i" "$TMP/t237want"; then
     ok "T237a -insert '' puts a real blank line into a suffix-less file / -insert '' 會把一個真正的空行放進沒有副檔名的檔案"
@@ -13735,9 +12330,8 @@ else
     bad "T237b file has $(wc -l < "$TMP/t237ap") lines, wanted 3 / 實得如上"
 fi
 
-# The case it was reported from: a .md read as prose, where the blank lines
-# ARE the paragraph structure.
-# 它被回報時的那個情境：一個當成散文讀的 .md，而那些空行**就是**段落結構。
+# A .md read as prose, where the blank lines ARE the paragraph structure.
+# 當成散文讀的 .md，那些空行**就是**段落結構。
 printf '# T\n\nprose\n' > "$TMP/t237.md"
 "$CSV2" -insert 3 '' --headers 0 -i "$TMP/t237.md" --in-place 2>/dev/null
 if [[ $(wc -l < "$TMP/t237.md") -eq 4 && $(sed -n 3p "$TMP/t237.md") == '' ]]; then
@@ -13747,29 +12341,22 @@ else
 fi
 
 # Where a suffix DID declare a shape, the refusal stays: an empty string is not
-# a record with the file's field count, and T159a/b pin the same distinction
-# for a blank line met while reading.
-# 在副檔名**確實**宣告了形狀的地方，那道拒絕留著：一個空字串不是「一筆有這個檔案欄數的紀錄」，
-# 而 T159a/b 對「讀取時遇到的空白行」釘的正是同一個區分。
+# a record with the file's field count. T159a/b pin the same distinction for a
+# blank line met while reading.
+# 副檔名**確實**宣告了形狀時，拒絕仍然有效：空字串不是一筆具有該檔欄數的紀錄。T159a/b 對讀取時
+# 遇到的空白行釘的是同一個區分。
 _t237_kept=1
 printf 'a,b\n1,2\n3,4\n' > "$TMP/t237.csv"
 printf 'a,b\n甲,乙\n1,2\n' > "$TMP/t237.csv2"
-# Written out rather than assembled with `eval`. The eval version reported an
-# EMPTY stderr for a command that refuses when typed by hand -- the quoting
-# went somewhere between the two layers, and the case then failed while saying
-# nothing about why. Two branches are longer and cannot do that.
-# 寫開來，而不是用 `eval` 組出來。eval 那個版本對一個「手打時會拒絕」的指令回報了**空的**
-# stderr——引號在兩層之間的某處走失了，而那個案例接著失敗、卻對原因隻字未提。兩個分支比較長，
-# 而它們做不出那件事。
+# Written out as two branches rather than assembled with `eval`, which can lose
+# the quoting between layers and fail with an empty stderr.
+# 寫成兩個分支而不用 `eval` 組裝：eval 可能在兩層之間弄丟引號，然後以空的 stderr 失敗。
 #
-# The scratch copy KEEPS the suffix. The first version copied both fixtures to
-# `t237w` -- no suffix -- and the suffix is the entire mechanism under test, so
-# csv2 correctly read the copy as .lines and correctly inserted the blank line.
-# All four cases failed while the program was right, and the empty stderr they
-# printed was the truthful report of a successful run.
-# 暫存複本**保留副檔名**。第一版把兩個 fixture 都複製成 `t237w`——沒有副檔名——而副檔名正是
-# 這裡被測的整個機制，於是 csv2 正確地把複本當 .lines 讀、正確地插進了空行。四個案例全部失敗，
-# 而程式是對的；它們印出的空 stderr 是「那次執行成功了」的忠實回報。
+# The scratch copy KEEPS the suffix: the suffix is the mechanism under test,
+# and a suffix-less copy would correctly be read as .lines and accept the
+# blank line.
+# 暫存複本**保留副檔名**：副檔名正是被測的機制，沒有副檔名的複本會被正確地當成 .lines 讀，
+# 並接受空行。
 for _t237_f in t237.csv t237.csv2; do
     cp "$TMP/$_t237_f" "$TMP/w_$_t237_f"
     _t237_e=$("$CSV2" -insert 1 '' -i "$TMP/w_$_t237_f" --in-place 2>&1 >/dev/null)
@@ -13784,44 +12371,27 @@ done
 
 echo
 echo "--- T238: a zsh that cannot stat refuses to measure / T238：一個 stat 不了的 zsh 拒絕量測 ---"
-# KZ. Reported by the Windows node: running this suite under `zsh -f` produced
-# three failures -- T129g, "the suite could not stamp itself", and "the suite
-# called zstat" -- and moved the skip count, because -f reads no start-up files
-# and the packaged zsh never builds its module_path. Three red cases, three
-# different directions, and the one real cause named by none of them.
+# KZ. A zsh that cannot load zsh/stat (e.g. the packaged zsh under `zsh -f`,
+# which never builds its module_path) must make the suite refuse at start-up
+# with rc=2 and name the cause, rather than produce several failures that each
+# point elsewhere. The guard is driven against the REAL suite, not a copy of
+# its logic.
+# KZ。載不進 zsh/stat 的 zsh（例如以 `zsh -f` 執行、沒有建立 module_path 的封裝版 zsh）必須讓
+# 測試在啟動時以 rc=2 拒絕並說出原因，而不是產生好幾個各指向別處的失敗。守衛是對著**真正的**
+# 測試檔驅動的，不是對著它邏輯的複本。
 #
-# The suite now refuses at start-up with rc=2. This case proves that refusal
-# bites, and it is the only kind of proof worth having: the guard is driven
-# against the REAL suite, not a copy of its logic.
+# The probe comes FIRST and decides whether the case runs at all. Where
+# poisoning module_path does not prevent the load, the guard would not fire
+# and the child would run the ENTIRE suite recursively inside itself.
+# 探測放在**最前面**，決定這個案例跑不跑。若毒化 module_path 擋不住載入，守衛就不會觸發，
+# 子行程會在自己內部遞迴地把**整套測試**再跑一遍。
 #
-# KZ。由 Windows 節點回報：用 `zsh -f` 跑這套測試會產生三個失敗——T129g、「測試無法為自己
-# 蓋章」、「測試呼叫了 zstat」——並讓略過數跟著變，因為 -f 不讀啟動檔，封裝版 zsh 因此沒有
-# 建立 module_path。三個紅字、三個方向，而唯一真正的原因不在它們任何一個裡面。
-#
-# 現在這套測試會在啟動時以 rc=2 拒絕。這個案例證明那道拒絕會咬，而且是唯一值得有的那種證明：
-# 守衛是對著**真正的**測試檔驅動的，不是對著它邏輯的一份複本。
-#
-# The probe comes FIRST and decides whether the case runs at all. Without it,
-# a platform where poisoning MODULE_PATH does not prevent the load would run
-# the ENTIRE suite recursively inside itself -- the guard would not fire, the
-# child would sail past line 49 and start testing. Checking that the poison
-# works is therefore not tidiness; it is what stops this case from being a
-# fork bomb on a platform nobody has tried yet.
-# 探測放在**最前面**，並決定這個案例跑不跑。少了它，在一個「毒化 MODULE_PATH 並不能阻止載入」
-# 的平台上，這裡會遞迴地把**整套測試**在自己內部再跑一遍——守衛不會觸發，子行程會順順地越過
-# 第 49 行開始測試。因此「確認毒藥有效」不是整潔問題，那是「這個案例在一個還沒有人試過的平台
-# 上不會變成 fork bomb」的原因。
-#
-# The poison is the `module_path` PARAMETER, and the suite is reached with
-# `source`, for one reason each. The MODULE_PATH environment variable is not
-# imported by zsh -- `MODULE_PATH=/nonexistent zsh -c 'echo $module_path'`
-# prints the real path -- so it cannot poison a child. And `exec` from a shell
-# that has set the parameter drops it, because it is a shell parameter and not
-# part of the process environment. `source` is what carries it in.
-# 毒藥用的是 `module_path` **參數**，而抵達測試檔的方式是 `source`，各有一個理由。
-# MODULE_PATH 這個環境變數不會被 zsh 匯入——`MODULE_PATH=/nonexistent zsh -c 'echo $module_path'`
-# 印出來的是真正的路徑——所以它毒不到子行程。而從一個「已經設好那個參數」的 shell 去 `exec`
-# 會把它丟掉，因為那是 shell 參數、不是行程環境的一部分。能把它帶進去的是 `source`。
+# The poison is the `module_path` PARAMETER, reached with `source`. zsh does
+# not import a MODULE_PATH environment variable, and `exec` drops a shell
+# parameter because it is not part of the process environment; `source` is
+# what carries it in.
+# 毒藥用的是 `module_path` **參數**，以 `source` 帶入。zsh 不會匯入 MODULE_PATH 環境變數，
+# 而 `exec` 會丟掉 shell 參數，因為它不屬於行程環境；能把它帶進去的是 `source`。
 if zsh -c 'module_path=(/nonexistent-module-path); zmodload -F zsh/stat b:zstat' 2>/dev/null; then
     skip "T238 poisoning module_path does not prevent zsh/stat from loading here, so the refusal cannot be driven / 在這裡毒化 module_path 並不能阻止 zsh/stat 載入，因此驅動不了那道拒絕"
 else
@@ -13832,9 +12402,9 @@ else
     else
         bad "T238a rc=$_t238_rc out=${_t238_out:0:120} / 實得如上"
     fi
-    # It must refuse BEFORE running anything. A refusal that arrives after 1157
-    # cases have run is not a refusal, it is a footnote.
-    # 它必須在跑任何東西**之前**拒絕。一道在 1157 個案例跑完之後才到的拒絕不是拒絕，是註腳。
+    # It must refuse BEFORE running anything; a refusal after the cases have
+    # run is only a footnote.
+    # 必須在跑任何東西**之前**拒絕；案例都跑完才來的拒絕只是註腳。
     if [[ $_t238_out != *"PASS  T"* && $_t238_out != *"通過 "* ]]; then
         ok "T238b and it refuses before running a single case / 而且它在跑第一個案例之前就拒絕"
     else
@@ -13844,23 +12414,14 @@ fi
 
 echo
 echo "--- T239: a build banner may not hardcode an architecture / T239：建置橫幅不得把架構寫死 ---"
-# LA, measured on WSL2: compile_csv2_linux.zsh printed
-# `Building csv2 for aarch64 Linux (-O)` while producing an ELF 64-bit x86-64.
-# Nothing broke -- the script has no target triple and no arch flag, it is a
-# native build wherever it runs -- but in a four-node matrix the reader
-# attributes that section of the log to the wrong node.
-#
-# What makes it worth a case rather than a one-line fix: the TRUTH was already
-# in the log, two lines below, from `file`. A log whose detail is right and
-# whose headline is wrong is more dangerous than one that is wrong throughout,
-# because it reads as verified. The headline is what gets quoted.
-#
-# LA，在 WSL2 上實測：compile_csv2_linux.zsh 印出 `Building csv2 for aarch64 Linux (-O)`，
-# 而產物是 ELF 64-bit x86-64。沒有東西壞掉——那支腳本沒有 target triple、沒有架構旗標，
-# 在哪裡跑就是哪裡的原生建置——但在四節點矩陣裡，讀 log 的人會把那一段結果歸給錯的節點。
-#
-# 它之所以值得一個案例、而不只是改一行：**真相本來就在 log 裡**，就在兩行之後的 `file`。
-# 一個「細節正確、標題錯誤」的 log 比全錯的更危險，因為它讀起來像是被驗證過的。而被引用的是標題。
+# LA. The build scripts are native builds with no target triple, so a banner
+# that names an architecture is wrong on every other host, and in a four-node
+# matrix the reader attributes that log section to the wrong node. A log whose
+# detail is right and whose headline is wrong reads as verified, and the
+# headline is what gets quoted.
+# LA。建置腳本是沒有 target triple 的原生建置，所以橫幅一旦寫死架構，在其他主機上就是錯的；
+# 在四節點矩陣裡，讀 log 的人會把那段結果歸給錯的節點。細節正確、標題錯誤的 log 讀起來像驗證過，
+# 而被引用的正是標題。
 _t239_scan() {
     local f l hits=""
     for f in "$@"; do
@@ -13874,11 +12435,9 @@ _t239_scan() {
 }
 
 _t239_files=($ROOT/*.zsh(N))
-# Fewer than three files means the glob broke, not that the tree is clean.
-# T218a passed on the guest having scanned NOTHING, and T218b is the only
-# reason anyone found out; a count guard is the cheap half of that lesson.
-# 少於三個檔案代表 glob 壞了，不代表這棵樹是乾淨的。T218a 曾在 guest 上「什麼都沒掃」而通過，
-# 而 T218b 是唯一說出這件事的東西；一道數量守衛是那個教訓裡便宜的那一半。
+# Fewer than three files means the glob broke, not that the tree is clean
+# (the same guard as T218a).
+# 少於三個檔案代表 glob 壞了，不代表樹是乾淨的（與 T218a 同一道守衛）。
 if (( ${#_t239_files} < 3 )); then
     bad "T239a the glob found ${#_t239_files} build scripts, so it scanned almost nothing / 那個 glob 只找到 ${#_t239_files} 支建置腳本，等於幾乎什麼都沒掃"
 else
@@ -13890,13 +12449,9 @@ else
     fi
 fi
 
-# The scan is driven against a file that really does contain one. Without this,
-# a scan that silently matched nothing would pass exactly when it stopped
-# working -- and it is the same one implementation, given a different input,
-# not a second copy of the logic.
-# 這個掃描被對著一個「真的含有那種行」的檔案驅動。少了這一步，一個安靜地什麼都沒比中的掃描，
-# 會在它停止運作的那一刻通過得最徹底——而這裡用的是**同一份實作**、只是換了輸入，不是邏輯的
-# 第二份複本。
+# The same scan function is driven against a file that really contains one;
+# otherwise a scan that silently matched nothing would pass.
+# 用**同一個**掃描函式去掃一個真的含有那種行的檔案；否則一個安靜地什麼都沒比中的掃描會照樣通過。
 print -r -- 'print -- "Building csv2 for aarch64 Linux"' > "$TMP/t239probe.zsh"
 if [[ -n ${$(_t239_scan "$TMP/t239probe.zsh")// /} ]]; then
     ok "T239b and the scan catches one when it is there / 而那個掃描在它存在時抓得到"
@@ -13906,21 +12461,18 @@ fi
 
 echo
 echo "--- T240: a directory that cannot be examined is not a missing one / T240：一個檢視不了的目錄，不是一個不存在的目錄 ---"
-# From LB's investigation. `fileKind` answers nil for EVERY stat failure, and
-# `-o` read nil as "the directory does not exist", so a permission error or a
-# symlink loop was reported as an absent directory -- on every platform, not
-# only on the one whose report started this. The errno was always there.
+# `-o` must not report a directory it could not stat (permission error,
+# symlink loop) as absent: `fileKind` answers nil for every stat failure, so
+# the errno has to be consulted to tell "missing" from "cannot be examined". See LB.
 #
-# The loop is used rather than a mode-000 directory because root defeats
-# permissions and the guest runs as root: chmod would have made this yet
-# another case that skips exactly where it would bite. ELOOP stops everyone.
+# A symlink loop is used rather than a mode-000 directory because the guest
+# runs as root, which defeats permissions; ELOOP stops everyone.
 #
-# 來自 LB 的追查。`fileKind` 對**每一種** stat 失敗都回答 nil，而 `-o` 把 nil 讀成「目錄不
-# 存在」，於是一個權限錯誤或一個 symlink 迴圈都被回報成「目錄不存在」——在每一個平台上，不只
-# 在那個引發追查的平台上。errno 一直都在。
+# `-o` 不得把一個 stat 不了的目錄（權限錯誤、symlink 迴圈）回報成不存在：`fileKind` 對每種
+# stat 失敗都回答 nil，所以必須看 errno 才能分辨「不存在」與「檢視不了」。見 LB。
 #
-# 這裡用迴圈而不是一個 mode-000 的目錄，因為 root 打得贏權限、而 guest 是以 root 執行的：
-# chmod 只會讓這個案例又變成「正好在它咬得到的地方跳過」。ELOOP 攔得住每一個人。
+# 這裡用 symlink 迴圈而不用 mode-000 目錄，因為 guest 以 root 執行，root 不受權限限制；ELOOP
+# 則攔得住每一個人。
 printf 'a,b\n1,2\n' > "$TMP/t240.csv"
 if (( IS_WINDOWS )); then
     skipt "T240 a symlink loop needs a privilege to create on Windows / 在 Windows 上建立 symlink 迴圈需要特權"
@@ -13934,20 +12486,17 @@ else
     else
         bad "T240a $(print -r -- $_t240 | head -1) / 訊息如上"
     fi
-    # The errno has to reach the message. Without this the case would pass on a
-    # sentence that named no cause, which is the shape it exists to remove.
-    # errno 必須抵達那則訊息。少了這一條，這個案例會在一句「沒有指出任何原因」的話上通過，
-    # 而那正是它存在所要移除的形狀。
+    # The errno has to reach the message; otherwise the case would pass on a
+    # sentence that names no cause.
+    # errno 必須出現在訊息裡；否則這個案例會在一句沒指出原因的話上通過。
     if [[ $_t240 == *"oop"* || $_t240 == *"迴圈"* || $_t240 == *"link"* ]]; then
         ok "T240b and it says what actually stopped it / 而且它說出了真正阻止它的東西"
     else
         bad "T240b the message named no cause: $(print -r -- $_t240 | head -1) / 訊息未指出原因"
     fi
 fi
-# The good case must stay good: a directory that really is absent still gets
-# the sentence that says so, or this change traded one false message for another.
-# 好的那一種要維持好：一個真的不存在的目錄，仍然要拿到那句說它不存在的話，否則這次改動只是
-# 把一句假話換成另一句假話。
+# A directory that really is absent still gets the sentence that says so.
+# 真的不存在的目錄，仍然要得到說它不存在的那句話。
 _t240_m=$("$CSV2" -r -t -i "$TMP/t240.csv" -o "$TMP/t240nosuchdir/out.csv" 2>&1 >/dev/null)
 if [[ $_t240_m == *"does not exist"* ]]; then
     ok "T240c while a directory that truly is absent still says so / 而一個真的不存在的目錄，仍然照實說"
@@ -13957,58 +12506,37 @@ fi
 
 echo
 echo "--- T241: every skip flag is counted, and every count has a flag / T241：每個跳過旗標都被計數，每個計數都有旗標 ---"
-# The forced check for mistakes.md entry 3: a rule applied to only part of
-# where it holds. Six instances across four days -- KU, KV, KW, KX, LC, and the
-# one this scan found while it was being written -- and the shape has a
-# checkable form here: a case sets `Txxx_SKIPPED=1` and the expected-skip
-# arithmetic must consume it. Set without consumed means the actual count
+# The forced check for mistakes.md entry 3 (a rule applied to only part of
+# where it holds). A case that sets `Txxx_SKIPPED=1` must be consumed by the
+# expected-skip arithmetic. Set without consumed means the actual count
 # exceeds the expected; consumed without set means the reverse.
 #
-# The pair matters more than either half. LC was a stale entry making the
-# expectation one too HIGH, and the same day T240 was added with a skip and no
-# count, one too LOW. Left alone they would have cancelled: the check passes,
-# both errors remain, and the next real drift hides inside the sum. A guard
-# that verifies a total can be defeated by two mistakes; one that verifies the
-# correspondence cannot.
+# It verifies the correspondence, not the total: two opposite mistakes (a
+# stale entry and an uncounted skip, as with LC and T240) cancel in a sum and
+# hide the next real drift.
 #
-# 這是 mistakes.md 第 3 條的強制檢查：一條規則只套用到它成立範圍的一部分。四天內六個實例
-# ——KU、KV、KW、KX、LC，以及這個掃描在被寫出來的過程中自己找到的那一個——而這個形狀在這裡
-# 有一個可檢查的樣子：一個案例設下 `Txxx_SKIPPED=1`，而預期略過數的算式必須消費它。有設定
-# 沒消費，代表實際會超過預期；有消費沒設定，則相反。
+# mistakes.md 第 3 條（規則只套用到成立範圍的一部分）的強制檢查。設下 `Txxx_SKIPPED=1` 的案例，
+# 必須被預期略過數的算式消費。有設定沒消費，代表實際數超過預期；有消費沒設定則相反。
 #
-# 成對比任何一半更重要。LC 是一筆過期項目、讓預期**多**了一；而同一天加入的 T240 有跳過沒有
-# 計數、讓預期**少**了一。放著不管它們會互相抵銷：檢查通過、兩個錯都還在，而下一次真正的漂移
-# 會藏在那個總和裡。一道驗證「總數」的守衛可以被兩個錯誤打敗；一道驗證「對應關係」的不行。
-# Comment lines are dropped FIRST. T218 records that its scan needed two halves
-# -- compose the probe string, and exclude the counter-examples written in
-# comments -- and this case applied the first and missed the second, so its own
-# explanatory comment (which names the flag pattern) was reported as an
-# uncounted flag. Reading a precedent and taking half of it is entry 3 of
-# mistakes.md happening inside the guard written for entry 3.
-# 註解行**先**被丟掉。T218 記著它的掃描需要兩半——把探針字串組出來，以及排除註解裡的反面示範
-# ——而這個案例套用了第一半、漏了第二半，於是它自己那段（提到旗標樣式的）說明註解被回報成一個
-# 未被計數的旗標。讀了一個先例卻只拿走一半，就是 mistakes.md 第 3 條在「為第 3 條而寫的守衛」
-# 裡再發生一次。
+# 它驗證的是對應關係而非總數：兩個方向相反的錯誤（例如 LC 的過期項目與 T240 未計數的跳過）在
+# 總和裡會互相抵銷，並把下一次真正的漂移藏起來。
+# Comment lines are dropped FIRST, as in T218: comments here name the flag
+# pattern and would otherwise be reported as uncounted flags.
+# 與 T218 一樣，**先**丟掉註解行：這裡的註解提到旗標樣式，不丟掉就會被回報成未計數的旗標。
 _t241_code() { LC_ALL=C grep -vE '^[[:space:]]*#' "$1" }
 _t241_sets() { _t241_code "$1" | LC_ALL=C grep -oE '\bT[0-9A-Za-z_]*SKIPPED=1' | LC_ALL=C sed 's/=1$//' | LC_ALL=C sort -u }
 _t241_uses() { _t241_code "$1" | LC_ALL=C grep -oE '\$\{T[0-9A-Za-z_]*SKIPPED:-0\}' | LC_ALL=C sed 's/[${}]//g; s/:-0//' | LC_ALL=C sort -u }
 
-# zsh's own array subtraction, `${A:|B}`, because `comm` DOES NOT EXIST in the
-# guest's busybox. The first version used it and the guest reported
-# `the suite called "comm", which does not exist here` -- a guard this tree
-# already had, catching mistakes.md entry 1 for the eighth time: a test that
-# depends on an external tool EXISTING. That entry's corrective names `stat`
-# and `getent` by name and I reached for a third one.
-# 用 zsh 自己的陣列減法 `${A:|B}`，因為 **guest 的 busybox 裡沒有 `comm`**。第一版用了它，
-# guest 回報 `the suite called "comm", which does not exist here`——那是這棵樹本來就有的守衛，
-# 抓到 mistakes.md 第 1 條的第八次：一個依賴外部工具**存在**的測試。那一條的矯正措施點名了
-# `stat` 與 `getent`，而我伸手拿了第三個。
+# zsh's own array subtraction, `${A:|B}` (via only_in_first), because `comm`
+# does not exist in the guest's busybox (mistakes.md entry 1: a test must not
+# depend on an external tool existing).
+# 用 zsh 自己的陣列減法 `${A:|B}`（經由 only_in_first），因為 **guest 的 busybox 裡沒有
+# `comm`**（mistakes.md 第 1 條：測試不得依賴外部工具存在）。
 _t241_sa=(${(f)"$(_t241_sets "$SUITE_PATH")"}); _t241_sa=(${_t241_sa:#})
 _t241_ua=(${(f)"$(_t241_uses "$SUITE_PATH")"}); _t241_ua=(${_t241_ua:#})
-# Fewer than ten flags means the scan broke, not that the file is clean. T218a
-# passed on the guest having scanned nothing; this is the cheap half of it.
-# 少於十個旗標代表掃描壞了，不代表這個檔案是乾淨的。T218a 曾在 guest 上什麼都沒掃而通過；
-# 這是那個教訓裡便宜的那一半。
+# Fewer than ten flags means the scan broke, not that the file is clean (the
+# same guard as T218a).
+# 少於十個旗標代表掃描壞了，不代表檔案是乾淨的（與 T218a 同一道守衛）。
 if (( ${#_t241_sa} < 10 )); then
     bad "T241a the scan found ${#_t241_sa} flags, so it read almost nothing / 掃描只找到 ${#_t241_sa} 個旗標，等於幾乎沒讀到東西"
 else
@@ -14022,19 +12550,12 @@ else
 fi
 
 # Driven against a file that really has an uncounted flag, using the SAME two
-# functions rather than a second copy of them. Without this the case would pass
-# most convincingly at the moment the greps stopped matching anything.
-# 用**同樣的兩個函式**（不是它們的第二份複本）去掃一個真的含有「未被計數的旗標」的檔案。少了
-# 這一步，這個案例會在那兩個 grep 停止比中任何東西的那一刻通過得最徹底。
-# The probe string is ASSEMBLED, not written out, or the scan finds it in this
-# file and reports T999 as an uncounted flag -- which is exactly what happened
-# on the first run, and exactly what T218b's probe did before it. mistakes.md
-# already carried the fix: "the probe's text was therefore composed". Reading
-# that and then writing the literal anyway is the same shape as entry 3.
-# 探針字串是**組出來的**，不是直接寫出來的，否則掃描會在這個檔案裡找到它、把 T999 回報成一個
-# 未被計數的旗標——那正是第一次執行時發生的事，也正是 T218b 的探針在它之前做過的事。
-# mistakes.md 早就記著那個修法：「探針的文字因此改成組出來的」。讀過它、然後照樣寫下字面值，
-# 與第 3 條是同一個形狀。
+# functions; otherwise the case would pass when the greps stopped matching.
+# 用**同樣的兩個函式**去掃一個真的含有未計數旗標的檔案；否則 grep 一旦比不中任何東西，
+# 這個案例也會通過。
+# The probe string is ASSEMBLED, as in T218b; a literal would be found in this
+# file and reported as an uncounted T999 flag.
+# 探針字串是**組出來的**，與 T218b 相同；寫成字面值會在這個檔案裡被找到，回報成未計數的 T999 旗標。
 _t241_w="SKIP"; _t241_w="${_t241_w}PED"
 print -r -- "T999_${_t241_w}=1" > "$TMP/t241probe.zsh"
 _t241_psa=(${(f)"$(_t241_sets "$TMP/t241probe.zsh")"}); _t241_psa=(${_t241_psa:#})
@@ -14047,23 +12568,12 @@ fi
 
 echo
 echo "--- T242: a refusal names a way through, and that way works / T242：一則拒絕說出一條路，而那條路走得通 ---"
-# LF. The Windows node met a file under testapp/actions/ with `#` comment lines,
-# was refused twice, and was about to write "csv2 cannot read files with #
-# comments" into its memory. The refusal was right and its reasoning was right;
-# what was wrong is that it named only the route that requires RENAMING the
-# file -- not advice for a path in version control -- so a careful reader
-# concluded there was none.
-#
-# The cost of this defect is not a wrong result. It is a wrong limitation
-# written into someone else's memory, and that outlives a defect, because no
-# test ever reads it.
-#
-# LF。Windows 節點遇到 `testapp/actions/` 底下帶 `#` 註解行的檔案，兩次都被拒，於是正要把
-# 「csv2 讀不了帶 # 註解的檔案」寫進它的 memory。那則拒絕是對的、理由也是對的；錯的是它只說出
-# 那條需要**改檔名**的路——對一個在版控裡的路徑那不是建議——於是一個仔細的讀者得出「沒有路」。
-#
-# 這個缺陷的代價不是一個錯的結果，是一條被寫進別人 memory 的錯誤限制，而那比一個缺陷活得久，
-# 因為沒有任何測試會去讀它。
+# LF. The `#` refusal must name a route that needs no RENAME (renaming is no
+# advice for a path under version control); otherwise a careful reader
+# concludes csv2 cannot read such files at all, and records that wrong
+# limitation where no test will ever read it.
+# LF。`#` 的拒絕訊息必須說出一條不需要**改檔名**的路（對版控裡的路徑，改檔名不算建議）；否則
+# 仔細的讀者會斷定 csv2 根本讀不了這種檔案，並把這個錯誤限制記在沒有任何測試會讀到的地方。
 printf '# actions for testapp\nname,cmd\nbuild,make\n' > "$TMP/t242.csv"
 _t242_msg=$("$CSV2" -r -i "$TMP/t242.csv" 2>&1 >/dev/null)
 if [[ $_t242_msg == *"-si --headers 0"* ]]; then
@@ -14072,11 +12582,10 @@ else
     bad "T242a the refusal names no rename-free route: ${_t242_msg:0:90} / 訊息如上"
 fi
 
-# The route is EXECUTED, not matched. A message may name a command that does
-# not work, and a case that only greps for the string would pass on one -- the
-# same reason T232 runs the README's examples instead of reading them.
-# 那條路是被**執行**的，不是被比對的。一則訊息可以說出一個其實行不通的指令，而一個只 grep
-# 字串的案例會在那種訊息上通過——與 T232 執行 README 範例而不是閱讀它們，是同一個理由。
+# The route is EXECUTED, not matched: a grep would pass on a message naming a
+# command that does not work. Same reason T232 runs the README's examples.
+# 那條路是被**執行**的，不是被比對的：只 grep 字串，會在指令其實行不通的訊息上通過。T232 執行
+# README 範例也是同一個理由。
 _t242_out=$("$CSV2" -r -si --headers 0 < "$TMP/t242.csv" 2>/dev/null)
 _t242_want=$(printf '# actions for testapp\nname,cmd\nbuild,make')
 if [[ $_t242_out == $_t242_want ]]; then
@@ -14085,11 +12594,10 @@ else
     bad "T242b following the message gave: ${_t242_out:0:80} / 照著做的結果如上"
 fi
 
-# The other half of the misunderstanding: on a .csv, --headers 0 means a
-# HEADERLESS CSV, not lines, because the suffix already declared commas. That
-# is why the node's second attempt failed, and the message now says so.
-# 誤解的另一半：在 .csv 上，--headers 0 的意思是「沒有標頭列的 CSV」而不是逐行，因為副檔名已經
-# 宣告了逗號。那就是那個節點第二次嘗試失敗的原因，而訊息現在說了這件事。
+# On a .csv, --headers 0 means a HEADERLESS CSV, not lines, because the suffix
+# already declared commas; the message must say so.
+# 在 .csv 上，--headers 0 的意思是「沒有標頭列的 CSV」而不是逐行，因為副檔名已宣告了逗號；
+# 訊息必須說明這點。
 if [[ $_t242_msg == *"HEADERLESS"* || $_t242_msg == *"沒有標頭列"* ]]; then
     ok "T242c and it distinguishes --headers 0 on a suffixed file from lines / 而它區分了「有副檔名時的 --headers 0」與逐行"
 else
@@ -14098,48 +12606,36 @@ fi
 
 echo
 echo "--- T243: a killed run's temp directory is reaped, a live one is not / T243：被殺掉的執行留下的暫存目錄會被回收，活著的不會 ---"
-# Reported by the parent project's session, which had been deleting the symptom
-# daily: 131 leftover payloads in one day, 4.1 GB, each holding a 229 MB
-# csv2-payload.tar. The source was here -- a temp directory from a run killed
-# on 2026-08-29, still sitting inside `test/` a week later, and tarred into
-# every guest payload since.
+# A killed run leaves its temp directory inside `test/`, and anything left
+# there is tarred into every guest payload, so start-up reaps directories
+# whose run is gone and spares live ones.
 #
 # The reaper is driven against a scratch directory using the SAME function the
 # start-up path calls, not a copy of its logic.
 #
-# 由母專案的 session 回報，而它先前每天在清那個症狀：一天 131 份殘留的 payload、4.1 GB，
-# 每一份裝著一個 229 MB 的 csv2-payload.tar。**來源在這裡**——一次 2026-08-29 被殺掉的執行留下的
-# 暫存目錄，一週後還在 `test/` 裡面，而且從那天起被打包進每一個 guest payload。
+# 被殺掉的執行會把暫存目錄留在 `test/` 裡，而留在那裡的東西會被打包進每一個 guest payload；
+# 因此啟動時會回收「執行已不在」的目錄，並放過還活著的。
 #
 # 這個回收器是對著一個臨時目錄驅動的，用的是啟動路徑呼叫的**同一個函式**，不是它邏輯的複本。
 _t243_dir="$TMP/t243home"
 mkdir -p "$_t243_dir"
 
-# A directory with no .pid at all -- what every run before this change left.
-# 一個完全沒有 .pid 的目錄——這次改動之前每一次執行留下的樣子。
+# A directory with no .pid at all, as left by runs that predate pid recording.
+# 一個完全沒有 .pid 的目錄，即記錄 pid 之前的執行留下的樣子。
 mkdir -p "$_t243_dir/.test_csv2.nopid"
-# A directory whose PID is not running. PID 1 is always alive, so a dead one is
-# manufactured: a subshell's PID, read after it has exited.
-# 一個「PID 沒在跑」的目錄。PID 1 永遠活著，所以這裡製造一個死的：取一個 subshell 的 PID，
-# 在它結束之後才使用。
-# A genuinely dead PID: start a background subshell, keep its pid, wait for it
-# to finish. The first attempt used `$sysparams[pid]`, which needs
-# `zmodload zsh/system` -- it was never loaded, `no_unset` aborted the subshell,
-# and `_t243_dead` came back EMPTY. The case still passed, because an empty pid
-# takes the no-pid branch: it tested that branch twice and the dead-pid branch
-# never once. Nothing in the suite said so; run_checked printed the line.
-# 一個真正死掉的 PID：開一個背景 subshell、留住它的 pid、等它結束。第一版用了
-# `$sysparams[pid]`，那需要 `zmodload zsh/system`——它從未被載入，`no_unset` 在 subshell 裡中止，
-# 於是 `_t243_dead` 回來是**空的**。而那個案例照樣通過，因為空的 pid 走的是「沒有 pid」那一支：
-# 它把那一支測了兩次，而「pid 已死」那一支一次也沒測到。測試本身沒有說出這件事，是 run_checked
-# 印出了那一行。
+# A directory whose PID is not running, manufactured from a background
+# subshell's pid read after it has exited. `$!` is used, not
+# `$sysparams[pid]`, which needs zsh/system: an empty pid would take the
+# no-pid branch and leave the dead-pid branch untested.
+# 一個「PID 沒在跑」的目錄：取背景 subshell 的 pid，在它結束後才使用。這裡用 `$!` 而不用需要
+# zsh/system 的 `$sysparams[pid]`：pid 若是空的，會走「沒有 pid」那一支，「pid 已死」那一支就
+# 沒測到。
 ( : ) & _t243_dead=$!
 wait $_t243_dead 2>/dev/null
 mkdir -p "$_t243_dir/.test_csv2.dead"; print -r -- "$_t243_dead" > "$_t243_dir/.test_csv2.dead/.pid"
-# And one that IS alive: this very suite. If the reaper takes this, it would
-# take a concurrent run's directory too, which is the failure that matters.
-# 以及一個**確實活著**的：這份測試自己。回收器若動了它，也就會動一個並行執行的目錄，
-# 而那才是真正要緊的失敗。
+# And one that IS alive: this very suite. A reaper that takes this would take
+# a concurrent run's directory too.
+# 以及一個**確實活著**的：這份測試自己。回收器若動了它，也就會動到並行執行的目錄。
 mkdir -p "$_t243_dir/.test_csv2.live"; print -r -- $$ > "$_t243_dir/.test_csv2.live/.pid"
 
 reap_stale_tmp "$_t243_dir" >/dev/null
@@ -14156,11 +12652,11 @@ else
     bad "T243b the reaper removed a LIVE run's directory / 回收器移除了一個「還活著」的執行的目錄"
 fi
 
-# The new run records its own pid, or the next run reaps this one while it is
-# still working. The reaper and the recording are two halves of one thing, and
-# a test that only drove the reaper would pass with the recording missing.
-# 新的執行要記下自己的 pid，否則下一次執行會在它還在工作時把它回收掉。回收器與「記錄」是同一件事
-# 的兩半，而一個「只驅動回收器」的測試，會在「記錄」不存在時照樣通過。
+# The run records its own pid, or the next run reaps this one while it is
+# still working. A test that only drove the reaper would pass with the
+# recording missing.
+# 這次執行要記下自己的 pid，否則下一次執行會在它還在工作時把它回收掉。只驅動回收器的測試，
+# 在「記錄」不存在時也會通過。
 if [[ -f "$TMP/.pid" && $(<"$TMP/.pid") == $$ ]]; then
     ok "T243c and this run recorded its own pid, so the next run will spare it / 而這次執行記下了自己的 pid，因此下一次執行會放過它"
 else
@@ -14170,12 +12666,11 @@ fi
 echo
 echo "--- T80: -count answers the same with an index and without / T80：-count 有索引與沒有索引時答案相同 ---"
 # Phase 8, item three. A scrolling front end needs the total before it draws
-# anything. The verb was chosen over a `total` field in --json's meta because
-# that field would only exist when an index does, and a field that is sometimes
-# there recreates the ambiguity this tool exists to remove.
-# 第 8 階段第三項。一個會捲動的前端在畫任何東西之前就需要總數。選了動詞而不是在 --json 的 meta
-# 加一個 `total`，因為那個欄位只有在索引存在時才有——而一個時有時無的欄位，重新製造了這個工具
-# 存在所要消滅的那種歧義。
+# anything. A verb rather than a `total` field in --json's meta, because that
+# field would exist only when an index does, and a sometimes-present field is
+# exactly the ambiguity this tool avoids.
+# 第 8 階段第三項。會捲動的前端在畫任何東西之前就需要總數。用動詞而不是在 --json 的 meta 加
+# `total`，因為那個欄位只在索引存在時才有，而時有時無的欄位正是這個工具要避免的歧義。
 _t80_with=$("$CSV2" -count -i "$PKG" 2>/dev/null)
 _t80_without=$("$CSV2" -count --no-index -i "$PKG" 2>/dev/null)
 if [[ -n $_t80_with && $_t80_with == $_t80_without ]]; then
@@ -14184,13 +12679,11 @@ else
     bad "T80a with=$_t80_with without=$_t80_without / 實得如上"
 fi
 
-# Checked against a number derived by a different route, not against itself.
-# --json's meta counts what the READ walked past; -count is allowed to answer
-# from a sidecar without reading. Two roads to one number is the only way this
-# case can fail when the sidecar is wrong.
-# 與一個「由另一條路推導出來的數字」對照，不是與自己對照。--json 的 meta 數的是那次**讀取**走過
-# 的筆數；而 -count 可以不讀就從 sidecar 回答。兩條路通往同一個數字，是這個案例在 sidecar 出錯時
-# 唯一有可能失敗的方式。
+# Checked against a number derived by a different route: --json's meta counts
+# what the READ walked past, while -count may answer from the sidecar without
+# reading. Only two roads to one number can catch a wrong sidecar.
+# 與另一條路推導出的數字對照：--json 的 meta 數的是**讀取**走過的筆數，而 -count 可以不讀、直接
+# 從 sidecar 回答。只有兩條路通往同一個數字，才抓得到出錯的 sidecar。
 _t80_json=$("$CSV2" -r --json -i "$PKG" 2>/dev/null | tail -1 | sed 's/.*"records":\([0-9]*\).*/\1/')
 if [[ $_t80_with == $_t80_json ]]; then
     ok "T80b and it agrees with the records --json counted while reading / 而它與 --json 讀取時數到的 records 一致"
@@ -14231,25 +12724,21 @@ else
     bad "T81b ${_t81_err:0:80} / 訊息如上"
 fi
 
-# WHICH OF THESE ACTUALLY BITE, measured by putting the old behaviour back:
-# T81a, T14d, T112h and T141a fail; T81b, T14e and T81c pass. T81c is the one
-# worth naming -- stdout was empty under the old behaviour too, so it is NOT a
-# guard for this change. It guards the pipeline promise, which is a different
-# thing and still worth having. T81b and T14e check the message text, and the
-# old code could have carried the same words in a warning; T81a is the case
-# that separates a refusal from a warning, because it reads the exit status.
-# **這些之中哪些真的會咬**，以「把舊行為放回去」量出來：T81a、T14d、T112h、T141a 失敗；
-# T81b、T14e、T81c 通過。T81c 是值得指名的那個——**舊行為下 stdout 本來也是空的**，所以它
-# **不是**這次改變的守衛。它守的是管線承諾，那是另一件事，而且仍然值得有。T81b 與 T14e 檢查的
-# 是訊息文字，而舊的程式可以在一個警告裡帶著同樣的字；T81a 才是分辨「拒絕」與「警告」的那一個，
-# 因為它讀的是結束狀態。
+# Which of these guard the refusal: T81a (with T14d, T112h, T141a) reads the
+# exit status, which is what separates a refusal from a warning. T81b and T14e
+# check message text, which a warning could also carry. T81c guards the
+# pipeline promise, a separate property: stdout would be empty under a warning
+# too.
+# 哪些真的守著這道拒絕：T81a（以及 T14d、T112h、T141a）讀的是結束狀態，那才分得出「拒絕」與
+# 「警告」。T81b 與 T14e 檢查訊息文字，警告也可能帶著同樣的字。T81c 守的是管線承諾，是另一件事：
+# 即使只是警告，stdout 也會是空的。
 #
 # stdout stays empty without -t, which is the promise every refusal here keeps.
 # WITH -t the header may already have gone out, because the total is not
-# knowable until the file has been read -- recorded beside the throw in
-# Run.swift rather than papered over.
-# 不帶 -t 時 stdout 保持空的，那是這裡每一道拒絕都遵守的承諾。帶 -t 時標頭可能已經送出去了，
-# 因為總筆數要讀完檔案才知道——那一點記在 Run.swift 那個 throw 旁邊，而不是被粉飾掉。
+# knowable until the file has been read; this is noted beside the throw in
+# Run.swift.
+# 不帶 -t 時 stdout 保持空的，這是這裡每一道拒絕都遵守的承諾。帶 -t 時標頭可能已經送出，因為
+# 總筆數要讀完檔案才知道；這一點記在 Run.swift 那個 throw 旁邊。
 _t81_out=$("$CSV2" -mid 900,999 -i "$PKG" 2>/dev/null)
 if [[ -z $_t81_out ]]; then
     ok "T81c and stdout is empty, so a pipeline sees nothing rather than something short / 而 stdout 是空的，因此管線看到的是「什麼都沒有」而不是「少了一截的東西」"
@@ -14259,15 +12748,12 @@ fi
 
 echo
 echo "--- T82: a line-spanning file still seeks, and answers identically / T82：跨行的檔案仍然 seek，而且答案完全相同 ---"
-# Phase 8, item five. Storing the LINE at each grid point is what let the seek
-# survive embedded newlines: before version 4 the fast path had to be given up
-# whenever a record could span lines, because the line number of the landing
-# point was unknowable without reading from the start. The code landed with
-# version 4; nothing asserted it until now.
+# Phase 8, item five. Index version 4 stores the LINE at each grid point, which
+# is what lets the seek survive embedded newlines: without it the landing
+# point's line number is unknowable without reading from the start.
 #
-# 第 8 階段第五項。在每個格點存下**行號**，正是讓 seek 在有內嵌換行時仍然成立的東西：在版本 4
-# 之前，只要一筆紀錄可能跨行就必須放棄那條快路徑，因為落點的行號在「不從頭讀」的情況下無法得知。
-# 程式隨版本 4 落地；而在此之前沒有任何東西斷言過它。
+# 第 8 階段第五項。索引版本 4 在每個格點存下**行號**，這正是 seek 在有內嵌換行時仍能成立的原因：
+# 少了它，不從頭讀就無法得知落點的行號。
 _t82_f="$TMP/t82.csv"
 {
     print -r -- 'id,note'
@@ -14279,16 +12765,11 @@ _t82_size=$(wc -c < "$_t82_f" | tr -d ' ')
 
 # The window starts deep into the file, so a scan would have to read most of it.
 # 這個視窗的起點在檔案深處，因此一次掃描必須讀掉它的大部分。
-# The fixture spans lines: the string above contains a REAL newline, so 4000
-# records occupy about 8000 lines. Checked, because the first diagnosis of this
-# case's failure was that it did NOT -- reached by reproducing the loop on one
-# line with a `\n` that `print -r` does not expand. The reproduction did not
-# have the shape of the thing being reproduced, which is the skill's own rule
-# and the reason that diagnosis was wrong. The real cause was the next line.
-# 這份 fixture 是跨行的：上面那個字串裡有一個**真正的**換行，因此 4000 筆佔約 8000 行。這裡檢查
-# 它，是因為這個案例失敗時的第一個診斷說它**不是**——那個診斷來自「把迴圈寫成一行、用一個
-# `print -r` 不會展開的 `\n`」的重現。**那次重現沒有被重現對象的形狀**，那正是 skill 自己那條
-# 規則，也是那個診斷錯掉的原因。真正的原因在下一行。
+# The fixture must really span lines: the string above contains a REAL
+# newline (`print -r` would not expand a `\n`), so 4000 records occupy about
+# 8000 lines. Otherwise nothing below tests a seek over embedded newlines.
+# 這份 fixture 必須真的跨行：上面的字串裡有一個**真正的**換行（`print -r` 不會展開 `\n`），因此
+# 4000 筆約佔 8000 行。否則以下沒有任何東西測到「跨內嵌換行的 seek」。
 _t82_lines=$(wc -l < "$_t82_f" | tr -d ' ')
 if (( _t82_lines > 7000 )); then
     ok "T82a the fixture really spans lines: $_t82_lines lines for 4000 records / 這份 fixture 真的跨行：4000 筆佔 $_t82_lines 行"
@@ -14304,21 +12785,13 @@ else
     bad "T82b read=$_t82_read size=$_t82_size (expected far less) / 實得如上"
 fi
 
-# Byte-identical to the same window without the index, INCLUDING --physical --
-# the physical line is exactly what a seek cannot recompute and must take from
-# the sidecar, so leaving it out would test the half that was never in doubt.
-# 與「同一個視窗但不用索引」逐位元相同，**包含 --physical**——實體行號正是一次 seek 無法重算、
-# 必須從 sidecar 取得的東西，把它排除在外等於測了從來沒有人懷疑的那一半。
-# Through --json, not --physical. `--physical` does not apply here at all: it
-# adds to the address in the LOCATING report and needs -contains, so the first
-# version of this case ran a command csv2 refused -- which is why read_bytes
-# and both outputs were empty. The channel carrying the line for a -mid window
-# is --json's `"line":`, and that is precisely the number a seek cannot
-# recompute and must take from the sidecar.
-# 走 --json，不走 --physical。`--physical` 在這裡根本不適用：它是附加在**定位報告**的位址上、
-# 需要搭配 -contains，因此這個案例的第一版執行了一個 csv2 會拒絕的指令——那就是 read_bytes 與
-# 兩個輸出都空掉的原因。對一個 -mid 視窗，載著行號的管道是 --json 的 `"line":`，而那正是一次
-# seek 無法重算、必須從 sidecar 取得的那個數字。
+# Byte-identical to the same window without the index, line numbers included:
+# the line is exactly what a seek cannot recompute and must take from the
+# sidecar. It is compared through --json's `"line":`, not --physical, which
+# applies only to the LOCATING report and needs -contains.
+# 與「同一個視窗但不用索引」逐位元相同，含行號：行號正是 seek 無法重算、必須從 sidecar 取得的
+# 東西。這裡透過 --json 的 `"line":` 比對，而不是 --physical——後者只用於**定位報告**，且需要
+# 搭配 -contains。
 "$CSV2" -mid 3900,3902 --json -i "$_t82_f" > "$TMP/t82_idx.out" 2>/dev/null
 "$CSV2" -mid 3900,3902 --json --no-index -i "$_t82_f" > "$TMP/t82_scan.out" 2>/dev/null
 if cmp -s "$TMP/t82_idx.out" "$TMP/t82_scan.out" && [[ -s "$TMP/t82_idx.out" ]] \
@@ -14331,20 +12804,18 @@ fi
 echo
 echo "--- T83: a version-3 sidecar is ignored, not misused / T83：版本 3 的 sidecar 被忽略，而不是被誤用 ---"
 # The version field sits at byte 8 and is checked BEFORE the index's own
-# checksum, which is what makes this case honest: patching the version alone
-# would otherwise be discarded for the checksum instead, and the case would
-# pass while proving something else entirely.
-# 版本欄位在第 8 個位元組，而且它在「索引自身的檢查碼」**之前**被檢查——那正是這個案例誠實的
-# 原因：否則只改版本會變成因為檢查碼而被丟棄，於是這個案例會通過，卻證明了完全不同的另一件事。
+# checksum; otherwise patching the version would be rejected by the checksum
+# and the case would pass while proving something else.
+# 版本欄位在第 8 個位元組，且在索引自身的檢查碼**之前**被檢查；否則只改版本會因檢查碼被丟棄，
+# 這個案例就會通過、證明的卻是另一件事。
 _t83_f="$TMP/t83.csv"
 { print -r -- 'a,b'; for i in {1..2000}; do print -r -- "$i,v$i"; done } > "$_t83_f"
 "$CSV2" --build-index -i "$_t83_f" >/dev/null 2>&1
 _t83_want=$("$CSV2" -mid 1900,1902 -i "$_t83_f" 2>/dev/null)
 
-# Proof the sidecar was usable BEFORE the patch. Without this the case would
-# pass on a file that never had a working index in the first place.
-# 證明那份 sidecar 在被改之前是可用的。少了這一步，這個案例會在一個「本來就沒有可用索引」的檔案
-# 上通過。
+# Proof the sidecar was usable BEFORE the patch; otherwise the case would pass
+# on a file that never had a working index.
+# 證明 sidecar 在被改之前可用；否則這個案例會在一個本來就沒有可用索引的檔案上通過。
 if "$CSV2" --verify-index -i "$_t83_f" >/dev/null 2>&1; then
     ok "T83a the sidecar is usable before the version is changed / 版本被改之前那份 sidecar 是可用的"
 else
@@ -14353,24 +12824,20 @@ fi
 
 printf '\003' | dd of="$_t83_f.index" bs=1 seek=8 conv=notrunc 2>/dev/null
 _t83_why=$("$CSV2" --verify-index -i "$_t83_f" 2>&1 >/dev/null)
-# The message says "written by a different INDEX_VERSION" -- matched on that
-# exact word. The first version looked for a lowercase "version" and did not
-# find it, and the case failed while the program was right.
-# 訊息說的是「written by a different INDEX_VERSION」——比對那個確切的字。第一版找的是小寫的
-# "version"，沒有找到，於是那個案例失敗、而程式是對的。
+# The message says "written by a different INDEX_VERSION"; matched on that
+# exact word (a lowercase "version" does not appear).
+# 訊息是「written by a different INDEX_VERSION」；比對的就是這個確切的字（小寫的 "version" 不會出現）。
 if [[ $_t83_why == *"INDEX_VERSION"* || $_t83_why == *"版本"* ]]; then
     ok "T83b a version-3 sidecar is refused BY VERSION, not by some later check / 版本 3 的 sidecar 是**因為版本**被拒，而不是因為後面某一道檢查"
 else
     bad "T83b ${_t83_why:0:90} / 訊息如上"
 fi
 
-# Ignored, not misused: the read still answers, and answers the same, because
-# it discarded the sidecar and scanned. A version bump that made an old sidecar
-# be READ with the new layout is the failure this guards -- it would return
+# Ignored, not misused: the read still answers the same, because it discarded
+# the sidecar and scanned. An old sidecar READ with the new layout would return
 # offsets that are structurally valid and point at the wrong bytes.
-# 被忽略，而不是被誤用：那次讀取仍然回答，而且答案相同，因為它丟掉 sidecar 改用掃描。這道守衛
-# 防的失敗是「版本提升之後，舊的 sidecar 被用新的排版去讀」——那會回傳一批結構合法、卻指向錯誤
-# 位元組的偏移量。
+# 被忽略而不是被誤用：讀取仍給出相同答案，因為它丟掉 sidecar 改用掃描。若用新排版去讀舊的
+# sidecar，會得到結構合法、卻指向錯誤位元組的偏移量。
 _t83_got=$("$CSV2" -mid 1900,1902 -i "$_t83_f" 2>/dev/null); _t83_rc=$?
 if [[ $_t83_rc == 0 && $_t83_got == $_t83_want && -n $_t83_want ]]; then
     ok "T83c and the read still gives the same answer, by scanning / 而那次讀取仍然給出同一個答案，靠的是掃描"
@@ -14380,20 +12847,16 @@ fi
 
 echo
 echo "--- T244: --json's meta carries the English header, positionally / T244：--json 的 meta 依位置帶著英文標頭 ---"
-# LI, found by csv2view. `header_zh` was positional and the English header was
-# not there at all: its names lived as the KEYS of each record's `fields`
-# object, and a JSON object's keys have no defined order. The emitted text
-# happens to be in file order, but a consumer decoding into a dictionary loses
-# it -- csv2view fell back to sorting the keys and drew the columns
-# alphabetically, silently, at rc=0.
-# LI，由 csv2view 發現。`header_zh` 是位置性的，而英文標頭**完全不在**：它的名字散在每一筆紀錄
-# 的 `fields` 物件的鍵上，而 JSON 物件的鍵沒有定義順序。輸出的文字碰巧是檔案順序，但一個解成
-# 字典的消費者會失去它——csv2view 因此退回「取鍵排序」，把欄位依字母序畫出來，安靜地，在 rc=0 下。
+# LI. The meta line carries `header` as a positional array, like `header_zh`.
+# The keys of each record's `fields` object are not enough: JSON object keys
+# have no defined order, so a consumer decoding into a dictionary loses the
+# column order (csv2view drew columns alphabetically).
+# LI。meta 行以位置陣列帶著 `header`，與 `header_zh` 相同。每筆紀錄 `fields` 物件的鍵不夠：
+# JSON 物件的鍵沒有定義順序，解成字典的消費者會失去欄序（csv2view 曾把欄位依字母序畫出）。
 _t244_meta=$("$CSV2" -mid 1,1 --json -i "$PKG" 2>/dev/null | head -1)
-# Compared against the file's OWN first line, not against a list written here:
-# a list here would be a second copy of the header and would agree with itself.
-# 與那個檔案**自己的第一行**比對，不是與寫在這裡的一份清單比對：寫在這裡的清單會是標頭的第二份
-# 複本，而它只會與自己一致。
+# Compared against the file's OWN first line, not a list written here, which
+# would be a second copy of the header.
+# 與檔案**自己的第一行**比對，而不是寫在這裡的清單——那只是標頭的第二份複本。
 _t244_want=$(head -1 "$PKG" | tr ',' '\n' | sed 's/^/"/;s/$/"/' | paste -sd, -)
 if [[ $_t244_meta == *"\"header\":[$_t244_want]"* ]]; then
     ok "T244a the meta line carries header in the file's column order / meta 行以檔案的欄序帶著 header"
@@ -14401,21 +12864,15 @@ else
     bad "T244a want header:[$_t244_want] got ${_t244_meta:0:110} / 實得如上"
 fi
 
-# On a .csv2 BOTH arrays are there and they line up position by position.
-# That is what makes the README's "consumers can use either header row" true;
-# before this it was false, because either was not available.
-# 在 .csv2 上**兩個**陣列都在，而且逐位置對齊。那正是 README 那句「consumers can use either
-# header row」成立的原因；在此之前它是假的，因為 either 並不存在。
-# The fixture is built here, not taken from compare/. That directory is NOT in
+# On a .csv2 BOTH arrays are there and they line up position by position,
+# which is what makes the README's "consumers can use either header row" true.
+# 在 .csv2 上**兩個**陣列都在，而且逐位置對齊，這正是 README 那句「consumers can use either
+# header row」成立的原因。
+# The fixture is built here, not taken from compare/: that directory is NOT in
 # the payload the guest harness tars (src, the build scripts, test,
-# verifications and the two READMEs), so on the guest the file did not exist,
-# csv2 failed, and both counts came back 0 -- a case failing for a reason that
-# had nothing to do with what it tests. mistakes.md entry 1, caught by the
-# guest exactly as the four-node rule says it will be.
-# fixture 在這裡造，不從 compare/ 取。那個目錄**不在** guest harness 打包的 payload 裡（只有
-# src、建置腳本、test、verifications 與兩份 README），因此在 guest 上那個檔案不存在、csv2 失敗、
-# 兩個計數都回來 0——一個「因為與它所測無關的理由而失敗」的案例。mistakes.md 第 1 條，而它正是
-# 被 guest 抓到的，與四節點規則說的一模一樣。
+# verifications and the two READMEs). mistakes.md entry 1.
+# fixture 在這裡造，不從 compare/ 取：那個目錄**不在** guest harness 打包的 payload 裡（只有
+# src、建置腳本、test、verifications 與兩份 README）。mistakes.md 第 1 條。
 print -r -- 'dimension,csv2,sqlite'  > "$TMP/t244.csv2"
 print -r -- '比較項目,csv2,SQLite'  >> "$TMP/t244.csv2"
 print -r -- 'a,b,c'                 >> "$TMP/t244.csv2"
@@ -14441,15 +12898,12 @@ fi
 
 echo
 echo "--- T245: --headers 0 on a file already read line by line is a no-op / T245：對一個本來就逐行讀的檔案，--headers 0 是無操作 ---"
-# LJ, reported by the parent project's session. A file with no declaring suffix
-# already reads line by line, so asking for `--headers 0` -- the format it is
-# already using -- must change nothing. It instead fell through to `.csv`, the
-# first line decided the field count, and any later line holding a comma
-# failed with a message that was perfectly true about a parse that should never
-# have happened.
-# LJ，由母專案的 session 回報。一個沒有宣告性後綴的檔案本來就逐行讀，因此指定 `--headers 0`
-# ——那個它現在正在用的格式——必須什麼都不改變。而它落進了 `.csv`，第一行決定欄數，之後任何含
-# 逗號的一行都會失敗，訊息對「那個本不該發生的解析」而言完全正確。
+# LJ. A file with no declaring suffix already reads line by line, so
+# `--headers 0` -- the format it is already using -- must change nothing. It
+# must not fall through to `.csv`, where the first line sets the field count
+# and any later line with a comma fails.
+# LJ。沒有宣告性後綴的檔案本來就逐行讀，因此 `--headers 0`——它正在用的格式——必須什麼都不改變。
+# 它不能落進 `.csv`：那裡第一行決定欄數，之後任何含逗號的行都會失敗。
 printf 'a\nb\nx,y\n' > "$TMP/t245.txt"
 _t245_plain=$("$CSV2" -r -i "$TMP/t245.txt" 2>&1); _t245_rc1=$?
 _t245_zero=$("$CSV2" -r --headers 0 -i "$TMP/t245.txt" 2>&1); _t245_rc2=$?
@@ -14459,22 +12913,18 @@ else
     bad "T245a rc=$_t245_rc1/$_t245_rc2 plain=[${_t245_plain//$'\n'/|}] zero=[${_t245_zero//$'\n'/|}] / 實得如上"
 fi
 
-# The comma is DATA there, and that is the whole point of the format. A case
-# checking only that the two spellings agree would pass if both had become CSV.
-# 那個逗號在那裡是**資料**，而那正是這個格式的全部重點。一個只檢查「兩種寫法一致」的案例，
-# 會在「兩者都變成 CSV」時照樣通過。
+# The comma is DATA there. A case checking only that the two spellings agree
+# would pass if both had become CSV.
+# 那個逗號在那裡是**資料**。只檢查「兩種寫法一致」的案例，會在兩者都變成 CSV 時照樣通過。
 if [[ $_t245_zero == *"x,y"* ]]; then
     ok "T245b and the comma stays data, one field per line / 而那個逗號仍然是資料，一行一個欄位"
 else
     bad "T245b the comma was treated as a separator: [${_t245_zero//$'\n'/|}] / 實得如上"
 fi
 
-# The use the override exists for is NOT taken away: a file with no suffix that
-# really IS a CSV stays readable with --headers 1. That is what the code
-# comment beside the fix protects, and removing it would trade one silent
-# breakage for another.
-# 那個覆寫存在的用途**沒有被拿走**：一個沒有副檔名、而且確實是 CSV 的檔案，用 --headers 1 仍然
-# 讀得到。那正是修正旁邊那段註解所保護的東西，拿掉它等於用一種靜默的破壞換另一種。
+# The override's own use stays: a file with no suffix that really IS a CSV is
+# still readable with --headers 1.
+# 覆寫原本的用途仍在：沒有副檔名、而確實是 CSV 的檔案，用 --headers 1 仍讀得到。
 printf 'a,b\n1,2\n' > "$TMP/t245data"
 _t245_csv=$("$CSV2" -r -t --headers 1 -i "$TMP/t245data" 2>/dev/null)
 if [[ $_t245_csv == "a,b"$'\n'"1,2" ]]; then
@@ -14484,37 +12934,21 @@ else
 fi
 
 echo "--- T246: --dry-run with -md writes nothing / T246：--dry-run 搭配 -md 不寫入任何東西 ---"
-# LK, found by blind-test round 79 -- and found ONLY by comparing sha256 before
-# and after, because there was nothing else to look at: exit 0, zero bytes on
-# stdout, zero bytes on stderr, and a changed file. That is why this case
-# asserts the CHECKSUM first and the report second. A case that checked only
-# the report would have passed the moment the report was added, while the write
-# went on happening underneath it.
-# LK，由第 79 回合盲測發現——而且**只**能靠前後比對 sha256 發現，因為沒有別的東西可看：rc=0、
-# stdout 零位元組、stderr 零位元組，以及一個被改掉的檔案。這正是本案例先斷言**校驗和**、再斷言
-# 報告的原因。一個只檢查報告的案例，會在報告被加上去的那一刻就通過，而底下那次寫入照樣繼續發生。
+# LK, round 79. A wrongful write here shows no other symptom (exit 0, empty
+# stdout and stderr), so this case asserts the FILE CONTENT first and the
+# report second: a case checking only the report would pass while the write
+# went on underneath it.
+# LK，第 79 回合。這裡的錯誤寫入沒有其他症狀（rc=0、stdout 與 stderr 皆空），因此本案例先斷言
+# **檔案內容**、再斷言報告：只檢查報告的案例，會在底下照樣寫入時通過。
 printf '# Notes\n\n| pkg | version | license |\n|---|---|---|\n| zlib | 1.3.2 | Zlib |\n| zstd | 1.5.6 | BSD |\n' > "$TMP/t246.md"
-# cmp against a pristine COPY, not a checksum of the path twice.
-#
-# The first version of this case took `shasum -a 256` before and after. macOS
-# has `shasum`; the guest's busybox has `sha256sum` and not `shasum`, so in the
-# guest BOTH captures were the empty string and `$before == $after` held --
-# the case passed by measuring nothing. It was the suite's own missing-command
-# handler that reported it, four calls' worth, and nothing else would have.
-#
-# `cmp` cannot fail that way: it compares two files that must both exist, and
-# `sha256_of` 70 lines up is no use here either -- it hashes a STRING, which is
-# the same trap one layer over.
-#
-# 用 `cmp` 與一份**原始複本**比對，而不是對同一個路徑取兩次校驗和。
-#
-# 這個案例的第一版在前後各取一次 `shasum -a 256`。macOS 有 `shasum`；guest 的 busybox 有
-# `sha256sum` 而沒有 `shasum`，於是在 guest 裡**兩次擷取都是空字串**，`$before == $after` 成立
-# ——這個案例以「什麼都沒量」的方式通過了。回報它的是這套測試自己的「缺指令」處理常式，數出四次
-# 呼叫，而除此之外沒有任何東西看得到。
-#
-# `cmp` 不可能那樣失敗：它比的是兩個都必須存在的檔案。上面第 1766 行的 `sha256_of` 在這裡也沒有
-# 用——它雜湊的是一個**字串**，那是同一個陷阱換一層。
+# cmp against a pristine COPY, not a checksum of the path twice. A hashing
+# tool missing on one node (`shasum` is absent from the guest's busybox) makes
+# both captures empty and equal, so the case passes by measuring nothing. `cmp`
+# compares two files that must both exist; `sha256_of` hashes a STRING and is
+# no use here either.
+# 用 `cmp` 與一份**原始複本**比對，而不是對同一路徑取兩次校驗和。某個節點缺少雜湊工具時（guest 的
+# busybox 沒有 `shasum`），兩次擷取都是空字串而相等，案例就以什麼都沒量的方式通過。`cmp` 比的是
+# 兩個都必須存在的檔案；`sha256_of` 雜湊的是**字串**，在這裡也不適用。
 cp "$TMP/t246.md" "$TMP/t246.orig"
 _t246_out=$("$CSV2" -update 2:version '9.9.9' -md -t --md-table 1 --dry-run \
             -i "$TMP/t246.md" --in-place 2>"$TMP/t246.err"); _t246_rc=$?
@@ -14524,12 +12958,11 @@ else
     bad "T246a rc=$_t246_rc diff=[$(cmp "$TMP/t246.orig" "$TMP/t246.md" 2>&1)] / 實得如上"
 fi
 
-# The report is the other half of the promise: the README says --dry-run
-# previews each changed cell as `old -> new`. Under -md it printed nothing at
-# all, so silence was indistinguishable from "no changes" -- and it was on
-# stdout that a caller would have looked to find out.
-# 報告是那個承諾的另一半：README 說 --dry-run 會以 `old -> new` 預覽每個變更的儲存格。在 -md 底下
-# 它什麼都沒印，於是「沉默」與「沒有變更」分不出來——而呼叫端要查明這件事，看的正是 stdout。
+# The report is the other half: the README says --dry-run previews each
+# changed cell as `old -> new` on stdout, -md included; silence would be
+# indistinguishable from "no changes".
+# 報告是另一半：README 說 --dry-run 會在 stdout 以 `old -> new` 預覽每個變更的儲存格，-md 也一樣；
+# 沉默會與「沒有變更」分不出來。
 if [[ $_t246_out == *'update 2:version:'* && $_t246_out == *'"1.5.6" -> "9.9.9"'* ]]; then
     ok "T246b and it previews the cell as old -> new / 並以 old -> new 預覽那個儲存格"
 else
@@ -14537,24 +12970,19 @@ else
 fi
 
 echo "--- T247: -update-where reaches a Markdown table / T247：-update-where 能編輯 Markdown 表 ---"
-# LL. The pre-scan that -update-where needs re-opened the RAW file instead of
-# going back through openInput, so a `.md` input skipped the Markdown-to-record
-# translation and arrived as one comma-free field per line. The guard against
-# feeding `-md` output back in as CSV then fired, blaming the file's format --
-# on a file correctly named `.md` that was never read as CSV.
+# LL. The pre-scan -update-where needs must go through openInput, not re-open
+# the RAW file; otherwise a `.md` input skips the Markdown-to-record
+# translation, and the guard against feeding `-md` output back as CSV fires on
+# a correctly named `.md`.
 #
-# The control matters as much as the case: `-update` on the SAME file with the
-# SAME flags already worked, and that difference is the whole evidence that the
-# format was never the problem. Without it, a reader has only a refusal that
-# sounds reasonable.
+# The control is `-update` on the SAME file with the SAME flags: if it
+# succeeds and -update-where does not, the format is not the problem.
 #
-# LL。`-update-where` 需要的預掃描重新開啟的是**原始檔**，而不是再走一次 openInput，因此 `.md`
-# 輸入跳過了「Markdown 轉紀錄」那一步，以「每行一個不含逗號的欄位」抵達。那道防止「把 `-md` 的
-# 輸出當 CSV 餵回來」的守衛於是開火，怪罪檔案的格式——而那個檔案的副檔名正確地是 `.md`，且從未
-# 被當成 CSV 讀。
+# LL。`-update-where` 需要的預掃描必須走 openInput，不能重新開啟**原始檔**；否則 `.md` 輸入會跳過
+# 「Markdown 轉紀錄」，而防止「把 `-md` 輸出當 CSV 餵回來」的守衛就會對一個名稱正確的 `.md` 開火。
 #
-# 對照組與案例本身一樣重要：`-update` 在**同一個檔案**、用**同一組旗標**早就能動，而那個差異正是
-# 「格式從來不是問題」的全部證據。少了它，讀者手上只剩一則聽起來合理的拒絕。
+# 對照組是在**同一個檔案**、用**同一組旗標**執行 `-update`：它成功而 -update-where 失敗，就表示
+# 問題不在格式。
 printf '| pkg | version |\n|---|---|\n| zlib | 1.3.2 |\n| zstd | 1.5.6 |\n' > "$TMP/t247.md"
 cp "$TMP/t247.md" "$TMP/t247ctl.md"
 "$CSV2" -update-where '1.5.6' '9.9.9' -md -t -i "$TMP/t247.md" --in-place 2>"$TMP/t247.err"
@@ -14567,11 +12995,10 @@ else
     bad "T247a where=$_t247_rc control=$_t247_ctl err=[$(tr '\n' '|' < "$TMP/t247.err")] / 實得如上"
 fi
 
-# It has to have edited the RIGHT cell, and left the other row alone. An
-# anchored edit that matched nothing would also exit 0 if the refusal were ever
-# relaxed, so the file is read back rather than trusted.
-# 它必須改到**對的**那一格，並且不動另一列。一次什麼都沒對上的定位編輯，在那個拒絕若被放寬時也會
-# 以 0 結束，因此這裡把檔案讀回來，而不是相信它。
+# It must edit the RIGHT cell and leave the other row alone. An anchored edit
+# that matched nothing could also exit 0, so the file is read back.
+# 它必須改到**對的**那一格，並且不動另一列。什麼都沒對上的定位編輯也可能以 0 結束，所以這裡
+# 把檔案讀回來確認。
 _t247_body=$(cat "$TMP/t247.md")
 if [[ $_t247_body == *'9.9.9'* && $_t247_body == *'1.3.2'* && $_t247_body != *'1.5.6'* ]]; then
     ok "T247b the anchored cell changed and the other row is untouched / 被定位的那一格改了，另一列沒有被動"
@@ -14580,14 +13007,11 @@ else
 fi
 
 echo "--- T248: the sentences round 79 had to discover by experiment / T248：第 79 回合只能靠實驗才問出來的那些句子 ---"
-# Round 79 got every one of these right eventually, and got them by running the
-# program until it answered. Each is now written in both READMEs, and each is
-# pinned here for the same reason every documented claim is: a described
-# behaviour that stops being true is worse than one that was never described,
-# because a reader relies on it.
-# 第 79 回合最後每一條都問對了，而它問出來的方式是「一直執行這支程式直到它回答」。這些現在都
-# 寫進了兩份 README，而每一條都釘在這裡，理由與所有被記載的行為一樣：一個「不再為真」的行為
-# 描述比一個從未被描述的更糟，因為讀者會依賴它。
+# Round 79. Behaviours both READMEs now state, each pinned here: a documented
+# behaviour that stops being true is worse than an undocumented one, because a
+# reader relies on it.
+# 第 79 回合。兩份 README 現在都寫明的行為，每一條都釘在這裡：被記載的行為一旦不再為真，比從未
+# 記載更糟，因為讀者會依賴它。
 printf 'pkg,version\nzlib,1.3.2\nzstd,1.5.6\n' > "$TMP/t248.csv"
 "$CSV2" -head 0 -i "$TMP/t248.csv" >/dev/null 2>"$TMP/t248a.err"; _t248_h=$?
 "$CSV2" -tail 0 -i "$TMP/t248.csv" >/dev/null 2>"$TMP/t248b.err"; _t248_t=$?
@@ -14598,12 +13022,10 @@ else
 fi
 
 # A `.lines` file has no header row, so the meta line carries no `header` KEY
-# at all -- not an empty array. The README now says so because a script written
-# against the column-order guarantee gets `undefined` there rather than `[]`,
-# and those two fail in different places.
-# `.lines` 檔沒有標頭列，因此那行 meta **完全不帶 `header` 這個鍵**——不是帶一個空陣列。README
-# 現在明說這件事，因為一個依「欄序保證」寫成的腳本在那裡拿到的是 `undefined` 而不是 `[]`，
-# 而那兩者失敗的位置不同。
+# at all -- not an empty array. A script gets `undefined` rather than `[]`
+# there, and those fail in different places, so the README states it.
+# `.lines` 檔沒有標頭列，因此 meta 行**完全不帶 `header` 鍵**，而不是空陣列。腳本在那裡拿到的是
+# `undefined` 而不是 `[]`，兩者失敗的位置不同，所以 README 寫明了這點。
 printf 'one\ntwo,three\n' > "$TMP/t248.txt"
 _t248_meta=$("$CSV2" -r --json -i "$TMP/t248.txt" 2>&1 | head -1)
 if [[ $_t248_meta == *'"format":"lines"'* && $_t248_meta != *'"header"'* ]]; then
@@ -14612,11 +13034,9 @@ else
     bad "T248b got [$_t248_meta] / 實得如上"
 fi
 
-# The documented header-only read. It is a recipe rather than a verb, which is
-# exactly why it needs a test: nothing in the program would break if it stopped
-# working, because no code path is named after it.
-# 被記載的「只讀標頭」。它是一份配方而不是一個動詞，而那正是它需要測試的原因：如果它哪天不再
-# 有效，程式裡不會有任何東西壞掉——因為沒有任何一條程式路徑以它命名。
+# The documented header-only read. It is a recipe rather than a verb, so no
+# code path is named after it and only a test notices if it stops working.
+# 被記載的「只讀標頭」。它是配方而不是動詞，沒有任何程式路徑以它命名，只有測試會發現它失效。
 _t248_hdr=$("$CSV2" -head 1 --json -i "$TMP/t248.csv" 2>/dev/null | head -1)
 if [[ $_t248_hdr == *'"meta"'* && $_t248_hdr == *'"header":['* ]]; then
     ok "T248c -head 1 --json | head -1 yields the column order / -head 1 --json | head -1 給出欄位順序"
@@ -14624,11 +13044,9 @@ else
     bad "T248c got [$_t248_hdr] / 實得如上"
 fi
 
-# `--md-style` with nothing given must equal `preserve`. The default was never
-# stated anywhere, and the round had to measure all three styles to find out
-# which one it had been getting.
-# 不給 `--md-style` 時必須等同 `preserve`。這個預設值從未被寫在任何地方，而那個回合只能把三種
-# 排版全部量一遍，才知道它一直拿到的是哪一種。
+# `--md-style` with nothing given must equal `preserve`, the documented
+# default.
+# 不給 `--md-style` 時必須等同 `preserve`，即文件記載的預設值。
 printf '| pkg | version |\n|---|---|\n| zlib | 1.3.2   |\n| zstd | 1.5.6   |\n' > "$TMP/t248d.md"
 cp "$TMP/t248d.md" "$TMP/t248e.md"
 "$CSV2" -update 1:version '9.9.9' -md -t -i "$TMP/t248d.md" --in-place 2>/dev/null
@@ -14639,30 +13057,19 @@ else
     bad "T248d default and preserve differ: [$(tr '\n' '|' < "$TMP/t248d.md")] vs [$(tr '\n' '|' < "$TMP/t248e.md")] / 實得如上"
 fi
 
-# `line` under `--md-table N` is the DOCUMENT's line. The fixture puts its one
-# data row on document line 7, and that is the number reported.
+# `line` under `--md-table N` is the DOCUMENT's line, not the table-relative
+# one. The fixture puts its one data row on document line 7, and that is the
+# number reported. Round 80.
 #
-# This case asserted the OPPOSITE for one day. It pinned line 2 -- the
-# table-relative number -- and it was right about the program while the program
-# was wrong about the document, which is the state a test cannot distinguish on
-# its own. Round 80 found it from the outside: given a 48-line document it was
-# told its record was on line 2, and the offset this suite's README then told it
-# to add did not work.
+# The literal 7 is deliberate: computing the expected value from the fixture
+# would reproduce whatever off-by-one the code has, while a number counted by
+# hand from the printf above cannot agree with a wrong implementation.
 #
-# The literal 7 is deliberate. Computing the expected value from the fixture
-# would reproduce whatever off-by-one the code has; a number counted by hand
-# from the printf above cannot agree with a wrong implementation by construction.
+# `--md-table N` 底下的 `line` 是**文件**的行號，不是表格內的相對行號。這個 fixture 把唯一的資料列
+# 放在文件第 7 行，回報的就是這個數字。第 80 回合。
 #
-# `--md-table N` 底下的 `line` 就是**文件**的行號。這個 fixture 把它唯一的資料列放在文件第 7 行，
-# 而那正是被回報的數字。
-#
-# 這個案例曾有一天斷言**相反**的事。它釘住 line 2——那個表格相對的數字——而它對「程式」的描述是
-# 正確的，同時程式對「文件」的描述是錯的；那正是一個測試靠自己分辨不出來的狀態。第 80 回合是從
-# 外面發現的：給它一份 48 行的文件，它被告知自己的紀錄在第 2 行，而這份 README 當時叫它加的那個
-# 偏移量行不通。
-#
-# 那個字面上的 7 是刻意的。從 fixture 去「算」出預期值，會把程式裡的任何差一錯誤一起重現；而一個
-# 從上面那行 printf 用手數出來的數字，在構造上就不可能與一個錯的實作一致。
+# 字面上的 7 是刻意的：從 fixture 算出預期值，會把程式裡的差一錯誤一起重現；而從上面那行 printf
+# 手數出來的數字，不可能與錯的實作一致。
 printf '# Doc\n\ntext\n\n| pkg | version |\n|---|---|\n| zlib | 1.3.2 |\n' > "$TMP/t248f.md"
 _t248_line=$("$CSV2" -r --json --md-table 1 -i "$TMP/t248f.md" 2>/dev/null | LC_ALL=C grep '"record":1')
 if [[ $_t248_line == *'"line":7'* ]]; then
@@ -14672,12 +13079,10 @@ else
 fi
 
 # `-md` on a Markdown destination is mandatory, and the refusal must leave the
-# file alone. The README said "may", which reads as optional; the round tried
-# it without and was refused. Checking the file too, because a refusal that
-# has already written is the shape this project keeps finding.
-# 目的地是 Markdown 時 `-md` 是**必要**的，而那次拒絕必須不動到檔案。README 原本寫的是「可以」，
-# 那讀起來像選配；那個回合不給它試了一次，被拒絕。這裡連檔案一起檢查，因為「一個已經寫過了的
-# 拒絕」正是這個專案一再找到的那個形狀。
+# file alone. The file is checked too, because a refusal that has already
+# written is a recurring failure here.
+# 目的地是 Markdown 時 `-md` 是**必要**的，而拒絕時必須不動到檔案。這裡連檔案一起檢查，因為
+# 「拒絕前已經寫入」是這裡一再出現的失敗。
 printf '| pkg | version |\n|---|---|\n| zlib | 1.3.2 |\n' > "$TMP/t248g.md"
 # cmp against a copy, not a hash of the path twice -- see T246a.
 # 用 cmp 與複本比對，不要對同一路徑取兩次雜湊——見 T246a。
@@ -14692,39 +13097,29 @@ else
 fi
 
 echo "--- T249: no script here DEPENDS on Perl or Python / T249：這裡沒有腳本「依賴」Perl 或 Python ---"
-# The rule is in AGENTS.md; this is what makes it hold. It was agreed in
-# conversation, written down beside T68 as a note about T68, and `shasum` --
-# which is Perl on macOS and does not look like Perl -- came back into the tree
-# twice with nothing saying anything.
+# Enforces the AGENTS.md rule. `shasum` is Perl on macOS without looking like
+# it, so it is named explicitly.
 #
-# The line is DEPENDENCY, not mention. T166e runs python3 for an independent
-# second implementation of a checksum, guarded by `command -v python3` with a
-# skip when it is absent -- the guest has no python3 and that case skips there.
-# That is allowed and is the pattern to copy: an optional cross-check that
-# strengthens an assertion where the tool exists and never becomes the only
-# path. `shasum` and `perl` have no such use here and are banned outright,
-# because `sha256sum` and `openssl` cover every node.
+# The line is DEPENDENCY, not mention. T166e runs python3 as an independent
+# second implementation of a checksum, guarded by `command -v python3` and
+# skipped when absent (as on the guest). That is the pattern to copy: an
+# optional cross-check that never becomes the only path. `shasum` and `perl`
+# have no such use and are banned outright, because `sha256sum` and `openssl`
+# cover every node.
 #
-# The first version of this case checked for the names at a "command position"
-# -- start of line, or after a pipe or semicolon. It PASSED with a real
-# violation planted in install.zsh: `sum_of() { shasum -a 256 ... }` puts the
-# name after `{`, which was not in the list. The bait case below had passed at
-# the same moment, because the bait was shaped the way the author could imagine
-# a violation being shaped. So this looks for the name ANYWHERE in code, which
-# cannot be outguessed, and full-line comments are stripped instead.
+# The name is matched ANYWHERE in code, with full-line comments stripped,
+# rather than at a guessed "command position": `sum_of() { shasum ... }` puts
+# it after `{`, which a position list misses.
 #
-# 規則寫在 AGENTS.md；讓它成立的是這裡。它在對話中講定過，被寫在 T68 旁邊、成為一則關於 T68 的
-# 附註，而 `shasum`——它在 macOS 上是 Perl，且看起來不像 Perl——兩度回到這棵樹裡，沒有任何東西出聲。
+# 強制 AGENTS.md 的規則。`shasum` 在 macOS 上是 Perl，卻看不出來，因此明確點名。
 #
-# 界線是**依賴**，不是提及。T166e 會執行 python3，作為某個檢查碼的獨立第二實作，並由
-# `command -v python3` 守住、缺席時跳過——guest 上沒有 python3，那個案例在那裡就是 SKIP。那是被
-# 允許的，也是該仿效的形狀：一個在工具存在時強化斷言、而且永遠不會成為唯一路徑的可選交叉比對。
-# `shasum` 與 `perl` 在這裡沒有這種用途，因此直接禁止，因為 `sha256sum` 與 `openssl` 涵蓋了每一個節點。
+# 界線是**依賴**，不是提及。T166e 執行 python3 作為某個檢查碼的獨立第二實作，由
+# `command -v python3` 守住、缺席時跳過（例如 guest）。那是該仿效的形狀：永遠不會成為唯一路徑的
+# 可選交叉比對。`shasum` 與 `perl` 在這裡沒有這種用途，因此直接禁止，因為 `sha256sum` 與
+# `openssl` 涵蓋了每一個節點。
 #
-# 這個案例的第一版是找「指令位置」上的名字——行首，或在管線、分號之後。它在 install.zsh 被植入一個
-# **真的**違規時照樣通過：`sum_of() { shasum -a 256 ... }` 把名字放在 `{` 之後，而那不在清單裡。
-# 底下那個誘餌案例在同一刻也是通過的，因為那個誘餌的形狀，正是作者想像得出來的違規形狀。所以這裡改成
-# 在程式碼裡找**任何位置**的那個名字——那猜不過去——並改以剝掉整行註解來排除說明文字。
+# 這裡在程式碼的**任何位置**比對那個名字（剝掉整行註解），而不是猜測「指令位置」：
+# `sum_of() { shasum ... }` 把名字放在 `{` 之後，位置清單會漏掉它。
 _ban=("sha"$'sum' "per"$'l')
 _scan_files=("$ROOT"/*.zsh(N) "$ROOT"/test/*.zsh(N) "$ROOT"/verifications/*.zsh(N) "$ROOT"/csv2view/*.zsh(N) "$ROOT"/csv2view/test/*.zsh(N))
 scan_for_banned() {
@@ -14749,11 +13144,11 @@ else
     bad "T249a ${_ban_hits} / 實得如上"
 fi
 
-# The guard must be able to FAIL, and the shape it is given must be the shape
-# that defeated its first version -- inside a function body, after a brace.
-# A bait the author finds natural proves only that the author can be matched.
-# 這道守衛必須**有能力失敗**，而給它的形狀必須是「打敗它第一版」的那個形狀——在函式主體裡、
-# 在一個大括號之後。一個作者覺得自然的誘餌，只證明得了作者自己會被抓到。
+# The guard must be able to FAIL, against the hard shape: inside a function
+# body, after a brace. A bait shaped the way the author imagines a violation
+# proves little.
+# 這道守衛必須**有能力失敗**，而且是對著困難的形狀：在函式主體裡、大括號之後。照作者想像中的
+# 違規形狀做出的誘餌，證明不了什麼。
 mkdir -p "$TMP/banscan"
 printf 'x=1\nsum_of() { %s -a 256 "$1" | cut -d" " -f1 }\n' "${_ban[1]}" > "$TMP/banscan/bait.zsh"
 _bait_body=$(LC_ALL=C grep -v '^[[:space:]]*#' "$TMP/banscan/bait.zsh")
@@ -14763,25 +13158,17 @@ else
     bad "T249b the scan missed a planted invocation, which is how its first version passed / 掃描漏掉了一個植入的呼叫，而那正是它第一版通過的方式"
 fi
 
-# T249d. The .zsh scan above cannot see a COMMAND IN A DOCUMENT. On 2026-09-10
-# the tree had exactly one: `$ shasum -a 256 <(...)` inside a reproduction in
-# todo/known-defects.md, written 2026-08-31, six days before the ban was
-# written down. Prose about the ban is everywhere and must not be flagged --
-# AGENTS.md, mistakes.md and this file all discuss `sha`+`sum` at length -- so
-# the shape checked is INVOCATION, not mention: a line that starts with a shell
-# prompt, or one that starts with the tool followed by a flag.
-# T249d。上面那個 .zsh 掃描看不到**文件裡的一行指令**。2026-09-10 這棵樹裡恰好有一處：
-# todo/known-defects.md 的一段重現裡有 `$ shasum -a 256 <(...)`，寫於 2026-08-31，比那條禁令
-# 被寫下來早六天。而談論這條禁令的散文到處都是、絕不能被標記——AGENTS.md、mistakes.md 與這個
-# 檔案自己都大篇幅討論它——所以檢查的形狀是**呼叫**而不是**提及**：一行以 shell 提示符開頭，
-# 或以那個工具名開頭且後面跟著一個旗標。
+# T249d. The .zsh scan above cannot see a COMMAND IN A DOCUMENT, such as a
+# reproduction in todo/known-defects.md. Prose about the ban is everywhere and
+# must not be flagged, so the shape checked is INVOCATION, not mention: a line
+# that starts with a shell prompt, or with the tool followed by a flag.
+# T249d。上面的 .zsh 掃描看不到**文件裡的指令**，例如 todo/known-defects.md 裡的重現。談論這條
+# 禁令的文字到處都是，不能被標記，所以檢查的形狀是**呼叫**而不是**提及**：以 shell 提示符開頭的行，
+# 或以那個工具名開頭、後面跟著旗標的行。
 #
-# A reproduction that cannot be run in this tree is worse than no reproduction:
-# known-defects.md says the reproductions are the only way to tell later
-# whether a fix has regressed, and one that needs Perl in a tree without Perl
-# quietly stops being that.
-# 一段在這棵樹裡跑不起來的重現，比沒有重現更糟：known-defects.md 說那些重現是「日後判斷修正有
-# 沒有退化的唯一依據」，而一段需要 Perl 的重現，在一棵沒有 Perl 的樹裡會安靜地不再是那個依據。
+# A reproduction that cannot be run in this tree is worse than none: the
+# reproductions are how a later reader tells whether a fix has regressed.
+# 在這棵樹裡跑不起來的重現比沒有更糟：重現是日後判斷修正有沒有退化的依據。
 _t249d_docs=($ROOT/*.md(N) $ROOT/todo/*.md(N) $ROOT/plan/*.md(N) $ROOT/verifications/*.md(N) $ROOT/csv2view/*.md(N))
 # Two files is a legitimate count: the payload sent into the guest carries only
 # the two READMEs. Zero means the glob failed. T218a.
@@ -14801,10 +13188,10 @@ else
     else
         bad "T249d banned tool invoked in a document at: $(print -r -- "$_t249d_hits" | head -2 | tr '\n' ' ') / 文件裡呼叫了被禁的工具"
     fi
-    # It must bite, and on the shape that actually occurred rather than an
-    # easier one. The line is ASSEMBLED so this file does not carry it. KF.
-    # 它必須會咬，而且咬的是「真的發生過」的那個形狀，不是一個比較好抓的形狀。那一行是**組出來
-    # 的**，這個檔案才不會自己帶著它。KF。
+    # It must bite, on the real invocation shapes rather than an easier one.
+    # The line is ASSEMBLED so this file does not carry it. KF.
+    # 它必須會咬，而且是對著真實的呼叫形狀，不是比較好抓的形狀。那一行是**組出來的**，這個檔案
+    # 才不會自己帶著它。KF。
     print -r -- "\$ ${_ban[1]} -a 256 <(cmd) <(cmd)" > "$TMP/t249d.md"
     print -r -- "${_ban[2]} -e 'print 1'" >> "$TMP/t249d.md"
     print -r -- "談論 ${_ban[1]} 的散文，不應該被標記" >> "$TMP/t249d.md"
@@ -14818,44 +13205,32 @@ else
     rm -f "$TMP/t249d.md"
 fi
 
-# python3 is allowed, but only where its absence is handled. Any file invoking
-# it must also guard it -- otherwise the guest, which has no python3, loses the
-# case silently rather than skipping it visibly.
-# python3 是被允許的，但只限於「它不存在時有被處理」的地方。任何呼叫它的檔案都必須同時守住它——
-# 否則沒有 python3 的 guest 會**安靜地失去**那個案例，而不是**看得見地**跳過它。
-# Per INVOCATION, not per file. The first version asked only whether the file
-# containing a python3 call also contained a guard somewhere -- and this file
-# has one, for T166e, hundreds of lines away. So an unguarded call added
-# elsewhere in the same file passed, and the guest failed on it two days later
-# with a message blaming the buffer under test. A guard whose unit is coarser
-# than the thing it guards will pass the case it was written for and miss the
-# next one.
-# 逐**呼叫**檢查，不是逐檔。第一版問的只是「含有 python3 呼叫的那個檔案，裡面某處有沒有守衛」
-# ——而這個檔案有一個，是 T166e 的，在幾百行之外。於是同一個檔案裡別處新增的、沒有守衛的呼叫
-# 照樣通過，而 guest 在兩天後以一則「怪罪被測緩衝」的訊息失敗。**一道守衛，若它的單位比它要守的
-# 東西粗，就會通過它被寫來針對的那個情況、而漏掉下一個。**
+# python3 is allowed, but only where its absence is handled; otherwise the
+# guest, which has no python3, loses the case silently rather than skipping it
+# visibly.
+# python3 是允許的，但只限於「它不存在時有被處理」的地方；否則沒有 python3 的 guest 會**安靜地失去**
+# 那個案例，而不是**看得見地**跳過它。
+# Checked per INVOCATION, not per file: this file has a guard for T166e, so a
+# per-file check would pass an unguarded call added elsewhere in it. A guard
+# whose unit is coarser than what it guards misses the next case.
+# 逐**呼叫**檢查，不是逐檔：這個檔案裡有 T166e 的守衛，逐檔檢查會放過同檔別處新增、沒有守衛的
+# 呼叫。**守衛的單位若比它要守的東西粗，就會漏掉下一個。**
 _py_unguarded=()
 for _f in "${_scan_files[@]}"; do
     [[ -f $_f ]] || continue
-    # The needle is BUILT, like `_ban` above. Written out, this line is itself a
-    # match and the scan reports its own source -- which it did, on the first
-    # run, and which T241a did twice before it. Two of the three scans in this
-    # case already built their needles; this one was written beside them without
-    # the same care.
-    # 這個關鍵字是**組出來的**，與上面的 `_ban` 一樣。直接寫出來的話，這一行本身就是一個命中，
-    # 掃描會回報它自己的原始碼——第一次執行時它就這樣做了，而 T241a 在它之前已經做過兩次。
-    # 這個案例裡三個掃描有兩個早就把關鍵字組出來；這一個是在它們旁邊寫的，卻沒有同樣的謹慎。
+    # The needle is BUILT, like `_ban` above; written out, this line would
+    # itself match and the scan would report its own source.
+    # 這個關鍵字是**組出來的**，與上面的 `_ban` 一樣；直接寫出來的話，這一行本身就會命中，掃描會
+    # 回報它自己的原始碼。
     _py="pyth"$'on'
     for _ln in ${(f)"$(LC_ALL=C grep -n -E "(^|[^[:alnum:]_])${_py}3?([^[:alnum:]_]|$)" "$_f" 2>/dev/null || true)"}; do
         _n=${_ln%%:*}
         [[ $_n == <-> ]] || continue
         # A full-line comment is not an invocation. Tested with grep rather than
-        # a zsh pattern: `[[:space:]]#` needs EXTENDED_GLOB to mean "zero or
-        # more", and without it the `#` is a literal, so the test never matched
-        # and every comment mentioning the word was reported as a call.
-        # 一整行的註解不是一次呼叫。用 grep 而不是 zsh 的樣式來測：`[[:space:]]#` 要有
-        # EXTENDED_GLOB 才表示「零或多個」，沒有它時那個 `#` 是字面字元，於是這個判斷永遠不成立，
-        # 每一行提到那個字的註解都被回報成一次呼叫。
+        # a zsh pattern: `[[:space:]]#` means "zero or more" only under
+        # EXTENDED_GLOB; without it the `#` is a literal and nothing matches.
+        # 整行註解不是呼叫。用 grep 而不用 zsh 樣式來測：`[[:space:]]#` 只有在 EXTENDED_GLOB 下才表示
+        # 「零或多個」；沒有它，`#` 是字面字元，什麼都比不中。
         print -r -- "${_ln#*:}" | LC_ALL=C grep -qE '^[[:space:]]*#' && continue
         # The guard has to be NEAR: within the 30 lines above the call, which is
         # more than any real if-block here and less than the distance to an
@@ -14876,21 +13251,19 @@ else
 fi
 
 echo "--- T250: document line numbers for a table inside a document / T250：文件裡的表格，行號是文件的行號 ---"
-# LM and LP. `--physical`'s whole name says it reports the line in the source,
-# and under `--md-table` it reported the line in the TRANSLATED table -- a wrong
-# number under a name that says it is the right one, which is harder to catch
-# than a wrong number with no name at all.
+# LM and LP. Under `--md-table`, `--physical` and --json's `line` report the
+# line in the SOURCE document, not in the translated table, as the name
+# `--physical` promises.
 #
 # The fixture is written so the expected values can be counted by eye: 24 prose
 # lines, header on 25, separator on 26, so data records start at 27. Those
 # literals are used rather than computed, for the reason given at T248e.
 #
-# LM 與 LP。`--physical` 的整個名字就是在說它回報的是「來源裡的行號」，而在 `--md-table` 底下它
-# 回報的是**翻譯後那張表**裡的行號——一個錯的數字冠上一個說它是對的名字，那比一個沒有名字的錯數字
-# 更難抓到。
+# LM 與 LP。在 `--md-table` 底下，`--physical` 與 --json 的 `line` 回報的是**來源文件**裡的行號，
+# 而不是翻譯後那張表的，一如 `--physical` 這個名字所承諾的。
 #
-# 這個 fixture 是刻意寫成「預期值可以用眼睛數出來」的：24 行散文、標頭在 25、分隔列在 26，因此資料
-# 從 27 開始。那些數字是直接寫死而不是算出來的，理由與 T248e 相同。
+# 這個 fixture 刻意寫成「預期值可以用眼睛數出來」：24 行散文、標頭在 25、分隔列在 26，因此資料
+# 從 27 開始。那些數字直接寫死而不是算出來，理由與 T248e 相同。
 { for _i in {1..24}; do print -r -- "prose line $_i"; done
   print -r -- '| pkg | version |'
   print -r -- '|---|---|'
@@ -14903,11 +13276,9 @@ else
     bad "T250a got [${_t250_json//$'\n'/|}] / 實得如上"
 fi
 
-# The two surfaces must agree. A number that is right in --json and wrong in
-# --physical is worse than one wrong in both: the two would disagree and nothing
-# would say which to believe.
-# 兩個出口必須一致。一個在 --json 對、在 --physical 錯的數字，比兩者都錯更糟：那樣它們會互相矛盾，
-# 而沒有任何東西說得出該相信哪一個。
+# The two surfaces must agree; if they disagreed, nothing would say which to
+# believe.
+# 兩個出口必須一致；若互相矛盾，沒有任何東西說得出該相信哪一個。
 _t250_phys=$("$CSV2" -contains pkg02 --physical --md-table 1 -i "$TMP/t250.md" 2>&1)
 if [[ $_t250_phys == *'@L28'* ]]; then
     ok "T250b --physical reports the same document line / --physical 回報同一個文件行號"
@@ -14932,11 +13303,10 @@ else
     bad "T250c got [$_t250_br], wanted \"line\":5 / 實得如上，預期 \"line\":5"
 fi
 
-# Nothing that is not a Markdown table may move. The offset is 0 there, and a
-# case that only checked the .md side would pass with a constant added to every
-# input in the program.
-# 任何「不是 Markdown 表」的東西都不可以動。那裡的偏移是 0，而一個只檢查 .md 那一側的案例，會在
-# 「程式對每一種輸入都加了一個常數」的情況下照樣通過。
+# Nothing that is not a Markdown table may move: the offset is 0 there. A case
+# checking only the .md side would pass with a constant added to every input.
+# 任何不是 Markdown 表的東西都不可以動：那裡的偏移是 0。只檢查 .md 那一側的案例，會在程式對每種
+# 輸入都加了常數時照樣通過。
 printf 'pkg\na\nb\n' > "$TMP/t250.csv"
 _t250_csv=$("$CSV2" -r --json -i "$TMP/t250.csv" 2>/dev/null | LC_ALL=C grep '"record":2')
 if [[ $_t250_csv == *'"line":3'* ]]; then
@@ -14945,8 +13315,8 @@ else
     bad "T250d got [$_t250_csv] / 實得如上"
 fi
 
-# --physical with --json is refused. Undocumented until round 80 needed both.
-# --physical 與 --json 併用會被拒。直到第 80 回合同時需要這兩者，這件事都沒有被記載。
+# --physical with --json is refused, naming the flag. Round 80.
+# --physical 與 --json 併用會被拒，並指名該旗標。第 80 回合。
 "$CSV2" -r --json --physical --md-table 1 -i "$TMP/t250.md" >/dev/null 2>"$TMP/t250.err"
 if [[ $? == 1 ]] && LC_ALL=C grep -q 'physical' "$TMP/t250.err"; then
     ok "T250e --physical with --json is refused, naming the flag / --physical 與 --json 併用被拒，且指名了那個旗標"
@@ -14956,10 +13326,10 @@ fi
 
 echo "--- T251: what --json's trailing records actually counts / T251：--json 結尾的 records 到底數的是什麼 ---"
 # It is how far the record NUMBERING got, not how many records were emitted and
-# not the file's total. For a whole-file read those three coincide, which is why
-# nothing noticed: the common case gives the right answer to the wrong question.
-# 它是「紀錄編號走到了哪裡」，不是輸出了幾筆，也不是檔案的總數。全檔讀取時這三者重合，而那正是
-# 沒有人發現的原因：最常見的用法，對一個錯的問題給出了正確的答案。
+# not the file's total. A whole-file read cannot tell these apart, because all
+# three coincide; a window can.
+# 它是「紀錄編號走到了哪裡」，不是輸出了幾筆，也不是檔案總數。全檔讀取時三者重合，分不出來；
+# 視窗讀取才分得出來。
 { print -r -- 'pkg'; for _i in {1..20}; do printf 'p%02d\n' $_i; done } > "$TMP/t251.csv"
 _t251_all=$("$CSV2" -r --json -i "$TMP/t251.csv" 2>/dev/null | tail -1)
 _t251_mid=$("$CSV2" -mid 5,8 --json -i "$TMP/t251.csv" 2>/dev/null | tail -1)
@@ -14971,12 +13341,11 @@ else
 fi
 
 echo "--- T252: the flags the \"stop using this\" table used to deny / T252：那張「停止使用」表曾經否認的旗標 ---"
-# LN. That table said scoping a search to one column was not offered, and warned
-# that counting would be "silently wrong", 260 lines below the section that
-# documents --search-column. It is tested here so the row cannot go stale again
-# without something failing.
-# LN。那張表說「把搜尋限定在一欄」不提供，還警告計數會「安靜地錯」——而記載了 --search-column 的
-# 段落就在它上面 260 行處。這裡把它測起來，好讓那一列不能再一次悄悄過時而沒有東西失敗。
+# LN. --search-column scopes a search to one column, so counting matches in
+# one column is not "silently wrong"; tested so the README's "stop using this"
+# table cannot claim otherwise without something failing.
+# LN。--search-column 會把搜尋限定在一欄，所以計數一欄裡的命中並不會「安靜地錯」；測起來，讓 README
+# 的「停止使用」表不能在沒有東西失敗的情況下又寫成相反的話。
 printf 'pkg,license\nzlib,MIT\ntransMITter,BSD\n' > "$TMP/t252.csv"
 _t252_all=$("$CSV2" -contains MIT -i "$TMP/t252.csv" 2>/dev/null | wc -l | tr -d ' ')
 _t252_one=$("$CSV2" -contains MIT --search-column license -i "$TMP/t252.csv" 2>/dev/null | wc -l | tr -d ' ')
@@ -14987,19 +13356,15 @@ else
 fi
 
 echo "--- T253: what the protection section now claims / T253：保護那一節現在宣稱的事 ---"
-# Round 81 read that section and could not finish a single keyed task from it.
-# Everything below is a sentence added because of that round, and each is here
-# so the sentence cannot quietly stop being true.
-# 第 81 回合讀了那一節，而它無法只靠那一節完成任何一個「需要金鑰」的任務。底下每一項都是因為那個
-# 回合而加進文件的句子，放在這裡是為了讓那些句子不能悄悄地不再為真。
+# Round 81. Each item below pins a sentence in the README's protection
+# section, so it cannot quietly stop being true.
+# 第 81 回合。底下每一項都釘住 README 保護一節裡的一句話，讓它不會悄悄地不再為真。
 printf 'id,name,email\n1,Alice,a@x.com\n2,Bob,b@x.com\n' > "$TMP/t253.csv"
 head -c 32 /dev/urandom > "$TMP/t253key.bin"
 
-# `-t` is inert for -hash. The section's four examples all carried it, so a
-# reader learns a rule that does not exist -- and the rule IS real for `-md`
-# editing, so they cannot tell the two apart.
-# `-t` 對 -hash 沒有作用。那一節的四個範例都帶著它，於是讀者學到一條不存在的規則——而那條規則對
-# `-md` 編輯**是**真的，所以他分不出哪一個才是。
+# `-t` is inert for -hash, unlike `-md` editing where it is required; examples
+# carrying it would teach a rule that does not exist.
+# `-t` 對 -hash 沒有作用，不像 `-md` 編輯那樣必要；範例若帶著它，會教出一條不存在的規則。
 "$CSV2" -hash email -i "$TMP/t253.csv" -o "$TMP/t253_t.csv" -t 2>/dev/null
 "$CSV2" -hash email -i "$TMP/t253.csv" -o "$TMP/t253_no.csv" 2>/dev/null
 if cmp -s "$TMP/t253_t.csv" "$TMP/t253_no.csv"; then
@@ -15008,8 +13373,8 @@ else
     bad "T253a -t changed the output of -hash / -t 改變了 -hash 的輸出"
 fi
 
-# The marker shapes the section now spells out.
-# 那一節現在明確寫出的標記形狀。
+# The marker shapes the section spells out.
+# 那一節明確寫出的標記形狀。
 _t253_plain=$(LC_ALL=C head -1 "$TMP/t253_no.csv")
 "$CSV2" -hash email -keyfile "$TMP/t253key.bin" -i "$TMP/t253.csv" -o "$TMP/t253_kf.csv" 2>/dev/null
 _t253_kf=$(LC_ALL=C head -1 "$TMP/t253_kf.csv")
@@ -15019,10 +13384,9 @@ else
     bad "T253b plain=[$_t253_plain] keyed=[$_t253_kf] / 實得如上"
 fi
 
-# A key under the minimum is refused, and the message carries the number. The
-# section now gives that number; round 81 could only find it by failing.
-# 低於下限的金鑰會被拒絕，而訊息裡有那個數字。那一節現在寫出了它；第 81 回合只能靠「先失敗一次」
-# 才找得到。
+# A key under the minimum is refused, and the message carries the number the
+# section documents.
+# 低於下限的金鑰會被拒絕，而訊息裡帶著那一節記載的數字。
 printf 'x' > "$TMP/t253short.bin"
 "$CSV2" -hash email -keyfile "$TMP/t253short.bin" -i "$TMP/t253.csv" -o "$TMP/t253z.csv" \
     >/dev/null 2>"$TMP/t253.err"
@@ -15052,10 +13416,10 @@ else
 fi
 
 # meta `header` keeps the marker; a record's `fields` key does not. The README
-# tells a script to take column ORDER from the meta header, so the two names
-# have to be documented as different or that advice breaks here.
-# meta 的 `header` 保留標記，而紀錄的 `fields` 鍵沒有。README 叫腳本從 meta 的 header 取欄序，因此
-# 這兩組名字必須被明白記載為「不同」，否則那個建議在這裡就會斷掉。
+# tells a script to take column ORDER from the meta header, so the difference
+# must be documented or that advice breaks here.
+# meta 的 `header` 保留標記，紀錄的 `fields` 鍵則沒有。README 叫腳本從 meta 的 header 取欄序，
+# 因此這個差異必須寫明，否則那個建議在這裡就會失效。
 _t253_json=$("$CSV2" -r --json -i "$TMP/t253_kf.csv" 2>/dev/null)
 _t253_meta=$(print -r -- "$_t253_json" | LC_ALL=C head -1)
 _t253_rec=$(print -r -- "$_t253_json" | LC_ALL=C sed -n '2p')
@@ -15084,26 +13448,19 @@ if [[ -r "$HOME/.multissh/generated/mldsa44-ed25519.key.raw" ]]; then
 fi
 
 echo "--- T254: --backup on the protection path, and what the markers mean / T254：保護路徑上的 --backup，以及那些標記的意義 ---"
-# LU is the worst defect these rounds have turned up, and the reason is not
-# probability: an ordinary edit that loses its backup loses a value you still
-# know, while an ENCRYPTION that loses its backup loses the plaintext for good.
-# The flag was accepted, exit 0, nothing on either stream, and no `.bak`. Three
-# write paths called makeInPlaceBackup and the fourth -- the one -encrypt uses
-# -- did not, so an ordinary edit backed up correctly the whole time and nothing
-# looked wrong from outside.
+# LU. Every in-place write path must honour --backup, including the one
+# -encrypt uses. An ordinary edit that loses its backup loses a value you still
+# know; an ENCRYPTION that loses its backup loses the plaintext for good, and
+# the failure is silent (exit 0, no output, no `.bak`).
 #
-# LU 是這幾個回合裡最嚴重的缺陷，而理由不是機率：一般編輯弄丟備份，弄丟的是一個你還知道的值；
-# 而**加密**弄丟備份，弄丟的是明文本身。那個旗標被接受、rc=0、兩條串流都沒有輸出，而沒有 `.bak`。
-# 有三條寫入路徑呼叫了 makeInPlaceBackup，第四條——`-encrypt` 走的那一條——沒有，因此一般編輯自始至終
-# 都正確地備份，從外面看不出任何異狀。
+# LU。每一條就地寫入路徑都必須遵守 --backup，包括 -encrypt 走的那一條。一般編輯弄丟備份，弄丟的
+# 是你還知道的值；**加密**弄丟備份，弄丟的是明文本身，而且這種失敗是靜默的（rc=0、無輸出、沒有 `.bak`）。
 printf 'id,secret\nA,alpha\nB,beta\n' > "$TMP/t254.csv"
-# Both copies keep the .csv suffix. A scratch copy named `.orig` is read as
-# `.lines` -- one field per line -- so `-encrypt secret` finds no such column
-# and the run fails for a reason that has nothing to do with what is being
-# tested. That is mistakes entry 1's seventh occurrence repeated verbatim.
-# 兩份複本都保留 .csv 副檔名。一個叫 `.orig` 的暫存複本會被當成 `.lines` 讀——每行一個欄位——於是
-# `-encrypt secret` 找不到那一欄，而該次執行失敗的理由與被測的事情毫無關係。那是 mistakes 第 1 條
-# 第七次的逐字重演。
+# Both copies keep the .csv suffix: a scratch copy named `.orig` is read as
+# `.lines` (one field per line), so `-encrypt secret` would find no such column
+# and fail for an unrelated reason. mistakes.md entry 1.
+# 兩份複本都保留 .csv 副檔名：叫 `.orig` 的暫存複本會被當成 `.lines`（每行一個欄位）讀，
+# `-encrypt secret` 就找不到那一欄，因無關的理由失敗。mistakes.md 第 1 條。
 cp "$TMP/t254.csv" "$TMP/t254.orig.csv"
 head -c 32 /dev/urandom > "$TMP/t254key.bin"
 "$CSV2" -encrypt secret -keyfile "$TMP/t254key.bin" -i "$TMP/t254.csv" --in-place --backup \
@@ -15115,10 +13472,9 @@ else
     bad "T254a rc=$_t254_rc bak=$([[ -f "$TMP/t254.csv.bak" ]] && echo present || echo MISSING) err=[$(tr '\n' '|' < "$TMP/t254.err")] / 實得如上"
 fi
 
-# And the file really was encrypted, so T254a is not passing on a run that did
-# nothing. A backup of an unchanged file would satisfy the assertion above.
-# 而那個檔案確實被加密了，因此 T254a 不是在一次「什麼都沒做」的執行上通過的。一份「沒有變動的檔案」
-# 的備份，也會滿足上面那個斷言。
+# And the file really was encrypted: a backup of an unchanged file would also
+# satisfy T254a.
+# 而那個檔案確實被加密了：一份未變動檔案的備份，也會滿足 T254a。
 if ! cmp -s "$TMP/t254.orig.csv" "$TMP/t254.csv" && LC_ALL=C grep -q 'secret:enc:' "$TMP/t254.csv"; then
     ok "T254b and the input really was encrypted in place / 而那個輸入確實被就地加密了"
 else
@@ -15137,11 +13493,9 @@ fi
 
 # LV: an :enc: KEYID is a fingerprint over the key AND the file's salt, so it
 # changes on every encryption with one unchanged key, while an :hmac: KEYID does
-# not. The README said KEYID identified the key -- a sentence added the previous
-# day -- and a script grouping files by it would find nothing.
+# not. A script grouping encrypted files by KEYID would find nothing.
 # LV：`:enc:` 的 KEYID 是對「金鑰**與**該檔 salt」取的指紋，因此同一把金鑰每次加密都不同，而 `:hmac:`
-# 的 KEYID 不會。README 說 KEYID 標識那把金鑰——那句是前一天加上去的——而一支依它把檔案分組的腳本
-# 什麼也找不到。
+# 的 KEYID 不會。依 KEYID 把加密檔分組的腳本會什麼也找不到。
 _t254_enc_ids=()
 _t254_mac_ids=()
 for _i in 1 2 3; do
@@ -15159,11 +13513,8 @@ else
 fi
 
 # LW: equality does not leak. Two records holding the SAME value must encrypt to
-# different bytes -- which is what per-cell nonces buy, and the property the
-# README's "NONCE" wording would have destroyed had the program worked the way
-# that page described.
-# LW：相等性不會洩漏。兩筆持有**相同值**的紀錄必須加密成不同的位元組——那正是「每格一個 nonce」買到的
-# 東西，也正是「若程式真的照那一頁寫的 NONCE 那樣運作」會被摧毀的性質。
+# different bytes, which is what per-cell nonces provide.
+# LW：相等性不會洩漏。兩筆持有**相同值**的紀錄必須加密成不同的位元組，這正是「每格一個 nonce」提供的。
 printf 'id,secret\nA,same\nB,same\n' > "$TMP/t254eq.csv"
 "$CSV2" -encrypt secret -keyfile "$TMP/t254key.bin" -i "$TMP/t254eq.csv" -o "$TMP/t254eq_out.csv" 2>/dev/null
 _t254_c1=$("$CSV2" -get 1:2 -i "$TMP/t254eq_out.csv" 2>/dev/null)
@@ -15187,18 +13538,14 @@ else
 fi
 
 echo "--- T255: the audit log records what actually ran / T255：稽核記錄記下的是真正跑過的東西 ---"
-# LY. The invocation echo replaced the token after the -update address with
-# `<value>` without asking whether it was a value or a flag. `--value-file`
-# vanished and its path fell through as a bare token, so the line read as
-# `-update ADDR <value> /path` -- not the command that ran, and not even the
-# same shape. `--value-stdin` vanished with nothing after it, which made that
-# record byte-identical to a literal update: the trail could not say where the
-# value came from, which is one of the questions it exists to answer.
+# LY. The invocation echo redacts the token after the -update address to
+# `<value>` only when it IS a value. `--value-file PATH` and `--value-stdin`
+# are recorded as themselves; otherwise the line no longer has the shape of the
+# command that ran, and the trail cannot say where the value came from.
 #
-# LY。指令回音把 `-update` 位址後面那個 token 換成 `<value>`，而沒有先問它是值還是旗標。
-# `--value-file` 消失了、它的路徑以裸 token 落下，於是那一行讀起來是 `-update ADDR <value> /path`
-# ——既不是跑過的指令，連形狀都不是。`--value-stdin` 消失後後面什麼都沒有，使那筆紀錄與一次字面值
-# 更新逐位元相同：那份軌跡說不出值從哪裡來，而那正是它存在要回答的問題之一。
+# LY。指令回音只在 `-update` 位址後那個 token **確實是值**時，才把它遮蔽成 `<value>`。
+# `--value-file PATH` 與 `--value-stdin` 以原樣記下；否則那一行就不再是實際執行指令的形狀，
+# 軌跡也說不出值從哪裡來。
 printf 'pkg,license\n名稱,授權\nzlib,MIT\n' > "$TMP/t255.csv2"
 printf 'BSD-3' > "$TMP/t255val.bin"
 "$CSV2" -log "$TMP/t255a.log" -update 1:license --value-file "$TMP/t255val.bin" \
@@ -15215,11 +13562,11 @@ else
     bad "T255a vf=[$_t255_vf] vs=[$_t255_vs] / 實得如上"
 fi
 
-# The redaction still has to happen for an actual value, INCLUDING one that
-# begins with a dash. Exempting anything that looks like a flag would print a
-# value like `-5` in the clear -- the opposite failure, and the worse one.
-# 對一個真正的值，遮蔽仍然必須發生，**包括以 dash 開頭的值**。把「看起來像旗標」的東西一律豁免，
-# 會讓 `-5` 這種值被明文印出來——那是反方向的失敗，而且更嚴重。
+# An actual value is still redacted, INCLUDING one that begins with a dash.
+# Exempting anything that looks like a flag would print a value like `-5` in
+# the clear, the worse failure.
+# 真正的值仍然要被遮蔽，**包括以 dash 開頭的值**。把「看起來像旗標」的東西一律豁免，會讓 `-5`
+# 這種值被明文印出——那是更嚴重的失敗。
 "$CSV2" -log "$TMP/t255d.log" -update 1:license '-5' -i "$TMP/t255.csv2" --in-place >/dev/null 2>&1
 if LC_ALL=C grep -q 'update 1:license <value>' "$TMP/t255c.log" \
    && LC_ALL=C grep -q 'update 1:license <value>' "$TMP/t255d.log" \
@@ -15229,11 +13576,9 @@ else
     bad "T255b c=[$(LC_ALL=C grep -o 'update 1:license [^ ]*' "$TMP/t255c.log"|head -1)] d=[$(LC_ALL=C grep -o 'update 1:license [^ ]*' "$TMP/t255d.log"|head -1)] / 實得如上"
 fi
 
-# LZ. --dry-run writes no DATA file and does write to the log. Both halves are
-# asserted, because the README now says both and either one alone would let the
-# other sentence rot.
-# LZ。--dry-run 不寫**資料**檔，而它確實會寫入記錄。兩半都要斷言，因為 README 現在兩句都說了，
-# 而只斷言其中一半，會讓另一句慢慢爛掉。
+# LZ. --dry-run writes no DATA file and does write to the log. The README says
+# both, so both halves are asserted.
+# LZ。--dry-run 不寫**資料**檔，但會寫入記錄。README 兩句都說了，所以兩半都要斷言。
 printf 'pkg,license\n名稱,授權\nzlib,seed\n' > "$TMP/t255dr.csv2"
 cp "$TMP/t255dr.csv2" "$TMP/t255dr.orig.csv2"
 : > "$TMP/t255dr.log"
@@ -15247,10 +13592,9 @@ else
 fi
 
 # MA. An edit cannot take --json, so an edit's refusal is never a JSON error
-# object -- adding --json replaces the real refusal with conflicting-options.
-# The README promised JSON errors in the Editing section until 2026-09-07.
-# MA。編輯不能搭配 --json，因此一次編輯的拒絕永遠不會是 JSON 錯誤物件——加上 --json 會把真正的
-# 拒絕換成 conflicting-options。直到 2026-09-07 之前，README 在編輯那一節承諾了 JSON 錯誤。
+# object: adding --json replaces the real refusal with conflicting-options.
+# MA。編輯不能搭配 --json，因此編輯的拒絕永遠不會是 JSON 錯誤物件：加上 --json 會把真正的拒絕換成
+# conflicting-options。
 head -c 32 /dev/urandom > "$TMP/t255key.bin"
 "$CSV2" -hash license -keyfile "$TMP/t255key.bin" -i "$TMP/t255.csv2" -o "$TMP/t255p.csv2" 2>/dev/null
 _t255_plain=$("$CSV2" -update 1:license 'x' -i "$TMP/t255p.csv2" --in-place 2>&1)
@@ -15261,11 +13605,9 @@ else
     bad "T255d plain=[${_t255_plain:0:70}] json=[${_t255_json:0:70}] / 實得如上"
 fi
 
-# MC. A .csv2 gets BOTH header rows marked. A case checking only the first row
-# would pass on a program that marked one and left the other naming a column
-# that no longer holds what its name says.
-# MC。一個 .csv2 的**兩列**標頭都會被標記。一個只檢查第一列的案例，會在「程式只標記了一列、
-# 而另一列還在用一個名字指稱一個已經不是那個東西的欄位」時照樣通過。
+# MC. A .csv2 gets BOTH header rows marked; otherwise the unmarked row names a
+# column that no longer holds what its name says.
+# MC。.csv2 的**兩列**標頭都會被標記；否則沒被標記的那一列，所指稱的欄位已不再是它名字說的東西。
 _t255_h1=$(LC_ALL=C sed -n '1p' "$TMP/t255p.csv2")
 _t255_h2=$(LC_ALL=C sed -n '2p' "$TMP/t255p.csv2")
 if [[ $_t255_h1 == *'license:hmac:'* && $_t255_h2 == *'授權:hmac:'* ]]; then
@@ -15275,15 +13617,12 @@ else
 fi
 
 echo "--- T256: what the index section now claims / T256：索引那一節現在宣稱的事 ---"
-# Round 84 found the index implementation in better shape than its page. Every
-# case here is a sentence added because that round had to run the program to
-# learn it, and the fixture is sized to clear CSV2_INDEX_MIN_BYTES via the
-# override rather than by building a 16 MiB file -- the variable exists so the
-# threshold can be tested without one.
+# Round 84. Each case pins a sentence in the README's index section. The
+# fixture clears CSV2_INDEX_MIN_BYTES via the override rather than by being a
+# 16 MiB file; the variable exists so the threshold can be tested without one.
 #
-# 第 84 回合發現索引的**實作**比它那一頁健康得多。這裡每一個案例都對應一句「因為那個回合必須真的
-# 執行程式才學得到」而加進文件的話；fixture 的大小是用覆寫變數跨過 CSV2_INDEX_MIN_BYTES，而不是去
-# 造一個 16 MiB 的檔案——那個變數存在的理由，正是讓這個門檻不需要那種 fixture 就能被測試。
+# 第 84 回合。每個案例都釘住 README 索引一節裡的一句話。fixture 用覆寫變數跨過 CSV2_INDEX_MIN_BYTES，
+# 而不是造一個 16 MiB 的檔案；那個變數存在，正是為了不需要那種檔案就能測這個門檻。
 { print -r -- 'id,payload'
   for _i in {1..4000}; do printf '%d,%s\n' $_i 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; done } > "$TMP/t256.csv"
 
@@ -15298,11 +13637,10 @@ else
     bad "T256a no sidecar was built / 沒有建立 sidecar"
 fi
 
-# ME: which verbs create one unasked, and which do not. Both halves matter --
-# a fix that stopped ALL automatic creation would satisfy a case that only
-# checked `-r`.
-# ME：哪些動詞會未經要求就建立，哪些不會。兩半都重要——一個「停掉所有自動建立」的改動，會讓一個
-# 只檢查 `-r` 的案例照樣通過。
+# ME: which verbs create one unasked, and which do not. Both halves matter:
+# stopping ALL automatic creation would satisfy a case that only checked `-r`.
+# ME：哪些動詞會未經要求就建立，哪些不會。兩半都重要：停掉所有自動建立，也會讓只檢查 `-r` 的
+# 案例通過。
 _t256_makes=()
 _t256_quiet=()
 for _v in '-r' '-count' '-head 3' '-mid 5,6' '-tail 3'; do
@@ -15316,10 +13654,9 @@ else
     bad "T256b creates=[$_t256_makes] quiet=[$_t256_quiet] / 實得如上"
 fi
 
-# And it is silent about it. The round's point was not that it happens but that
-# nothing says so: a 500 MB CSV gets a file written beside it with no output.
-# 而且它對此不出聲。那個回合的重點不是「它會發生」，而是「沒有東西說它發生了」：一個 500 MB 的
-# CSV 旁邊會多出一個檔案，而沒有任何輸出。
+# And it is silent about it: a large CSV gets a file written beside it with no
+# output, which is why the README must say so.
+# 而且它對此不出聲：大型 CSV 旁邊會多出一個檔案而沒有任何輸出，所以 README 必須寫明。
 rm -f "$TMP/t256.csv.index"
 CSV2_INDEX_MIN_BYTES=1000 "$CSV2" -tail 3 -i "$TMP/t256.csv" >/dev/null 2>"$TMP/t256.err"
 if [[ $? == 0 && ! -s "$TMP/t256.err" ]]; then
@@ -15329,10 +13666,8 @@ else
 fi
 
 # MF: a damaged sidecar is discarded SILENTLY, and the answer stays correct.
-# Both halves are the finding: correct output is why nobody notices, and silence
-# is why nobody can notice.
-# MF：壞掉的 sidecar 會被**靜默地**捨棄，而答案仍然正確。兩半合起來才是那個發現：答案正確是「沒有
-# 人注意到」的原因，而沉默是「沒有人**能**注意到」的原因。
+# Both halves are documented behaviour.
+# MF：壞掉的 sidecar 會被**靜默地**捨棄，而答案仍然正確。兩半都是被記載的行為。
 "$CSV2" --build-index -i "$TMP/t256.csv" >/dev/null 2>&1
 printf 'X' | dd of="$TMP/t256.csv.index" bs=1 seek=200 conv=notrunc 2>/dev/null
 _t256_want=$("$CSV2" -mid 500,500 --no-index -i "$TMP/t256.csv" 2>/dev/null)
@@ -15344,9 +13679,9 @@ else
     bad "T256d rc=$_t256_rc got=[$_t256_got] want=[$_t256_want] err=$(wc -c < "$TMP/t256b.err" | tr -d ' ')B / 實得如上"
 fi
 
-# MG: -debug is the only window onto which path ran. The README now shows this
+# MG: -debug is the only window onto which path ran. The README shows this
 # output, so it has to keep existing.
-# MG：`-debug` 是唯一看得見「走了哪條路」的窗口。README 現在展示了這段輸出，因此它必須繼續存在。
+# MG：`-debug` 是唯一看得見「走了哪條路」的窗口。README 展示了這段輸出，因此它必須繼續存在。
 "$CSV2" --build-index -i "$TMP/t256.csv" >/dev/null 2>&1
 _t256_dbg=$("$CSV2" -mid 500,500 -debug -i "$TMP/t256.csv" 2>&1 >/dev/null)
 if [[ $_t256_dbg == *'index hit'* && $_t256_dbg == *'read_bytes='* && $_t256_dbg == *'file_bytes='* ]]; then
@@ -15357,8 +13692,8 @@ fi
 
 # MH: --verify-index checks the sidecar, not the data, and says so; and
 # --build-index with --no-index is a contradiction rather than a silent winner.
-# MH：--verify-index 檢查的是 sidecar 而不是資料，而且它自己這樣說；以及 --build-index 搭配
-# --no-index 是一個「矛盾」，而不是其中一方安靜地勝出。
+# MH：--verify-index 檢查的是 sidecar 而不是資料，而且會自己說明；--build-index 搭配 --no-index
+# 是矛盾，不會由其中一方安靜地勝出。
 printf 'X' | dd of="$TMP/t256.csv.index" bs=1 seek=200 conv=notrunc 2>/dev/null
 _t256_ver=$("$CSV2" --verify-index -i "$TMP/t256.csv" 2>&1)
 _t256_ver_rc=$?
@@ -15372,23 +13707,19 @@ else
 fi
 
 echo "--- T257: -tail is a ring, and what stdin refuses / T257：-tail 是一個環，以及 stdin 拒絕什麼 ---"
-# MI. `tailRing` was an Array with removeFirst(), which shifts every remaining
-# element, so holding N records cost O(N) per record. The NAME said ring from
-# the day it was written, and in this tree names and comments are reliable
-# enough that nobody read the line under it.
+# MI. `tailRing` must be a real ring. An Array with removeFirst() shifts every
+# remaining element, so holding N records costs O(N) per record.
 #
 # This case measures the SHAPE, not a duration: the same file at two values of N
 # must cost about the same. A wall-clock threshold would fail on a loaded
-# machine and would have to be retuned per node; a ratio between two runs on the
-# same machine in the same second does not.
+# machine and need retuning per node; a ratio between two runs on the same
+# machine in the same second does not.
 #
-# MI。`tailRing` 原本是一個 Array 加 `removeFirst()`，而它會搬移其餘每一個元素，因此持有 N 筆的
-# 成本是「每筆 O(N)」。那個**名字**從它被寫下的那天起就說它是環，而在這棵樹裡，名稱與註解可靠到
-# 沒有人會去讀它底下那一行。
+# MI。`tailRing` 必須是真的環。Array 加 `removeFirst()` 會搬移其餘每一個元素，持有 N 筆的成本
+# 就成了「每筆 O(N)」。
 #
-# 這個案例量的是**形狀**，不是一個時間長度：同一個檔案在兩個 N 值下的成本必須差不多。一個以牆鐘
-# 秒數為門檻的斷言，會在機器忙碌時失敗、而且每個節點都要重新調；而「同一台機器、同一秒內兩次執行
-# 的比值」不會。
+# 這個案例量的是**形狀**，不是時間長度：同一個檔案在兩個 N 值下的成本必須差不多。以牆鐘秒數為門檻
+# 的斷言會在機器忙碌時失敗，而且每個節點都要重調；「同一台機器、同一秒內兩次執行的比值」不會。
 { print -r -- 'id,payload'
   for _i in {1..40000}; do printf '%d,%s\n' $_i 'aaaaaaaaaaaaaaaaaaaa'; done } > "$TMP/t257.csv"
 
@@ -15399,16 +13730,13 @@ _t257_large=$( { time ( "$CSV2" -tail 8000 -i "$TMP/t257.csv" --no-index >/dev/n
 # Guard the arithmetic: an unparsed time is not a fast run.
 # 守住這個算式：一個「沒有解析出來的時間」不是一次跑得快的執行。
 if [[ -n $_t257_small && -n $_t257_large ]]; then
-    # zsh arithmetic, not python3: the guest is busybox and has no python3, and
-    # T166e's guarded use of it is far enough away in this file that T249c --
-    # which checks per FILE -- did not notice this one was unguarded. The guest
-    # reported "the buffer is not a ring" on a run where both timings were
-    # 0.040s, because the missing interpreter left the comparison empty. A
-    # failure message that names the wrong cause is worse than none.
-    # 用 zsh 的算術，不用 python3：guest 是 busybox、沒有 python3，而 T166e 那個「有守衛的」用法
-    # 在這個檔案裡離得夠遠，於是 T249c——它是**逐檔**檢查的——沒有發現這一個沒有守衛。guest 在
-    # 一次「兩個時間都是 0.040s」的執行上回報了「那個緩衝不是一個環」，因為缺少的直譯器讓那個
-    # 比較變成空的。**一則指名了錯誤原因的失敗訊息，比沒有訊息更糟。**
+    # zsh arithmetic, not python3: the busybox guest has no python3, and a
+    # missing interpreter leaves the comparison empty, which then reports "the
+    # buffer is not a ring" -- the wrong cause. T249c checks per FILE, so it
+    # does not catch an unguarded use here when a guarded one exists elsewhere.
+    # 用 zsh 的算術，不用 python3：busybox guest 沒有 python3，缺少直譯器會讓比較變成空的，接著回報
+    # 「那個緩衝不是一個環」——錯誤的原因。T249c 是**逐檔**檢查的，檔案別處有守衛的用法時，它抓不到
+    # 這裡沒有守衛的那一個。
     if (( _t257_small <= 0.02 || _t257_large / _t257_small < 4 )); then
         ok "T257a -tail 8000 costs about what -tail 100 does (${_t257_small}s vs ${_t257_large}s) / -tail 8000 的成本與 -tail 100 相當"
     else
@@ -15443,9 +13771,8 @@ else
 fi
 
 # MJ. A --headers that AGREES with the suffix is accepted; only disagreement is
-# refused. The page described a clean binary that does not exist.
-# MJ。與副檔名**一致**的 --headers 會被接受，只有不一致才被拒絕。那一頁描述了一個不存在的
-# 乾淨二分法。
+# refused. It is not a blanket ban on --headers with a suffix.
+# MJ。與副檔名**一致**的 --headers 會被接受，只有不一致才被拒絕；並不是「有副檔名就不准給 --headers」。
 printf 'a,b\n1,2\n' > "$TMP/t257one.csv"
 printf 'a,b\n甲,乙\n1,2\n' > "$TMP/t257two.csv2"
 "$CSV2" -r --headers 1 -i "$TMP/t257one.csv" >/dev/null 2>&1; _t257_a1=$?
@@ -15459,8 +13786,8 @@ else
 fi
 
 # MK/ML. -count refuses stdin; an edit through a pipe works and needs a
-# destination. Both were reachable only by probing.
-# MK／ML。`-count` 拒絕 stdin；一次經由管線的編輯可行，而且需要一個目的地。兩者原本都只能靠試。
+# destination.
+# MK／ML。`-count` 拒絕 stdin；經由管線的編輯可行，而且需要一個目的地。
 "$CSV2" -count -si --headers 1 < "$TMP/t257one.csv" >/dev/null 2>"$TMP/t257.err"
 _t257_cnt=$?
 _t257_edit=$("$CSV2" -update 1:1 'X' -si --headers 1 -so < "$TMP/t257one.csv" 2>/dev/null)
@@ -15471,22 +13798,21 @@ else
 fi
 
 echo "--- T258: the two spellings of -delete, and what a record number means / T258：-delete 的兩種寫法，以及紀錄號指的是什麼 ---"
-# MN. `-delete a,b` is an inclusive range and `-delete` may repeat, and neither
-# was on the page -- so a reader with two records to remove chose blind between
-# a syntax that does what they meant and one that silently takes the record
-# between. Both exit 0 with empty streams, so the wrong choice costs a record
-# with no sign that anything unintended happened.
+# MN. `-delete a,b` is an inclusive range and `-delete` may repeat. A reader
+# with two records to remove must know which is which: one does what they meant,
+# the other silently takes the records between. Both exit 0 with empty streams,
+# so the wrong choice costs records with no sign.
 #
 # Both forms are asserted together on purpose. A case that checked only the
 # range would pass on a program where the repeated flag ALSO deleted a range,
-# and vice versa; it is the difference between them that the page now teaches.
+# and vice versa; it is the difference between them that matters.
 #
-# MN。`-delete a,b` 是一個包含兩端的範圍，而 `-delete` 可以重複，兩者都不在那一頁上——於是一個有
-# 兩筆要刪的讀者只能在「做他想要的事」與「安靜地把中間那一筆一起帶走」之間盲選。兩種寫法都以 0
-# 結束、串流全空，因此選錯的代價是少一筆紀錄，而沒有任何跡象。
+# MN。`-delete a,b` 是包含兩端的範圍，而 `-delete` 可以重複。要刪兩筆的讀者必須分得出哪個是哪個：
+# 一個做他想要的事，另一個會安靜地把中間的紀錄一起帶走。兩種寫法都以 0 結束、串流全空，因此選錯的
+# 代價是少了紀錄，而沒有任何跡象。
 #
-# 兩種寫法刻意一起斷言。一個只檢查範圍的案例，會在「重複旗標**也**刪成範圍」的程式上通過，
-# 反之亦然；那一頁現在教的正是**兩者之間的差別**。
+# 兩種寫法刻意一起斷言。只檢查範圍的案例，會在「重複旗標**也**刪成範圍」的程式上通過，反之亦然；
+# 重要的正是**兩者之間的差別**。
 _t258_mk() { printf 'name\nalpha\nbravo\ncharlie\ndelta\necho\n' > "$1" }
 _t258_mk "$TMP/t258a.csv"
 "$CSV2" -delete 2,4 -i "$TMP/t258a.csv" --in-place >"$TMP/t258.out" 2>"$TMP/t258.err"
@@ -15501,8 +13827,8 @@ else
     bad "T258a range=[$_t258_range] list=[$_t258_list] / 實得如上"
 fi
 
-# The silence is half the finding: it is why the wrong spelling is not noticed.
-# 那份沉默是這個發現的一半：它正是「選錯了卻沒有人發現」的原因。
+# The silence matters: it is why a wrong spelling goes unnoticed.
+# 這份沉默是重點：它正是「寫錯了卻沒人發現」的原因。
 if [[ $_t258_rc == 0 && ! -s "$TMP/t258.out" && ! -s "$TMP/t258.err" ]]; then
     ok "T258b the range form says nothing on either stream / 範圍那種寫法在兩條串流上都不說話"
 else
@@ -15539,22 +13865,22 @@ else
 fi
 
 echo "--- T259: a column address survives a structural column edit / T259：欄位位址在結構性欄位編輯之下仍然成立 ---"
-# MS, the worst defect these rounds have found. `headers` is rewritten in place
-# by `-delete -col`/`-add-column` before any record is processed, while each
-# record keeps its input shape until the very end. Resolving an address against
-# the rewritten header and applying it to an unrewritten record wrote to a
-# neighbouring column -- exit 0, both streams empty, the intended cell untouched.
+# MS. `headers` is rewritten in place by `-delete -col`/`-add-column` before any
+# record is processed, while each record keeps its input shape until the end.
+# Resolving an address against the rewritten header and applying it to an
+# unrewritten record writes to a neighbouring column -- exit 0, both streams
+# empty, the intended cell untouched.
 #
 # Every case below asserts the FULL record, not just the target cell. Checking
 # only the target would pass on a program that wrote the right value into the
 # right place and also corrupted something else.
 #
-# MS，這幾個回合找到最嚴重的缺陷。`headers` 會在任何紀錄被處理之前，就被 `-delete -col`／
-# `-add-column` 就地改寫，而每一筆紀錄保持它輸入的形狀直到最後。拿改寫過的標頭解析位址、再套到
-# 還沒改寫的紀錄上，就會寫進隔壁那一欄——rc=0、兩條串流都空的、而使用者要改的那一格沒有被動。
+# MS。`headers` 會在任何紀錄被處理之前，就被 `-delete -col`／`-add-column` 就地改寫，而每一筆紀錄
+# 保持輸入的形狀直到最後。拿改寫過的標頭解析位址、再套到還沒改寫的紀錄上，就會寫進隔壁那一欄——
+# rc=0、兩條串流都空、要改的那一格沒有被動。
 #
-# 底下每一個案例斷言的是**整筆紀錄**，不只是目標那一格。只檢查目標的話，會在「正確地寫對了地方、
-# 同時又弄壞了別處」的程式上通過。
+# 底下每一個案例斷言的是**整筆紀錄**，不只是目標那一格。只檢查目標的話，會在「寫對了地方、同時又
+# 弄壞了別處」的程式上通過。
 _t259_mk() { printf 'a,b,c,d,e\nv1,v2,v3,v4,v5\n' > "$1" }
 
 _t259_mk "$TMP/t259a.csv"
@@ -15580,8 +13906,8 @@ else
     bad "T259b got [$_t259_add] wanted [ZZ,v1,v2,v3,CHANGED,v5] / 實得如上"
 fi
 
-# `-delete -cell` resolves the same way, and had the same bug.
-# `-delete -cell` 走同一條解析，而它有同一個毛病。
+# `-delete -cell` resolves the same way and is exposed to the same shift.
+# `-delete -cell` 走同一條解析，也受同一個位移影響。
 _t259_mk "$TMP/t259c.csv"
 "$CSV2" -delete -col a -delete -cell 1:d -i "$TMP/t259c.csv" --in-place >/dev/null 2>&1
 _t259_cell=$(LC_ALL=C tail -1 "$TMP/t259c.csv")
@@ -15591,14 +13917,14 @@ else
     bad "T259c got [$_t259_cell] wanted [v2,v3,,v5] / 實得如上"
 fi
 
-# A numeric address naming the LAST column, in a run that also deletes one. The
-# range check used the post-delete count, so this was refused with "the file has
-# 4 columns" about a file that had 5 -- which meant the last column of a file
-# could not be correctly updated in any run that also deleted a column: the
-# numeric form errored with a false statement, the name form corrupted silently.
-# 一個指向**最後一欄**的數字位址，而同一次執行也刪掉了一欄。那個範圍檢查用的是刪除後的欄數，
-# 於是它以「the file has 4 columns」拒絕了一個當下有 5 欄的檔案——那表示在任何「同時刪掉一欄」的
-# 執行裡，一個檔案的最後一欄都無法被正確更新：數字寫法以一句不成立的敘述報錯，欄名寫法靜默寫錯。
+# A numeric address naming the LAST column, in a run that also deletes one. A
+# range check against the post-delete count refuses this with "the file has 4
+# columns" about a file that has 5, so the last column could not be updated in
+# any run that also deleted a column: the numeric form errs with a false
+# statement, the name form corrupts silently.
+# 一個指向**最後一欄**的數字位址，而同一次執行也刪掉一欄。若範圍檢查用刪除後的欄數，就會以
+# 「the file has 4 columns」拒絕一個當下有 5 欄的檔案，於是在任何同時刪欄的執行裡，最後一欄都無法
+# 被正確更新：數字寫法以一句不成立的敘述報錯，欄名寫法靜默寫錯。
 _t259_mk "$TMP/t259d.csv"
 "$CSV2" -delete -col 2 -update 1:5 'X' -i "$TMP/t259d.csv" --in-place >/dev/null 2>"$TMP/t259d.err"
 _t259_num_rc=$?
@@ -15610,10 +13936,10 @@ else
 fi
 
 # The refusal that must SURVIVE the fix: an edit aimed at the column being
-# removed is still refused, rather than being silently applied to whatever now
-# sits at that index. This is the case the shifted index used to land on.
-# 一個必須在修正之後**仍然存在**的拒絕：瞄準「正被移除的那一欄」的編輯仍會被拒絕，而不是被
-# 靜默地套到「現在位於那個索引上的東西」。那正是偏移後的索引原本會落上去的情況。
+# removed is still refused, rather than silently applied to whatever now sits
+# at that index -- the case a shifted index lands on.
+# 一個在修正之後必須**仍然存在**的拒絕：瞄準「正被移除的那一欄」的編輯仍被拒絕，而不是靜默套到
+# 「現在位於那個索引上的東西」——那正是偏移後的索引會落上去的情況。
 _t259_mk "$TMP/t259e.csv"
 "$CSV2" -delete -col a -update 1:a 'X' -i "$TMP/t259e.csv" --in-place >/dev/null 2>"$TMP/t259e.err"
 _t259_clash=$?
@@ -15638,21 +13964,17 @@ else
 fi
 
 echo "--- T260: the machine-readable side of a search / T260：搜尋的機器可讀那一側 ---"
-# Round 88's verdict: every TEXT output format was documented and every JSON
-# output format under -contains was not. The block that did exist showed one
-# line of a four-line output under a `$` prompt with no ellipsis -- the likeliest
-# thing on that page to have produced a broken parser, and it contradicted a
-# bolded warning 570 lines later.
+# Round 88. Every TEXT output format under -contains was documented and no JSON
+# one was. A one-line excerpt of a four-line output under a `$` prompt, with no
+# ellipsis, is the likeliest way to produce a broken parser.
 #
-# 第 88 回合的判詞：每一種**文字**輸出格式都被記載了，而 `-contains` 底下每一種 JSON 輸出格式都沒有。
-# 唯一存在的那個區塊，在一個 `$` 提示符底下展示了四行輸出中的一行、而且沒有省略號——那是那一頁裡
-# 最可能造出一個壞掉解析器的東西，而且它與 570 行之後一段粗體警告互相矛盾。
+# 第 88 回合。`-contains` 底下每一種**文字**輸出格式都有記載，JSON 的一種也沒有。在 `$` 提示符底下
+# 只展示四行輸出中的一行、又沒有省略號，最容易造出一個壞掉的解析器。
 printf 'pkg,license\nzlib,MIT\nzstd,BSD\nbusybox,GPL\n' > "$TMP/t260.csv"
 
 # The whole output, counted. A case asserting only "the last line is the counts"
-# would pass on the very output the README used to show.
-# **整個**輸出，連行數一起數。一個只斷言「最後一行是計數」的案例，會在 README 原本展示的那個輸出上
-# 照樣通過。
+# would pass on a one-line excerpt of it.
+# **整個**輸出，連行數一起數。只斷言「最後一行是計數」的案例，在只有一行的節錄上也會通過。
 _t260_lines=$("$CSV2" -contains busybox --json -i "$TMP/t260.csv" 2>/dev/null | LC_ALL=C grep -c .)
 _t260_first=$("$CSV2" -contains busybox --json -i "$TMP/t260.csv" 2>/dev/null | LC_ALL=C sed -n '1p')
 _t260_hit=$("$CSV2" -contains busybox --json -i "$TMP/t260.csv" 2>/dev/null | LC_ALL=C sed -n '2p')
@@ -15664,10 +13986,10 @@ else
 fi
 
 # MW: the hit shape is NOT the -r --json shape, and the absence of `fields` is
-# the half that breaks a script. Asserting the keys that are present without
-# asserting the key that is absent would miss exactly the failure reported.
-# MW：命中的形狀**不是** `-r --json` 的形狀，而「沒有 `fields`」正是弄壞腳本的那一半。只斷言「有哪些
-# 鍵」而不斷言「沒有哪個鍵」，會剛好漏掉被回報的那個失敗。
+# what breaks a script. Asserting the keys present without the key absent
+# would miss exactly that failure.
+# MW：命中的形狀**不是** `-r --json` 的形狀，而「沒有 `fields`」正是弄壞腳本的那一點。只斷言有哪些
+# 鍵、不斷言沒有哪個鍵，會剛好漏掉這個失敗。
 if [[ $_t260_hit == *'"field":1'* && $_t260_hit == *'"header_en":"pkg"'* \
       && $_t260_hit == *'"value":"busybox"'* && $_t260_hit != *'"fields"'* ]]; then
     ok "T260b a cell hit carries field/header_en/value and no fields object / 一個命中的儲存格帶 field/header_en/value，而沒有 fields 物件"
@@ -15687,11 +14009,11 @@ else
     bad "T260c got [${_t260_ctx//$'\n'/|}] / 實得如上"
 fi
 
-# MX: the locating report's escapes. A TAB inside a value must not be able to
-# look like the separator -- that is the whole reason the format is TAB-separated
-# and the reason the escape rules had to be written down.
-# MX：定位報告的跳脫。一個值裡面的 TAB 不可以看起來像那個分隔符——那正是這個格式採用 TAB 分隔的
-# 全部理由，也是那些跳脫規則必須被寫下來的理由。
+# MX: the locating report's escapes. A TAB inside a value must not look like
+# the separator -- that is why the format is TAB-separated and why the escape
+# rules are documented.
+# MX：定位報告的跳脫。值裡的 TAB 不可以看起來像分隔符——這正是格式採用 TAB 分隔、跳脫規則必須
+# 寫明的理由。
 { print -r -- 'k,v'; printf 'x,"a\tb"\n'; printf 'y,"c\nd"\n' } > "$TMP/t260esc.csv"
 _t260_tab=$("$CSV2" -contains a -i "$TMP/t260esc.csv" 2>/dev/null)
 _t260_nl=$("$CSV2" -contains c -i "$TMP/t260esc.csv" 2>/dev/null)
@@ -15716,8 +14038,8 @@ else
 fi
 
 # MY: a search that matches nothing exits 0. Anyone porting a grep idiom needs
-# this, and nothing said it.
-# MY：一次沒有命中的搜尋以 0 結束。任何把 grep 慣用法搬過來的人都需要這件事，而沒有任何地方說。
+# to know this.
+# MY：一次沒有命中的搜尋以 0 結束。任何把 grep 慣用法搬過來的人都需要知道這件事。
 "$CSV2" -contains NOTHING_HERE -i "$TMP/t260.csv" >/dev/null 2>&1
 _t260_none=$?
 if [[ $_t260_none == 0 ]]; then
@@ -15742,21 +14064,17 @@ else
 fi
 
 echo "--- T261: what --headers 0 means on each suffix / T261：--headers 0 在每一種副檔名上的意思 ---"
-# NA. A correction on 2026-09-07 fixed one sentence in this paragraph and left
-# two beside it, four lines apart and contradicting each other: that `0` is
-# refused whatever the suffix says, and that it is the one value a suffix cannot
-# override. Both false. This is mistakes 4.6 at a smaller scale -- last time it
-# was the other rows of a table, this time the next sentence in the paragraph.
+# NA. `--headers 0` is accepted on every suffix; it is not "refused whatever the
+# suffix says", nor "the one value a suffix cannot override". Both sentences
+# were wrong in the same paragraph at once (cf. mistakes 4.6).
 #
-# The table in the README is now four rows, so this case is four assertions.
-# Checking one suffix would have passed while three others were wrong.
+# The README table has four rows, so this case is four assertions. Checking
+# one suffix would pass while the other three were wrong.
 #
-# NA。2026-09-07 的一次修正改掉了這一段裡的一句，卻把它旁邊的兩句留下——相距四行、而且彼此矛盾：
-# 「`0` 無論副檔名說什麼都會被拒」，以及「它是唯一一個副檔名蓋不過去的值」。兩句都是假的。
-# 這是 mistakes 4.6 的縮小版——上一次是一張表的其餘各列，這一次是**同一段落裡的下一句**。
+# NA。`--headers 0` 在每一種副檔名上都被接受；它既不是「無論副檔名說什麼都被拒」，也不是「唯一一個
+# 副檔名蓋不過去的值」。這兩句曾同時錯在同一段裡（參見 mistakes 4.6）。
 #
-# README 裡那張表現在有四列，因此這個案例有四項斷言。只檢查其中一種副檔名，會在另外三種都錯的
-# 情況下照樣通過。
+# README 那張表有四列，因此這個案例有四項斷言。只檢查一種副檔名，會在另外三種都錯時照樣通過。
 printf 'a,b,c\n1,2,3\n' > "$TMP/t261.csv"
 printf 'a,b\n甲,乙\n1,2\n' > "$TMP/t261.csv2"
 printf '# doc\n\n| p | v |\n|---|---|\n' > "$TMP/t261.md"
@@ -15773,11 +14091,10 @@ fi
 
 # And what it MEANS differs. On a .csv it is headerless CSV -- still split on
 # commas, still arity-checked -- while on a suffix-less file it is line mode.
-# The ragged file is what separates them: line mode has one field per line and
-# cannot be ragged.
+# The ragged file separates them: line mode has one field per line and cannot
+# be ragged.
 # 而它的**意思**不同。在 `.csv` 上它是「無標頭的 CSV」——仍然依逗號切割、仍然檢查欄數——而在無副檔名
-# 的檔案上它是逐行模式。那個欄數不齊的檔案正是分開兩者的東西：逐行模式一行就是一個欄位，
-# 不可能不齊。
+# 的檔案上它是逐行模式。欄數不齊的檔案正好分開兩者：逐行模式一行就是一個欄位，不可能不齊。
 printf 'a,b,c\n1,2\n' > "$TMP/t261ragged.csv"
 printf 'a,b,c\n1,2\n' > "$TMP/t261ragged"
 "$CSV2" -r --headers 0 -i "$TMP/t261ragged.csv" >/dev/null 2>"$TMP/t261.err"
@@ -15810,10 +14127,10 @@ else
 fi
 
 # NB/ND. meta `fields` is the HEADER's width, so 0 means "no header row" and
-# not "unfixed" -- the width is pinned by record 1 on that very run, which
-# T261b just proved by refusing a ragged file.
+# not "unfixed" -- the width is pinned by record 1 on that run, as T261b shows
+# by refusing a ragged file.
 # NB／ND。meta 的 `fields` 是**標頭的寬度**，因此 0 的意思是「沒有標頭列」而不是「不固定」
-# ——在那一次執行上，寬度正是由第 1 筆釘住的，而 T261b 剛剛用「拒絕一個不齊的檔案」證明了這件事。
+# ——在那次執行上寬度由第 1 筆釘住，T261b 拒絕不齊的檔案即為證明。
 _t261_meta=$("$CSV2" -r --json --headers 0 -i "$TMP/t261.csv" 2>/dev/null | LC_ALL=C head -1)
 if [[ $_t261_meta == *'"headers":0'* && $_t261_meta == *'"fields":0'* ]]; then
     ok "T261e fields is 0 when there is no header row, while the width is still enforced / 沒有標頭列時 fields 是 0，而寬度仍然被強制"
@@ -15821,11 +14138,11 @@ else
     bad "T261e got [$_t261_meta] / 實得如上"
 fi
 
-# NE. The Markdown refusal described the FILE as one-column when it was the
-# RECORD that had one field. The two-column fixture is the case: a message that
-# said "one column" of a two-column file sent the reader to the wrong place.
-# NE。那則 Markdown 拒絕把**檔案**描述成單欄，而其實是那筆**紀錄**只有一個欄位。這個兩欄的
-# fixture 正是那個情況：一則對兩欄檔案說「只有一欄」的訊息，會把讀者送去錯的地方。
+# NE. The Markdown refusal must describe the RECORD as having one field, not the
+# FILE as one-column. The two-column fixture is the case: "one column" said of a
+# two-column file sends the reader to the wrong place.
+# NE。那則 Markdown 拒絕必須描述**紀錄**只有一個欄位，而不是說**檔案**只有一欄。這個兩欄的 fixture
+# 正是那個情況：對兩欄檔案說「只有一欄」，會把讀者送去錯的地方。
 printf 'pkg,version\n套件,版本\n|---|---|\n' > "$TMP/t261md.csv2"
 "$CSV2" -r -i "$TMP/t261md.csv2" >/dev/null 2>"$TMP/t261md.err"
 if LC_ALL=C grep -q 'has one field' "$TMP/t261md.err" \
@@ -15838,7 +14155,7 @@ fi
 # NF. Suffix matching is case-insensitive, and the LAST suffix decides -- which
 # matters because --backup writes `.bak`, and those files do not read back as
 # CSV.
-# NF。副檔名比對不分大小寫，而**最後一個**副檔名說了算——那件事要緊，因為 `--backup` 寫出的是
+# NF。副檔名比對不分大小寫，而**最後一個**副檔名說了算——這很要緊，因為 `--backup` 寫出的是
 # `.bak`，而那些檔案讀回來不是 CSV。
 printf 'a,b\n1,2\n' > "$TMP/T261UP.CSV"
 printf 'a,b\n1,2\n' > "$TMP/t261.csv.bak"
@@ -15851,18 +14168,15 @@ else
 fi
 
 echo "--- T262: what reaches stdout when a run fails / T262：一次失敗的執行，有什麼到達了 stdout ---"
-# NI. `-mid` past the end under --json wrote BOTH meta lines and no records: a
-# syntactically valid, semantically complete document announcing zero matching
-# records, while exiting 1. The closing line is the one sentinel a consumer has
-# for noticing a run that was cut short, so emitting it here defeated the only
-# mitigation there was -- and the README argues in this exact context that empty
-# output must not be confusable with an invalid range. The check ran after the
-# line it was supposed to prevent.
+# NI. `-mid` past the end under --json must write nothing to stdout. Writing
+# both meta lines and no records gives a valid, complete document announcing
+# zero matches while exiting 1. The closing line is the one sentinel a consumer
+# has for noticing a run cut short, and empty output must not be confusable with
+# an invalid range. The range check must run before the first line is written.
 #
-# NI。`-mid` 越界搭配 --json 寫出了**兩行** meta 而沒有任何紀錄：一份語法正確、語意完整、宣告
-# 「零筆符合」的文件，同時以 1 結束。那行結尾是消費端唯一可以用來察覺「一次被中途切斷的執行」的
-# 標記，因此在這裡送出它，恰好抵銷了僅有的那個緩解手段——而 README 就在這個脈絡裡論證「空輸出不可以
-# 與無效範圍混淆」。那個檢查跑在「它本該防止的那一行」之後。
+# NI。`-mid` 越界搭配 --json 時，stdout 必須什麼都沒有。寫出兩行 meta 而沒有紀錄，會是一份語法正確、
+# 語意完整、宣告「零筆符合」的文件，同時以 1 結束。結尾那行是消費端察覺「執行被中途切斷」的唯一
+# 標記，而空輸出不可以與無效範圍混淆。範圍檢查必須在寫出第一行之前執行。
 printf 'pkg,version\na,1\nb,2\nc,3\n' > "$TMP/t262.csv"
 _t262_out=$("$CSV2" -mid 99,100 --json -i "$TMP/t262.csv" 2>"$TMP/t262.err")
 _t262_rc=$?
@@ -15882,11 +14196,10 @@ else
 fi
 
 # A legitimate selection that happens to be empty must still produce BOTH meta
-# lines. That is the case the fix could most easily have broken, and it is the
-# distinction the whole design rests on: empty-and-valid must look different
-# from invalid.
+# lines. That is the case the fix could most easily break, and the distinction
+# the design rests on: empty-and-valid must look different from invalid.
 # 一個合法、只是剛好沒有內容的選取，仍然必須產生**兩行** meta。那是這個修正最容易弄壞的情況，
-# 也是整個設計所依賴的那個區別：**「空而有效」必須看起來與「無效」不同。**
+# 也是整個設計所依賴的區別：**「空而有效」必須看起來與「無效」不同。**
 _t262_ok=$("$CSV2" -mid 3,3 --json -i "$TMP/t262.csv" 2>/dev/null)
 if [[ $(print -r -- "$_t262_ok" | LC_ALL=C grep -c '^{"meta"') == 2 ]]; then
     ok "T262c a valid selection still carries both meta lines / 一個有效的選取仍然帶著兩行 meta"
@@ -15895,20 +14208,18 @@ else
 fi
 
 # NH. The other half, which is NOT a defect and must stay true: a fault found
-# part-way through a file leaves good records on stdout. The README promised the
-# opposite until 2026-09-07, and a tool that streams cannot promise it. This
-# case pins the REALITY so the sentence cannot drift back.
+# part-way through a file leaves good records on stdout. A tool that streams
+# cannot promise otherwise, and this case pins that so the README cannot drift
+# back to claiming it.
 #
 # The fixture has to exceed the 64 KiB output buffer, or nothing is flushed
-# before the throw and the case passes while measuring a smaller claim -- which
-# is what happened on the first attempt at reproducing this.
+# before the throw and the case passes while measuring a smaller claim.
 #
-# NH。另外一半，它**不是**缺陷、而且必須保持為真：在讀到檔案中途才發現的錯誤，會在 stdout 上留下
-# 好的紀錄。README 直到 2026-09-07 都承諾了相反的事，而一個會串流的工具不可能做到那個承諾。
-# 這個案例釘住**現實**，好讓那個句子不能漂回去。
+# NH。另外一半，它**不是**缺陷、而且必須保持為真：在檔案中途才發現的錯誤，會在 stdout 上留下好的
+# 紀錄。會串流的工具無法承諾相反的事；這個案例釘住現實，讓 README 不會漂回那個承諾。
 #
-# fixture 必須超過 64 KiB 的輸出緩衝，否則在拋出之前什麼都還沒被沖出去，而這個案例會在量測一個
-# 更小的宣稱時通過——而那正是第一次重現它時發生的事。
+# fixture 必須超過 64 KiB 的輸出緩衝，否則在拋出之前什麼都還沒沖出去，這個案例會在量測一個更小的
+# 宣稱時通過。
 { print -r -- 'a,b,c'
   for _i in {1..20000}; do printf '%d,xxxxxxxxxx,yyyyyyyyyy\n' $_i; done
   print -r -- 'BROKEN' } > "$TMP/t262big.csv"
@@ -15921,12 +14232,11 @@ else
     bad "T262d rc=$_t262_big_rc lines=$_t262_partial / 實得如上"
 fi
 
-# NJ. An error message that is cut off mid-sentence loses exactly the half that
-# tells the reader how to recover. The English and Chinese halves are compared
-# for completeness against each other -- the Chinese one was intact throughout,
-# which is what made the truncation visible at all.
-# NJ。一則在句子中間被切斷的錯誤訊息，失去的恰好是「告訴讀者怎麼補救」的那一半。這裡把英文與中文
-# 兩半互相對照——中文那一半自始至終是完整的，而那正是這個截斷之所以看得出來的原因。
+# NJ. An error message cut off mid-sentence loses exactly the half that tells
+# the reader how to recover. The English half must end in a complete clause,
+# like the Chinese half.
+# NJ。一則在句子中間被切斷的錯誤訊息，失去的恰好是「告訴讀者怎麼補救」的那一半。英文半段必須與中文
+# 半段一樣，以完整的子句結束。
 printf 'x\n|---|---|\n' > "$TMP/t262md.csv"
 "$CSV2" -r -i "$TMP/t262md.csv" >/dev/null 2>"$TMP/t262md.err"
 _t262_en=$(LC_ALL=C sed -n '1p' "$TMP/t262md.err")
@@ -15938,23 +14248,20 @@ fi
 
 echo "--- T263: --pretty is --md-style pretty / T263：--pretty 就是 --md-style pretty ---"
 # NM/NN/NO. `--pretty` and `--md-style pretty` are one setting with two
-# spellings, and each assignment overwrote the other, so the LAST one on the
-# command line won -- silently, at rc=0 with an empty stderr. A wrapper script
-# appending a style flag to a user's arguments flipped its own output.
+# spellings. If each assignment overwrites the other, the LAST one on the
+# command line wins silently, at rc=0 with an empty stderr, and a wrapper that
+# appends a style flag flips its own output.
 #
-# BOTH ORDERS are asserted. My first fix compared against the final `mdStyle`,
-# which is `.pretty` when `--pretty` came last, so it caught one order and not
-# the other. The comment beside `langFlags` in the same file says exactly what
-# to do -- count the flags, not the state they leave behind -- and I did half of
-# it. The two-order assertion is what caught that.
+# BOTH ORDERS are asserted. Comparing against the final `mdStyle` catches only
+# one order, because it is `.pretty` when `--pretty` comes last. As the comment
+# beside `langFlags` says: count the flags, not the state they leave behind.
 #
-# NM／NN／NO。`--pretty` 與 `--md-style pretty` 是同一個設定的兩種寫法，而兩次賦值互相覆寫，因此
-# **命令列上最後那個贏**——靜默地，rc=0 而 stderr 空白。一支「在使用者參數後面追加一個 style」的
-# 包裝腳本，會把自己的輸出翻面。
+# NM／NN／NO。`--pretty` 與 `--md-style pretty` 是同一個設定的兩種寫法。若兩次賦值互相覆寫，
+# **命令列上最後那個**就會靜默勝出，rc=0 而 stderr 空白；一支在使用者參數後追加 style 的包裝腳本，
+# 會把自己的輸出翻面。
 #
-# **兩種順序都要斷言。** 我的第一版修法是對著最終的 `mdStyle` 比對，而當 `--pretty` 排在後面時它
-# 就是 `.pretty`，於是只抓到一種順序。同一個檔案裡 `langFlags` 旁邊那段註解說的正是該怎麼做
-# ——數旗標，不要數它們留下的狀態——而我只做了一半。抓到那件事的，正是「兩種順序」這個斷言。
+# **兩種順序都要斷言。** 對著最終的 `mdStyle` 比對只抓得到一種順序，因為 `--pretty` 排在後面時它
+# 就是 `.pretty`。一如 `langFlags` 旁邊那段註解所說：數旗標，不要數它們留下的狀態。
 printf 'pkg,version\n套件名稱,版本\nzlib,1.3\n' > "$TMP/t263.csv2"
 
 "$CSV2" -r -t -md --pretty          -i "$TMP/t263.csv2" 2>/dev/null > "$TMP/t263a"
@@ -15988,11 +14295,11 @@ else
     bad "T263c only $_t263_ok of 4 were accepted / 四種只有 $_t263_ok 種被接受"
 fi
 
-# NO. Silent no-ops in a tool that names every other one. `--filter` and
-# `--normalize` without `-contains` are refused and the README says so; these
-# two did nothing and said nothing.
-# NO。靜默的無操作，而這支工具會指名其他每一個。`--filter` 與 `--normalize` 少了 `-contains` 會被
-# 拒絕、README 也這樣寫；而這兩個什麼都沒做、也什麼都沒說。
+# NO. No silent no-ops in a tool that names every other one. `--filter` and
+# `--normalize` without `-contains` are refused; `--pretty` and `--md-style`
+# without `-md` must be refused the same way.
+# NO。這支工具會指名其他每一個無操作，不可以有靜默的。`--filter` 與 `--normalize` 少了 `-contains`
+# 會被拒絕；`--pretty` 與 `--md-style` 少了 `-md` 也必須同樣被拒絕。
 "$CSV2" -r -t --pretty -i "$TMP/t263.csv2" >/dev/null 2>"$TMP/t263p.err"
 _t263_np=$?
 "$CSV2" -r -t --md-style compact -i "$TMP/t263.csv2" >/dev/null 2>"$TMP/t263s.err"
@@ -16019,29 +14326,26 @@ else
 fi
 
 echo "--- T264: which addresses can be written, and which are only printed / T264：哪些位址寫得進去，哪些只會被印出來 ---"
-# Round 92's verdict: addressing was documented as a syntax without ever saying
-# which addresses are WRITABLE and which are only PRINTABLE. Header addresses
-# (0 / 0a / 0b) and A1 cells ([C3]) both look like things you can type; neither
-# is.
+# Round 92: addressing must say which addresses are WRITABLE and which are only
+# PRINTABLE. Header addresses (0 / 0a / 0b) and A1 cells ([C3]) both look like
+# things you can type; neither is.
 #
-# 第 92 回合的判詞：定址被記載成一種語法，卻從未說出哪些位址**寫得進去**、哪些只是會被**印出來**。
-# 標頭位址（0／0a／0b）與 A1 格號（[C3]）看起來都像可以打進去的東西；兩者都不是。
+# 第 92 回合：定址必須說清楚哪些位址**寫得進去**、哪些只會被**印出來**。標頭位址（0／0a／0b）與
+# A1 格號（[C3]）看起來都像可以打進去的東西；兩者都不是。
 printf 'pkg,version\n套件,版本\nzlib,1.3.1\nzstd,1.5.6\n' > "$TMP/t264.csv2"
 
-# NT. Four entry points, one concept. Two reached the right message and two
-# answered with the wrong CONCEPT -- `--search-row 0` said "a count must be at
-# least 1", and a row address is not a count. That is exactly what a reader
-# tries after reading that the report prints 0 for a header, and the correct
-# message was already in the binary.
+# NT. Four entry points, one concept, and all must give the header message. A
+# wrong CONCEPT is the failure: "a count must be at least 1" for
+# `--search-row 0`, when a row address is not a count. A reader tries exactly
+# that after seeing the report print 0 for a header.
 #
-# All four are asserted together because the defect WAS the divergence: any
-# case checking one entry point would have passed throughout.
+# All four are asserted together because the defect is the divergence: a case
+# checking one entry point would pass while another diverged.
 #
-# NT。四個入口、一個概念。兩個到得了正確的訊息，兩個用**錯誤的概念**回答——`--search-row 0` 說
-# 「a count must be at least 1」，而一個列位址不是一個計數。那正是讀者在讀到「報告為標頭印 0」
-# 之後會打的東西，而正確的訊息本來就在執行檔裡。
+# NT。四個入口、一個概念，全部都必須給出標頭的訊息。失敗的形式是**用錯概念**：對 `--search-row 0`
+# 說「a count must be at least 1」，而列位址不是計數。讀者看到報告為標頭印 0 之後，正會去打這個。
 #
-# 四個一起斷言，因為那個缺陷**就是**這種分歧：任何只檢查其中一個入口的案例，自始至終都會通過。
+# 四個一起斷言，因為那個缺陷**就是**這種分歧：只檢查一個入口的案例，會在另一個分歧時照樣通過。
 _t264_bad=()
 for _addr in '-get 0:1' '-get 0a:1'; do
     "$CSV2" ${=_addr} -i "$TMP/t264.csv2" >/dev/null 2>"$TMP/t264.err"
@@ -16069,20 +14373,17 @@ else
     bad "T264b --search-row 1 was refused / --search-row 1 被拒絕了"
 fi
 
-# NS. Round 92 asked for `-rownum` to be refused on a locating report, since
-# `--json` refuses it and the report accepts it in silence. The asymmetry is
-# real and the remedy was wrong: T15 asserts that `-rownum` does not shift
-# addressing by running exactly that pair, and refusing it would delete the way
-# that invariant is expressed. The invariant is older and load-bearing -- a flag
-# that "just prints one more column" quietly changing every address is the
-# failure it guards. So the report ACCEPTS it inertly and `--json` refuses it,
-# and both halves are asserted here so neither can drift.
+# NS. The asymmetry is deliberate: the locating report ACCEPTS `-rownum` inertly
+# and `--json` refuses it. Refusing it on the report (round 92's request) would
+# break T15, which asserts that `-rownum` does not shift addressing by running
+# exactly that pair -- and a flag that "just prints one more column" quietly
+# changing every address is the older, load-bearing failure. Both halves are
+# asserted so neither can drift.
 #
-# NS。第 92 回合要求在定位報告上拒絕 `-rownum`，因為 `--json` 拒絕它而報告靜默接受。那個不對稱是
-# 真的，而那個補救方向是錯的：T15 正是以「跑那一對」來斷言 `-rownum` 不會改變定址，拒絕它等於刪掉
-# 那個不變量被表達的方式。而那個不變量更早、也更承重——一個「只是多印一欄」的旗標安靜地改變每一個
-# 位址，正是它所防的失敗。因此報告**惰性地接受**它、而 `--json` 拒絕它，兩半都在這裡斷言，
-# 好讓哪一邊都不能漂走。
+# NS。這個不對稱是刻意的：定位報告**惰性地接受** `-rownum`，而 `--json` 拒絕它。在報告上拒絕它
+# （第 92 回合的要求）會弄壞 T15——T15 正是以「跑那一對」來斷言 `-rownum` 不改變定址——而一個
+# 「只是多印一欄」的旗標安靜地改變每一個位址，是更早、也更承重的那個失敗。兩半都斷言，讓哪一邊都
+# 不能漂走。
 _t264_plain=$("$CSV2" -contains 1. -i "$TMP/t264.csv2" 2>/dev/null)
 _t264_rown=$("$CSV2" -contains 1. -rownum -i "$TMP/t264.csv2" 2>/dev/null)
 "$CSV2" -contains 1. -rownum --json -i "$TMP/t264.csv2" >/dev/null 2>"$TMP/t264r.err"
@@ -16120,21 +14421,19 @@ else
 fi
 
 echo "--- T265: why --value-file exists, and what its refusals say / T265：--value-file 為什麼存在，以及它的拒絕說了什麼 ---"
-# NY, the round's most valuable finding and NOT a defect: a command-line
-# argument is a NUL-terminated string, so a literal value is cut at the first
-# NUL before csv2 is even started -- silently, at exit 0. That is the whole
-# reason these two flags exist and the page never said it.
+# NY, and NOT a defect: a command-line argument is a NUL-terminated string, so a
+# literal value is cut at the first NUL before csv2 even starts -- silently, at
+# exit 0. That is the whole reason these two flags exist.
 #
 # Both halves are asserted together. The literal case alone proves nothing (it
 # looks like a csv2 bug), and the file case alone proves nothing (it looks like
 # an ordinary feature). Side by side they are the argument.
 #
-# NY，那個回合最有價值的發現，而且**不是**缺陷：一個命令列參數是 NUL 結尾的字串，因此一個字面值
-# 會在第一個 NUL 處被切掉——**在 csv2 被啟動之前**，靜默地、rc=0。那正是這兩個旗標存在的全部理由，
-# 而那一頁從未說過。
+# NY，而且**不是**缺陷：命令列參數是 NUL 結尾的字串，因此字面值會在第一個 NUL 處被切掉——**在 csv2
+# 啟動之前**，靜默地、rc=0。那正是這兩個旗標存在的全部理由。
 #
-# 兩半一起斷言。只有字面值那一半什麼也證明不了（看起來像 csv2 的臭蟲），只有檔案那一半也什麼都
-# 證明不了（看起來像一個普通功能）。並排放，它們才是那個論證。
+# 兩半一起斷言。只有字面值那一半什麼也證明不了（看起來像 csv2 的臭蟲），只有檔案那一半也證明不了
+# （看起來像普通功能）。並排放，它們才是那個論證。
 printf 'a,b,c\n1,2,3\n' > "$TMP/t265lit.csv"
 printf 'a,b,c\n1,2,3\n' > "$TMP/t265file.csv"
 printf 'AA\000BB' > "$TMP/t265.bin"
@@ -16149,37 +14448,32 @@ else
     bad "T265a literal=$_t265_lit bytes file=$_t265_file bytes (want 3 and 6) / 實得如上"
 fi
 
-# NX. Four causes, four messages, each naming the path. The placeholder was
-# literal `(path)` for all of them, so a script over many value files could not
-# tell which one failed -- and the wording blamed readability while the real
-# cause for /dev/null is that it is not a regular file.
+# NX. Four causes, four messages, each naming the path. A literal `(path)`
+# placeholder leaves a script over many value files unable to tell which one
+# failed, and /dev/null must be refused as not a regular file, not as
+# unreadable.
 #
 # The empty REGULAR file is in the same loop deliberately: it is the control
 # that shows the refusal is about the KIND of file, not its size.
 #
-# NX。四種成因、四則訊息，每一則都指名路徑。那個佔位符對四者都是字面的 `(path)`，因此一支跑過許多
-# 值檔案的腳本說不出哪一個失敗——而那個措辭把原因說成「讀不到」，但 `/dev/null` 真正的原因是
-# 「它不是一般檔案」。
+# NX。四種成因、四則訊息，每一則都指名路徑。字面的 `(path)` 佔位符會讓跑過許多值檔案的腳本說不出
+# 哪一個失敗；而 `/dev/null` 必須以「不是一般檔案」被拒絕，不是「讀不到」。
 #
-# 空的**一般**檔案刻意放在同一個迴圈裡：它是那個對照組，證明那個拒絕是關於檔案的**種類**、
-# 不是它的大小。
+# 空的**一般**檔案刻意放在同一個迴圈裡：它是對照組，證明拒絕是關於檔案的**種類**、不是大小。
 mkdir -p "$TMP/t265dir"
 printf '' > "$TMP/t265empty.bin"
 # Compared on the BASENAME, not the path that was passed. On Windows MSYS
-# rewrites the argument before csv2 ever sees it -- the message names
-# `C:/Users/.../tmp/tmp.XXX/NOSUCH.bin` for an argument written
-# `/tmp/tmp.XXX/NOSUCH.bin` -- so the message is right and the first version of
-# this comparison was wrong: it checked the string this test PASSED against the
-# string csv2 RECEIVED, which are different on that node.
+# rewrites the argument before csv2 sees it -- `/tmp/tmp.XXX/NOSUCH.bin`
+# arrives as `C:/Users/.../tmp/tmp.XXX/NOSUCH.bin` -- so the string this test
+# passes and the string csv2 receives differ there.
 #
 # `/dev/null` is exempted from the name check entirely: MSYS maps it to `nul`,
 # a different name, so there is nothing to match. What must hold everywhere is
 # that the refusal is not the bare `(path)` placeholder.
 #
-# 比對的是**basename**，不是「傳進去的那個路徑」。在 Windows 上，MSYS 會在 csv2 看到之前改寫那個
-# 參數——一個寫作 `/tmp/tmp.XXX/NOSUCH.bin` 的參數，訊息裡指名的是
-# `C:/Users/.../tmp/tmp.XXX/NOSUCH.bin`——因此**那則訊息是對的**，錯的是這個比較的第一版：它拿
-# 「這個測試傳出去的字串」去比「csv2 收到的字串」，而在那個節點上兩者不同。
+# 比對的是**basename**，不是傳進去的路徑。在 Windows 上，MSYS 會在 csv2 看到之前改寫參數——
+# `/tmp/tmp.XXX/NOSUCH.bin` 抵達時是 `C:/Users/.../tmp/tmp.XXX/NOSUCH.bin`——因此在那裡，
+# 「這個測試傳出去的字串」與「csv2 收到的字串」不同。
 #
 # `/dev/null` 完全豁免名稱檢查：MSYS 把它映射成 `nul`，那是另一個名字，沒有東西可以比對。
 # 在每一個平台上都必須成立的，是「那個拒絕不是裸的 `(path)` 佔位符」。
@@ -16205,22 +14499,20 @@ else
     bad "T265b unnamed: $_t265_bad  empty_rc=$_t265_empty / 實得如上"
 fi
 
-# NZ. Reading the bytes back is the half the page sold and never explained:
-# `-get` adds exactly one LF, the locating report cannot print non-UTF-8 and
-# renders it, and `--json` refuses the file rather than substituting U+FFFD.
-# All three are how a caller finds out what is actually stored.
-# NZ。「把位元組讀回來」是那一頁賣了、卻從未說明的那一半：`-get` 加上恰好一個 LF、定位報告印不出
-# 非 UTF-8 而改用一種呈現、而 `--json` 會**拒絕整個檔案**而不是拿 U+FFFD 去替換。這三件事就是一個
-# 呼叫端用來查明「到底存了什麼」的方法。
+# NZ. Reading the bytes back: `-get` adds exactly one LF, the locating report
+# cannot print non-UTF-8 and renders it, and `--json` refuses the file rather
+# than substituting U+FFFD. All three are how a caller finds out what is
+# actually stored.
+# NZ。把位元組讀回來：`-get` 加上恰好一個 LF、定位報告印不出非 UTF-8 而改用一種呈現、`--json` 會
+# **拒絕整個檔案**而不是拿 U+FFFD 替換。這三件事就是呼叫端查明「到底存了什麼」的方法。
 printf 'a,b,c\n1,2,3\n' > "$TMP/t265u.csv"
 printf 'X\xffY' > "$TMP/t265bad.bin"
 "$CSV2" -update 1:3 --value-file "$TMP/t265bad.bin" -i "$TMP/t265u.csv" --in-place >/dev/null 2>&1
 # Whitespace squeezed AND trimmed: `od` pads its line and `tr -s` leaves the
-# padding as a single trailing space, which made the first version of this
-# comparison fail on a correct program. The bytes are the assertion; the
-# spacing around them is the tool's.
-# 空白既壓縮**也**修掉：`od` 會補齊它那一行，而 `tr -s` 會留下一個結尾空白，那讓這個比較的第一版
-# 在一個正確的程式上失敗。**位元組才是斷言，它們周圍的空白是那個工具的。**
+# padding as a single trailing space, which would fail a correct program. The
+# bytes are the assertion; the spacing around them is the tool's.
+# 空白既壓縮**也**修掉：`od` 會補齊它那一行，而 `tr -s` 會留下一個結尾空白，那會讓一個正確的程式
+# 失敗。**位元組才是斷言，它們周圍的空白是那個工具的。**
 _t265_get=$("$CSV2" -get 1:3 -i "$TMP/t265u.csv" 2>/dev/null | LC_ALL=C od -An -tx1 | LC_ALL=C tr -s ' ' | LC_ALL=C tr -d ' \n')
 _t265_rep=$("$CSV2" -contains X -i "$TMP/t265u.csv" 2>/dev/null)
 "$CSV2" -r --json -i "$TMP/t265u.csv" >/dev/null 2>"$TMP/t265j.err"
@@ -16245,18 +14537,18 @@ fi
 
 echo "--- T266: what a failed edit leaves behind, and how a warning looks / T266：一次失敗的編輯留下什麼，以及一則警告長什麼樣 ---"
 # OB. The backup is written BEFORE the edit -- it has to be -- but a failed edit
-# leaves the input byte-identical, so the `.bak` then held a copy of a file
-# nothing touched, and makeInPlaceBackup refuses to overwrite one. ONE failure
-# permanently blocked every future --backup edit on that path: the flag worked
-# once per file and a failure burned it.
+# leaves the input byte-identical, so a `.bak` left behind holds a copy of a
+# file nothing touched, and makeInPlaceBackup refuses to overwrite one. One
+# failure would then block every future --backup edit on that path. A failed
+# edit must remove its backup.
 #
 # Four states are asserted, because a fix in either direction passes two of
 # them: always removing the backup would pass "failure leaves none" and lose
 # the successful case, and never removing it would pass "success keeps one".
 #
-# OB。備份寫在編輯**之前**——那是必然的——但一次失敗的編輯會讓輸入逐位元不變，於是那個 `.bak` 保存的
-# 是一份沒有東西動過的檔案，而 makeInPlaceBackup 拒絕覆寫既有的備份。**一次失敗就永久封死了那個
-# 路徑上未來的每一次 --backup 編輯**：這個旗標每個檔案只能用一次，而一次失敗把它燒掉了。
+# OB。備份寫在編輯**之前**——那是必然的——但失敗的編輯會讓輸入逐位元不變，留下的 `.bak` 保存的是
+# 一份沒被動過的檔案，而 makeInPlaceBackup 拒絕覆寫既有的備份。於是**一次失敗就會封死那個路徑上
+# 未來的每一次 --backup 編輯**。失敗的編輯必須移除它的備份。
 #
 # 四種狀態都要斷言，因為任一個方向的修法都會通過其中兩種：「一律移除」會通過「失敗不留」而弄丟成功
 # 的情況，「一律不移除」會通過「成功保留」。
@@ -16286,17 +14578,16 @@ else
     bad "T266b bak=[$(tr '\n' '|' < "$TMP/t266.csv.bak")] / 實得如上"
 fi
 
-# OA. Two warnings in one program had two shapes: --truncate-partial printed an
-# audit-log line -- ISO timestamp, WARN level -- on a run where -log was never
-# passed, while -add-column two files away printed plainly. The log FILE's line
-# and the stderr line were the same string.
+# OA. Warnings have one shape: `csv2: <text>`. An audit-log line -- ISO
+# timestamp, WARN level -- on stderr from --truncate-partial, in a run where
+# -log was never passed, while -add-column prints plainly, is the inconsistency
+# this pins.
 #
 # Both are asserted, because making them agree is the fix and either one alone
 # would pass on a program that changed the wrong one.
 #
-# OA。同一支程式裡的兩則警告有兩種形狀：`--truncate-partial` 在一次「從未給過 -log」的執行上印出了
-# 一行稽核紀錄——ISO 時間戳、WARN 等級——而兩個檔案之外的 `-add-column` 印得乾乾淨淨。log **檔案**
-# 那一行與 stderr 那一行，是同一個字串。
+# OA。警告只有一種形狀：`csv2: <文字>`。這裡釘住的不一致是：`--truncate-partial` 在一次從未給過
+# -log 的執行上往 stderr 印出一行稽核紀錄——ISO 時間戳、WARN 等級——而 `-add-column` 印得乾乾淨淨。
 #
 # 兩者都要斷言，因為「讓它們一致」才是那個修正，而只斷言其中一個，會在「改錯了那一個」的程式上通過。
 printf 'a,b\n1,"unclosed\n' > "$TMP/t266torn.csv"
@@ -16322,11 +14613,10 @@ else
     bad "T266d got [${_t266_dbg:0:70}] / 實得如上"
 fi
 
-# The torn-file definition: ending inside an unclosed quote is truncatable,
-# a short last record is a different fault and is refused. The page said
-# "incomplete final record" and defined neither.
-# 「破損檔案」的定義：結束在**未關閉的引號裡**是可截斷的，而「最後一筆欄位太少」是**另一種**錯誤、
-# 會被拒絕。那一頁寫的是「結尾不完整的紀錄」，兩者都沒有定義。
+# The torn-file definition: ending inside an unclosed quote is truncatable; a
+# short last record is a different fault and is refused.
+# 「破損檔案」的定義：結束在**未關閉的引號裡**是可截斷的；「最後一筆欄位太少」是**另一種**錯誤、
+# 會被拒絕。
 printf 'a,b,c\n1,2,3\n4,5\n' > "$TMP/t266short.csv"
 "$CSV2" -r --truncate-partial -i "$TMP/t266short.csv" >/dev/null 2>&1
 _t266_short=$?
@@ -16337,36 +14627,33 @@ else
 fi
 
 echo "--- T267: the parallel path accepts only what it can split / T267：平行路徑只接受它切得開的東西 ---"
-# OF/OG, the first crash these rounds have found. `Format.from(path:)` answers
-# only for the two DECLARING suffixes and returns nil for everything else, and
-# the call site defaulted that nil to `.csv` -- a false statement about what a
-# suffix-less file is. So a `.txt` with an index reached a splitter built for
-# CSV records:
+# OF/OG, a crash. `Format.from(path:)` answers only for the two DECLARING
+# suffixes and returns nil for everything else; defaulting that nil to `.csv`
+# is a false statement about what a suffix-less file is. A `.txt` with an index
+# then reaches a splitter built for CSV records:
 #
 #   exit 133 (128+5, SIGTRAP), stdout 0 bytes, stderr 0 bytes, 3/3
 #
-# reached entirely through documented commands, because `--build-index` accepts
-# such a file and reports success. A `.md` took the same road and had its raw
-# table parsed as CSV, refused with a message telling the caller to rename the
-# file to the suffix it already had -- which is LL one layer over: a second
-# reader that did not know a `.md` must be translated first.
+# entirely through documented commands, because `--build-index` accepts such a
+# file and reports success. A `.md` on the same road has its raw table parsed as
+# CSV and is refused with a message telling the caller to rename the file to the
+# suffix it already has -- LL one layer over: a second reader that does not know
+# a `.md` must be translated first.
 #
-# All four formats are asserted in one loop, because the defect WAS the two the
-# condition never named, and a case covering only `.csv` would have passed
-# throughout.
+# All four formats are asserted in one loop, because the defect is in the two
+# the condition never named, and a case covering only `.csv` would pass.
 #
-# OF／OG，這幾個回合找到的第一個當機。`Format.from(path:)` 只為那兩個**會宣告的**副檔名作答，其餘
-# 回傳 nil，而呼叫點把那個 nil 預設成 `.csv`——**那是一句關於「無副檔名的檔案是什麼」的假話**。
-# 於是一個有索引的 `.txt` 抵達了為 CSV 紀錄而建的切分器：
+# OF／OG，一個當機。`Format.from(path:)` 只為那兩個**會宣告的**副檔名作答，其餘回傳 nil；把那個 nil
+# 預設成 `.csv`，**是一句關於「無副檔名的檔案是什麼」的假話**。於是一個有索引的 `.txt` 會抵達為 CSV
+# 紀錄而建的切分器：
 #
 #   rc=133（128+5，SIGTRAP）、stdout 0 bytes、stderr 0 bytes、三次全中
 #
-# 而且整條路都走得通**被記載的指令**，因為 `--build-index` 接受這種檔案並回報成功。`.md` 走同一條路，
-# 它的原始表格被當成 CSV 解析，並以「請把檔案改名成它已經有的副檔名」拒絕——那是 LL 高一層：
-# 一個不知道「`.md` 必須先被翻譯」的第二個讀取者。
+# 而且整條路都是**被記載的指令**，因為 `--build-index` 接受這種檔案並回報成功。`.md` 走同一條路時，
+# 原始表格被當成 CSV 解析，並以「請把檔案改名成它已經有的副檔名」拒絕——那是 LL 高一層：一個不知道
+# 「`.md` 必須先被翻譯」的第二個讀取者。
 #
-# 四種格式在同一個迴圈裡斷言，因為那個缺陷**就是**「那個條件從未指名的兩種」，而一個只涵蓋 `.csv`
-# 的案例自始至終都會通過。
+# 四種格式在同一個迴圈裡斷言，因為缺陷就在「那個條件從未指名的兩種」，只涵蓋 `.csv` 的案例會通過。
 printf 'alpha\nbravo\ncharlie\n' > "$TMP/t267.txt"
 printf '| p | v |\n|---|---|\n| a | 1 |\n' > "$TMP/t267.md"
 printf 'k,v\na,1\nb,2\n' > "$TMP/t267.csv"
@@ -16406,9 +14693,9 @@ else
 fi
 
 # OJ. A decline reason must name what the CALLER typed. `-A`/`-B`/`-C` imply
-# --filter internally, so asking about filter first reported `--filter` to
+# --filter internally, so asking about filter first would report `--filter` to
 # someone who never passed it.
-# OJ。婉拒理由必須指名**呼叫端打了什麼**。`-A`／`-B`／`-C` 在內部隱含 `--filter`，因此先問 filter，
+# OJ。婉拒理由必須指名**呼叫端打了什麼**。`-A`／`-B`／`-C` 在內部隱含 `--filter`，因此若先問 filter，
 # 會對一個從未給過它的人回報 `--filter`。
 _t267_ctx=$("$CSV2" -contains a -C 1 -debug -i "$TMP/t267.csv" 2>&1 >/dev/null \
     | LC_ALL=C grep -o 'single-threaded: .*')
@@ -16422,28 +14709,25 @@ echo "--- T268: the installer's reachability claim / T268：安裝器對「可�
 # OK. The probe is a ladder -- non-login, then login, then login-interactive --
 # and concluding "every shell" from the first rung assumes a login shell only
 # ADDS to PATH. On macOS it does not: path_helper runs from /etc/zprofile for
-# login shells and REORDERS it, which README.md:35-39 explains three lines above
-# the check that did not use it.
+# login shells and REORDERS it (README.md:35-39).
 #
 # So with a second csv2 earlier in the login PATH -- what you have the moment you
 # install twice, which is what --prefix and --dir are for -- "reachable from:
-# every shell" was true about reachability and false about identity, beside a
-# line promising identity.
+# every shell" would be true about reachability and false about identity,
+# beside a line promising identity.
 #
-# This is the second layer of one lesson: on 2026-08-25 the same probe was fixed
-# for inheriting the caller's PATH, and the fix was "start a shell from
-# nothing". This time: from nothing, but only one KIND of nothing.
+# The probe starts each shell from an empty environment so it does not inherit
+# the caller's PATH, and it must try every KIND of shell, not just one.
 #
 # OK。那個探測是一個階梯——非登入、登入、登入互動——而從第一階就結論「每一種 shell」，前提是
 # 「登入 shell 只會**增加** PATH」。macOS 上不是：`path_helper` 由 /etc/zprofile 在登入 shell 執行、
-# 它會**重排** PATH；而 README.md 第 35–39 行解釋的正是這件事，就在那個沒有用到它的檢查上方三行。
+# 它會**重排** PATH（README.md 第 35–39 行）。
 #
 # 於是當登入 PATH 上有第二個 csv2 時——那正是你裝第二次就會有的東西，而 --prefix 與 --dir 存在的
-# 理由就是讓你裝第二次——「reachable from: every shell」對**可達性**為真、對**同一性**為假，
+# 理由就是讓你裝第二次——「reachable from: every shell」會對**可達性**為真、對**同一性**為假，
 # 而它旁邊那一行承諾的正是同一性。
 #
-# 這是同一個教訓的第二層：2026-08-25 同一個探測才因為「繼承呼叫者的 PATH」被修過，那次的修法是
-# 「從零開始一個 shell」。這一次是：從零開始，但只從**一種**零開始。
+# 這個探測讓每個 shell 從空的環境啟動，以免繼承呼叫者的 PATH；而且必須試過**每一種** shell，不只一種。
 _t268_install="$ROOT/install.zsh"
 if [[ ! -x $_t268_install ]]; then
     bad "T268a install.zsh is not executable / install.zsh 不可執行"
@@ -16497,21 +14781,20 @@ fi
 
 echo
 echo "--- T269: -count refuses its companions instead of discarding them / T269：-count 拒絕同伴，而不是丟棄它們 ---"
-# OP. `-count` is dispatched first and ignored everything beside it: it printed
-# a number, exited 0, said nothing on stderr, and did not do the other thing
-# asked for. The heaviest form swallowed an --in-place edit.
+# OP. `-count` is dispatched first, and must refuse its companions rather than
+# ignore them: printing a number, exiting 0, saying nothing on stderr, and not
+# doing the other thing asked for. The heaviest form swallows an --in-place edit.
 #
 # Each case below asserts BOTH halves -- that it refuses, AND that the thing it
-# used to swallow did not happen. Asserting only the refusal would pass against
-# a version that refuses and edits anyway, which is a real shape here: OB was a
-# refusal that had already written its backup.
+# would swallow did not happen. Asserting only the refusal would pass against a
+# version that refuses and edits anyway, a real shape here: OB was a refusal
+# that had already written its backup.
 #
-# OP。`-count` 是分派鏈上的第一個，而它會忽略旁邊的一切：印出一個數字、以 0 結束、stderr
-# 什麼都沒有，而另一件被要求的事沒有發生。最重的一種是它吞掉一次 --in-place 編輯。
+# OP。`-count` 是分派鏈上的第一個，它必須拒絕同伴，而不是忽略它們：印出一個數字、以 0 結束、stderr
+# 什麼都沒有，而另一件被要求的事沒有發生。最重的一種是吞掉一次 --in-place 編輯。
 #
-# 底下每個案例都斷言**兩半**——它會拒絕，**而且**它先前吞掉的那件事沒有發生。只斷言拒絕，
-# 會在一個「拒絕之後照樣編輯」的版本上通過，而那是這裡真實存在過的形狀：OB 就是一則
-# 「已經先寫好備份」的拒絕。
+# 底下每個案例都斷言**兩半**——它會拒絕，**而且**它會吞掉的那件事沒有發生。只斷言拒絕，會在一個
+# 「拒絕之後照樣編輯」的版本上通過，而那是這裡真實的形狀：OB 就是一則「已經先寫好備份」的拒絕。
 _t269=$TMP/t269
 mkdir -p "$_t269"
 printf 'pkg,license,maintainer\nzlib,MIT,alice\ntransMITter,BSD,bob\nlibfoo,MIT,carol\n' > "$_t269/f.csv"
@@ -16528,12 +14811,12 @@ else
 fi
 
 # The message must name only what was TYPED. --in-place derives o.output from
-# o.input inside validate(), so a check placed at the END of validate() listed
-# `-o` for a caller who never typed it -- OQ in miniature, introduced by this
-# very fix. This case is why the check sits first.
-# 訊息只能指名**打過的**東西。`--in-place` 會在 validate() 裡由 o.input 推導出 o.output，
-# 因此一個放在 validate() **結尾**的檢查，會對一個從沒打過 `-o` 的呼叫端列出 `-o`——那正是
-# OQ 的縮影，而且是這個修法自己帶進來的。這個案例就是那個檢查為什麼放在最前面。
+# o.input inside validate(), so a check at the END of validate() would list `-o`
+# for a caller who never typed it -- OQ in miniature. That is why the check
+# sits first.
+# 訊息只能指名**打過的**東西。`--in-place` 會在 validate() 裡由 o.input 推導出 o.output，因此放在
+# validate() **結尾**的檢查，會對一個從沒打過 `-o` 的呼叫端列出 `-o`——那是 OQ 的縮影。這就是那個
+# 檢查放在最前面的原因。
 # Read the LIST, not the whole sentence: the prose after the colon is long and
 # any substring test against it answers about the wrong text.
 # 讀那份**清單**，不要讀整句話：冒號之後的散文很長，任何對它做的子字串比對，回答的都是
@@ -16545,11 +14828,11 @@ else
     bad "T269b list=[$_t269_list] / 實得如上"
 fi
 
-# The search form is the one that reads as a WRONG ANSWER rather than as
-# nothing happening: -contains ZZZ -count used to return the file's total, so
-# "how many records mention this" got a plausible number to another question.
-# 搜尋那一種形狀最像一個**錯誤的答案**而不是「什麼都沒發生」：`-contains ZZZ -count` 先前
-# 回傳整個檔案的筆數，於是「有幾筆提到這個」拿到的是一個回答了另一個問題的合理數字。
+# The search form reads as a WRONG ANSWER rather than as nothing happening:
+# -contains ZZZ -count returning the file's total gives "how many records
+# mention this" a plausible number to another question.
+# 搜尋那一種形狀讀起來像一個**錯誤的答案**而不是「什麼都沒發生」：若 `-contains ZZZ -count` 回傳
+# 整個檔案的筆數，「有幾筆提到這個」拿到的就是一個回答了另一個問題的合理數字。
 _t269_s=$("$CSV2" -contains ZZZNOMATCH -count -i "$_t269/f.csv" 2>&1); _t269_src=$?
 if (( _t269_src != 0 )) && [[ $_t269_s == *"-count cannot be combined"*"-contains"* ]]; then
     ok "T269c -contains -count is refused rather than answering a different question / -contains -count 被拒絕，而不是回答另一個問題"
@@ -16557,10 +14840,10 @@ else
     bad "T269c rc=$_t269_src out=[${_t269_s%%$'\n'*}] / 實得如上"
 fi
 
-# -o was swallowed too, so the destination was never even created. Asserting
-# the file's absence and not just the refusal: a refusal that had already
-# created an empty file is the shape OB had.
-# `-o` 也被吞掉，於是目的地連建立都沒有。這裡斷言的是「檔案不存在」而不只是「有拒絕」：
+# -o must not be swallowed either, or the destination is never created.
+# Asserting the file's absence and not just the refusal: a refusal that had
+# already created an empty file is the shape OB had.
+# `-o` 也不可以被吞掉，否則目的地連建立都不會有。這裡斷言的是「檔案不存在」而不只是「有拒絕」：
 # 一則「已經先建好一個空檔」的拒絕，正是 OB 的形狀。
 rm -f "$_t269/dest.csv"
 "$CSV2" -count -o "$_t269/dest.csv" -i "$_t269/f.csv" >/dev/null 2>&1
@@ -16586,14 +14869,14 @@ fi
 
 echo
 echo "--- T270: a modifier followed by a value names the modifier / T270：修飾符後面接一個值時要指名修飾符 ---"
-# OQ. `csv2 -col license` answered `unexpected argument "license"` and never
-# mentioned `-col`. The message accused the value; the mistake was the flag's
-# context, and `-col` IS a real flag -- it belongs to `-delete`. The refusal
-# that says the right thing lives at the end of the parse and could not be
-# reached, because a bare word ends the parse first.
-# OQ。`csv2 -col license` 先前回答 `unexpected argument "license"`，從頭到尾沒提過 `-col`。
-# 那則訊息指控的是「值」，而使用者打錯的是「旗標的位置」，何況 `-col` **是**真旗標——它屬於
-# `-delete`。說得對的那則拒絕住在解析的最後，而它永遠到不了，因為一個落單的字會先結束解析。
+# OQ. `csv2 -col license` must mention `-col`, not just answer
+# `unexpected argument "license"`. That message accuses the value, while the
+# mistake is the flag's context -- `-col` IS a real flag, belonging to
+# `-delete`. The refusal that says the right thing lives at the end of the
+# parse, and a bare word ends the parse first unless the modifier is checked.
+# OQ。`csv2 -col license` 必須提到 `-col`，不能只回答 `unexpected argument "license"`。那則訊息指控
+# 的是「值」，而打錯的是「旗標的位置」——`-col` **是**真旗標，屬於 `-delete`。說得對的那則拒絕住在
+# 解析的最後，若不先檢查修飾符，一個落單的字會先結束解析。
 _t270_col=$("$CSV2" -col license -i "$_t269/f.csv" 2>&1)
 _t270_cell=$("$CSV2" -cell 1:1 -i "$_t269/f.csv" 2>&1)
 if [[ $_t270_col == *"-col is a modifier"* && $_t270_col == *license* \
@@ -16604,11 +14887,10 @@ else
 fi
 
 # A stray word with NO modifier pending must keep the old message. Widening the
-# modifier branch to every stray argument would have made this pass while
-# hiding the general case, which is the shape the modifier fix could take by
-# accident.
-# 一個**沒有**待決修飾符的落單字，必須維持原本的訊息。把修飾符那一支放寬到所有落單參數，
-# 會讓上面那個案例通過、同時把一般情況藏起來——而那正是這個修法可能不小心變成的形狀。
+# modifier branch to every stray argument would make T270a pass while hiding
+# the general case.
+# 一個**沒有**待決修飾符的落單字，必須維持原本的訊息。把修飾符那一支放寬到所有落單參數，會讓 T270a
+# 通過、同時把一般情況藏起來。
 _t270_stray=$("$CSV2" stray -i "$_t269/f.csv" 2>&1)
 if [[ $_t270_stray == *'unexpected argument "stray"'* && $_t270_stray != *"modifier"* ]]; then
     ok "T270b a stray word with no modifier pending keeps the general message / 沒有待決修飾符時，落單的字維持一般訊息"
@@ -16632,17 +14914,16 @@ fi
 
 echo
 echo "--- T271: CRLF is normalised, and only -debug says so / T271：CRLF 會被正規化，而只有 -debug 說得出來 ---"
-# OT. README.md held the string CRLF zero times. "Output record separators are
-# always LF" implies the normalisation without stating it, and the INFO that
-# announces it is visible only under -debug. For a tool that runs on a Windows
-# node this is something the reader walks straight into.
+# OT. CRLF input is normalised to LF output, and the INFO that announces it is
+# visible only under -debug. For a tool that runs on a Windows node, the README
+# must state it outright, not only imply it with "output record separators are
+# always LF".
 #
 # Both halves are asserted: that the bytes change, AND that the normal path
 # stays silent. A version that started printing the INFO unconditionally would
 # break every pipeline this tool is meant to sit in.
-# OT。`README.md` 裡「CRLF」出現 0 次。「輸出的紀錄分隔符一律是 LF」暗示了正規化卻沒有說出來，
-# 而宣告它的那則 INFO 只在 `-debug` 底下看得到。對一個要在 Windows 節點上跑的工具，這是讀者會
-# 直接撞上的事。
+# OT。CRLF 輸入會被正規化成 LF 輸出，而宣告它的那則 INFO 只在 `-debug` 底下看得到。對一個要在
+# Windows 節點上跑的工具，README 必須明說，不能只用「輸出的紀錄分隔符一律是 LF」來暗示。
 #
 # 兩半都要斷言：位元組確實變了，**而且**正常路徑保持安靜。一個開始無條件印出那則 INFO 的版本，
 # 會弄壞這個工具本來就該待在裡面的每一條管線。
@@ -16668,24 +14949,22 @@ fi
 
 echo
 echo "--- T272: a '#' in the MIDDLE is refused too / T272：檔案中段的 '#' 同樣被拒絕 ---"
-# OU. README.md said a file with '# ...' "at the top" is refused. A '#' anywhere
-# is refused, and the message is better than the page: it names the record AND
-# the line, which differ once a header row is in front of them. "At the top"
-# invited the reader to assume a mid-file '#' was fine -- an assumption that
-# surfaces only after half the file has been read.
-# OU。`README.md` 先前說的是「開頭有 `# ...` 的檔案」會被拒絕。任何位置的 `#` 都會被拒絕，而且
-# 那則訊息比那一頁更好：它同時指名**紀錄**與**行號**，而有了標頭列在前面，這兩個數字就不一樣了。
-# 「開頭」會邀請讀者假設中段的 `#` 沒關係——而那個假設要等到半個檔案讀完之後才浮現。
+# OU. A '#' anywhere is refused, not only "at the top", and the message names
+# the record AND the line, which differ once a header row is in front of them.
+# "At the top" would invite the reader to assume a mid-file '#' is fine -- an
+# assumption that surfaces only after half the file has been read.
+# OU。任何位置的 `#` 都會被拒絕，不只是「開頭」；訊息同時指名**紀錄**與**行號**，而有標頭列在前面時
+# 這兩個數字就不一樣了。「開頭」會讓讀者假設中段的 `#` 沒關係——而那個假設要等到半個檔案讀完才浮現。
 _t272=$TMP/t272
 mkdir -p "$_t272"
 printf 'a,b\n1,2\n#note\n3,4\n' > "$_t272/mid.csv"
 "$CSV2" -r -i "$_t272/mid.csv" > "$_t272/out" 2> "$_t272/err"
 _t272_rc=$?
-# record 2 and line 3 -- the two numbers differ here, which is the whole reason
-# the message carries both. A case matching only "record 2" would pass against a
+# record 2 and line 3 -- the two numbers differ here, which is the reason the
+# message carries both. A case matching only "record 2" would pass against a
 # message that had quietly stopped naming the line.
-# 紀錄 2 與行號 3——這兩個數字在這裡是不同的，而那正是訊息要同時帶著它們的全部理由。一個只比對
-# 「record 2」的案例，會在一個「悄悄不再說出行號」的訊息上照樣通過。
+# 紀錄 2 與行號 3——這兩個數字在這裡不同，那正是訊息要同時帶著它們的理由。只比對「record 2」的
+# 案例，會在一個悄悄不再說出行號的訊息上照樣通過。
 if (( _t272_rc != 0 )) && [[ ! -s "$_t272/out" ]] \
    && [[ "$(<"$_t272/err")" == *"record 2 (line 3) starts with '#'"* ]]; then
     ok "T272a a mid-file '#' is refused, naming record 2 and line 3, with no output / 中段的 '#' 被拒絕，指名 record 2 與 line 3，且沒有輸出"
@@ -16695,21 +14974,18 @@ fi
 
 echo
 echo "--- T273: the documented .csv <-> .csv2 conversion, both directions / T273：文件記載的 .csv 與 .csv2 互轉，兩個方向 ---"
-# OR. The row said "write the records to a suffix-less path, author the second
-# header row yourself, then read that back". Read back, that path is `.lines` --
-# which is what it already was. The step that converts is the RENAME, and the
-# row did not have it; nor did it have the reverse direction, though its title
-# is "between .csv and .csv2".
+# OR. The step that converts a suffix-less file to .csv2 is the RENAME: read
+# back, a suffix-less path is `.lines`. The recipe must include the rename and
+# the reverse direction, since its title is "between .csv and .csv2".
 #
 # This case runs the README's text verbatim, including the rename. It is the
 # only kind of case that can catch a recipe which is merely incomplete: every
-# individual command in the old version exited 0.
-# OR。那一列寫的是「把紀錄寫到一個沒有副檔名的路徑、自己撰寫第二列標頭，然後把它讀回來」。
-# 讀回來時那個路徑是 `.lines`——而它本來就是。完成轉換的那一步是**改名**，而那一列沒有它；
-# 它也沒有反方向，儘管它的標題是「在 `.csv` 與 `.csv2` 之間轉換」。
+# individual command in an incomplete one still exits 0.
+# OR。把無副檔名的檔案轉成 `.csv2` 的那一步是**改名**：讀回來時，無副檔名的路徑是 `.lines`。這份做法
+# 必須包含改名，也必須有反方向，因為它的標題是「在 `.csv` 與 `.csv2` 之間轉換」。
 #
-# 這個案例逐字執行 README 的文字，包含那次改名。這是唯一抓得住「一份只是不完整的做法」的案例
-# 形式：舊版裡的每一道指令，單獨看都以 0 結束。
+# 這個案例逐字執行 README 的文字，包含那次改名。這是唯一抓得住「一份只是不完整的做法」的案例形式：
+# 不完整的做法裡，每一道指令單獨看仍然以 0 結束。
 _t273=$TMP/t273
 mkdir -p "$_t273"
 printf 'pkg,version,license\nzlib,1.3.1,MIT\nzstd,1.5.6,BSD\n' > "$_t273/p.csv"
@@ -16738,10 +15014,10 @@ else
 fi
 
 # And -t really is required: without it the header row is dropped silently, so
-# the recipe would build a .csv2 whose first header row is a data record. The
-# README now says "the -t is required"; this is the case behind that clause.
-# 而 `-t` 真的是必要的：少了它，標頭列會被靜默丟掉，於是那份做法會做出一個「第一列標頭其實是
-# 一筆資料」的 `.csv2`。README 現在寫著「`-t` 是必要的」；這就是那個子句背後的案例。
+# the recipe would build a .csv2 whose first header row is a data record. This
+# is the case behind the README's "the -t is required".
+# 而 `-t` 真的是必要的：少了它，標頭列會被靜默丟掉，於是那份做法會做出一個「第一列標頭其實是一筆
+# 資料」的 `.csv2`。這就是 README「`-t` 是必要的」那個子句背後的案例。
 "$CSV2" -r -i "$_t273/p.csv" -o "$_t273/nohdr" 2>/dev/null
 _t273_first=$(head -1 "$_t273/nohdr" 2>/dev/null)
 if [[ $_t273_first == 'zlib,1.3.1,MIT' ]]; then
@@ -16752,16 +15028,13 @@ fi
 
 echo
 echo "--- T274: --json puts a meta line at BOTH ends / T274：--json 在頭尾各放一行 meta ---"
-# OS. The table prescribes `--json` and jq for two rows and showed no jq
-# expression anywhere, and the obvious one is wrong: `.fields.license` yields a
-# null for each meta line, so a column list silently gains two entries that are
-# not data. The README now carries `select(.record)`, and this case pins the
-# fact that makes it necessary rather than the jq text, which cannot be run
-# where jq is absent.
-# OS。那張表為兩列開的藥方是 `--json` 加 jq，而整頁沒有出現過任何一個 jq 運算式，何況最直觀的
-# 那個是錯的：`.fields.license` 會為每一行 meta 產生一個 null，於是一份欄位清單會靜默地多出
-# 兩個不是資料的項目。README 現在寫著 `select(.record)`，而這個案例釘住的是「讓它成為必要」的
-# 那個事實，而不是那段 jq 文字——jq 在某些節點上並不存在。
+# OS. `.fields.license` over `--json` output yields a null for each meta line,
+# so a column list silently gains two entries that are not data; hence
+# `select(.record)` in the README. This case pins the fact that makes it
+# necessary rather than the jq text, which cannot be run where jq is absent.
+# OS。對 `--json` 輸出用 `.fields.license`，會為每一行 meta 產生一個 null，於是一份欄位清單會靜默地
+# 多出兩個不是資料的項目；所以 README 寫的是 `select(.record)`。這個案例釘住「讓它成為必要」的那個
+# 事實，而不是那段 jq 文字——jq 在某些節點上並不存在。
 _t274=$TMP/t274
 mkdir -p "$_t274"
 printf 'pkg,version,license\nzlib,1.3.1,MIT\nzstd,1.5.6,BSD\n' > "$_t274/p.csv"
@@ -16770,13 +15043,9 @@ _t274_n=$(wc -l < "$_t274/j" | tr -d ' ')
 _t274_head=$(head -1 "$_t274/j")
 _t274_tail=$(tail -1 "$_t274/j")
 _t274_norec=$(LC_ALL=C grep -c -v '"record"' "$_t274/j")
-# Two records, four lines: the count is asserted against the fixture rather than
-# quoted from a different one. The first version of this case expected five,
-# copied from a three-record file used earlier in the session, and failed for
-# being right about a file that was not there.
-# 兩筆紀錄、四行：這個數字是對著**這個** fixture 斷言的，不是從另一個 fixture 引用來的。這個案例
-# 的第一版期望 5，那是從本 session 稍早一個三筆的檔案抄來的——它因為「對著一個不在場的檔案說了
-# 實話」而失敗。
+# Two records, four lines: the count is asserted against THIS fixture, not
+# quoted from a different one.
+# 兩筆紀錄、四行：這個數字是對著**這個** fixture 斷言的，不是從另一個 fixture 引用來的。
 if [[ $_t274_n == 4 && $_t274_head == '{"meta":'* && $_t274_tail == '{"meta":'* && $_t274_norec == 2 ]]; then
     ok "T274a two records come back as four lines, two of them meta at the ends / 兩筆紀錄回來的是四行，其中兩行是頭尾的 meta"
 else
@@ -16788,11 +15057,9 @@ echo
 echo "--- T275: -count says whether the index answered / T275：-count 說出索引有沒有作答 ---"
 # OZ. README calls -debug the only window onto whether an index was used, and
 # says it prints `index hit` or the reason it did not. `-count` is the verb whose
-# ENTIRE claim is O(1)-via-index, and it was the one verb with that window shut:
-# only timing revealed it. The failure half already worked.
-# OZ。README 說 -debug 是「索引有沒有被用到」的唯一窗口，會印出 `index hit` 或它沒被用到的原因。
-# `-count` 是那個「全部賣點就是有索引時 O(1)」的動詞，而它恰好是那扇窗關著的唯一一個：只有計時
-# 看得出來。失敗的那一半本來就是好的。
+# ENTIRE claim is O(1)-via-index, so it must have that window too.
+# OZ。README 說 -debug 是「索引有沒有被用到」的唯一窗口，會印出 `index hit` 或沒被用到的原因。
+# `-count` 是那個「全部賣點就是有索引時 O(1)」的動詞，所以它也必須有那扇窗。
 _t275=$TMP/t275
 mkdir -p "$_t275"
 printf 'a,b\n1,2\n3,4\n' > "$_t275/f.csv"
@@ -16818,23 +15085,21 @@ fi
 
 echo
 echo "--- T276: an index is what makes a .csv parallel / T276：索引才是讓 .csv 走平行的東西 ---"
-# OW. This is the fact the parallel measurement harness did not know. It set
-# CSV2_PARALLEL_MIN_BYTES=1 to force the parallel path, but the obstacle for a
-# .csv is not the size threshold -- it is that nothing has proved one record per
-# line. So half the rows of a table headed "parallel" were scan-path runs, at
-# the scan path's memory, and the harness reported them as parallel because it
-# only ever grepped for lines BOTH paths print.
+# OW. For a .csv the obstacle to the parallel path is not the size threshold --
+# it is that nothing has proved one record per line. Setting
+# CSV2_PARALLEL_MIN_BYTES=1 alone does not force it: without an index the run is
+# a scan-path run, at the scan path's memory, and grepping only for lines BOTH
+# paths print cannot tell them apart.
 #
 # Pinned here at a size the suite can afford, via the same threshold variable
-# the harness uses. The harness cannot be a test case -- it needs 1.3 GB and
-# twenty minutes -- so the FACT is pinned instead of the script.
+# the measurement harness uses. The harness cannot be a test case -- it needs
+# 1.3 GB and twenty minutes -- so the FACT is pinned instead of the script.
 #
-# OW。這正是那支平行量測 harness 不知道的事實。它設了 `CSV2_PARALLEL_MIN_BYTES=1` 來強制平行路徑，
-# 但一個 `.csv` 的阻擋者不是大小門檻——而是「沒有任何東西證明過每行一筆」。於是一張標題寫著
-# 「平行」的表，有一半的列是掃描路徑的執行、帶著掃描路徑的記憶體，而 harness 把它們當成平行回報，
-# 因為它從頭到尾只 grep 了兩條路徑**都會**印的那些行。
+# OW。對 `.csv` 而言，平行路徑的阻擋者不是大小門檻——而是「沒有任何東西證明過每行一筆」。單靠
+# `CSV2_PARALLEL_MIN_BYTES=1` 強制不了：沒有索引時，那是一次掃描路徑的執行、帶著掃描路徑的記憶體，
+# 而只 grep 兩條路徑**都會**印的行，分不出兩者。
 #
-# 這裡用測試負擔得起的大小、透過 harness 用的同一個門檻變數來釘住它。那支 harness 本身當不了測試
+# 這裡用測試負擔得起的大小、透過量測 harness 用的同一個門檻變數來釘住它。那支 harness 本身當不了測試
 # 案例——它需要 1.3 GB 與二十分鐘——所以釘住的是那個**事實**，不是那支腳本。
 _t276=$TMP/t276
 mkdir -p "$_t276"
@@ -16852,9 +15117,9 @@ else
     bad "T276a before=[${_t276_before##*DEBUG }] after=[${_t276_after##*DEBUG }] / 實得如上"
 fi
 
-# A .csv2 needs no index -- it is the asymmetry that made the old table's two
-# .csv2 rows genuine while its two .csv rows were not.
-# 一個 `.csv2` 不需要索引——正是這個不對稱，讓舊表的兩個 `.csv2` 列是真的，而兩個 `.csv` 列不是。
+# A .csv2 needs no index -- the asymmetry that makes its parallel measurements
+# genuine where a .csv's without an index are not.
+# 一個 `.csv2` 不需要索引——正是這個不對稱，讓 `.csv2` 的平行量測是真的，而沒有索引的 `.csv` 不是。
 sed '1a\
 套件,授權' "$_t276/s.csv" > "$_t276/s.csv2"
 _t276_c2=$(CSV2_PARALLEL_MIN_BYTES=1000 "$CSV2" -contains needle -debug -i "$_t276/s.csv2" 2>&1 >/dev/null)
@@ -16866,16 +15131,13 @@ fi
 
 echo
 echo "--- T277: stored ciphertext length is base64, in steps of three / T277：密文儲存長度是 base64，以三為一階 ---"
-# OY. README said ciphertext is plaintext + 28 bytes "so value lengths are
-# visible and an empty cell is distinguishable". The +28 is right, but the cell
-# holds base64, so 0, 1 and 2 bytes all store as 40 characters -- an empty cell
-# is NOT distinguishable. It erred conservatively, claiming more leakage than
-# exists, but a reader padding values to hide an empty cell was acting on a
-# false statement, and base64 appeared nowhere on the page.
-# OY。README 先前說密文是明文加 28 個位元組「因此值的長度看得見，空儲存格也分辨得出來」。+28 是對的，
-# 但儲存格裡放的是 base64，於是 0、1、2 位元組都存成 40 個字元——空儲存格**分辨不出來**。它錯的方向
-# 是保守的（宣稱的洩漏比實際多），但一個為了藏起空儲存格而去補齊值的讀者，是依據一句假話在行動，
-# 而 base64 這件事整頁從未出現。
+# OY. Ciphertext is plaintext + 28 bytes, but the cell holds base64, so 0, 1 and
+# 2 bytes all store as 40 characters -- an empty cell is NOT distinguishable. A
+# reader padding values to hide an empty cell would be acting on a false
+# statement, so the README states the base64 step.
+# OY。密文是明文加 28 個位元組，但儲存格裡放的是 base64，於是 0、1、2 位元組都存成 40 個字元——
+# 空儲存格**分辨不出來**。一個為了藏起空儲存格而去補齊值的讀者，會是依據一句假話在行動，所以
+# README 寫明了 base64 這一階。
 _t277=$TMP/t277
 mkdir -p "$_t277"
 LC_ALL=C head -c 32 /dev/urandom > "$_t277/k.bin"
@@ -16886,11 +15148,10 @@ for _r in 1 2 3 4 5; do
     _v=$("$CSV2" -get "${_r}:secret" -i "$_t277/e.csv" 2>/dev/null)
     _t277_len+=(${#_v})
 done
-# 0,1,2 -> 40 ; 3,4 -> 44. The formula the README now states is
-# 4 * ceil((len + 28) / 3), and these five values are the two buckets it
-# predicts either side of a step.
-# 0、1、2 → 40；3、4 → 44。README 現在寫出的公式是 4 * ceil((len + 28) / 3)，而這五個值正是它
-# 預測的、跨過一個階的兩個桶。
+# 0,1,2 -> 40 ; 3,4 -> 44. The README's formula is 4 * ceil((len + 28) / 3),
+# and these five values are the two buckets it predicts either side of a step.
+# 0、1、2 → 40；3、4 → 44。README 的公式是 4 * ceil((len + 28) / 3)，而這五個值正是它預測的、
+# 跨過一個階的兩個桶。
 if [[ ${_t277_len[1]} == 40 && ${_t277_len[2]} == 40 && ${_t277_len[3]} == 40 \
    && ${_t277_len[4]} == 44 && ${_t277_len[5]} == 44 ]]; then
     ok "T277a plaintexts 0,1,2 all store as 40 characters and 3,4 as 44 / 明文 0、1、2 都存成 40 個字元，3、4 存成 44"
@@ -16900,19 +15161,17 @@ fi
 
 echo
 echo "--- T278: the measurement scripts find the binary this platform builds / T278：量測腳本找得到這個平台建出來的執行檔 ---"
-# measure.zsh named release/csv2 unconditionally, so on Windows -- where the
-# build produces release/csv2.exe -- it exited "build first" on a node that had
-# just built successfully, and the one Windows measurement on record was taken
-# by passing CSV2= by hand. That incantation appeared in no file while the
-# README said to run the script, full stop.
+# The measurement scripts must not name release/csv2 unconditionally: on
+# Windows the build produces release/csv2.exe, and a hard-wired name exits
+# "build first" on a node that has just built successfully, leaving passing
+# CSV2= by hand as an undocumented workaround.
 #
 # Checked by reading the scripts rather than by running them: they need a
 # 25 MiB corpus and minutes, which is not a test case. What can regress is the
 # hard-wired name, and that is what this looks for.
 #
-# `measure.zsh` 無條件指名 `release/csv2`，於是在 Windows 上——那裡建出來的是 `release/csv2.exe`
-# ——它會在一個剛剛建置成功的節點上印出「build first」並結束，而現存唯一一份 Windows 量測是靠手動
-# 傳入 `CSV2=` 取得的。那個咒語不存在於任何檔案裡，而 README 說的是「執行這支腳本」，句號。
+# 量測腳本不可以無條件指名 `release/csv2`：Windows 上建出來的是 `release/csv2.exe`，寫死的名字會在
+# 一個剛剛建置成功的節點上印出「build first」並結束，剩下「手動傳入 `CSV2=`」這種沒有記載的繞道。
 #
 # 這裡用**讀腳本**而不是跑腳本來檢查：它們需要 25 MiB 的語料與好幾分鐘，那不是一個測試案例。
 # 會退化的是那個寫死的名字，而這就是它要找的東西。
@@ -16931,24 +15190,25 @@ fi
 
 echo
 echo "--- T279: the published table equals the files it names / T279：發表的表格等於它指名的那些檔案 ---"
-# The page says the source measurements are kept in verifications/measure_output*.txt.
-# On 2026-09-08 it said that while the table quoted minima across five runs and
-# the file held one run, so the table and its stated source disagreed by 3x on
-# one row. Nothing reported it: both were plausible numbers in the same units.
+# The page says the source measurements are kept in
+# verifications/measure_output*.txt, so the table must equal those files. A
+# table quoting minima across five runs while the file holds one run disagrees
+# with its stated source, and nothing else reports it: both are plausible
+# numbers in the same units.
 #
-# This case is the one guard that a table CANNOT drift from its source, which is
-# the whole subject of round 98. When a node re-measures -- the parent runner
-# rewrites measure_output_linux.txt on every guest run -- this case fails until
-# the table is updated. That is the intended cost: the alternative is a page
-# that quotes numbers no file supports.
+# This case is the one guard that a table CANNOT drift from its source (round
+# 98). When a node re-measures -- the parent runner rewrites
+# measure_output_linux.txt on every guest run -- this case fails until the table
+# is updated. That is the intended cost: the alternative is a page that quotes
+# numbers no file supports.
 #
-# 那一頁說原始量測保存在 verifications/measure_output*.txt。2026-09-08 它一邊這樣說，一邊在表格裡
-# 引用五次執行的最小值，而檔案裡是單獨一次執行——於是表格與它自稱的來源，在其中一列上差了三倍。
-# 沒有任何東西回報這件事：兩者都是同一個單位下看起來合理的數字。
+# 那一頁說原始量測保存在 verifications/measure_output*.txt，因此表格必須等於那些檔案。一張引用五次
+# 執行最小值、而檔案裡只有一次執行的表，就與它自稱的來源不一致，而沒有別的東西會回報：兩者都是同一個
+# 單位下看起來合理的數字。
 #
-# 這個案例是「一張表不會與它的來源漂開」的唯一守衛，而那正是第 98 回合的全部主題。當某個節點重新
-# 量測時——母專案 runner 每次跑 guest 都會改寫 measure_output_linux.txt——這個案例會失敗，直到表格
-# 被更新為止。那是刻意付出的代價：另一個選擇，是一頁引用著「沒有任何檔案支持」的數字。
+# 這個案例是「一張表不會與它的來源漂開」的唯一守衛（第 98 回合）。當某個節點重新量測時——母專案
+# runner 每次跑 guest 都會改寫 measure_output_linux.txt——這個案例會失敗，直到表格被更新為止。那是
+# 刻意付出的代價：另一個選擇，是一頁引用著「沒有任何檔案支持」的數字。
 _t279_us() {   # 秒 -> 帶千位逗號的微秒 / seconds -> microseconds with thousands separators
     local n=$(printf '%.0f' $(( $1 * 1000000 )))
     print -r -- $n | LC_ALL=C sed -e :a -e 's/\(.*[0-9]\)\([0-9]\{3\}\)/\1,\2/;ta'
@@ -16964,16 +15224,14 @@ _t279_from() {  # $1=檔案 $2=列 -> 微秒 / file, row -> microseconds
     [[ -n $v ]] || { print -r -- "MISSING"; return }
     _t279_us $v
 }
-# The four columns of the README table, in the order they appear.
-# README 表格的四欄，依它們出現的順序。
-# Five columns since 2026-09-10, in the order the table prints them. WSL2 was
-# added because it is a machine in this loop and had no column -- which is how
-# its measurement came to overwrite the guest's file. Adding the column without
-# adding it here made this case fail by comparing README column 3 (WSL) against
-# measure_output_windows.txt: the table's SHAPE changed and the check said so.
-# 自 2026-09-10 起是五欄，順序與表格印出的一致。WSL2 之所以被加進來，是因為它是這個迴路裡的一台
-# 機器卻沒有欄位——而那正是它的量測會覆蓋 guest 檔案的緣由。加了欄位卻沒有加在這裡，會讓這個案例
-# 拿 README 第 3 欄（WSL）去對 measure_output_windows.txt 而失敗：表格的**形狀**變了，而檢查說了出來。
+# The five columns of the README table, in the order the table prints them.
+# WSL2 has its own column because it is a machine in this loop; without one its
+# measurement would overwrite the guest's file. Adding a column to the table
+# without adding it here makes this case fail by comparing the wrong columns:
+# the table's SHAPE changed and the check says so.
+# README 表格的五欄，順序與表格印出的一致。WSL2 有自己的欄位，因為它是這個迴路裡的一台機器；沒有欄位
+# 的話，它的量測會覆蓋 guest 的檔案。在表格加了欄位卻沒有加在這裡，會讓這個案例拿錯的欄去比對而失敗：
+# 表格的**形狀**變了，而檢查說了出來。
 _t279_files=(measure_output measure_output_macos_ssd measure_output_linux_x86_64 measure_output_windows measure_output_linux)
 _t279_rows=(single parallel edit rewrite)
 _t279_labels=("Whole-file search, single-threaded" "Whole-file search, parallel" "Small durable edit" "Full-file rewrite")
@@ -16987,18 +15245,13 @@ for _i in 1 2 3 4; do
     for _c in 1 2 3 4 5; do
         _want=$(_t279_from ${_t279_files[$_c]} ${_t279_rows[$_i]})
         # zsh DROPS the empty fields that a leading and trailing `|` produce, so
-        # field 1 is the label and the data columns are 2..5 -- not 3..6. The
-        # first version of this line used `_c + 2`, which is in range for three
-        # of the four columns and out of range for the fourth; under `set -u`
-        # an out-of-range subscript is not empty, it ABORTS THE SUITE, and
-        # `zsh -n` cannot see it because it is a run-time value. That is
-        # mistakes_prevention rule 4 in a different disguise, so the `:-` is
-        # here as well as the corrected index.
-        # zsh 會**丟掉**開頭與結尾的 `|` 造成的空欄位，因此第 1 欄是標題、資料欄是 2..5——不是
-        # 3..6。這一行的第一版寫的是 `_c + 2`，它對四欄中的三欄在範圍內、對第四欄越界；而在
-        # `set -u` 之下，一個越界的下標不是空字串，它會**中止整個測試套件**，而 `zsh -n` 看不見
-        # 它，因為那是執行期的值。那正是 mistakes_prevention 第 4 條換了一個偽裝，所以除了修正
-        # 索引之外，這裡也加上 `:-`。
+        # field 1 is the label and the data columns are 2..6 -- not 3..7. Under
+        # `set -u` an out-of-range subscript is not empty, it ABORTS THE SUITE,
+        # and `zsh -n` cannot see it because it is a run-time value
+        # (mistakes_prevention rule 4), so the `:-` is here as well as the index.
+        # zsh 會**丟掉**開頭與結尾的 `|` 造成的空欄位，因此第 1 欄是標題、資料欄是 2..6——不是 3..7。
+        # 在 `set -u` 之下，越界的下標不是空字串，它會**中止整個測試套件**，而 `zsh -n` 看不見它，
+        # 因為那是執行期的值（mistakes_prevention 第 4 條），所以除了索引之外，這裡也加上 `:-`。
         _got=${${(s:|:)_line}[$((_c + 1))]:-}
         _got=${_got// /}
         _got=${_got%µs}
@@ -17013,11 +15266,11 @@ else
     bad "T279a ${#_t279_bad} mismatch(es): ${_t279_bad[1]}${_t279_bad[2]:+ ; ${_t279_bad[2]}} / 不一致如上"
 fi
 
-# And the same four numbers must appear in the translation, so a reader of
-# either page acts on the same figures. The zh table was corrected in the same
-# commit as the English one twice this month; nothing checked that they agreed.
-# 而同樣那四個數字必須也出現在翻譯裡，讓讀任一頁的人依據的是同一組數字。這個月已經有兩次，中文表
-# 與英文表在同一個 commit 裡各自被修正——而沒有任何東西檢查過它們是否一致。
+# And the same figures must appear in the translation, so a reader of either
+# page acts on the same numbers. The two tables are edited separately, and
+# nothing else checks that they agree.
+# 而同樣那些數字也必須出現在翻譯裡，讓讀任一頁的人依據的是同一組數字。兩張表是分開編輯的，而沒有
+# 別的東西檢查它們是否一致。
 _t279_zh_bad=0
 for _i in 1 2 3 4; do
     for _c in 1 2 3 4 5; do
@@ -17033,19 +15286,18 @@ fi
 
 echo
 echo "--- T280: the refusal predicate is ONE FIELD, not the '#' / T280：拒絕的述詞是「恰好一個欄位」，不是那個 '#' ---"
-# PG. Round 97 rewrote the paragraph to say the '#' refusal "fires wherever the
-# line is". It does -- for a one-field line. The trigger is the field count and
-# the '#' only selects which message that line gets. T272a passed against the
-# broad sentence because its fixture happened to be the narrow case: a test that
-# agreed with the code and not with the sentence it was there to defend.
+# PG. The '#' refusal fires for a ONE-FIELD line wherever it is. The trigger is
+# the field count; the '#' only selects which message that line gets. T272a
+# alone passes against the broader claim "fires wherever the line is" (round
+# 97), because its fixture is the narrow case.
 #
-# Both halves are asserted here, which is what T272a was missing.
+# Both halves are asserted here, which T272a does not.
 #
-# PG。第 97 回合把那一段改寫成「不論那一行在哪裡都會觸發」。它確實會——**對一個單欄位的行而言**。
-# 觸發條件是欄數，而 `#` 只是選擇了那一行會拿到哪一則訊息。T272a 之所以在那句寬宣稱之下通過，是
-# 因為它的 fixture 剛好是那個窄的情況：一個與程式一致、卻與它本該保護的句子不一致的測試。
+# PG。`#` 的拒絕會對**單欄位的行**觸發，不論它在哪裡。觸發條件是欄數；`#` 只是選擇那一行拿到哪一則
+# 訊息。單靠 T272a，會在「不論那一行在哪裡都會觸發」（第 97 回合）這個較寬的宣稱下通過，因為它的
+# fixture 剛好是窄的情況。
 #
-# 這裡把兩半都斷言了，而那正是 T272a 缺的東西。
+# 這裡把兩半都斷言了，而 T272a 沒有。
 _t280=$TMP/t280
 mkdir -p "$_t280"
 printf 'a,b\n1,2\n#comment,x\n3,4\n' > "$_t280/two.csv"
@@ -17092,14 +15344,14 @@ fi
 
 echo
 echo "--- T281: the --json error codes are not a closed set of three / T281：--json 的錯誤碼不是「三個」這樣一個封閉集合 ---"
-# PI. The page said "There are three codes" one sentence before promising that
-# code values are stable across versions, which is what makes a closed list
-# load-bearing. Five are reachable. The fix was not to write "five" -- that is
-# the same mistake one size larger -- but to say the set is open and to list
-# what has been seen; this case pins the five and the sentence that opens it.
-# PI。這一頁先寫「共有三個 code」，下一句就承諾 code 的值跨版本穩定——正是那句話讓封閉清單變成
-# 承重的。實際上有五個到得了。修法不是把「三」改成「五」（那是同一個錯換個大小），而是說明這個
-# 集合是開放的、並列出已見過的；這個案例釘住那五個，以及那句「開放」的話。
+# PI. The set of --json error codes is open: five are reachable, and the page
+# promises code values are stable across versions, which makes any closed count
+# load-bearing. Writing "five" instead of "three" would be the same mistake one
+# size larger, so the page says the set is open and lists what has been seen;
+# this case pins the five and the sentence that opens it.
+# PI。--json 的錯誤碼集合是開放的：有五個到得了，而那一頁承諾 code 的值跨版本穩定，於是任何封閉的
+# 數量都會變成承重的。把「三」改成「五」是同一個錯換個大小，所以那一頁說明集合是開放的、並列出已見過
+# 的；這個案例釘住那五個，以及那句「開放」的話。
 _t281=$TMP/t281
 mkdir -p "$_t281"
 printf 'pkg,license\nzlib,MIT\n' > "$_t281/f.csv"
@@ -17131,15 +15383,12 @@ for _c in unknown-flag not-found ambiguous-match conflicting-options invalid-inp
     LC_ALL=C grep -q -- "$_c" "$ROOT/README.zh-TW.md" || _t281_missing+=("zh:$_c")
 done
 # Asserted POSITIVELY -- the pages must SAY the set is open -- rather than by
-# forbidding the old sentence. The first version of this case forbade "共有三個
-# code" and then FAILED, because the corrected paragraph quotes that very phrase
-# in its own note about what it used to say. A scan that catches its own
-# needle has happened twice before in this file; the durable form is to require
-# the new claim rather than to ban the old words.
-# 這裡用**正向**斷言——那兩頁必須**說出**這個集合是開放的——而不是去禁止那句舊話。這個案例的第一版
-# 禁止了「共有三個 code」，然後**失敗了**：因為修正後的段落，在它自己那句「先前寫的是什麼」的註記
-# 裡引用了那個字串。「掃描抓到自己的針」在這個檔案裡已經發生過兩次；耐久的形式是要求**新**宣稱
-# 存在，而不是禁止**舊**的字眼。
+# forbidding the old sentence. The corrected paragraph may quote the old phrase
+# in its own note, and a scan that bans it would then catch its own needle; the
+# durable form is to require the new claim rather than to ban the old words.
+# 這裡用**正向**斷言——那兩頁必須**說出**這個集合是開放的——而不是去禁止那句舊話。修正後的段落可能
+# 在自己的註記裡引用那句舊話，禁止它的掃描就會抓到自己的針；耐久的形式是要求**新**宣稱存在，而不是
+# 禁止**舊**的字眼。
 if (( ${#_t281_missing} == 0 )) && LC_ALL=C grep -q 'The set of codes is not closed' "$ROOT/README.md" \
    && LC_ALL=C grep -q '這組 code 不是封閉的' "$ROOT/README.zh-TW.md"; then
     ok "T281b both pages list all five and both say the set is open / 兩份文件都列出五個，而且都說明這個集合是開放的"
@@ -17149,13 +15398,11 @@ fi
 
 echo
 echo "--- T282: an edit's refusal IS a parseable object / T282：一次編輯的拒絕就是一個可解析的物件 ---"
-# PJ. Three sentences said it never is, and one of them removed a whole row of
-# the limits table on that reasoning. The narrow true fact -- you cannot get the
-# EDIT's own error as JSON, because --json is refused before the edit runs -- is
-# worth stating; "do not bother parsing" is not.
-# PJ。有三句話說它「絕不是」，而其中一句還據此把「何時該停用」那張表的一整列移除了。那個窄的、
-# 為真的事實——你拿不到「編輯自己的錯誤」的 JSON，因為 `--json` 在編輯執行之前就被拒絕了——值得
-# 寫出來；「不必費事去解析」不值得。
+# PJ. An edit's refusal under --json IS one parseable object. The narrow true
+# fact -- you cannot get the EDIT's own error as JSON, because --json is refused
+# before the edit runs -- is worth stating; "do not bother parsing" is not.
+# PJ。一次編輯在 --json 下的拒絕**就是**一個可解析的物件。那個窄的、為真的事實——你拿不到「編輯自己的
+# 錯誤」的 JSON，因為 `--json` 在編輯執行之前就被拒絕了——值得寫出來；「不必費事去解析」不值得。
 _t282=$TMP/t282
 mkdir -p "$_t282"
 printf 'a,b\n1,2\n' > "$_t282/e.csv"
@@ -17170,11 +15417,11 @@ fi
 
 echo
 echo "--- T283: --include-headers adds a sixth key and two zeroes / T283：--include-headers 多出第六個鍵與兩個 0 ---"
-# PK. The cell-hit shape is enumerated exhaustively on the page and header_row
-# was not in the list; `record` is 0, which no verb accepts; and `matched` stays
+# PK. The cell-hit shape is enumerated exhaustively on the page, so header_row
+# must be in the list; `record` is 0, which no verb accepts; and `matched` stays
 # 0 while a hit line is in the stream, so a script gated on `matched > 0`
 # reports "no match" with the match in front of it.
-# PK。那一頁把 cell-hit 的形狀逐一列舉過，而 `header_row` 不在清單裡；`record` 是 0，而沒有任何動詞
+# PK。那一頁把 cell-hit 的形狀逐一列舉，因此 `header_row` 必須在清單裡；`record` 是 0，而沒有任何動詞
 # 接受它；`matched` 在串流裡明明有一行命中時仍然是 0，於是一支以 `matched > 0` 當閘門的腳本，會在
 # 命中就擺在眼前時回報「沒有命中」。
 _t283=$TMP/t283
@@ -17193,10 +15440,10 @@ fi
 echo
 echo "--- T284: an early-stopping consumer gets 141, not 1 / T284：提早停止的消費者拿到 141，不是 1 ---"
 # PL. "Every failure exits 1" plus "check the exit status" leads straight to
-# treating a normal early exit as a failure. grep for 141 and SIGPIPE returned
-# zero hits in both pages.
-# PL。「每一種失敗都以 1 結束」再加上「要檢查結束狀態」，會直接把一次**正常**的早退當成失敗。
-# 在兩份文件裡 grep `141` 與 `SIGPIPE`，命中數都是 0。
+# treating a normal early exit as a failure, so the pages must mention 141 and
+# SIGPIPE.
+# PL。「每一種失敗都以 1 結束」再加上「要檢查結束狀態」，會直接把一次**正常**的早退當成失敗，所以兩份
+# 文件都必須提到 `141` 與 `SIGPIPE`。
 _t284=$TMP/t284
 mkdir -p "$_t284"
 {
@@ -17280,16 +15527,14 @@ fi
 
 echo
 echo "--- T287: the two pages agree on what an encrypted column leaks / T287：兩份文件對「加密欄位洩漏什麼」的說法一致 ---"
-# PH. Round 98 corrected the English paragraph and the Chinese measurement
-# tables in one commit, with both files open, and left the Chinese encryption
-# paragraph saying the exact thing the English one now apologises for. The two
-# pages contradicted each other on a security-relevant claim for a day.
+# PH. The English and Chinese pages must agree on what an encrypted column
+# leaks. Correcting one paragraph and not its translation leaves the pages
+# contradicting each other on a security-relevant claim.
 #
 # Checked as a property of the PAIR, because either page alone reads fine.
 #
-# PH。第 98 回合在同一個 commit 裡、兩份檔案都開著的情況下，修了英文那一段與中文的量測表格，卻把
-# 中文的加密段落留在原地——說著英文段落現在正在道歉的那件事。兩份文件在一個與安全有關的宣稱上互相
-# 矛盾了一天。
+# PH。英文與中文兩份文件對「加密欄位洩漏什麼」的說法必須一致。只修了一段而沒修它的翻譯，會讓兩份文件
+# 在一個與安全有關的宣稱上互相矛盾。
 #
 # 這裡檢查的是**那一對**的性質，因為單看任一頁都讀得通。
 if LC_ALL=C grep -q 'base64' "$ROOT/README.md" && LC_ALL=C grep -q 'base64' "$ROOT/README.zh-TW.md" \
@@ -17302,12 +15547,12 @@ fi
 echo
 echo "--- T288: -add-column appends at width+1, and -insert does not / T288：-add-column 在 width+1 會附加，而 -insert 不會 ---"
 # PU. The rule is in the program's own refusal -- "the highest position is 3,
-# which appends" -- and nowhere on the page, while the NEIGHBOURING verb refuses
-# one-past-the-end and sends you to -append. So the inference a reader makes
-# from the verb next door is exactly wrong.
-# PU。這條規則寫在程式自己的拒絕訊息裡——「the highest position is 3, which appends」——而那一頁上
-# 沒有；同時**旁邊那個動詞**拒絕「最後一個的下一個」並要人改用 `-append`。於是讀者從隔壁動詞推論
-# 出來的結果，恰好是反的。
+# which appends" -- and must be on the page too, because the NEIGHBOURING verb
+# refuses one-past-the-end and sends you to -append. The inference a reader
+# makes from the verb next door is exactly wrong.
+# PU。這條規則寫在程式自己的拒絕訊息裡——「the highest position is 3, which appends」——那一頁上也
+# 必須有，因為**旁邊那個動詞**拒絕「最後一個的下一個」並要人改用 `-append`。讀者從隔壁動詞推論出來的
+# 結果，恰好是反的。
 _t288=$TMP/t288
 mkdir -p "$_t288"
 printf 'pkg,license\nzlib,MIT\nzstd,BSD\n' > "$_t288/f.csv"
@@ -17335,8 +15580,8 @@ fi
 echo
 echo "--- T289: -o must be a regular file / T289：-o 必須是一般檔案 ---"
 # PX. The refusal says why -- -o writes a temp file beside the destination and
-# renames it -- and only the refusal said it.
-# PX。那則拒絕說出了原因——`-o` 會在目的地旁邊寫一個暫存檔再改名——而先前只有那則拒絕說得出來。
+# renames it.
+# PX。那則拒絕說出了原因——`-o` 會在目的地旁邊寫一個暫存檔再改名。
 _t289=$("$CSV2" -r -i "$_t288/f.csv" -o /dev/null 2>&1 >/dev/null); _t289_rc=$?
 if (( _t289_rc != 0 )) && [[ $_t289 == *'is not a regular file'* ]]; then
     ok "T289a -o onto a device node is refused, naming the reason / -o 指向裝置節點被拒絕並說出原因"
@@ -17346,12 +15591,11 @@ fi
 
 echo
 echo "--- T290: a .csv2 quotes like a .csv / T290：.csv2 的引號規則與 .csv 相同 ---"
-# PY. The Formats table granted "quoted commas and newlines" to .csv and
-# described .csv2 only as escapes, so a reader cleaning a colleague's file --
-# the first thing anyone does -- had to test to learn the one fact that step
-# depended on.
-# PY。格式表把「引號內的逗號與換行」記在 `.csv` 那一列，而 `.csv2` 那一列只寫跳脫，於是一個要清理
-# 同事檔案的讀者（那是任何人做的第一件事）必須實測，才能知道那一步唯一承重的事實。
+# PY. A .csv2 takes quoted commas and newlines exactly as a .csv does. A reader
+# cleaning a colleague's file depends on that one fact, so the Formats table
+# must grant it to both rows, not describe .csv2 only as escapes.
+# PY。`.csv2` 與 `.csv` 一樣接受引號內的逗號與換行。要清理同事檔案的讀者依賴的就是這一個事實，因此
+# 格式表必須把它記在兩列，而不是只把 `.csv2` 寫成跳脫。
 _t290=$TMP/t290
 mkdir -p "$_t290"
 printf 'a,b\n甲,乙\n"x,y",2\n"he said ""hi""",3\n' > "$_t290/q.csv2"
@@ -17365,14 +15609,14 @@ fi
 
 echo
 echo "--- T291: -contains is a substring match even when scoped / T291：-contains 即使限定了欄位仍是子字串比對 ---"
-# PT. This is the one most likely to reach a real report unnoticed: the obvious
-# way to count licences produces a plausible WRONG number. The limits table
-# listed case-insensitivity and column scoping and omitted exact matching, so a
-# reader who read the whole table believes --search-column is the constraint
-# they wanted.
+# PT. The case most likely to reach a real report unnoticed: the obvious way to
+# count licences produces a plausible WRONG number. --search-column scopes the
+# column but does not make the match exact, and a limits table listing
+# case-insensitivity and scoping without exact matching leads a reader to
+# believe it does.
 # PT。這是最可能悄悄進到一份真實報表的那一條：計算授權數量最直覺的做法，會產生一個**看起來合理的
-# 錯誤數字**。那張限制表列了「不分大小寫」與「限定欄位」，卻漏了「精確比對」，於是一個讀完整張表的
-# 人，會以為 `--search-column` 就是他要的那個限定。
+# 錯誤數字**。`--search-column` 限定了欄位，但不會讓比對變成精確的；一張列了「不分大小寫」與「限定
+# 欄位」卻漏了「精確比對」的限制表，會讓讀者以為它會。
 _t291=$TMP/t291
 mkdir -p "$_t291"
 printf 'pkg,license\nzlib,MIT\nfoo,MIT-0\nbar,NON-MIT\nbaz,BSD\n' > "$_t291/f.csv"
@@ -17385,10 +15629,9 @@ fi
 
 echo
 echo "--- T292: --md-style preserve is compact on CSV input / T292：--md-style preserve 在 CSV 輸入上等同 compact ---"
-# PZ. Said once and easy to miss; the tester handed a human an unaligned table
-# at rc=0 with no warning.
-# PZ。只說過一次而且很容易被略過；受測者因此在 rc=0、沒有任何警告的情況下，交給人類讀者一張沒有
-# 對齊的表。
+# PZ. Easy to miss: on CSV input preserve yields an unaligned table at rc=0
+# with no warning.
+# PZ。很容易被略過：在 CSV 輸入上，preserve 會在 rc=0、沒有任何警告的情況下產出一張沒有對齊的表。
 _t292_p=$("$CSV2" -r -t -md --md-style preserve -i "$_t291/f.csv" 2>/dev/null | LC_ALL=C head -1)
 _t292_c=$("$CSV2" -r -t -md --md-style compact -i "$_t291/f.csv" 2>/dev/null | LC_ALL=C head -1)
 _t292_y=$("$CSV2" -r -t -md --md-style pretty -i "$_t291/f.csv" 2>/dev/null | LC_ALL=C head -1)
@@ -17400,9 +15643,9 @@ fi
 
 echo
 echo "--- T293: csv2 stops at the first fault / T293：csv2 停在第一個錯誤 ---"
-# PV. Cleaning a colleague's file is one round trip per fault, and the page
-# never said so. Two faults, one message.
-# PV。清理一份同事給的檔案是「一個錯誤一趟」，而那一頁從未說出這件事。兩個錯誤，一則訊息。
+# PV. Cleaning a colleague's file is one round trip per fault. Two faults, one
+# message.
+# PV。清理一份同事給的檔案是「一個錯誤一趟」。兩個錯誤，一則訊息。
 _t293=$TMP/t293
 mkdir -p "$_t293"
 printf 'a,b\n1\n2,3,4\n' > "$_t293/multi.csv"
@@ -17416,18 +15659,18 @@ fi
 
 echo
 echo "--- T294: the SIGPIPE claim is size-dependent / T294：SIGPIPE 那個宣稱與大小有關 ---"
-# PS. Round 99 wrote "a consumer that stops early gets exit 141" without its
-# precondition. On a three-record fixture -- the size anyone verifies a claim on
-# -- the status is 0, because csv2 finishes before `head` closes. That is the
-# same species as the closed enumeration it replaced: an observation with the
-# condition that makes it true removed.
+# PS. "A consumer that stops early gets exit 141" holds only for large output.
+# On a three-record fixture -- the size anyone verifies a claim on -- the
+# status is 0, because csv2 finishes before `head` closes. Dropping that
+# condition is the same species as a closed enumeration: an observation with
+# the condition that makes it true removed.
 #
 # Both sizes are asserted, which is the only form that catches a future edit
 # dropping the qualifier again.
 #
-# PS。第 99 回合把「一個提早停止的消費者拿到的是 141」寫成了無條件的。在一個三筆的 fixture 上——
-# 那正是任何人拿來驗證宣稱的大小——狀態是 0，因為 csv2 在 `head` 關閉之前就跑完了。那與它所取代的
-# 那個封閉列舉是同一個物種：一個被拿掉了「讓它為真的條件」的觀察。
+# PS。「一個提早停止的消費者拿到的是 141」只在輸出夠大時成立。在一個三筆的 fixture 上——那正是任何人
+# 拿來驗證宣稱的大小——狀態是 0，因為 csv2 在 `head` 關閉之前就跑完了。拿掉那個條件，與封閉列舉是
+# 同一個物種：一個被拿掉了「讓它為真的條件」的觀察。
 #
 # 這裡兩種大小都斷言了，而那是唯一能抓住「未來某次編輯又把限定詞拿掉」的形式。
 _t294=$TMP/t294
@@ -17442,10 +15685,8 @@ else
 fi
 
 # And the page must carry the qualifier, in both languages. A grep is the only
-# thing standing between a future edit and the unconditional sentence coming
-# back.
-# 而那一頁必須帶著限定詞，兩種語言都要。一次 grep，是「未來某次編輯讓那句無條件的話回來」與現在
-# 之間唯一的東西。
+# thing stopping the unconditional sentence from coming back.
+# 而那一頁必須帶著限定詞，兩種語言都要。一次 grep，是唯一能擋住那句無條件的話回來的東西。
 if LC_ALL=C grep -q 'once the output is large' "$ROOT/README.md" \
    && LC_ALL=C grep -q '前提是輸出大到會塞住' "$ROOT/README.zh-TW.md"; then
     ok "T294b both pages state the precondition for 141 / 兩份文件都寫出了 141 的前提"
@@ -17455,23 +15696,20 @@ fi
 
 echo
 echo "--- T295: the two pages agree as a CLASS, not one pair at a time / T295：兩份文件的一致性是一個「類別」，不是一次一對 ---"
-# PR. Round 99 recorded PH -- the Chinese page keeping a claim the English one
-# had corrected -- and wrote T287a for it. One round later the same mistake
-# happened one paragraph away: the English page dropped "the code values are
-# stable across versions" and the Chinese page kept it. T287a could not catch
-# that, because it pins ONE PAIR rather than the property.
+# PR. T287a (PH) pins ONE PAIR of claims across the two pages, not the
+# property, so it cannot catch the same mistake one paragraph away -- such as
+# the English page dropping "the code values are stable across versions" while
+# the Chinese page keeps it.
 #
 # So this case takes the load-bearing tokens of the machine interface and
 # requires each to be present in BOTH pages. It cannot prove the prose agrees;
-# it does catch a correction applied to one file and not the other, which is
-# what has now happened twice.
+# it does catch a correction applied to one file and not the other.
 #
-# PR。第 99 回合記下了 PH——中文版留著英文版已經更正的一個宣稱——並為它寫了 T287a。**下一個回合**，
-# 同一個錯誤在隔壁一段又發生了一次：英文版拿掉了「code 的值跨版本穩定」，而中文版留著。T287a 抓不到
-# 它，因為它釘住的是**一對**，而不是那個性質。
+# PR。T287a（PH）釘住的是兩份文件之間的**一對**宣稱，而不是那個性質，因此抓不到隔壁一段的同一個錯誤
+# ——例如英文版拿掉了「code 的值跨版本穩定」，而中文版留著。
 #
 # 因此這個案例取機器介面上那些**承重的**詞，要求每一個都同時出現在**兩份**文件裡。它證明不了散文
-# 一致；但它抓得到「一次更正只套用到其中一個檔案」——而那件事現在已經發生兩次了。
+# 一致；但它抓得到「一次更正只套用到其中一個檔案」。
 _t295_tokens=(base64 ambiguous-match unknown-flag header_row json-ascii)
 _t295_bad=()
 for _tok in $_t295_tokens; do
@@ -17492,26 +15730,21 @@ fi
 
 echo
 echo "--- T296: the parallel table equals the file it names / T296：平行那張表等於它指名的那個檔案 ---"
-# T279 pinned the read/write table to its four source files, and the parallel
-# table -- the one that had HALF ITS ROWS MEASURING THE WRONG CODE PATH for
-# three weeks (OW) -- had no equivalent. It named
-# verifications/measure_parallel_rss_output.txt as its source and nothing
-# checked that they agreed. A table that drifts from its source is exactly the
-# defect this suite already guards against once; the guard was written for one
-# table and not for the class.
+# T279 pins the read/write table to its source files; this does the same for
+# the parallel table, which names verifications/measure_parallel_rss_output.txt
+# as its source (OW: half its rows once measured the wrong code path). A table
+# that drifts from its source is a class of defect, not one table's.
 #
 # Same reason T279 exists, same intended cost: when a node re-measures, this
-# fails until the table is brought up to date. That is the trade -- the
-# alternative is a page quoting numbers no file supports, which round 98 found
-# it doing.
+# fails until the table is brought up to date. The alternative is a page
+# quoting numbers no file supports (round 98).
 #
-# T279 把讀寫那張表釘在它的四份來源檔上，而平行那張表——那張**有一半的列量了錯誤的程式路徑**
-# 長達三個星期的表（OW）——沒有對應的守衛。它指名 verifications/measure_parallel_rss_output.txt
-# 是它的來源，而沒有任何東西檢查兩者是否一致。一張與來源漂開的表，正是這份測試已經防過一次的
-# 缺陷；只是那個守衛是為**一張表**寫的，不是為那個**類別**。
+# T279 把讀寫那張表釘在它的來源檔上；這裡對平行那張表做同樣的事，它指名
+# verifications/measure_parallel_rss_output.txt 為來源（OW：它曾有一半的列量了錯誤的程式路徑）。
+# 一張與來源漂開的表是一個**類別**的缺陷，不只是某一張表的。
 #
-# 與 T279 同樣的理由、同樣刻意付出的代價：某個節點重新量測之後，這個案例會失敗，直到表格被更新
-# 為止。另一個選擇是一頁引用著沒有任何檔案支持的數字——而第 98 回合發現它正在那樣做。
+# 與 T279 同樣的理由、同樣刻意付出的代價：某個節點重新量測之後，這個案例會失敗，直到表格被更新為止。
+# 另一個選擇是一頁引用著沒有任何檔案支持的數字（第 98 回合）。
 _t296_src=$ROOT/verifications/measure_parallel_rss_output.txt
 if [[ ! -r $_t296_src ]]; then
     bad "T296a $_t296_src is missing; the table it backs cannot be checked / 找不到那份來源檔，它支撐的表格無法檢查"
@@ -17523,15 +15756,12 @@ else
     # 的證據——它的 RSS 只有其他列的五分之一。
     _t296_bad=()
     # Field 3, not 2: the line is `csv elapsed_seconds: 9.636`, so $1 is the
-    # format, $2 is the key with its colon, and $3 is the number. The first
-    # version took $2 and this case FAILED on its first run with
-    # "the source says elapsed_seconds: s" -- which is the shape working: it
-    # printed what it had actually extracted instead of comparing something
-    # empty against something empty and passing.
+    # format, $2 is the key with its colon, and $3 is the number. Taking $2
+    # fails visibly with "the source says elapsed_seconds: s", because the
+    # message prints what was extracted rather than comparing empty to empty.
     # 第 3 欄，不是第 2 欄：那一行是 `csv elapsed_seconds: 9.636`，$1 是格式、$2 是帶冒號的鍵、
-    # $3 才是數值。第一版取了 $2，而這個案例在**第一次執行就失敗**，訊息是
-    # 「the source says elapsed_seconds: s」——那正是它該有的樣子：它把實際抓到的東西原樣印出來，
-    # 而不是拿一個空的去比另一個空的然後通過。
+    # $3 才是數值。取 $2 會明顯地失敗，訊息是「the source says elapsed_seconds: s」，因為訊息印出的是
+    # 實際抓到的東西，而不是拿空的去比空的。
     _t296_num() {   # $1 = key prefix, $2 = which occurrence (1-based)
         LC_ALL=C grep "^$1 " "$_t296_src" | LC_ALL=C sed -n "${2}p" | LC_ALL=C awk '{print $3}'
     }
@@ -17553,23 +15783,18 @@ else
         fi
         _t296_i=$((_t296_i + 1))
     done
-    # Peak RSS is the number OW was wrong about -- 9.28 MiB published for a
-    # parallel search that was really a scan. Checked in MiB to one or two
-    # decimals, the way the table prints it.
+    # Peak RSS is the number OW got wrong -- 9.28 MiB published for a parallel
+    # search that was really a scan. Checked in MiB to one or two decimals, the
+    # way the table prints it.
     # 峰值 RSS 正是 OW 弄錯的那個數字——為一次「其實是掃描」的平行搜尋公布了 9.28 MiB。
     # 以表格印出的形式（MiB，一到兩位小數）比對。
     # Separated with `#`, not `:`, because the key itself ends in a colon:
-    # `${_k%:*}` on 'csv peak_rss_bytes:1' strips ':1' AND leaves
-    # 'csv peak_rss_bytes' without its colon, so the grep matched nothing and
-    # this case reported "missing from the source file" about a line that was
-    # right there. Verified in a shell before re-running the suite -- ten
-    # minutes per attempt is too long a loop to debug a one-character mistake
-    # in.
-    # 用 `#` 而不是 `:` 當分隔符，因為那個鍵本身就以冒號結尾：`${_k%:*}` 對
-    # 'csv peak_rss_bytes:1' 會砍掉 ':1'，**同時**讓 'csv peak_rss_bytes' 少了它的冒號，於是
-    # grep 什麼都沒匹配到，而這個案例對著一行就在眼前的資料回報「missing from the source
-    # file」。這次先在殼層驗過才重跑整套——一次十分鐘的迴圈，太長，不適合用來 debug 一個
-    # 差一個字元的錯。
+    # `${_k%:*}` on 'csv peak_rss_bytes:1' would strip ':1' AND leave
+    # 'csv peak_rss_bytes' without its colon, so the grep would match nothing
+    # and report a present line as "missing from the source file".
+    # 用 `#` 而不是 `:` 當分隔符，因為那個鍵本身就以冒號結尾：`${_k%:*}` 對 'csv peak_rss_bytes:1'
+    # 會砍掉 ':1'，**同時**讓 'csv peak_rss_bytes' 少了它的冒號，於是 grep 什麼都匹配不到，並對一行
+    # 就在那裡的資料回報「missing from the source file」。
     for _k in 'csv peak_rss_bytes:#1' 'csv2 peak_rss_bytes:#1' 'csv peak_rss_bytes:#2' 'csv2 peak_rss_bytes:#2' 'csv-noindex peak_rss_bytes:#1'; do
         _key=${_k%#*}; _nth=${_k##*#}
         _bytes=$(LC_ALL=C grep "^$_key " "$_t296_src" | LC_ALL=C sed -n "${_nth}p" | LC_ALL=C awk '{print $3}')
@@ -17588,12 +15813,12 @@ else
 fi
 
 # The no-index row is not decoration: it is the evidence that the four rows
-# above it are on a different code path, and the whole of OW was that nobody
-# could tell. Its RSS must be far below theirs -- an order of magnitude, not a
-# few percent -- or the table has quietly gone back to measuring one path twice.
-# 無索引那一列不是裝飾：它是「上面四列在另一條程式路徑上」的證據，而 OW 的全部內容就是
-# 「沒有人分辨得出來」。它的 RSS 必須遠低於那四列——是一個數量級，不是幾個百分點——否則那張表
-# 已經悄悄變回「把同一條路徑量了兩次」。
+# above it are on a different code path, which is exactly what OW could not
+# tell. Its RSS must be far below theirs -- an order of magnitude, not a few
+# percent -- or the table has quietly gone back to measuring one path twice.
+# 無索引那一列不是裝飾：它是「上面四列在另一條程式路徑上」的證據，而那正是 OW 分辨不出來的。它的
+# RSS 必須遠低於那四列——是一個數量級，不是幾個百分點——否則那張表已經悄悄變回「把同一條路徑量了
+# 兩次」。
 if [[ -r $_t296_src ]]; then
     _t296_par=$(LC_ALL=C grep '^csv peak_rss_bytes:' "$_t296_src" | LC_ALL=C sed -n '1p' | LC_ALL=C awk '{print $3}')
     _t296_ni=$(LC_ALL=C grep '^csv-noindex peak_rss_bytes:' "$_t296_src" | LC_ALL=C awk '{print $3}')
@@ -17607,29 +15832,25 @@ fi
 echo
 echo "--- T297: no script claims a line number it cannot know / T297：沒有腳本宣稱一個它不可能知道的行號 ---"
 # `$LINENO` inside a function reports the line within THAT FUNCTION. In a
-# TRAPZERR handler -- which is where every use of it in this tree was -- that
-# means the message names a line in the handler and not the line that failed.
-# On 2026-09-10 publish.zsh printed "stopped at line 2" for a failure a hundred
-# lines away, and the same idiom was in release.zsh, benchmark.zsh and
-# measure_parallel_rss.zsh: written on 2026-08-31, 2026-09-08 and 2026-09-10,
-# so it spread by being copied rather than by being decided.
-# `$LINENO` 在函式內回報的是**那個函式**裡的行號。而這棵樹上每一處用到它的地方都在 TRAPZERR
-# 處理器裡——也就是說，那則訊息指名的是處理器裡的一行，不是失敗的那一行。2026-09-10
-# publish.zsh 為一個相隔上百行的失敗印出「停在第 2 行」，而同一個慣用法也在 release.zsh、
-# benchmark.zsh 與 measure_parallel_rss.zsh 裡：分別寫於 2026-08-31、2026-09-08、2026-09-10，
-# 所以它是靠複製散開的，不是靠決定。
+# TRAPZERR handler that means the message names a line in the handler and not
+# the line that failed -- "stopped at line 2" for a failure a hundred lines
+# away. The idiom spreads by copying (publish.zsh, release.zsh, benchmark.zsh,
+# measure_parallel_rss.zsh), not by decision.
+# `$LINENO` 在函式內回報的是**那個函式**裡的行號。在 TRAPZERR 處理器裡，那則訊息指名的就是處理器裡
+# 的一行，不是失敗的那一行——為一個相隔上百行的失敗印出「停在第 2 行」。這個慣用法是靠複製散開的
+# （publish.zsh、release.zsh、benchmark.zsh、measure_parallel_rss.zsh），不是靠決定。
 #
-# This is scanned rather than written down as a rule because that distribution
-# -- four copies across three days -- is the one the skill says a rule cannot
-# hold: the next script will copy it too.
-# 這裡用掃描而不是寫成一條規則，因為那個分布（四份、跨三天）正是 skill 說「規則擋不住」的
-# 那一格：下一支腳本一樣會把它複製過去。
+# This is scanned rather than written down as a rule because an idiom that
+# spreads by copying is the kind the skill says a rule cannot hold: the next
+# script will copy it too.
+# 這裡用掃描而不是寫成一條規則，因為靠複製散開的慣用法，正是 skill 說「規則擋不住」的那一種：下一支
+# 腳本一樣會把它複製過去。
 #
 # Comment lines are excluded. The comments above and in all four scripts
 # explain the defect and necessarily quote it; a check that flagged its own
-# explanation would be unusable. That is T218a's lesson, not a new one.
-# 註解行被排除。上面這段、以及那四支腳本裡的說明都必然要引用它；一個會標記自己說明文字的檢查
-# 是不能用的。那是 T218a 的教訓，不是新的。
+# explanation would be unusable (T218a).
+# 註解行被排除。上面這段、以及那四支腳本裡的說明都必然要引用它；一個會標記自己說明文字的檢查是不能
+# 用的（T218a）。
 cat > "$TMP/t297scan.awk" <<'T297AWK'
 /^[[:space:]]*#/ { next }
 /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*\(\)[[:space:]]*\{/ { inf = 1; depth = 1; next }
@@ -17659,9 +15880,9 @@ fi
 # 這個檢查必須會咬。在「故意弄壞會產生非空結果」被證明之前，一個空結果什麼都證明不了——KF。
 # The probe's text is ASSEMBLED, the same reason T218b assembles its own: this
 # scan reads the suite too, and a literal here would be a string rather than a
-# use, but only after someone had spent time finding that out.
-# 探針的文字是**組出來的**，與 T218b 組它自己的理由相同：這道掃描連測試檔也讀，而寫在這裡的
-# 字面值是一個字串而不是一次使用——但那要有人花時間查過才知道。
+# use, which is not obvious to whoever reads the hit.
+# 探針的文字是**組出來的**，與 T218b 組它自己的理由相同：這道掃描連測試檔也讀，而寫在這裡的字面值
+# 是一個字串而不是一次使用，讀到命中的人不會一眼看出來。
 _t297_var='LINENO'
 { print -r -- 'probe() {'
   print -r -- "    print -r -- \"here: \$$_t297_var\""
@@ -17678,14 +15899,9 @@ echo
 echo "--- T298: mistakes.md's counts match the counter / T298：mistakes.md 的次數與計數器一致 ---"
 # mistakes.md opens each entry with `**N 次 / M 天**`, and `mistakes_counter.csv2`
 # is the authority for those numbers. A copy of a number is a second place to
-# forget, and this one has been forgotten repeatedly: on 2026-09-10 entry 3 said
-# 17/7 and entry 4 said 5/2 while the counter said 18/8 and 8/3. Entry 3's
-# English paragraph had ALREADY been corrected once for the same reason and
-# carried a sentence saying so -- and was stale again by the time it was read.
-# mistakes.md 每一條的開頭都有 `**N 次 / M 天**`，而權威來源是 `mistakes_counter.csv2`。
-# 一個數字的副本就是「第二個會忘記更新的地方」，而這個副本被忘記過不只一次：2026-09-10
-# 第 3 條寫 17/7、第 4 條寫 5/2，而計數器是 18/8 與 8/3。第 3 條的英文段落**已經因為同一個
-# 理由被更正過一次**，還留著一句話說明它被更正過——而被讀到時它又已經過期了。
+# forget to update, and these copies do go stale.
+# mistakes.md 每一條的開頭都有 `**N 次 / M 天**`，而權威來源是 `mistakes_counter.csv2`。一個數字的
+# 副本就是「第二個會忘記更新的地方」，而這些副本確實會過期。
 #
 # The check reads the counter through csv2, because three of its columns carry
 # commas inside quotes and this suite is the one place allowed to call csv2 for
@@ -17696,11 +15912,11 @@ _t298_md=$ROOT/mistakes.md
 _t298_counter=$ROOT/mistakes_counter.csv2
 # Not every tree this suite runs in is a full checkout. run_csv2_test.zsh sends
 # a PAYLOAD into the guest -- src, test, verifications and the READMEs -- and
-# neither mistakes.md nor plan/ goes with it. On 2026-09-10 this case FAILED
-# there on its first guest run, reading "absent" as "inconsistent".
+# neither mistakes.md nor plan/ goes with it, so "absent" must not be read as
+# "inconsistent".
 # 這份測試執行的樹不一定是完整的 checkout。run_csv2_test.zsh 送進 guest 的是一份 **payload**
-# ——src、test、verifications 與兩份 README——`mistakes.md` 與 `plan/` 都不在裡面。2026-09-10
-# 這個案例在 guest 的第一次執行就 FAIL 了，它把「不在」讀成了「不一致」。
+# ——src、test、verifications 與兩份 README——`mistakes.md` 與 `plan/` 都不在裡面，因此不可以把
+# 「不在」讀成「不一致」。
 #
 # "Skip when the file is missing" would be the wrong fix: deleting mistakes.md
 # on a host would then be a silent skip. `plan/plan.md` is in every checkout and
@@ -17710,11 +15926,9 @@ _t298_counter=$ROOT/mistakes_counter.csv2
 # `plan/plan.md` 在每一個 checkout 裡、不在任何 payload 裡，因此用它來區分兩種情況——有它卻
 # 沒有 mistakes.md 是壞掉的樹，要失敗；兩者都沒有是 payload，略過並說出理由。
 if [[ ! -r $_t298_md && ! -r $_t298_counter && ! -r $ROOT/plan/plan.md ]]; then
-    # Recorded for T69b, like every other conditional skip here. Without it the
-    # guest reported "expected 5 SKIP(s), the suite produced 6" -- which is the
-    # count doing its job on the first run after this case learned to skip.
-    # 記錄給 T69b，與這裡每一個有條件的略過相同。少了它，guest 回報的是「預期 5 個 SKIP，
-    # 實際 6 個」——那是這個計數在「本案例學會略過之後的第一次執行」上盡了它的職責。
+    # Recorded for T69b, like every other conditional skip here. Without it
+    # T69b reports one more SKIP than expected.
+    # 記錄給 T69b，與這裡每一個有條件的略過相同。少了它，T69b 會回報比預期多一個 SKIP。
     T298_SKIPPED=1
     skipt "T298 mistakes.md's counts match the counter / mistakes.md 的次數與計數器一致 (this tree is a payload, not a checkout: no mistakes.md and no plan/ / 這棵樹是 payload 而不是 checkout：沒有 mistakes.md，也沒有 plan/)"
 elif [[ ! -r $_t298_md || ! -r $_t298_counter ]]; then
@@ -17791,25 +16005,22 @@ fi
 
 echo
 echo "--- T299: release.zsh's version check accepts only the exact build id / T299：release.zsh 的版本檢查只接受完全相符的 build id ---"
-# This check has been wrong three times, each time by enumerating the shapes
-# `git describe` can answer with instead of anchoring the comparison:
-#   1. equality against `(SHORTHASH` -- broke the moment v0.1.0 was tagged and
-#      describe started answering `v0.1.0-4-g3515258`
-#   2. "the hash appears anywhere" -- still assumed a hash was in there, and at
-#      a TAGGED commit describe answers `v0.1.0` with no hash, so it refused at
-#      the one commit a release script exists to serve
-#   3. "the id appears anywhere" -- WORSE than the bug it replaced: `v0.1.0` is
-#      a substring of `v0.1.0-13-g1750de3`, so a binary thirteen commits later
-#      would have shipped as the release
-# QC. The third was caught by testing the REFUSAL direction; the passing
-# direction had looked right in all three versions.
-# 這道檢查錯了三次，每一次都是去列舉 `git describe` 可能回答的形式，而不是錨定那個比對：
-#   1. 拿 `(SHORTHASH` 比相等——v0.1.0 一被打上、describe 開始回答 `v0.1.0-4-g3515258` 就壞了
-#   2. 「雜湊出現在任何位置」——仍然假設那裡面有雜湊，而在 tag 所指的 commit 上 describe 回答的
-#      是 `v0.1.0`、沒有雜湊，於是它在「一支發行腳本存在所要服務的唯一那個 commit」上拒絕
-#   3. 「那個 id 出現在任何位置」——比它取代的缺陷更糟：`v0.1.0` 是 `v0.1.0-13-g1750de3` 的
-#      子字串，於是一個晚了十三個 commit 的執行檔會被當成那次 release 出貨
-# QC。第三次是靠測「拒絕」那個方向抓到的；三個版本的「通過」方向看起來都是對的。
+# The comparison is ANCHORED, not an enumeration of the shapes `git describe`
+# can answer with. Each enumerated form fails somewhere:
+#   1. equality against `(SHORTHASH` -- breaks once a tag exists and describe
+#      answers `v0.1.0-4-g3515258`
+#   2. "the hash appears anywhere" -- at a TAGGED commit describe answers
+#      `v0.1.0` with no hash, so it refuses at the one commit a release serves
+#   3. "the id appears anywhere" -- `v0.1.0` is a substring of
+#      `v0.1.0-13-g1750de3`, so a binary thirteen commits later would ship
+# QC. Test the REFUSAL direction; the passing direction looks right in all three.
+# 這個比對是**錨定的**，不是去列舉 `git describe` 可能回答的形式。每一種列舉都會在某處失敗：
+#   1. 拿 `(SHORTHASH` 比相等——一旦有了 tag、describe 回答 `v0.1.0-4-g3515258` 就壞了
+#   2. 「雜湊出現在任何位置」——在 tag 所指的 commit 上 describe 回答 `v0.1.0`、沒有雜湊，於是它在
+#      一支發行腳本要服務的唯一那個 commit 上拒絕
+#   3. 「那個 id 出現在任何位置」——`v0.1.0` 是 `v0.1.0-13-g1750de3` 的子字串，於是一個晚了十三個
+#      commit 的執行檔會被出貨
+# QC。要測「拒絕」那個方向；三者的「通過」方向看起來都是對的。
 #
 # The expression is EXTRACTED from release.zsh rather than copied here. A copy
 # would be the fourth place to forget, and this family of mistakes is entry 3
@@ -17855,30 +16066,17 @@ fi
 
 echo
 echo "--- T300: every .zsh in HEAD is executable / T300：HEAD 裡每一支 .zsh 都可執行 ---"
-# compile_csv2_linux.zsh was 100644 while the other thirteen were 100755, so
-# `./compile_csv2_linux.zsh` on a fresh clone exits 126 -- found, not
-# executable, which reads like a typo rather than a repository property. It
-# survived because the only automated caller invokes it as `zsh <path>`, where
-# the mode bit takes no part: that path succeeded many times and proved
-# something ADJACENT to the question. QE.
-# compile_csv2_linux.zsh 是 100644，而另外十三支是 100755，於是在一份新 clone 上
-# `./compile_csv2_linux.zsh` 以 126 結束——找得到、不能執行，而那讀起來像打錯字，不像是這個
-# repo 的性質。它活下來，是因為唯一會自動呼叫它的地方用的是 `zsh <path>`，那裡模式位元根本不
-# 參與：那條路徑成功過很多次，而它證明的是與被問的問題**相鄰**的一件事。QE。
+# A .zsh committed as 100644 makes `./script.zsh` on a fresh clone exit 126,
+# which reads like a typo, not a repository property. Callers that run
+# `zsh <path>` never notice, because the mode bit takes no part there. QE.
+# 以 100644 提交的 .zsh，在新 clone 上執行 `./script.zsh` 會以 126 結束，看起來像打錯字，
+# 不像 repo 的性質。用 `zsh <path>` 呼叫的地方察覺不到，因為那裡模式位元不參與。QE。
 #
-# HEAD, not the index and not the working tree. A clone gets what is in the
-# COMMIT. The first version of this case read the index, and that is not a
-# smaller mistake than reading the working tree -- it is the one that can be
-# rewritten by the very next command. `git update-index --chmod=+x` set the
-# index to 100755, T300a passed, and the `git add -A` in the same commit line
-# re-staged the file from disk, where it was still 644, putting 100644 back.
-# The commit went out claiming a fix the tree did not contain, and the guard
-# had already reported green on a state that no longer existed. Entry 1.
-# 看 **HEAD**，不看索引、也不看工作區。一份 clone 拿到的是 **commit** 裡的東西。這個案例的第一版
-# 讀的是索引，而那不是比「讀工作區」小的錯——它是那個「會被下一條命令改寫」的對象。
-# `git update-index --chmod=+x` 把索引設成 100755、T300a 通過，然後同一行裡的 `git add -A` 從磁碟
-# 重新暫存了那個檔案——磁碟上它還是 644——於是 100644 被放了回去。那個 commit 帶著一個「樹裡並不
-# 存在的修正」出去了，而守衛早已對著一個不再存在的狀態回報了綠燈。第 1 條。
+# HEAD, not the index and not the working tree: a clone gets what is in the
+# commit, and the index can be re-staged from disk by the next `git add`.
+# Entry 1.
+# 看 HEAD，不看索引也不看工作區：clone 拿到的是 commit 裡的東西，而索引會被下一次
+# `git add` 從磁碟重新暫存。第 1 條。
 if ! command -v git >/dev/null 2>&1 || [[ ! -d $ROOT/.git && ! -f $ROOT/.git ]]; then
     T300_SKIPPED=1
     skipt "T300 every .zsh in HEAD is executable / HEAD 裡每一支 .zsh 都可執行 (not a git checkout here / 這裡不是一個 git checkout)"
@@ -17914,24 +16112,17 @@ fi
 
 echo
 echo "--- T301: nothing splits CSV on commas without saying why / T301：沒有東西在切 CSV 的逗號時不說理由 ---"
-# The founding rule of this project, and until 2026-09-10 nothing enforced it.
-# Defect M removed twelve `cut -d, -fN` from this suite in August and left
-# cell() behind -- but no check, so seven came back. One of them, T2, counted
-# fields with `awk -F','` on TARGET_PACKAGES.csv, the very fixture this tree
-# uses to show that a comma inside quotes is DATA, and PASSED: both sides
-# counted the same wrong way, so two wrong numbers agreed. QF.
-# 這個專案的立身之本，而直到 2026-09-10 都沒有任何東西在執行它。缺陷 M 在八月從這份測試裡移除了
-# 十二處 `cut -d, -fN` 並留下 cell()——但沒有留下檢查，於是回來了七處。其中 T2 用 `awk -F','` 去數
-# TARGET_PACKAGES.csv 的欄數（正是這棵樹用來示範「引號內的逗號是資料」的那個 fixture），而且
-# 通過了：兩邊用同一種錯的方式數，兩個錯的數字彼此相等。QF。
+# The project's founding rule, enforced. Without a check, removed comma splits
+# come back; and a split used on both sides of a comparison passes, because
+# two wrong counts agree. M, QF.
+# 執行這個專案的立身之本。沒有檢查，被移除的逗號切割會回來；而比較的兩邊都用切割時會通過，
+# 因為兩個錯的數字彼此相等。M、QF。
 #
-# Two of the sites MUST stay: T64a and T65c exist to prove `cut -d,` returns
-# the wrong value. So this does not ban the shape, it requires a REASON beside
-# it -- a `# CSV-SPLIT-OK:` marker. Deliberate and casual then look different
-# in the file, which they did not before.
-# 其中兩處**必須留著**：T64a 與 T65c 存在的理由就是證明 `cut -d,` 會給出錯的值。所以這裡不是禁止
-# 那個形狀，而是要求它旁邊有一個**理由**——一個 `# CSV-SPLIT-OK:` 標記。於是「刻意」與「順手」在
-# 檔案裡看得出差別，而在此之前看不出來。
+# Some sites MUST stay: T64a and T65c exist to prove `cut -d,` returns the
+# wrong value. So the shape is not banned; it needs a reason beside it, a
+# `# CSV-SPLIT-OK:` marker, so deliberate and casual uses look different.
+# 有些地方必須留著：T64a 與 T65c 就是要證明 `cut -d,` 給出錯的值。所以這裡不禁止那個形狀，
+# 而是要求旁邊有理由——一個 `# CSV-SPLIT-OK:` 標記——讓刻意與順手看得出差別。
 #
 # The marker name is ASSEMBLED, like T218b's probe: this case reads the suite
 # itself, and a literal here would be an unexplained marker on a line that
@@ -17942,35 +16133,26 @@ _t301_mark="CSV-SPLIT"$'-'"OK"
 # INVOCATION, not mention -- the same discriminator T249d needed. `ok "T64a
 # cut -d, -f6 and csv2 disagree ..."` is a MESSAGE about the rule and must not
 # be flagged; a real split is preceded by a pipe, a `$(`, a `;` or `&&`, or
-# starts its line. The first version of this pattern had no such anchor and
-# reported the assertion message of the very case that demonstrates the rule.
+# starts its line. Without that anchor the pattern flags the assertion message
+# of the case that demonstrates the rule.
 # **呼叫**而不是**提及**——與 T249d 需要的是同一個判別式。`ok "T64a cut -d, -f6 and csv2
 # disagree …"` 是一段**關於這條規則的訊息**，絕不能被標記；而真正的切割前面會有一個管線、
-# 一個 `$(`、一個 `;` 或 `&&`，或者它就在行首。這個樣式的第一版沒有這個錨點，於是它回報了
-# 「示範這條規則的那個案例」自己的斷言訊息。
+# 一個 `$(`、一個 `;` 或 `&&`，或者它就在行首。少了這個錨點，樣式會標記示範這條規則的
+# 那個案例自己的斷言訊息。
 _t301_cmd='(^|[|;&(]|\$\()[[:space:]]*'
-# The FOURTH shape, added after another session's guard found two of them
-# here. The rule names four ways to split a CSV by hand and this pattern was
-# written from those four lines and stopped at three -- and the missing one,
-# `${line%,*}`, is the one that rewrote status_notes in TARGET_PACKAGES.csv on
-# 2026-08-15, which is the direct reason this tree exists. My guard, on my own
-# tree, aimed at the shape this project cares about most, reported clean. QH.
-# **第四種形狀**，在另一個 session 的守衛在這裡找到兩處之後補上。那條規則列了四種「自己切 CSV」
-# 的寫法，而這個樣式是照著那四行寫的、停在第三行——而漏掉的那一個 `${line%,*}`，正是 2026-08-15
-# 改寫 TARGET_PACKAGES.csv 中 status_notes 的那一個，也就是這棵樹存在的直接原因。我自己的守衛，
-# 在自己的樹上、對著這個專案最在意的那個形狀，回報了乾淨。QH。
+# The fourth shape the rule names: `${line%,*}` and its relatives. It is the
+# shape behind the status_notes rewrite in TARGET_PACKAGES.csv, so missing it
+# would leave the case this project cares about most unguarded. QH.
+# 那條規則列的第四種形狀：`${line%,*}` 及其同類。它正是改寫 TARGET_PACKAGES.csv 中
+# status_notes 的那一種，漏掉它，這個專案最在意的情況就沒有守衛。QH。
 _t301_pe='\$\{[^}]*(%%?,\*|##?\*,)'
-# The FIFTH shape: zsh's own `${(s:,:)line}`, which splits on a comma directly.
-# It is not in the four-line rule, because that rule is written for portable
-# shell -- but this project is zsh only, so it is the form most likely to be
-# reached for here, and T301 was not looking for it. There are currently ZERO
-# instances, which is precisely the state in which the first one goes
-# unnoticed. Reported by the linuxcs-87 session after its own pattern turned
-# out to miss it too.
-# **第五種形狀**：zsh 自己的 `${(s:,:)line}`，它直接以逗號切割。那條四行的規則沒有列它，因為那條
-# 規則是為可攜的 shell 寫的——但這個專案只用 zsh，所以它反而是這裡最可能被伸手去拿的那一種，而
-# T301 沒有在找它。目前的實例數是**零**，而那正是「第一個違規不會被發現」的那個狀態。由
-# linuxcs-87 那個 session 回報，他們自己的樣式也漏了它。
+# The fifth shape: zsh's own `${(s:,:)line}`, which splits on a comma directly.
+# The four-line rule omits it because it is written for portable shell, but
+# this project is zsh only, so it is the form most likely to be reached for.
+# It has zero instances now, which is exactly when the first would go unseen.
+# 第五種形狀：zsh 自己的 `${(s:,:)line}`，直接以逗號切割。四行規則沒有列它，因為那條規則是
+# 為可攜的 shell 寫的；但這個專案只用 zsh，所以它反而最可能被拿來用。目前實例數為零，而那
+# 正是第一個違規不會被發現的狀態。
 #
 # `s` followed by any non-alphanumeric delimiter, a comma, then that class
 # again -- covers `s:,:`, `s/,/`, `s.,.` and `s|,|` without enumerating them.
@@ -17999,21 +16181,14 @@ else
     fi
 
     # NAMED one by one, not counted. A count cannot say WHICH shape is
-    # missing -- it says "expected 5, got 4" -- and this pattern has now been
-    # short twice: it stopped at three of the rule's four shapes (QH), and then
-    # missed zsh's own `${(s:,:)}`, which is not in that rule at all because
-    # the rule is written for portable shell while this project is zsh only.
-    # The linuxcs-87 session made the same change to its control group for the
-    # same reason, after its pattern turned out to be short by three.
+    # missing -- it says "expected 5, got 4" -- and this pattern has been short
+    # of a shape before (QH).
     # **逐一具名**，不是數數量。一個數字說不出**少了哪一種**——它只會說「應為 5、實得 4」——而這個
-    # 樣式已經短過兩次了：它停在那條規則四種形狀裡的第三種（QH），然後又漏了 zsh 自己的
-    # `${(s:,:)}`——那一種根本不在那條規則裡，因為那條規則是為可攜的 shell 寫的，而這個專案只用
-    # zsh。linuxcs-87 那個 session 基於同一個理由，把它的正控組做了同樣的改動——它的樣式短了三種。
+    # 樣式曾經少過形狀（QH）。
     #
-    # Every line here is ASSEMBLED from $_ban-style pieces? No -- they are
-    # written out, because T301 reads this file and each one carries a marker
-    # saying it builds a probe. A marker is more readable than a hidden
-    # literal, and it is the mechanism this case is testing.
+    # The probe lines are written out, not assembled: T301 reads this file and
+    # each one carries a marker saying it builds a probe. A marker is more
+    # readable than a hidden literal, and it is the mechanism this case tests.
     # 這裡每一行都是寫出來的，不是組出來的，因為 T301 會讀這個檔案，而每一行都帶著一個標記說明
     # 它是在建構探針。一個標記比一個藏起來的字面值好讀，而且那正是這個案例在測的機制。
     _t301_bad=()
@@ -18050,12 +16225,12 @@ fi
 
 echo
 echo "--- T302: a printed address can be pasted back, and its decoration is CHECKED / T302：印出來的位址可以貼回去，而它的裝飾會被驗證 ---"
-# `--physical` prints `1:1@L2` and `--a1` prints `1:1 [A2]`, and until
-# 2026-09-10 pasting either back was refused. Accepting them is only half the
-# point: the decoration is a CLAIM about the file as it was when the address
-# was printed, so if the file has changed since, acting on that address is
-# exactly the edit the caller does not want.
-# `--physical` 印 `1:1@L2`、`--a1` 印 `1:1 [A2]`，而直到 2026-09-10 為止把它們貼回去都會被拒絕。
+# `--physical` prints `1:1@L2` and `--a1` prints `1:1 [A2]`, and both can be
+# pasted back. Accepting them is only half the point: the decoration is a
+# CLAIM about the file as it was when the address was printed, so if the file
+# has changed since, acting on that address is exactly the edit the caller
+# does not want.
+# `--physical` 印 `1:1@L2`、`--a1` 印 `1:1 [A2]`，兩者都可以貼回去。
 # 接受它們只做到一半：那段裝飾是一個「關於位址被印出時那個檔案」的**宣稱**，所以若檔案之後
 # 變了，照那個位址動手正是呼叫者最不想要的那一次編輯。
 #
@@ -18154,38 +16329,32 @@ assert_eq "$("$CSV2" -get '2:1' -i "$TMP/t302.csv" 2>/dev/null)" "r2" \
 echo
 echo "--- T303: the build id always carries the commit / T303：build id 永遠帶著那個 commit ---"
 # `git describe --always` answers according to whether a tag existed WHEN THE
-# BUILD RAN, not according to the source. The three published v0.1.0 archives
-# say `(8d5600e)` because they were built before the tag was cut; the same
-# commit built afterwards says `(v0.1.0)`. Same source, two strings, and no
-# rebuild changes it -- so the id could not answer the one question it exists
-# to answer, which commit this is. QD.
-# `git describe --always` 的答案取決於「**建置執行的當下**」有沒有 tag，不取決於原始碼。已發布的
-# 三份 v0.1.0 封存說 `(8d5600e)`，因為它們是在 tag 被打之前建的；同一個 commit 之後建出來說
-# `(v0.1.0)`。同一份原始碼、兩種字串，重建也改不了——於是那個 id 回答不了它存在所要回答的唯一
-# 問題：這是哪一個 commit。QD。
+# BUILD RAN, not according to the source: the same commit built before and
+# after its tag says `(8d5600e)` or `(v0.1.0)`. A bare tag cannot answer the
+# one question the id exists for, which commit this is. QD.
+# `git describe --always` 的答案取決於「**建置執行的當下**」有沒有 tag，不取決於原始碼：同一個
+# commit 在 tag 前後建置，會說 `(8d5600e)` 或 `(v0.1.0)`。一個純 tag 回答不了這個 id 存在所要
+# 回答的唯一問題：這是哪一個 commit。QD。
 if ! command -v git >/dev/null 2>&1 || [[ ! -d $ROOT/.git && ! -f $ROOT/.git ]]; then
     T303_SKIPPED=1
     skipt "T303 the build id always carries the commit / build id 永遠帶著那個 commit (not a git checkout here / 這裡不是一個 git checkout)"
 else
-    # The SHAPE, not the freshness. The first version of this case asked
-    # whether the id contained HEAD's short hash, which fails whenever the
-    # binary is older than the tree -- after a docs-only commit, say. That is a
-    # fact about the environment and not about the property under test, and
-    # whether a binary matches HEAD is release.zsh's job, where it belongs.
-    # Entry 1, written into the case meant to pin a different lesson.
-    # 測的是**形狀**，不是新鮮度。這個案例的第一版問的是「那個 id 有沒有含 HEAD 的短雜湊」，而
-    # 那在「執行檔比工作樹舊」時就會失敗——例如剛提交了一個只改文件的 commit。那是一件關於
-    # 環境的事實，不是關於被測性質的；而「執行檔與 HEAD 相不相符」是 release.zsh 的職責，它本來
-    # 就在那裡。第 1 條，寫在一個本來要釘住另一條教訓的案例裡。
+    # The SHAPE, not the freshness. Asking for HEAD's short hash would fail
+    # whenever the binary is older than the tree, e.g. after a docs-only
+    # commit; that is about the environment, and whether a binary matches HEAD
+    # is release.zsh's job. Entry 1.
+    # 測的是**形狀**，不是新鮮度。要求含有 HEAD 的短雜湊，會在執行檔比工作樹舊時失敗，例如剛
+    # 提交一個只改文件的 commit；那是環境的事，而執行檔與 HEAD 是否相符是 release.zsh 的職責。
+    # 第 1 條。
     setopt local_options extended_glob
     _t303_ver=$("$CSV2" --version 2>/dev/null)
     _t303_id=${${_t303_ver##*\(}%%\)*}
     if [[ $_t303_id == unknown && ( -d $ROOT/.git || -f $ROOT/.git ) ]]; then
         # `unknown` is true only where there is no .git. Here there is one, so the
-        # build failed to ask git -- QT's batch copy did exactly that on Windows
-        # (an unescaped = inside for /f) and this case used to pass it.
-        # `unknown` 只在沒有 .git 的地方是真話。這裡有，所以是建置沒問到 git——QT 的 batch 副本在
-        # Windows 上正是如此（for /f 裡未跳脫的 =），而這個案例原本會讓它通過。
+        # build failed to ask git, as an unescaped = inside for /f does in the
+        # batch copy. QT.
+        # `unknown` 只在沒有 .git 的地方是真話。這裡有，所以是建置沒問到 git，例如 batch 副本裡
+        # for /f 內未跳脫的 =。QT。
         bad "T303a the build id is \"unknown\" although $ROOT has a .git; the build failed to ask git / 這裡有 .git，build id 卻是 unknown：建置沒有問到 git"
     elif [[ $_t303_id == unknown ]]; then
         # A build with no .git says so rather than guessing. That is the guest,
@@ -18201,27 +16370,23 @@ else
     # The VALUE, not only the shape -- but only when the binary is a build of
     # THIS tree, so a stale binary is not reported as a wrong one.
     #
-    # T303a alone was not enough, and the Windows node showed why on the day it
-    # was written: a stray `)` in the batch copy closed an `if` block early,
-    # `_described` came out empty, and the build fell back to the bare short
-    # hash. That still CONTAINS a commit, so the shape check passed while the
-    # value was wrong -- `(97e3908)` where the rule says `v0.1.0-34-g97e3908`.
+    # T303a alone is not enough: a build that falls back to the bare short hash
+    # (`(97e3908)` where the rule says `v0.1.0-34-g97e3908`) still CONTAINS a
+    # commit, so the shape check passes while the value is wrong.
     #
     # 測的是**值**，不只是形狀——但只在「這個執行檔是這棵樹的建置」時才測，這樣一個過期的
     # 執行檔才不會被回報成一個錯的。
     #
-    # 只有 T303a 是不夠的，而 Windows 節點在它被寫下的當天就示範了原因：batch 副本裡一個多餘的
-    # `)` 把一個 `if` 區塊提前關掉，`_described` 變成空的，建置退回純短雜湊。那**仍然含有一個
-    # commit**，於是形狀檢查通過而值是錯的——建置說 `(97e3908)`，而規則說 `v0.1.0-34-g97e3908`。
+    # 只有 T303a 不夠：退回純短雜湊的建置（規則說 `v0.1.0-34-g97e3908` 而它說 `(97e3908)`）
+    # **仍然含有一個 commit**，於是形狀檢查通過而值是錯的。
     if [[ -r $ROOT/build_id.zsh ]]; then
         _t303_want=$(zsh -c "source '$ROOT/build_id.zsh'; csv2_build_id '$ROOT'" 2>/dev/null)
         _t303_hd=$(git -C "$ROOT" rev-parse --short=8 HEAD 2>/dev/null)
         # Only when the tree is CLEAN. A dirty tree makes the rule say
         # `-dirty` while a binary built a moment earlier does not, and that
-        # difference is about the tree's state, not about the rule -- the same
-        # moving target T303a's first version compared against.
+        # difference is about the tree's state, not about the rule.
         # 只在工作區**乾淨**時比。工作區髒的時候，規則會說 `-dirty`，而一分鐘前建好的執行檔不會，
-        # 而那個差異講的是工作區的狀態、不是那條規則——與 T303a 第一版比對的是同一個會動的目標。
+        # 而那個差異講的是工作區的狀態、不是那條規則。
         _t303_clean=$(git -C "$ROOT" status --porcelain 2>/dev/null | LC_ALL=C grep -c . || true)
         if [[ -n $_t303_want && -n $_t303_hd && $_t303_id == *"$_t303_hd"* && $_t303_clean == 0 ]]; then
             # A build of this commit: the id must be what the rule produces.
@@ -18265,12 +16430,12 @@ else
     # batch 那一份 source 不了它。能要求它的是同一個性質：它必須除了 describe 之外，也去問短雜湊。
     if [[ -r $ROOT/compile_csv2_win.bat ]]; then
         # And at 8 characters, like build_id.zsh (QT): the copy must not drift back to git's default.
-        # The = is written ^= there: inside `for /f` an unescaped = becomes a space, git got
-        # `--abbrev 8`, failed with its error sent to nul, and the build said `unknown`. The first
-        # version of this check asked for `--short=8` -- the broken spelling -- and passed it.
+        # The = is written ^= there: inside `for /f` an unescaped = becomes a space, git gets
+        # `--abbrev 8`, fails with its error sent to nul, and the build says `unknown`. So the
+        # unescaped `--short=8` spelling is the broken one and is rejected.
         # 而且是 8 碼，與 build_id.zsh 相同（QT）：副本不得漂回 git 的預設值。那裡的 = 寫成 ^=：在
         # `for /f` 裡未跳脫的 = 會變成空白，git 收到 `--abbrev 8` 而失敗、錯誤被送進 nul，建置說
-        # `unknown`。這個檢查的第一版要求的是 `--short=8`——正是那個壞掉的寫法——而且讓它通過了。
+        # `unknown`。所以未跳脫的 `--short=8` 才是壞掉的寫法，會被拒絕。
         if LC_ALL=C grep -qF 'rev-parse --short^=8 HEAD' "$ROOT/compile_csv2_win.bat" &&
            LC_ALL=C grep -qF 'describe --always --dirty --abbrev^=8' "$ROOT/compile_csv2_win.bat" &&
            ! LC_ALL=C grep -qE -- '--(short|abbrev)=8' "$ROOT/compile_csv2_win.bat"; then
@@ -18283,20 +16448,14 @@ fi
 
 echo
 echo "--- T304: release.zsh takes the version from the binary / T304：release.zsh 的版本來自執行檔 ---"
-# It was `VERSION=${VERSION:-0.1.0}`, a constant. On the day v0.1.1 was cut it
-# packaged a binary reporting `csv2 0.1.1` into an archive named
-# `csv2-0.1.0-macos-arm64.tar.zst`, reported "verified: extracted, ran, and read
-# a CSV" -- true, every check held and none of them was the name -- and
-# overwrote the local copy of the PUBLISHED v0.1.0 archive on the way. QI.
-# 它原本是 `VERSION=${VERSION:-0.1.0}`，一個常數。在 v0.1.1 被打出來的那天，它把一個回報
-# `csv2 0.1.1` 的執行檔打包成一份叫 `csv2-0.1.0-macos-arm64.tar.zst` 的封存，回報「已驗證：解開、
-# 執行過，而且讀得了一個 CSV」——那是真的，它檢查的每一件事都成立，而其中沒有一件是那個名字——
-# 並且順手覆蓋掉了**已發布**的 v0.1.0 封存的本機複本。QI。
-#
-# A constant that is only wrong when the version changes is wrong at the one
-# moment it matters, which is why this is checked rather than remembered.
-# 一個「只有在版本改變時才會錯」的常數，會在它唯一要緊的那一刻出錯——那正是這件事要用檢查而不是
-# 用記得來處理的原因。
+# A version constant in release.zsh packages a binary into an archive named for
+# a different version, and every content check still passes, because none of
+# them looks at the name. A constant that is only wrong when the version
+# changes is wrong at the one moment it matters, so this is checked rather
+# than remembered. QI.
+# release.zsh 裡的版本常數，會把執行檔打包進一份以另一個版本命名的封存，而每一項內容檢查都
+# 仍然通過，因為沒有一項看名字。一個只在版本改變時才會錯的常數，會在唯一要緊的那一刻出錯，
+# 所以這件事用檢查而不是靠記得。QI。
 if [[ ! -r $ROOT/release.zsh ]]; then
     T304_SKIPPED=1
     skipt "T304 release.zsh takes the version from the binary / release.zsh 的版本來自執行檔 (no release.zsh in this tree / 這棵樹裡沒有 release.zsh)"
@@ -18313,9 +16472,8 @@ else
     fi
 
     # The extraction EXTRACTED from the script, not copied. A copy would be a
-    # second place to forget, and this file already has that lesson twice.
-    # 那個抽取式是**從腳本裡取出來的**，不是抄的。抄一份就是第二個會忘記更新的地方，而這個檔案
-    # 已經有兩次這個教訓了。
+    # second place to forget.
+    # 那個抽取式是**從腳本裡取出來的**，不是抄的。抄一份就是第二個會忘記更新的地方。
     _t304_expr=$(LC_ALL=C grep -m1 'VERSION=\${\${(z)' "$ROOT/release.zsh" | LC_ALL=C sed 's/^[[:space:]]*//')
     if [[ $_t304_expr != *'(z)'* ]]; then
         bad "T304b could not extract the version expression from release.zsh, got [$_t304_expr] / 從 release.zsh 取不出那個抽取式"
@@ -18346,10 +16504,9 @@ else
         bad "T304c release.zsh has no refusal for an unreadable version / release.zsh 沒有「讀不出版本號就拒絕」這道守衛"
     fi
 
-    # Making an archive must not overwrite one. `rm -rf` on the archive path is
-    # what destroyed a published artefact's local copy.
-    # 「產生一份封存」不得覆寫另一份。對封存路徑下 `rm -rf`，正是一份已發布產物的本機複本被毀掉
-    # 的方式。
+    # Making an archive must not overwrite one: `rm -rf` on the archive path
+    # can destroy the local copy of a published artefact. QI.
+    # 「產生一份封存」不得覆寫另一份：對封存路徑下 `rm -rf`，可能毀掉已發布產物的本機複本。QI。
     if LC_ALL=C grep -q 'already exists; remove it first' "$ROOT/release.zsh"; then
         ok "T304d and it refuses to overwrite an archive that already exists / 而且它拒絕覆寫一份已經存在的封存"
     else
@@ -18359,16 +16516,13 @@ fi
 
 echo
 echo "--- T305: -append honours --headers 0 on a .md, like every other verb / T305：.md 上的 -append 與其他動詞一樣遵守 --headers 0 ---"
-# `-append` refused a .md under `--headers 0` while `-insert` accepted the same
-# file with the same flag in the same run, and `-o` accepted it too. The
-# divergence was the --in-place append FAST PATH, which resolved the format
-# itself -- extension first -- so the override was never consulted and the file
-# was parsed as CSV until the first comma in prose. QJ, reported by the
-# linuxcs-87 session.
-# `-append` 在 `--headers 0` 之下拒絕了一個 `.md`，而 `-insert` 在同一次執行、同一個旗標下接受了
-# 同一個檔案，`-o` 也接受了。分歧出在 `--in-place` 的**追加快路徑**：它自己解析格式、而且先試
-# 副檔名，於是那個覆寫從來沒有被看到，那個檔案被當成 CSV 解析，直到散文裡的第一個逗號。QJ，
-# 由 linuxcs-87 那個 session 回報。
+# The --in-place append FAST PATH resolves the format itself, extension first.
+# If it skips the `--headers 0` override, a .md is parsed as CSV up to the
+# first comma in prose, so `-append` refuses a file that `-insert` and `-o`
+# accept with the same flag. QJ.
+# `--in-place` 的**追加快路徑**自己解析格式，而且先看副檔名。若它略過 `--headers 0` 這個覆寫，
+# `.md` 會被當成 CSV 解析到散文裡的第一個逗號，於是 `-append` 拒絕一個 `-insert` 與 `-o`
+# 在同一旗標下都接受的檔案。QJ。
 #
 # The fixture's comma is INSIDE prose, which is the whole point: a `.md` read
 # as prose has no fields, and a comma is a character like any other.
@@ -18386,8 +16540,8 @@ assert_eq "$(tail -1 "$TMP/t305.md")" "TESTLINE" \
 head -3 "$TMP/t305.md" > "$TMP/t305.head"
 assert_same "$TMP/t305.head" "$TMP/t305.orig" \
     "T305c and the three lines before it are byte-identical / 而它前面那三行逐位元相同"
-# The pairing that revealed it: the same file, the same flag, a different verb.
-# 揭發它的那個配對：同一個檔案、同一個旗標、不同的動詞。
+# The pairing that exposes it: the same file, the same flag, a different verb.
+# 能看出分歧的配對：同一個檔案、同一個旗標、不同的動詞。
 assert_succeeds "T305d -insert accepts the same file with the same flag / -insert 在同一個旗標下接受同一個檔案" \
     "$CSV2" --headers 0 -insert 2 'INSERTED' -i "$TMP/t305.md" --in-place
 # And the fast path must still exist for the files it is for. Declining .md
@@ -18402,16 +16556,14 @@ assert_eq "$("$CSV2" -count -i "$TMP/t305.csv" | tr -d ' ')" "2" \
 
 echo
 echo "--- T306: the Windows build script stays parseable by cmd.exe / T306：Windows 建置腳本維持 cmd.exe 解析得了的樣子 ---"
-# The Windows build succeeded while printing three kinds of error on stderr,
-# and one was cmd.exe executing fragments of Chinese comment lines, cut
-# mid-character, on some runs and not others. The file's own header already
-# said it must be English-only; nothing enforced that, and thirteen Chinese
-# lines went in on 2026-09-10. A build that prints errors every time teaches
-# its reader to ignore the next real one. QK.
-# Windows 建置成功，卻在 stderr 上印出三種錯誤，其中一種是 cmd.exe 執行了中文註解行的片段——從
-# 字元中間切開，而且有時出現、有時不出現。那個檔案自己的開頭已經寫著必須只用英文；沒有東西在
-# 執行那條規則，於是 2026-09-10 加進了十三行中文。一段每次都印錯誤的建置，會教讀者忽略下一個
-# 真的錯誤。QK。
+# cmd.exe can execute fragments of non-ASCII comment lines, cut mid-character,
+# on some runs and not others, so a build that succeeds still prints errors.
+# The file's header says it must be English-only, and this enforces it. A
+# build that prints errors every time teaches its reader to ignore the next
+# real one. QK.
+# cmd.exe 可能執行非 ASCII 註解行的片段——從字元中間切開，有時出現、有時不出現——於是建置
+# 成功卻仍印出錯誤。那個檔案的開頭寫著必須只用英文，這裡負責執行它。一段每次都印錯誤的建置，
+# 會教讀者忽略下一個真的錯誤。QK。
 #
 # These are static checks on purpose: they run on every platform, so a Chinese
 # line added from a Mac is reported on the Mac, not on the next Windows build.
@@ -18454,17 +16606,16 @@ fi
 
 echo
 echo "--- T307: install.zsh really stops when scoop manages csv2 / T307：scoop 管理 csv2 時，install.zsh 真的會停 ---"
-# The refusal existed and had been "verified on the node", yet on the first
-# machine where scoop really managed csv2 it did not stop. `die` printed without
-# `-r`, so the Windows path was read as escapes and `\c` cut the message short;
-# and `die` ran inside `DEST_DIR=$(target_dir)`, so it ended a subshell and the
-# script carried on with an empty destination -- `--dry-run` exited 0 planning
-# `cp ... /csv2.exe`. The node check had judged "refused" from the message.
-# This case judges it from the exit status and from what was planned. QL.
-# 那道拒絕早就存在，也「在節點上驗過」，但在第一台 scoop 真的管理著 csv2 的機器上，它沒有停。`die` 印的
-# 時候沒有 `-r`，於是 Windows 路徑被當成跳脫、`\c` 把訊息截斷；而且 `die` 是在 `DEST_DIR=$(target_dir)`
-# 裡跑的，結束的是子 shell，腳本帶著空的目的地繼續——`--dry-run` 以 0 結束並規劃 `cp ... /csv2.exe`。
-# 節點上的那次檢查是看訊息判定「拒絕了」。這個案例看的是退出碼與它規劃了什麼。QL。
+# Two ways the scoop refusal can print and still not stop: `die` without `-r`
+# reads the Windows path as escapes, so `\c` cuts the message short; and `die`
+# inside `DEST_DIR=$(target_dir)` ends only a subshell, so the script carries
+# on with an empty destination and plans `cp ... /csv2.exe`. A refusal judged
+# from its message misses both, so this case judges it from the exit status
+# and from what was planned. QL.
+# scoop 那道拒絕有兩種「印了卻沒停」的方式：`die` 不帶 `-r` 會把 Windows 路徑當成跳脫，`\c`
+# 把訊息截斷；而在 `DEST_DIR=$(target_dir)` 裡的 `die` 只結束子 shell，腳本帶著空的目的地繼續，
+# 規劃出 `cp ... /csv2.exe`。只看訊息判定「拒絕了」兩者都抓不到，所以這個案例看退出碼與它
+# 規劃了什麼。QL。
 #
 # Four fakes early on PATH make the Windows branch reachable on every platform:
 # `uname` says MINGW, `brew` has no prefix (it is asked first), `scoop` answers
@@ -18494,27 +16645,27 @@ _t307_run --dry-run --no-rc; _t307_rc=$?
 assert_eq "$_t307_rc" "1" \
     "T307a --dry-run exits 1 when scoop manages csv2 / scoop 管理 csv2 時 --dry-run 以 1 結束"
 # Exit status 1 alone does not prove the REFUSAL stopped it. Where no Windows
-# build exists -- a Mac, or a tree that was never built -- the old script also
-# exited 1, one step later, at "no binary at ...". Measured against the
-# pre-fix install.zsh: T307a passed for that reason. So this counts
-# diagnostics: a script that stopped at the refusal says `install.zsh:` once.
+# build exists -- a Mac, or a tree that was never built -- a script that went
+# past the refusal also exits 1, one step later, at "no binary at ...", so
+# T307a passes on the broken script too. So this counts diagnostics: a script
+# that stopped at the refusal says `install.zsh:` once.
 # 單憑退出碼 1 證明不了停下它的是**那道拒絕**。在沒有 Windows 建置的地方——Mac，或一棵從沒建置過的
-# 樹——舊腳本也以 1 結束，只是晚一步，停在「no binary at ...」。以修正前的 install.zsh 量過：T307a
-# 正是因為這樣而通過。所以這裡數診斷訊息：停在拒絕那一步的腳本只會說一次 `install.zsh:`。
-# `-a`: the broken message carried a NUL, which makes grep call the file binary
+# 樹——越過拒絕的腳本也以 1 結束，只是晚一步，停在「no binary at ...」，所以 T307a 對壞掉的腳本
+# 也會通過。因此這裡數診斷訊息：停在拒絕那一步的腳本只會說一次 `install.zsh:`。
+# `-a`: the broken message carries a NUL, which makes grep call the file binary
 # and print one "Binary file matches" line in place of the matches -- a count
-# of 1, which is the passing answer. It did exactly that against the old script.
+# of 1, which is the passing answer.
 # `-a`：壞掉的訊息含一個 NUL，會讓 grep 把檔案當成二進位，並以一行「Binary file matches」取代那些
-# 比對結果——計數是 1，也就是「通過」的那個答案。對舊腳本它正是這樣做的。
+# 比對結果——計數是 1，也就是「通過」的那個答案。
 _t307_diags=$(LC_ALL=C grep -a -o 'install\.zsh:' "$TMP/t307.err" | wc -l | tr -d ' ')
 if [[ -s $TMP/t307.out || $_t307_diags != 1 ]]; then
     bad "T307b it went on after refusing ($_t307_diags diagnostics; stdout: $(head -3 "$TMP/t307.out")) / 拒絕之後它繼續往下跑了"
 else
     ok "T307b it stops at the refusal: one diagnostic, nothing planned / 它停在拒絕：一則診斷，什麼都沒規劃"
 fi
-# The whole path, backslashes and all, AND the text after it: `\c` stopped the
-# output right inside the path, so the part after it is what proves the cut is
-# gone.
+# The whole path, backslashes and all, AND the text after it: `\c` stops the
+# output right inside the path, so the part after it is what proves there is
+# no cut.
 # 整段路徑，連同反斜線，**以及**它後面的文字：`\c` 就在路徑中間讓輸出停下，所以後面那段才是證明
 # 截斷已經消失的東西。
 if LC_ALL=C grep -qF -- "$_t307_win" "$TMP/t307.err" && LC_ALL=C grep -qF -- '--dir DIR' "$TMP/t307.err"; then
@@ -18530,9 +16681,9 @@ else
     bad "T307d --uninstall rc=$_t307_rc, said: $(head -c 200 "$TMP/t307.err") / 實得如上"
 fi
 
-# The same missing `-r` was on the unknown-option message, whose value is
-# whatever the caller typed.
-# 同一個缺少的 `-r` 也在「未知選項」那則訊息上，而它的值是呼叫端打的任何東西。
+# The unknown-option message needs the same `-r`: its value is whatever the
+# caller typed.
+# 「未知選項」那則訊息也需要同一個 `-r`：它的值是呼叫端打的任何東西。
 "$ROOT/install.zsh" 'C:\a\cb' > /dev/null 2> "$TMP/t307.err"
 if LC_ALL=C grep -qF -- 'C:\a\cb' "$TMP/t307.err"; then
     ok "T307e an unknown option is echoed verbatim / 未知選項被原樣印回"
@@ -18543,25 +16694,22 @@ fi
 echo
 echo "--- T308: the publish rewrite moves the version as DATA and leaves prose alone / T308：出貨改寫動的是「資料」裡的版本號，不動散文 ---"
 # Both package files contain prose that names a version as HISTORY, and history
-# does not move with a new release. Until 2026-09-18 the rewrite replaced the
-# old version on every line, so publishing v0.1.1 turned the Formula's "aarch64
-# arrives in v0.1.1. It was absent from v0.1.0" into "absent from v0.1.1" -- a
-# sentence contradicting itself, and it shipped. Publishing again would have
-# rewritten scoop's DATED record of a real Windows verification into a claim
-# that the run printed a version that did not exist on that date. QM.
+# does not move with a new release. Replacing the old version on every line
+# turns "It was absent from v0.1.0" into "absent from v0.1.1", a sentence that
+# contradicts itself, and rewrites a dated verification record into a claim
+# about a version that did not exist on that date. QM.
 #
-# 兩個套件檔裡都有把版本號當成**歷史**來記的散文，而歷史不隨新版本前進。2026-09-18 之前，改寫會
-# 替換每一行上的舊版本號，於是發布 v0.1.1 那一步把 Formula 的「aarch64 arrives in v0.1.1. It was
-# absent from v0.1.0」變成「absent from v0.1.1」——一句自相矛盾的話，而且出貨了。再發布一次，會把
-# scoop 那筆**帶日期**的 Windows 查證紀錄改寫成「那次執行印出了一個當天還不存在的版本」。QM。
+# 兩個套件檔裡都有把版本號當成**歷史**來記的散文，而歷史不隨新版本前進。替換每一行上的舊版本號，
+# 會把「It was absent from v0.1.0」變成「absent from v0.1.1」——一句自相矛盾的話——也會把一筆
+# **帶日期**的查證紀錄改寫成關於「當天還不存在的版本」的宣稱。QM。
 # The guest gets a tar payload, not a checkout: publish.zsh, Formula/ and
 # scoop/ do not travel in it. Absent, this case must SAY it did not run, the
-# way T299/T303/T304 do -- the first version FAILED there instead, reporting
-# "the rewrite changed prose" about files that were not present. The body is
-# left at its original indentation so the guard reads as one added line.
+# way T299/T303/T304 do, rather than fail about files that are not present.
+# The body is left at its original indentation so the guard reads as one
+# added line.
 # guest 拿到的是一份 tar payload，不是 checkout：publish.zsh、Formula/、scoop/ 都不在裡面。它們不在時，
-# 這個案例必須**說出自己沒有執行**，與 T299/T303/T304 一樣——第一版是在那裡**失敗**，對著不存在的檔案
-# 回報「改寫動到了散文」。底下的本體維持原本的縮排，讓這道守衛讀起來只是多加的一行。
+# 這個案例必須**說出自己沒有執行**，與 T299/T303/T304 一樣，而不是對著不存在的檔案失敗。底下的
+# 本體維持原本的縮排，讓這道守衛讀起來只是多加的一行。
 if [[ -r $ROOT/publish.zsh && -r $ROOT/Formula/csv2.rb && -r $ROOT/scoop/csv2.json ]]; then
 _t308_fn=$TMP/t308fn.zsh
 sed -n '/^prose_lines() {/,/^}/p;/^data_text() {/,/^}/p;/^rewrite_version() {/,/^}/p' \
@@ -18612,9 +16760,9 @@ for _t308_pair in "Formula/csv2.rb rb" "scoop/csv2.json json"; do
     cp "$ROOT/$_t308_src" "$_t308_new"
     _t308_rewrite "$_t308_new"
     # Files, not `diff <(..) <(..)`: with no /dev/fd (the guest) diff exits 2,
-    # and this reported "the rewrite changed prose" with an empty diff. QU.
-    # 用檔案，不用 `diff <(..) <(..)`：沒有 /dev/fd 時（guest）diff 以 2 結束，而這裡回報
-    # 「改寫動到了散文」，附的 diff 是空的。QU。
+    # which would read as "the rewrite changed prose" with an empty diff. QU.
+    # 用檔案，不用 `diff <(..) <(..)`：沒有 /dev/fd 時（guest）diff 以 2 結束，會被讀成
+    # 「改寫動到了散文」，附的 diff 卻是空的。QU。
     _t308_prose_of "$_t308_orig" "$_t308_kind" > "$TMP/t308-prose-orig"
     _t308_prose_of "$_t308_new"  "$_t308_kind" > "$TMP/t308-prose-new"
     diff "$TMP/t308-prose-orig" "$TMP/t308-prose-new" > "$TMP/t308-prose.diff" 2>&1
@@ -18642,14 +16790,10 @@ done
 # The control group, on a fixture it builds itself rather than on whatever the
 # tree happens to contain.
 #
-# The first version replaced the CURRENT version everywhere in scoop/csv2.json
-# and required the notes to change. That held only while the notes named the
-# version being published -- which is exactly the state a release ends: after
-# v0.1.2 shipped, the dated note still said 0.1.1 (correctly, because that is
-# what was verified that day), the blanket replace no longer touched it, and
-# this case failed saying "T308b proves nothing". It was right about itself.
-# A control that depends on an incidental property of the tree stops being a
-# control the moment the tree moves.
+# Relying on the real notes naming the current version would hold only until
+# the next release moves the version past them. A control that depends on an
+# incidental property of the tree stops being a control the moment the tree
+# moves.
 #
 # So a line is PLANTED: prose that names the current version, which is the one
 # combination that tells the two behaviours apart. The blunt replace must
@@ -18657,11 +16801,8 @@ done
 #
 # 負控組，跑在它自己造的 fixture 上，而不是跑在「樹剛好是什麼樣子」上。
 #
-# 第一版把 scoop/csv2.json 裡的現行版本號全部替換掉，並要求 notes 有變。那件事**只在 notes 剛好
-# 提到正在發布的那個版本時**成立——而那正是一次發布所終結的狀態：v0.1.2 出去之後，那筆帶日期的
-# 紀錄仍寫著 0.1.1（那是對的，因為那天查證的就是它），全域替換不再碰到它，於是這個案例失敗並說
-# 「T308b 什麼都沒證明」。**它對自己的判斷是對的。** 一個依賴樹的偶然性質的對照組，在樹一動的
-# 那一刻就不再是對照組。
+# 依賴真實 notes 剛好提到現行版本，只會成立到下一次發布讓版本越過它們為止。一個依賴樹的偶然
+# 性質的對照組，在樹一動的那一刻就不再是對照組。
 #
 # 因此這裡**種一行進去**：一句提到現行版本的散文——那是唯一能把兩種行為分開的組合。全域替換必須
 # 弄壞它，而 rewrite_version 必須不動它。
@@ -18726,24 +16867,21 @@ echo
 echo "--- T309: the build id asks git from inside the directory, not with -C / T309：build id 從目錄裡面問 git，不用 -C ---"
 # On Windows, zsh's pwd is MSYS-style `/c/Users/...`, so `${0:A:h}` is too, and
 # git for Windows answers `fatal: cannot change to '/c/Users/...'`. Both git
-# calls returned empty, and the function fell through to the branch that exists
-# for the guest -- so a correct 0.1.2 binary was refused on the Windows node
-# with "rebuild before releasing". The shell can cd there; git asked from
-# inside needs no path. QN.
+# calls return empty, the function falls through to the branch meant for the
+# guest, and a correct binary is refused with "rebuild before releasing". The
+# shell can cd there; git asked from inside needs no path. QN.
 # 在 Windows 上 zsh 的 pwd 是 MSYS 風格的 `/c/Users/...`，於是 `${0:A:h}` 也是，而 git for Windows
-# 會回 `fatal: cannot change to '/c/Users/...'`。兩次 git 呼叫都回空字串，函式落到那個「為 guest 而
-# 存在」的分支——於是一個正確的 0.1.2 執行檔在 Windows 節點上以「發行前請重新建置」被拒。shell 進得去
-# 那個目錄，而從裡面問 git 根本不需要路徑。QN。
+# 會回 `fatal: cannot change to '/c/Users/...'`。兩次 git 呼叫都回空字串，函式落到那個為 guest 準備
+# 的分支，一個正確的執行檔就以「發行前請重新建置」被拒。shell 進得去那個目錄，而從裡面問 git
+# 不需要路徑。QN。
 # Comment lines are excluded, for the reason T218a excludes them: the text
-# explaining why `git -C` is wrong must be able to write `git -C`. The first
-# version of this case did not, and failed on its own explanation.
+# explaining why `git -C` is wrong must be able to write `git -C`.
 # 排除註解行，理由與 T218a 相同：說明「為什麼 `git -C` 是錯的」那段文字，必須寫得出 `git -C`。
-# 這個案例的第一版沒有排除，於是敗在它自己的說明上。
 # build_id.zsh is not in the guest payload either, and there `csv2_build_id`
-# has nothing to source: the first version reported "absolute gave [], '.'
-# gave []" and "rc=127", which is the harness failing, not the tree.
-# build_id.zsh 同樣不在 guest 的 payload 裡，那裡 `csv2_build_id` 沒有東西可以 source：第一版在那裡
-# 回報「絕對路徑給 []、'.' 給 []」與「rc=127」，那是測試自己壞了，不是那棵樹壞了。
+# has nothing to source, so running anyway would report the harness failing
+# ("rc=127"), not the tree.
+# build_id.zsh 同樣不在 guest 的 payload 裡，那裡 `csv2_build_id` 沒有東西可以 source，硬跑只會回報
+# 測試自己壞了（「rc=127」），不是那棵樹壞了。
 if [[ -r $ROOT/build_id.zsh ]]; then
 _t309_gitC=$(LC_ALL=C grep -n 'git -C' "$ROOT/build_id.zsh" | LC_ALL=C grep -v ':[[:space:]]*#' || true)
 if [[ -n $_t309_gitC ]]; then
@@ -18752,9 +16890,9 @@ else
     ok "T309a build_id.zsh asks git from inside the directory / build_id.zsh 從目錄裡面問 git"
 fi
 
-# The same tree, named two ways, must give one answer. This is the property the
-# Windows node violated -- `.` worked and the absolute path did not.
-# 同一棵樹用兩種寫法指稱，必須得到同一個答案。這正是 Windows 節點違反的性質——`.` 可以，絕對路徑不行。
+# The same tree, named two ways, must give one answer. QN breaks exactly this:
+# `.` works and the absolute path does not.
+# 同一棵樹用兩種寫法指稱，必須得到同一個答案。QN 破壞的正是這個性質：`.` 可以，絕對路徑不行。
 _t309_abs=$(cd "$ROOT" && zsh -c 'source ./build_id.zsh; csv2_build_id "$PWD"' 2>/dev/null)
 _t309_dot=$(cd "$ROOT" && zsh -c 'source ./build_id.zsh; csv2_build_id .' 2>/dev/null)
 if [[ -n $_t309_abs && $_t309_abs == $_t309_dot ]]; then
@@ -18764,10 +16902,10 @@ else
 fi
 
 # A tree WITH a .git whose git says nothing is a malformed question, not an
-# unknown build. A fake git exiting 128 reproduces what Windows did, on any
+# unknown build. A fake git exiting 128 reproduces the Windows failure on any
 # platform.
 # 一棵**有** .git 而 git 什麼都不說的樹，是一個問錯的問題，不是一次來歷不明的建置。一個退出 128 的
-# 假 git，在任何平台上都能重現 Windows 上發生的事。
+# 假 git，在任何平台上都能重現 Windows 上的那種失敗。
 _t309_bin=$TMP/t309bin
 _t309_repo=$TMP/t309repo
 mkdir -p "$_t309_bin" "$_t309_repo/.git"
@@ -18805,12 +16943,10 @@ echo "--- T310: release.zsh gives native tools relative names, not absolute MSYS
 # zstd -- a native program -- cannot open it. A relative name works and so does
 # a native path; only the absolute MSYS one fails. csv2.exe is native as well,
 # so the probe file is named relatively too. The sha256 block in the same file
-# was already doing this, which is what makes it QO rather than a discovery:
-# the practice was present and had not been carried to the rest of its range.
+# already does this; this case holds the rest of the file to it. QO.
 # 在 Windows 上 zsh 的 pwd 是 `/c/Users/...`，`${0:A:h}` 也是，而 scoop 的 zstd 是原生程式，開不了它。
 # 相對名稱可以、原生路徑可以，只有絕對的 MSYS 路徑不行。csv2.exe 同樣是原生程式，所以那個探測檔也用
-# 相對名稱。同一個檔案裡寫 sha256 那段本來就是這樣做的——那正是這件事算 QO 而不算新發現的原因：做法
-# 已經在，只是沒有推廣到它成立的其餘範圍。
+# 相對名稱。同一個檔案裡寫 sha256 那段本來就這樣做；這個案例要求檔案其餘部分比照辦理。QO。
 # release.zsh is not in the guest payload. Without this guard the greps find
 # nothing in a file that is not there, `|| true` turns that into an empty
 # result, and all three cases PASS having measured nothing -- the shape T218a's
@@ -18860,10 +16996,9 @@ echo
 echo "--- T311: the Formula has a url for every context Homebrew evaluates / T311：Formula 對 Homebrew 會求值的每一種情境都有 url ---"
 # Homebrew 7 evaluates a formula once per (OS, arch) it knows, and a combination
 # with no url is a LOAD-TIME error that fails the whole tap -- so `brew install`
-# is never reached. Until 2026-09-18 the only macOS url was inside
-# `on_macos { on_arm }`, leaving macOS x86_64 with none; `brew tap` refused for
-# every macOS version. publish.zsh's four checks all passed and none of them was
-# this question. QP.
+# is never reached. A macOS url only inside `on_macos { on_arm }` leaves macOS
+# x86_64 with none, and `brew tap` refuses on every macOS version. publish.zsh's
+# other checks do not ask this question. QP.
 #
 # WHAT THIS CASE IS NOT: it is not "brew can load the formula". Only brew can
 # answer that, and it is not on three of the four nodes. This is a PROXY -- the
@@ -18871,9 +17006,8 @@ echo "--- T311: the Formula has a url for every context Homebrew evaluates / T31
 # proxy so the next reader does not take a green line here for a successful tap.
 #
 # Homebrew 7 對它認識的每一種 (OS, 架構) 各求值一次，而一個沒有 url 的組合是**載入期**錯誤，它會讓整個
-# tap 失敗——於是 `brew install` 根本輪不到。2026-09-18 之前，唯一的 macOS url 在 `on_macos { on_arm }`
-# 裡，macOS x86_64 一個都沒有，`brew tap` 對每個 macOS 版本都拒絕。publish.zsh 的四道檢查全部通過，
-# 而其中沒有一道是這個問題。QP。
+# tap 失敗——於是 `brew install` 根本輪不到。macOS url 若只在 `on_macos { on_arm }` 裡，macOS x86_64
+# 就一個都沒有，`brew tap` 對每個 macOS 版本都拒絕。publish.zsh 的其他檢查不問這個問題。QP。
 #
 # **這個案例不是什麼**：它不是「brew 載得起來」。那件事只有 brew 回答得了，而四個節點裡有三個沒有 brew。
 # 這是一個**代理指標**——QP 之所以發生的那個結構性質——而且明白寫成代理，免得下一個讀者把這裡的綠燈
@@ -18935,15 +17069,13 @@ echo "--- T312: publish.zsh refuses an archive built from another commit / T312�
 # The gap this closes: every other check on an archive is equally true of one
 # built from the PREVIOUS commit. The two checksums agree because the node that
 # built the stale archive also wrote the .sha256 beside it; it unpacks; its name
-# says the right version. On 2026-09-18 a `git fetch` failed on the WSL node,
-# `&&` stopped the checkout, the message had gone to /dev/null, and release.zsh
-# packaged the stale binary and exited 0 -- its own check compares the binary
-# against the CHECKOUT, and both were one commit behind together. Reading
-# `--version` by hand is what caught it. This is that reading, scripted.
+# says the right version. release.zsh's own check compares the binary against
+# the CHECKOUT, so a node whose fetch failed quietly packages a stale binary
+# and exits 0. This reads the build id inside the archive instead.
 # 這道檢查補的缺口：封存上其他每一項檢查，對「用**上一個** commit 建出來的封存」同樣成立——兩份校驗和
-# 相符（因為那份 .sha256 正是建置它的節點自己寫的）、解得開、名字正確。2026-09-18 WSL 節點上 `git fetch`
-# 失敗、`&&` 讓 checkout 沒跑、訊息進了 /dev/null，而 release.zsh 打包了那個過期的執行檔並以 0 結束——
-# 它自己的檢查比對的是執行檔與 checkout，兩者一起停在舊 commit。抓到它的是手動讀 `--version`。
+# 相符（因為那份 .sha256 正是建置它的節點自己寫的）、解得開、名字正確。release.zsh 自己的檢查比對的是
+# 執行檔與 checkout，所以一個 fetch 靜默失敗的節點會打包過期的執行檔並以 0 結束。這裡改讀封存裡的
+# build id。
 if [[ -r $ROOT/publish.zsh ]] && command -v zstd >/dev/null 2>&1; then
 _t312_fn=$TMP/t312fn.zsh
 sed -n '/^ARCHIVE_BUILD_ID=""$/,/^}$/p' "$ROOT/publish.zsh" > "$_t312_fn"
@@ -18993,9 +17125,8 @@ else
 fi
 
 # The control. Without a refusal that fires, T312b would pass against a function
-# that accepts everything -- which is the state before this check existed.
-# 負控組。沒有一個真的會觸發的拒絕，T312b 對一個「什麼都接受」的函式也會通過——而那正是這道檢查存在
-# 之前的狀態。
+# that accepts everything.
+# 負控組。沒有一個真的會觸發的拒絕，T312b 對一個「什麼都接受」的函式也會通過。
 _t312_make other "v9.9.9 / 0000000"
 _t312_ro=$(_t312_try other)
 if [[ $_t312_ro == refused ]]; then
@@ -19005,14 +17136,13 @@ else
 fi
 
 # And an archive carrying no build id at all is refused rather than passed for
-# lack of evidence. The first version of this function looked for the assembled
-# `--version` line, which swift composes at run time and is nowhere in the file,
-# so it matched nothing and refused ALL FOUR real archives -- a check that is
-# always red gets worked around, not read. Found by running it on the archives
-# already on disk.
-# 而一份完全沒有 build id 的封存要被**拒絕**，不是因為「查無實據」而放行。這個函式的第一版找的是組好的
-# `--version` 那一行，而那一行是 swift 在執行時組出來的、根本不在檔案裡，於是它一個都比不到，把四份真實
-# 封存全部拒絕——**一個永遠是紅燈的檢查會被繞過，不會被讀。** 那是拿磁碟上現有的封存跑一次才發現的。
+# lack of evidence. The function must not look for the assembled `--version`
+# line: swift composes it at run time, so it is nowhere in the file, and every
+# real archive would be refused -- a check that is always red gets worked
+# around, not read.
+# 而一份完全沒有 build id 的封存要被**拒絕**，不是因為「查無實據」而放行。這個函式不能去找組好的
+# `--version` 那一行：那一行是 swift 在執行時組出來的、根本不在檔案裡，於是每一份真實封存都會被拒絕
+# ——**一個永遠是紅燈的檢查會被繞過，不會被讀。**
 _t312_make none "no build id here at all"
 _t312_rn=$(_t312_try none)
 if [[ $_t312_rn == refused ]]; then
@@ -19027,23 +17157,19 @@ fi
 
 echo
 echo "--- T313: install.zsh stops when Homebrew manages csv2 / T313：Homebrew 管理 csv2 時 install.zsh 會停 ---"
-# QL is this same defect on the scoop side, fixed 2026-09-17. macOS never had
-# the equivalent, and there it is worse: install.zsh's destination IS brew's own
-# bin directory, so `cp -f` replaces brew's symlink with a plain file while
-# brew's database still believes it owns that path -- and the NOTE printed
-# alongside ("brew list will not show it") is false line by line in exactly that
-# situation, having been written for the case where brew does not manage csv2.
-# Found on 2026-09-23 by running --dry-run before acting on a suggestion to
-# rebuild and reinstall. QR.
+# QL is the scoop side of this. On macOS it is worse: install.zsh's
+# destination IS brew's own bin directory, so `cp -f` replaces brew's symlink
+# with a plain file while brew's database still believes it owns that path --
+# and the NOTE printed alongside ("brew list will not show it"), written for
+# the case where brew does not manage csv2, is false in exactly this one. QR.
 #
 # A fake brew early on PATH makes this reachable on every platform: target_dir
 # reaches the brew branch by asking `brew --prefix`, with no uname gate, so no
 # macOS is needed to exercise it.
 #
-# QL 是 scoop 那一側的同一件事，2026-09-17 修掉。macOS 從來沒有對應的檢查，而那裡更糟：install.zsh
-# 的目的地**就是 brew 自己的 bin 目錄**，`cp -f` 會把 brew 的 symlink 換成普通檔案，而 brew 仍認為
-# 它擁有那條路徑——同一畫面上那段 NOTE（「brew list 不會列出它」）在那個情境下逐行皆假。2026-09-23
-# 在照做「重建並重裝」的建議之前先跑 --dry-run 才發現。QR。
+# QL 是 scoop 那一側的同一件事。macOS 上更糟：install.zsh 的目的地**就是 brew 自己的 bin 目錄**，
+# `cp -f` 會把 brew 的 symlink 換成普通檔案，而 brew 仍認為它擁有那條路徑——同一畫面上那段為
+# 「brew 不管理 csv2」而寫的 NOTE（「brew list 不會列出它」），在這個情境下正好是假的。QR。
 #
 # 一個放在 PATH 前面的假 brew 讓這一支在每個平台都走得到：target_dir 是靠問 `brew --prefix` 進入那一
 # 支的，沒有 uname 關卡，所以不需要一台 macOS 才能測。
@@ -19123,22 +17249,20 @@ echo "--- T314: --headers N says how many header rows, never what separates fiel
 # many header ROWS it has; only a suffix says that commas separate fields,
 # which is why `--headers 0` on a `.csv` is a HEADERLESS CSV and not lines.
 #
-# runAppendFast resolved it as `Format.from(path:) ?? headersOverride.map {...}
-# ?? .lines`, and 0 is a value, so on a suffix-less path the map fired and gave
-# `.csv`: `.lines` was unreachable whenever --headers was given at all. The
-# refusal then named "the header" -- a header the flag had just said did not
-# exist. Reading the same file with the same flag was correct throughout; only
-# appending IN PLACE refused, because only that takes the fast path. QS, and
-# QJ's family: QJ's own comment describes this word for word with `.md` in
-# place of `.txt`, and its fix declined one extension by name.
+# If runAppendFast resolves the format as `Format.from(path:) ??
+# headersOverride.map {...} ?? .lines`, any --headers value makes the map fire
+# on a suffix-less path and gives `.csv`, so `.lines` is unreachable and the
+# refusal names "the header" the flag just said does not exist. Reading the
+# same file with the same flag is unaffected; only appending IN PLACE takes
+# the fast path. QS, in QJ's family (QJ is the same shape with `.md`).
 #
 # 一個「副檔名沒有宣告格式」的檔案是 `.lines`。`--headers N` 說的是它有幾列**標頭**；只有副檔名才說
 # 「逗號是分隔符」——那正是「`--headers 0` 配 `.csv` 是無標頭 CSV 而非 lines」的理由。
 #
-# runAppendFast 原本把它解析成 `Format.from(path:) ?? headersOverride.map {…} ?? .lines`，而 0 是一個
-# 值，於是在沒有宣告格式的副檔名上那個 map 會觸發並給出 `.csv`——只要給了 `--headers`，`.lines` 就
-# 永遠到不了。接著那則拒絕指名了「標頭」，而那正是該旗標剛說不存在的東西。同一個檔案、同一個旗標，
-# 用讀的自始至終正確，只有**就地**追加會拒絕，因為只有它走快路徑。QS，QJ 的同一族。
+# 若 runAppendFast 把格式解析成 `Format.from(path:) ?? headersOverride.map {…} ?? .lines`，任何
+# `--headers` 值都會讓那個 map 在沒有宣告格式的副檔名上觸發並給出 `.csv`，於是 `.lines` 永遠到不了，
+# 而那則拒絕指名了該旗標剛說不存在的「標頭」。同一個檔案、同一個旗標，用讀的不受影響；只有**就地**
+# 追加走快路徑。QS，與 QJ 同一族（QJ 是同樣的形狀，換成 `.md`）。
 _t314=$TMP/t314
 mkdir -p "$_t314"
 
@@ -19156,7 +17280,7 @@ else
     bad "T314a got [$_t314_a], want [rc=0 lines=3]: $(head -c 150 "$_t314/err") / 實得如上"
 fi
 
-# Not specific to 0. Any --headers made the map fire, so 1 failed the same way,
+# Not specific to 0. Any --headers makes the map fire, so 1 fails the same way,
 # and a case pinned only on 0 would pass against half a fix.
 # 不限於 0。任何 --headers 都會讓那個 map 觸發，所以 1 也一樣失敗；只釘住 0 的案例，對一個修了一半的
 # 修正也會通過。
@@ -19167,11 +17291,11 @@ else
     bad "T314b got [$_t314_b], want [rc=0 lines=3]: $(head -c 150 "$_t314/err") / 實得如上"
 fi
 
-# The property the report turned on: one file, one flag, two verbs. Reading was
-# always right; appending in place was not. Asserting the pair is what makes a
-# future divergence visible, rather than asserting each alone.
-# 這份回報真正壓住的性質：同一個檔案、同一個旗標、兩個動詞。讀一直是對的，就地追加不是。斷言這一
-# **對**，才能讓將來的分歧看得見；分開斷言各自都不會說話。
+# The property at stake: one file, one flag, two verbs must agree. Asserting
+# the pair is what makes a future divergence visible, rather than asserting
+# each alone.
+# 關鍵的性質：同一個檔案、同一個旗標、兩個動詞必須一致。斷言這一**對**，才能讓將來的分歧看得見；
+# 分開斷言各自都不會說話。
 printf 'alpha\nbeta, gamma, delta\n' > "$_t314/c.txt"
 _t314_read=$("$CSV2" --headers 0 -r -i "$_t314/c.txt" 2>/dev/null)
 if [[ $_t314_read == $'alpha\nbeta, gamma, delta' ]]; then
@@ -19207,16 +17331,14 @@ fi
 
 echo
 echo "--- T315: the width table is generated from Unicode, and still is / T315：寬度表由 Unicode 資料產生，而且仍然是 ---"
-# Todo section 3 kept the hand-written width table open for weeks because
-# "generate it from the Unicode character database" looked like a build-time
-# dependency. It is not one: unicode/gen_width.zsh runs only when the Unicode
-# version is raised, and the build compiles the committed region of src/Width.swift.
-# The hand table had lagged -- U+1F6D5..1F6D8 and U+1F6DC..1F6DF are East Asian
-# Wide since Unicode 12-15 and measured 1 -- and nothing reported it.
-# todo 第 3 節讓手寫的寬度表開了好幾週，因為「從 Unicode 字元資料庫產生」看起來像建置期依賴。其實
-# 不是：unicode/gen_width.zsh 只在升級 Unicode 時執行，建置編譯的是 src/Width.swift 裡已提交的那一段。
-# 手寫表一直落後——U+1F6D5..1F6D8 與 U+1F6DC..1F6DF 自 Unicode 12–15 起就是 East Asian Wide，
-# 卻被量成 1——而沒有任何東西回報這件事。
+# Generating the table is not a build-time dependency: unicode/gen_width.zsh
+# runs only when the Unicode version is raised, and the build compiles the
+# committed region of src/Width.swift. A hand-written table lags silently --
+# U+1F6D5..1F6D8 and U+1F6DC..1F6DF are East Asian Wide since Unicode 12-15
+# and a hand table measured them 1.
+# 產生這張表不是建置期依賴：unicode/gen_width.zsh 只在升級 Unicode 時執行，建置編譯的是
+# src/Width.swift 裡已提交的那一段。手寫表會靜默落後——U+1F6D5..1F6D8 與 U+1F6DC..1F6DF
+# 自 Unicode 12–15 起就是 East Asian Wide，手寫表卻量成 1。
 if [[ -x $ROOT/unicode/gen_width.zsh ]]; then
 # The committed region of src/Width.swift must be exactly what the generator
 # makes from the committed data. The region carries each input's sha256, so
@@ -19248,10 +17370,10 @@ fi
 
 # Measured, not asserted from the table: --pretty pads each cell to the column
 # width, so the padding against an 8-column cell IS the width (T48's method).
-# Each sample changed between the hand table and the generated one, and each
-# expectation was checked against both binaries before this case was written.
+# Each sample measures differently under the hand table and the generated one,
+# so each would catch a regression to the old table.
 # 用量的，不是從表格斷言：--pretty 會把每格補到欄寬，所以相對一個 8 欄寬儲存格的補白就是寬度（T48 的方法）。
-# 每個樣本在手寫表與產生的表之間都有變化，每個預期值在寫這個案例之前都用兩份執行檔量過。
+# 每個樣本在手寫表與產生的表之下量得不同，所以每一個都抓得到退回舊表。
 {
   print -r -- 'w,note'
   print -r -- '寬,註'
@@ -19288,12 +17410,12 @@ fi
 echo
 echo "--- T316: the build id's hash is 8 characters on every machine / T316：build id 的雜湊在每台機器上都是 8 碼 ---"
 # git's default abbreviation grows with the clone's object count and follows
-# each machine's core.abbrev, so the published 0.1.3 reads `fa2e792b` on WSL and
-# `fa2e792` elsewhere -- one commit, two strings. The user chose a fixed 8. QT.
+# each machine's core.abbrev, so one commit can read `fa2e792b` on one node and
+# `fa2e792` on another. The id is fixed at 8. QT.
 # The repository here is built from scratch, and every git call runs from
 # inside it (cd in a subshell, not -C or a path argument: QN).
-# git 的預設縮寫隨 clone 的物件數成長、也跟著每台機器的 core.abbrev，於是已發布的 0.1.3 在 WSL 上說
-# `fa2e792b`、其他地方說 `fa2e792`——同一個 commit、兩種字串。使用者選了固定 8 碼。QT。
+# git 的預設縮寫隨 clone 的物件數成長、也跟著每台機器的 core.abbrev，於是同一個 commit 可能在一個節點
+# 說 `fa2e792b`、在另一個說 `fa2e792`。id 固定為 8 碼。QT。
 # 這裡的 repository 是從零建的，每一個 git 呼叫都在它裡面執行（子 shell 裡 cd，不用 -C 也不傳路徑：QN）。
 if command -v git >/dev/null 2>&1 && [[ -r $ROOT/build_id.zsh ]]; then
     # t316_hash <build_id.zsh> -- the hash part of the id built from $TMP/t316.
@@ -19343,13 +17465,12 @@ echo
 echo "--- T317: no case hands a process substitution to diff, cmp or comm / T317：沒有案例把行程替換交給 diff、cmp 或 comm ---"
 # zsh expands `<(cmd)` to the PATH /dev/fd/N. The guest's /dev has no fd link,
 # so an external program given that path exits with an error -- and a case
-# that sorts diff's status into two classes reads the error as "different".
-# T308b failed falsely that way and T56i passed vacuously, on the guest, every
-# run since it was written (QU). `< <(cmd)` is not this: zsh reads that itself.
+# that sorts diff's status into two classes reads the error as "different":
+# a false failure, or a vacuous pass, on the guest. QU. `< <(cmd)` is not
+# this: zsh reads that itself.
 # zsh 把 `<(cmd)` 展開成 /dev/fd/N 這個**路徑**。guest 的 /dev 沒有 fd 連結，於是拿到那個路徑的
-# 外部程式會以錯誤結束——而一個把 diff 的退出碼只分成兩類的案例，會把錯誤讀成「不同」。T308b
-# 因此假失敗，T56i 因此在 guest 上從寫下那天起每一次都空過（QU）。`< <(cmd)` 不是這個：那是 zsh
-# 自己讀的。
+# 外部程式會以錯誤結束——而一個把 diff 的退出碼只分成兩類的案例，會把錯誤讀成「不同」：在 guest 上
+# 不是假失敗就是空過。QU。`< <(cmd)` 不是這個：那是 zsh 自己讀的。
 _t317_scan() {   # _t317_scan <file>  -- prints offending line numbers
     LC_ALL=C grep -nE '(^|[^[:alnum:]_])(diff|cmp|comm)([[:space:]]+-[[:alnum:]-]+)*[[:space:]]+<[(]' "$1" |
         LC_ALL=C grep -vE '^[0-9]+:[[:space:]]*#' | LC_ALL=C cut -d: -f1 | tr '\n' ' '
@@ -19461,18 +17582,18 @@ fi
 
 echo
 echo "--- T321: release.zsh and publish.zsh answer --help before doing anything / T321：release.zsh 與 publish.zsh 在做任何事之前先回答 --help ---"
-# release.zsh read no argument at all, so `./release.zsh --help` packaged an
-# archive -- from an untagged build, under the release's name, and reported it
-# verified. publish.zsh took `--help` as the version. RB.
+# A release.zsh that reads no argument packages an archive on `--help` --
+# from an untagged build, under the release's name, reported verified -- and a
+# publish.zsh without the branch takes `--help` as the version. RB.
 #
 # Both run here from a COPY in a directory with no release/ and no dist/. That
-# is what makes the case safe to keep: if the help branch ever goes missing
-# again, the copy has no binary to package and fails, instead of this suite
-# writing an archive into the real dist/ on every run.
-# release.zsh 完全不讀引數，於是 `./release.zsh --help` 打包了一份封存——來自未打 tag 的建置、掛著
-# 正式封存的名字，並回報已驗證。publish.zsh 則把 `--help` 當成版本。RB。
+# is what makes the case safe to keep: if the help branch goes missing, the
+# copy has no binary to package and fails, instead of this suite writing an
+# archive into the real dist/ on every run.
+# 不讀引數的 release.zsh 會在 `--help` 時打包一份封存——來自未打 tag 的建置、掛著正式封存的名字、
+# 回報已驗證——而沒有這個分支的 publish.zsh 會把 `--help` 當成版本。RB。
 # 兩者在這裡都從一份**複本**執行，那個目錄裡沒有 release/ 也沒有 dist/。這是這個案例可以安心留著的
-# 原因：help 分支若再次消失，複本沒有執行檔可打包、會失敗，而不是讓這個套件每跑一次就往真正的
+# 原因：help 分支若消失，複本沒有執行檔可打包、會失敗，而不是讓這個套件每跑一次就往真正的
 # dist/ 寫一份封存。
 if [[ ! -r $ROOT/release.zsh || ! -r $ROOT/publish.zsh ]]; then
     T321_SKIPPED=1
@@ -19502,19 +17623,19 @@ fi
 
 echo
 echo "--- T322: release.zsh names the archive from the binary, whatever VERSION says / T322：release.zsh 以執行檔為封存命名，不管 VERSION 說什麼 ---"
-# `VERSION=9.9.9 ./release.zsh` packaged a 0.1.4 binary as csv2-9.9.9-… and
-# reported it verified: an exported VERSION skipped the block that asks the
-# binary. RE -- QI through another door, and T304a ("no version literal is
-# assigned") went on passing throughout.
+# An exported VERSION must not skip the block that asks the binary, or
+# `VERSION=9.9.9 ./release.zsh` packages a 0.1.4 binary as csv2-9.9.9-… and
+# reports it verified. RE: QI through another door, which T304a ("no version
+# literal is assigned") does not see.
 #
 # Run from a copy beside a STUB binary, for the reason T321 gives. The stub
 # reports 1.2.3, so the three outcomes are distinguishable: a disagreeing
 # VERSION is refused BEFORE anything is written; an agreeing one and none at
 # all both get past the version check and stop later, at the first check that
 # needs a real repository -- which is how this case knows they got past it.
-# `VERSION=9.9.9 ./release.zsh` 把一個 0.1.4 的執行檔打包成 csv2-9.9.9-…，並回報已驗證：一個被
-# export 的 VERSION 跳過了「去問執行檔」的那一段。RE——QI 從另一扇門回來，而 T304a（「沒有版本
-# 字面值被指派」）從頭到尾都在通過。
+# 被 export 的 VERSION 不得跳過「去問執行檔」的那一段，否則 `VERSION=9.9.9 ./release.zsh` 會把一個
+# 0.1.4 的執行檔打包成 csv2-9.9.9-…，並回報已驗證。RE：QI 從另一扇門回來，而 T304a（「沒有版本
+# 字面值被指派」）看不到它。
 # 與 T321 相同的理由：從一份複本執行，旁邊放一個**假的**執行檔。它回報 1.2.3，於是三種結果分得開：
 # 不相符的 VERSION 在寫入任何東西**之前**就被拒絕；相符的與完全沒設的都通過版本檢查，停在後面第一道
 # 需要真 repository 的檢查——這個案例就是靠那一點知道它們通過了。
@@ -19554,14 +17675,13 @@ fi
 
 echo
 echo "--- T323: install.zsh says what it is about to replace / T323：install.zsh 說出它即將取代的是什麼 ---"
-# Twice a stale csv2 sat on a PATH unnoticed -- a day in September, a month
-# before 2026-10-07 -- because finding out meant comparing `csv2 --version`
-# with HEAD and nobody did. install.zsh now asks the copy at the destination
-# for its version by running it, and says so before writing. A copy that will
-# not run is reported as THAT, not as absent (RC).
-# 有兩次，一份過期的 csv2 待在 PATH 上沒有人發現——九月的一天、2026-10-07 之前的一個月——因為要
-# 發現它得有人去比對 `csv2 --version` 與 HEAD，而沒有人比。install.zsh 現在靠「執行它」去問目的地
-# 那一份的版本，並在寫入之前說出來。一份跑不起來的複本要照實回報，而不是說它不存在（RC）。
+# A stale csv2 on PATH goes unnoticed when finding out means comparing
+# `csv2 --version` with HEAD by hand. install.zsh asks the copy at the
+# destination for its version by running it, and says so before writing. A
+# copy that will not run is reported as THAT, not as absent (RC).
+# 若要靠人手比對 `csv2 --version` 與 HEAD，PATH 上一份過期的 csv2 就不會被發現。install.zsh 靠
+# 「執行它」去問目的地那一份的版本，並在寫入之前說出來。一份跑不起來的複本要照實回報，而不是說它
+# 不存在（RC）。
 # install.zsh installs the binary in ITS tree's release/, which is not
 # necessarily the $CSV2 under test, so that file is the one copied and asked.
 # install.zsh 裝的是**它那棵樹**的 release/ 裡的執行檔，不一定是受測的 $CSV2，所以被複製與被問的是那個檔案。
@@ -19597,18 +17717,16 @@ fi
 
 echo
 echo "--- T324: the history is linear / T324：歷史是線性的 ---"
-# 478 commits and not one merge, and until 2026-10-14 nothing said so or kept
-# it so. Four checkouts on four machines push to one branch; a single
-# `git pull` without --rebase on any of them records a merge commit, and the
-# next push carries it out with nothing reporting it. Local config
-# (pull.rebase) only reaches the machine it was set on, and AGENTS.md only
-# reaches whoever reads it. This case is the part that runs everywhere the
-# suite does.
-# 478 個 commit、沒有一個 merge，而在 2026-10-14 之前沒有任何東西說出這件事、也沒有任何東西
-# 維持它。四台機器上的四份 checkout 推向同一條分支；其中任何一台少了 --rebase 的一次 `git pull`
-# 就會記下一個 merge commit，下一次 push 就把它帶出去，沒有任何東西回報。本機設定（pull.rebase）
-# 只到得了設定它的那台機器，AGENTS.md 只到得了讀它的人。這個案例是「套件跑到哪裡、它就跑到哪裡」
-# 的那一部分。
+# The history has no merge commits, and this keeps it so. Four checkouts on
+# four machines push to one branch; a single `git pull` without --rebase on
+# any of them records a merge commit, and the next push carries it out with
+# nothing reporting it. Local config (pull.rebase) only reaches the machine it
+# was set on, and AGENTS.md only reaches whoever reads it. This case is the
+# part that runs everywhere the suite does.
+# 歷史裡沒有 merge commit，這個案例負責維持它。四台機器上的四份 checkout 推向同一條分支；其中
+# 任何一台少了 --rebase 的一次 `git pull` 就會記下一個 merge commit，下一次 push 就把它帶出去，
+# 沒有任何東西回報。本機設定（pull.rebase）只到得了設定它的那台機器，AGENTS.md 只到得了讀它的人。
+# 這個案例是「套件跑到哪裡、它就跑到哪裡」的那一部分。
 if ! command -v git >/dev/null 2>&1 || [[ ! -d $ROOT/.git && ! -f $ROOT/.git ]]; then
     T324_SKIPPED=1
     skipt "T324 the history is linear / 歷史是線性的 (not a git checkout here / 這裡不是一個 git checkout)"
@@ -19652,12 +17770,12 @@ fi
 
 echo
 echo "--- T325: editing one of two touching Markdown tables keeps the other / T325：兩張相鄰的 Markdown 表，編輯其一不會刪掉另一張 ---"
-# No blank line between the tables. The reader saw two; the in-place writer
-# had its own scan, saw one, and deleted everything after the edited table
-# with exit 0. RG. T325b-d are the bytes, not the exit status: rc 0 was what
-# the defect reported too.
-# 兩張表之間沒有空白行。讀取器看到兩張；就地寫回有它自己的掃描，看到一張，於是以退出碼 0
-# 刪掉了被編輯那張之後的一切。RG。T325b–d 看的是位元組而不是退出碼：那個缺陷回報的也是 rc 0。
+# No blank line between the tables. The reader sees two; an in-place writer
+# with its own scan that sees one deletes everything after the edited table
+# with exit 0. RG. T325b-d check the bytes, not the exit status, because the
+# defect also exits 0.
+# 兩張表之間沒有空白行。讀取器看到兩張；一個自己掃描、只看到一張的就地寫回，會以退出碼 0 刪掉
+# 被編輯那張之後的一切。RG。T325b–d 看的是位元組而不是退出碼，因為那個缺陷也以 0 結束。
 _t325=$TMP/t325.md
 print -rl -- '| a | b |' '|---|---|' '| 1 | 2 |' '| x | y |' '|---|---|' '| 3 | 4 |' > "$_t325"
 assert_succeeds "T325a -update on table 1 of two touching tables, --in-place / 對兩張相鄰表的第 1 張就地 -update" -- \
@@ -19673,10 +17791,10 @@ assert_eq "$("$CSV2" -get 1:b --md-table 1 -i "$_t325" 2>&1)|$("$CSV2" -get 1:y 
 
 echo
 echo "--- T326: an A1 column too long for an Int is refused, not a crash / T326：長到超過 Int 的 A1 欄位被拒絕，而不是崩潰 ---"
-# `n * 26` overflowed and Swift trapped: rc 133 here, 132 in the review, no
-# message. assert_fails alone would have PASSED that -- a trap is non-zero --
-# so the exit status is pinned to 1 and the refusal must say what it is. RH.
-# `n * 26` 溢位，Swift 直接陷阱：這裡 rc 133、審查時 132，沒有任何訊息。單用 assert_fails 會讓它
+# An overflowing `n * 26` makes Swift trap (rc 132 or 133, no message).
+# assert_fails alone would PASS that -- a trap is non-zero -- so the exit
+# status is pinned to 1 and the refusal must say what it is. RH.
+# `n * 26` 溢位會讓 Swift 直接陷阱（rc 132 或 133，沒有任何訊息）。單用 assert_fails 會讓它
 # **通過**——陷阱也是非零——所以退出碼釘死為 1，而且那則拒絕必須說出它是什麼。RH。
 print -rl -- k,v a,1 > "$TMP/t326.csv"
 _t326=$("$CSV2" -get '1:1 [ZZZZZZZZZZZZZZ2]' -i "$TMP/t326.csv" 2>&1); _t326_rc=$?
@@ -19692,13 +17810,13 @@ assert_eq "$("$CSV2" -get '1:2 [B2]' -i "$TMP/t326.csv" 2>&1)" "1" \
 echo
 echo "--- T327: parallel search reports the physical line past a multi-line header / T327：標頭跨行時，平行搜尋回報的實體行號正確 ---"
 # The index proves one record per line for the DATA; the header is not in
-# that proof. The parallel path used headerRows as the line base, so a header
-# holding two quoted newlines put every line two too early. RI. Compared
-# against the single-threaded path, which was right all along, and T327a
-# checks the parallel path was the one taken.
-# 索引證明的是**資料**每筆一行；標頭不在那份證明裡。平行路徑用 headerRows 當行號基底，於是一個
-# 含兩個引號內換行的標頭，讓每一個行號早了兩行。RI。比對的對象是一直都正確的單執行緒路徑，而
-# T327a 確認走的真的是平行路徑。
+# that proof. Using headerRows as the parallel path's line base puts every
+# line two too early after a header holding two quoted newlines. RI. Compared
+# against the single-threaded path, and T327a checks the parallel path was
+# the one taken.
+# 索引證明的是**資料**每筆一行；標頭不在那份證明裡。平行路徑若用 headerRows 當行號基底，一個含兩個
+# 引號內換行的標頭會讓每一個行號早兩行。RI。比對的對象是單執行緒路徑，而 T327a 確認走的真的是
+# 平行路徑。
 _t327=$TMP/t327.csv
 printf '"a\nb\nc",v\nx,hit\ny,hit\n' > "$_t327"
 "$CSV2" --build-index -i "$_t327" >/dev/null 2>&1
@@ -19714,13 +17832,13 @@ assert_eq "$_t327_par" "$_t327_one" "T327c and the parallel report equals the si
 
 echo
 echo "--- T328: the Homebrew note appears only where brew owns the directory / T328：只有 brew 擁有那個目錄時，才印 Homebrew 的說明 ---"
-# /usr/local/bin is Homebrew's only on Intel macOS. The note was printed on a
-# WSL with no brew, about a package manager that was not there. RF. Three
+# /usr/local/bin is Homebrew's only on Intel macOS; elsewhere, e.g. a WSL with
+# no brew, the note warns about a package manager that is not there. RF. Three
 # PATHs: a brew whose prefix is /usr/local (the note is right), one whose
 # prefix is /opt/homebrew (it is not), and none at all -- built by dropping
 # every PATH entry that holds a brew, since this machine may have a real one.
-# /usr/local/bin 只有在 Intel macOS 上才是 Homebrew 的。那段說明曾印在一台沒有 brew 的 WSL 上，
-# 對一個不存在的套件管理員發出警告。RF。三種 PATH：prefix 是 /usr/local 的 brew（說明是對的）、
+# /usr/local/bin 只有在 Intel macOS 上才是 Homebrew 的；在別處，例如一台沒有 brew 的 WSL，那段說明
+# 會對一個不存在的套件管理員發出警告。RF。三種 PATH：prefix 是 /usr/local 的 brew（說明是對的）、
 # prefix 是 /opt/homebrew 的 brew（不對），以及完全沒有 brew——做法是拿掉 PATH 裡每一個含有 brew
 # 的項目，因為這台機器上可能有真的 brew。
 if [[ ! -r $ROOT/install.zsh ]]; then
@@ -19755,15 +17873,15 @@ fi
 
 echo
 echo "--- T329: the binary names no toolchain to find its runtime in / T329：執行檔不指望任何工具鏈目錄提供 runtime ---"
-# RJ. On Linux swiftc wrote the toolchain's version-numbered path into RPATH,
-# and the published 0.1.5 aarch64 binary stopped running when the guest's Swift
-# moved on. Linux builds are static now: no RPATH or RUNPATH (a), no Swift
+# RJ. On Linux swiftc writes the toolchain's version-numbered path into RPATH,
+# so a dynamic binary stops running when the machine's Swift moves on. Linux
+# builds are static: no RPATH or RUNPATH (a), no Swift
 # runtime library among the dependencies (b), and it runs with an empty
 # environment (c). macOS asks the same question of its own format: no LC_RPATH,
 # and every dependency under /usr/lib or /System, which the OS owns. Windows is
 # RC, a different answer (ship the DLLs), so it is not asked here.
-# RJ。Linux 上 swiftc 把工具鏈帶版本號的路徑寫進 RPATH，guest 的 Swift 一換，已發布的 0.1.5
-# aarch64 執行檔就跑不起來了。Linux 建置現在是靜態的：沒有 RPATH／RUNPATH（a）、依賴裡沒有任何
+# RJ。Linux 上 swiftc 會把工具鏈帶版本號的路徑寫進 RPATH，機器上的 Swift 一換，動態連結的執行檔
+# 就跑不起來。Linux 建置是靜態的：沒有 RPATH／RUNPATH（a）、依賴裡沒有任何
 # Swift runtime 函式庫（b）、環境變數全空也能執行（c）。macOS 用它自己的格式問同一個問題：沒有
 # LC_RPATH，而且每一個依賴都在作業系統擁有的 /usr/lib 或 /System 底下。Windows 是 RC，答案不同
 # （把 DLL 一起帶上），所以這裡不問。
@@ -19818,15 +17936,15 @@ esac
 
 echo
 echo "--- T330: an edit does not add a final newline the file never had / T330：編輯不會補上一個檔案從來沒有的結尾換行 ---"
-# RK. Editing one cell of a file with no final newline added one: a byte
-# nobody wrote. An edit's output now ends the way its input did. CRLF is a
+# RK. Editing one cell of a file with no final newline must not add one: a
+# byte nobody wrote. An edit's output ends the way its input did. CRLF is a
 # different case -- one line ending replaced by another -- and still becomes
 # LF (d). -append is not that case: the records it adds are new and end in
 # LF like every record csv2 writes (T202b pins it for the fast path), alone (e)
 # or beside another edit (f), and the two give the same bytes. A file that
 # did end in LF keeps it (g). Each case states its bytes in full, so an extra
 # or missing LF anywhere shows.
-# RK。在一個沒有結尾換行的檔案裡改一格，結果多了一個：一個沒有人寫過的位元組。編輯的輸出現在以
+# RK。在一個沒有結尾換行的檔案裡改一格，不得多出一個換行：那是一個沒有人寫過的位元組。編輯的輸出以
 # 輸入的方式結束。CRLF 是另一回事——一個行尾換成另一個——它照舊變成 LF（d）。-append 不是這種
 # 情況：它加上的紀錄是新的，和 csv2 寫出的每一筆一樣以 LF 結尾（快速路徑由 T202b 釘住），不論單獨（e）
 # 或與其他編輯一起（f），兩者的位元組相同。原本以 LF 結尾的檔案保留它（g）。每一項都寫出完整的位元組，所以任何地方多一個或少一個 LF 都看得到。
@@ -19861,11 +17979,11 @@ printf 'a,b\n1,2\n' > "$_t330/g.csv"
 "$CSV2" -update 1:2 X -i "$_t330/g.csv" --in-place 2>/dev/null
 assert_eq "$(_t330_bytes "$_t330/g.csv")" " a , b \\n 1 , X \\n " \
     "T330g a file that ended in LF still does / 原本以 LF 結尾的檔案照舊以 LF 結尾"
-# Markdown in place used to drop every trailing empty line and add one LF:
-# (h) a document ending in its table gained one, (i) prose after the table
-# gained one, (j) blank lines at the end were removed.
-# Markdown 就地編輯原本會丟掉結尾所有空行、再補一個 LF：(h) 以表格結尾的文件多了一個，(i) 表格後面
-# 的散文多了一個，(j) 結尾的空行被刪掉。
+# Markdown in place must not drop trailing empty lines or add an LF: (h) a
+# document ending in its table, (i) prose after the table, (j) blank lines at
+# the end.
+# Markdown 就地編輯不得丟掉結尾的空行、也不得補 LF：(h) 以表格結尾的文件、(i) 表格後面的散文、
+# (j) 結尾的空行。
 _t330_md() {   # _t330_md <name> <printf body> -> the bytes after editing cell 1:2
     printf "$2" > "$_t330/$1.md"
     "$CSV2" -update 1:2 X -i "$_t330/$1.md" -md -t --md-table 1 --in-place 2>/dev/null
@@ -19881,13 +17999,13 @@ assert_eq "$(_t330_md j '| a | b |\n|---|---|\n| 1 | 2 |\n\n\n')" " | a | b | \\
 echo "--- T331: an empty last record survives a missing final newline / T331：沒有結尾換行時，空的最後一筆紀錄保留下來 ---"
 # RL. In a one-column file an empty record is zero bytes; it exists only
 # through the newline that ends it. RK withholds the last record's LF when the
-# input had none, so 'a\nx' with its last record edited to '' came out as
-# 'a\n' -- one record fewer, rc 0, silent. Now that LF is written for a record
-# that is nothing else (a, b for CRLF input, c on stdout, e for a lines file),
+# input had none, so without care 'a\nx' with its last record edited to ''
+# comes out as 'a\n' -- one record fewer, rc 0, silent. That LF is written for
+# a record that is nothing else (a, b for CRLF input, c on stdout, e for a lines file),
 # the record is still counted afterwards (d), and a last record that has bytes
 # of its own still gets no newline the file never had (f).
 # RL。單欄檔案裡的空紀錄是零個位元組，只靠結束它的換行而存在。RK 在輸入沒有結尾換行時扣下最後一筆的
-# LF，於是 'a\nx' 把最後一筆改成 '' 之後寫出 'a\n'——少一筆，rc 0，什麼都沒說。現在一筆除了 LF 之外
+# LF，若不小心，'a\nx' 把最後一筆改成 '' 之後會寫出 'a\n'——少一筆，rc 0，什麼都沒說。一筆除了 LF 之外
 # 什麼都沒有的紀錄，那個 LF 照寫（a；b 是 CRLF 輸入；c 是 stdout；e 是 lines 檔），之後仍算得到那一筆（d）；
 # 而有自己位元組的最後一筆，仍不會被補上一個檔案從來沒有的換行（f）。
 _t331=$TMP/t331
@@ -19925,31 +18043,25 @@ echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # 比對 12 組呼叫。這一行說明它在哪裡執行，而不是假裝這個案例不存在。
 skipt "T47 macOS and aarch64 Linux produce byte-identical output / mac 與 Linux 輸出逐位元相同 (runs from the parent project: test_submodules/run_csv2_test.zsh / 由母專案的 test_submodules/run_csv2_test.zsh 執行)"
 
-# T69b runs LAST because it counts something the suite produces: the docs now
-# say there is exactly one SKIP instead of quoting a PASS total, and a claim
-# that replaced a number has to be checked at the point where the number is
-# final. Asserting it earlier tested a counter that had not finished counting.
-# T69b 放在最後，因為它數的是「測試自己產生的東西」：文件現在說的是「恰好一個 SKIP」而不是
-# 引用 PASS 總數，而一個取代了數字的宣稱，必須在那個數字定案的位置檢查。放在更早的地方，
-# 測到的是一個還沒數完的計數器。
-# The expected count is per-platform, and each skip has to be one somebody
-# decided rather than one that merely happened. On POSIX there is exactly one:
-# T47, which compares two platforms and so cannot run inside either. Windows
-# adds three, all of them the ENVIRONMENT's limits and all of them documented
-# in todo/known-defects.md: a POSIX FIFO a native binary cannot see (T61a,
-# T61c) and a UTF-16 command line that leaves no raw argument bytes to check
-# (T98a-T98g, one skip line).
+# T69b runs LAST because it counts something the suite produces: the docs say
+# there is exactly one SKIP instead of quoting a PASS total, and that claim has
+# to be checked where the number is final. Earlier, it would test a counter
+# that has not finished counting.
+# T69b 放在最後，因為它數的是「測試自己產生的東西」：文件說的是「恰好一個 SKIP」而不是引用
+# PASS 總數，而這個宣稱必須在數字定案的位置檢查。放在更早，測到的是一個還沒數完的計數器。
+# Each skip has to be one somebody decided rather than one that merely
+# happened. The base is one, T47, which compares two platforms and so cannot
+# run inside either; every other skip is added below by the case that
+# skipped, from its own run-time condition.
 #
 # Checking the number rather than listing the names is deliberate: a name list
 # would pass while a case quietly stopped running, which is the same failure as
 # a stale count. The number moves the moment anything is skipped that nobody
 # accounted for.
 #
-# 預期的數量依平台而定，而每一個 SKIP 都必須是「有人決定的」，不是「碰巧變成這樣的」。
-# POSIX 上恰好一個：T47——它比對的是兩個平台，因此無法在其中任何一個內部執行。Windows
-# 多三個，全部是「環境」的限制、也全部記在 todo/known-defects.md 裡：一個原生程式看不見的
-# POSIX FIFO（T61a、T61c），以及一條「沒有原始參數位元組可查」的 UTF-16 命令列
-# （T98a–T98g，合為一行 skip）。
+# 每一個 SKIP 都必須是「有人決定的」，不是「碰巧變成這樣的」。基數是一個：T47——它比對的是
+# 兩個平台，因此無法在其中任何一個內部執行；其餘每一個 SKIP 都由跳過的那個案例依它自己的
+# 執行期條件，在下面加上。
 # 檢查「數量」而不是列出名字是刻意的：名字清單會在「某個案例安靜地不再執行」時照樣通過，
 # 而那與一個過期的數字是同一種失敗。只要有任何一個沒被計入的東西被略過，數量就會變。
 # One more axis than the platform: whether this system can read a file's mode
@@ -19964,77 +18076,29 @@ skipt "T47 macOS and aarch64 Linux produce byte-identical output / mac 與 Linux
 # 讓這個數字變成自我實現。
 want_skip=1                                   # T47, on every platform / 每個平台都有
 if (( IS_WINDOWS )); then
-    # What is left that is genuinely the platform, once the capabilities are
-    # probed instead of assumed: T61a and T61c (a POSIX FIFO is invisible to a
-    # native Windows program), T98a-g (the command line arrives as UTF-16, so
-    # there are no raw argument bytes to refuse), T141e (the same FIFO),
-    # T131e (POSIX signals), T135c (a file the user cannot read, which needs
-    # modes that bite here), T181a, T184a and T184b.
+    # No Windows count is written here. A number written here is a second
+    # place to forget: it goes on predicting a skip after the case's reason has
+    # gone, and the gap shows as exactly one. Every Windows skip (T61a, T61c,
+    # T98, T141e, T131e, T181a, T184a/b and the rest) is recorded by its own
+    # case at the point where it skips, so no Windows skip can be predicted
+    # without the case agreeing.
     #
-    # This was 9 and included the symlinks -- T43h, T129a-d, T130a-c -- which
-    # this machine has and has always had. Their skips are now recorded by the
-    # cases themselves, from a run-time probe, like every other conditional
-    # skip in this file. A number written here instead is a second place to
-    # forget: it went on saying 9 while the reason for three of them had gone.
-    #
-    # 在能力改成「探測」而不是「假設」之後，真正屬於這個平台的還剩下這些：T61a 與 T61c（POSIX
-    # FIFO 對原生 Windows 程式不可見）、T98a-g（命令列以 UTF-16 抵達，沒有原始參數位元組可拒絕）、
-    # T141e（同一個 FIFO）、T131e（POSIX 訊號）、T135c（一個使用者讀不到的檔案，那需要「咬得住」
-    # 的模式）、T181a、T184a 與 T184b。
-    # 這裡原本是 9，而且把 symlink（T43h、T129a-d、T130a-c）算了進去——那是這台機器有、而且一直
-    # 都有的東西。它們的跳過現在由案例自己記錄，來自一次執行期探測，與這個檔案裡其他每一個條件式
-    # 跳過相同。把數字寫在這裡，是多一個會忘記的地方：它一直說著 9，而其中三個的理由早就不在了。
-    # The number is GONE. It said 9 while three of its reasons had left, was
-    # corrected to 6, and then said 6 while T135c's reason had left too: that
-    # case now puts a DIRECTORY where the unreadable sidecar goes, which fails
-    # the open for everyone, so it no longer skips on Windows -- and the count
-    # went on predicting that it would. The Windows node measured it as
-    # "expected 16, actual 15", and before that "expected 19, actual 18": the
-    # gap was always exactly one, which is what a single stale entry looks like.
-    #
-    # The comment above this line had already diagnosed the disease -- "a
-    # number written here is a second place to forget" -- and then kept it. So
-    # each of these five now records its own skip at the point where it skips,
-    # like every other conditional skip in this file. There is no longer a
-    # place where a Windows skip can be predicted without the case agreeing.
-    #
-    # 那個數字**沒有了**。它曾經說著 9，而其中三個的理由已經離開；改成 6 之後，它又說著 6，
-    # 而 T135c 的理由也離開了：那個案例現在在「讀不到的 sidecar」的位置放一個**目錄**，那對
-    # 任何人都會讓 open 失敗，因此它在 Windows 上不再跳過——而這個計數仍在預測它會。Windows
-    # 節點量到的是「預期 16、實際 15」，更早一次是「預期 19、實際 18」：差距永遠正好是 1，
-    # 而那正是「單一一筆過期項目」的樣子。
-    #
-    # 這一行上面的註解**早就診斷出這個病**——「把數字寫在這裡，是多一個會忘記的地方」——然後
-    # 留下了它。因此這五個現在各自在「它跳過的那個地方」記錄自己，與這個檔案裡其他每一個條件式
-    # 跳過相同。現在不再有任何地方能在「案例沒有同意」的情況下預測一個 Windows 的跳過。
+    # 這裡不寫 Windows 的數字。寫在這裡的數字是多一個會忘記的地方：案例的理由離開之後它仍在預測
+    # 那個跳過，差距會正好是 1。每一個 Windows 的跳過（T61a、T61c、T98、T141e、T131e、T181a、
+    # T184a/b 等）都由它自己的案例在跳過的地方記錄，因此不再有任何 Windows 的跳過能在「案例沒有
+    # 同意」的情況下被預測。
     :
 else
     _t69_probe=$(zstat_mode "$TMP")
     [[ $_t69_probe == <-> ]] || (( want_skip += 1 ))   # T129e
-    # T135c needs a file it cannot read. Root can read anything, so in the
-    # guest -- which runs as root -- that case skips and this count has to know
-    # it. Probed the same way T135c decides, on a file made for the purpose.
-    # T135c 需要一個「它讀不到」的檔案。root 什麼都讀得到，因此在以 root 執行的 guest 上
-    # 那個案例會 SKIP，而這個數字必須知道這件事。用與 T135c 相同的方式、在一個為此建立的
-    # 檔案上探測。
-    # T135c no longer needs a probe here. It used to make its unreadable
-    # sidecar with `chmod 000` and skip where that does not bite, so this
-    # mirrored the same question; now it puts a DIRECTORY in the sidecar's
-    # place, which fails the open for root as well, and it skips only if the
-    # directory itself cannot be created. That is not a platform property
-    # worth predicting -- if it ever happens, the SKIP will be one this count
-    # did not expect and T69b will say so, which is exactly what it is for.
-    #
-    # Changing the case without changing this line is what produced
-    # "expected 6 SKIP(s), the suite produced 5" in the guest: the case ran
-    # for the first time there, and the count still assumed it would not.
-    # T135c 這裡不再需要探測。它以前用 `chmod 000` 製造那份讀不到的 sidecar，並在「權限咬不住」
-    # 的地方跳過，因此這裡照樣問了同一個問題；現在它在 sidecar 的位置放一個**目錄**，那對 root
-    # 一樣會讓 open 失敗，而它只在「連目錄都建不出來」時才跳過。那不是一個值得預測的平台性質
-    # ——真的發生時，那會是一個「這個計數沒有預期到」的 SKIP，而 T69b 會說出來，那正是它的用途。
-    #
-    # 改了案例卻沒改這一行，正是 guest 上「預期 6 個 SKIP，實際 5 個」的來源：那個案例在那裡
-    # 第一次執行了，而這個計數仍然假設它不會。
+    # T135c needs no probe here: it puts a DIRECTORY in the sidecar's place,
+    # which fails the open for root as well, and skips only if the directory
+    # itself cannot be created. That is not a platform property worth
+    # predicting -- if it happens, T69b reports an unexpected SKIP, which is
+    # what it is for.
+    # T135c 這裡不需要探測：它在 sidecar 的位置放一個**目錄**，那對 root 一樣會讓 open 失敗，
+    # 而它只在「連目錄都建不出來」時才跳過。那不是一個值得預測的平台性質——真的發生時，T69b 會
+    # 回報一個沒預期到的 SKIP，那正是它的用途。
     # T143, which skips where `touch -r` does not carry nanoseconds. Taken from
     # the flag that case sets rather than re-derived: reading a timestamp to
     # that precision needs stat, and the platform that skips is the one without
@@ -20045,13 +18109,10 @@ else
     # 「不再執行」，這個變數就不會被設定、want_skip 會變小、數量對不上——那正是這個檢查的用途。
 fi
 # T143 can skip on ANY platform whose touch -r drops the nanoseconds -- the
-# guest and Windows both do -- so this sits outside the branch. It was inside
-# the POSIX arm first, and Windows then reported one skip more than expected:
-# a per-platform count that had learned about a difference which is not
-# per-platform.
+# guest and Windows both do -- so this sits outside the branch. Inside the
+# POSIX arm, Windows would report one skip more than expected.
 # T143 在「touch -r 會丟掉奈秒」的任何平台上都可能跳過——guest 與 Windows 都是——因此這一行
-# 放在分支外面。它原本在 POSIX 那一支裡，於是 Windows 回報的 SKIP 比預期多一個：一個
-# 「依平台而定」的數字，去學了一件其實不依平台而定的差異。
+# 放在分支外面。放在 POSIX 那一支裡，Windows 回報的 SKIP 會比預期多一個。
 (( ${T143_SKIPPED:-0} )) && (( want_skip += 1 ))
 # T146e needs iconv, which the guest's busybox does not carry; T145e needs a
 # directory that refuses a new file, which a root shell does not meet. Both
@@ -20113,9 +18174,9 @@ fi
 (( ${T182B_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T184A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T184B_SKIPPED:-0} )) && (( want_skip += 1 ))
-# The five that used to be a hardcoded 6 in the Windows arm, plus T240. Each is
-# recorded by the case that skipped, which is the only place that knows.
-# 原本在 Windows 那一支裡寫成 6 的那五個，加上 T240。每一個都由「跳過的那個案例」自己記錄，
+# The Windows-only skips, plus T240. Each is recorded by the case that
+# skipped, which is the only place that knows.
+# 只在 Windows 上的那些跳過，加上 T240。每一個都由「跳過的那個案例」自己記錄，
 # 而那是唯一知道這件事的地方。
 (( ${T61A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T61C_SKIPPED:-0} )) && (( want_skip += 1 ))
@@ -20123,29 +18184,26 @@ fi
 (( ${T141E_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T131E_SKIPPED:-0} )) && (( want_skip += 1 ))
 # T135c skips only when the directory it needs cannot be created -- not a
-# platform property, and the reason the old number was wrong.
-# T135c 只在「它需要的那個目錄建不出來」時跳過——那不是平台的性質，而它正是那個舊數字錯掉的原因。
+# platform property, so it cannot be predicted by platform.
+# T135c 只在「它需要的那個目錄建不出來」時跳過——那不是平台的性質，因此無法依平台預測。
 (( ${T135C_SKIPPED:-0} )) && (( want_skip += 1 ))
 # T240 needs a symlink loop, which Windows will not let an unprivileged process
-# create. Added WITH its count, unlike T240's first version: a new skip whose
-# count is missing cancels against a stale entry and the check passes with two
-# errors in it, which is worse than one visible mismatch.
-# T240 需要一個 symlink 迴圈，而 Windows 不讓沒有特權的行程建立它。這次是**連同計數一起**加的
-# ——與 T240 的第一版不同：一個「漏掉計數」的新跳過，會與一筆過期項目互相抵銷，於是那個檢查
-# 帶著兩個錯誤通過，而那比一個看得見的數量不符更糟。
+# create. A new skip is added WITH its count: a skip whose count is missing
+# cancels against a stale entry and the check passes with two errors in it,
+# which is worse than one visible mismatch.
+# T240 需要一個 symlink 迴圈，而 Windows 不讓沒有特權的行程建立它。新的跳過要**連同計數一起**加：
+# 一個「漏掉計數」的跳過，會與一筆過期項目互相抵銷，於是那個檢查帶著兩個錯誤通過，而那比一個
+# 看得見的數量不符更糟。
 (( ${T240_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T191A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T200A_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T200B_SKIPPED:-0} )) && (( want_skip += 1 ))
 
 # T308/T309/T310 measure publish.zsh, build_id.zsh and release.zsh, none of
-# which travel in the guest's tar payload. Counted here at the same time as the
-# skip was written, for the reason stated above T240: a new skip that is not
-# counted cancels out a stale entry, and the check then passes carrying two
-# errors, which is worse than a visible mismatch.
+# which travel in the guest's tar payload. Counted together with the skip, for
+# the reason stated above T240.
 # T308／T309／T310 量的是 publish.zsh、build_id.zsh 與 release.zsh，三者都不在 guest 的 tar payload
-# 裡。這裡與那三個略過**同時**加上計數，理由就寫在 T240 上面那一段：一個沒有被計數的新略過，會與一筆
-# 過期項目互相抵銷，於是那道檢查帶著兩個錯誤通過——那比一個看得見的數量不符更糟。
+# 裡。計數與略過一起加上，理由寫在 T240 上面那一段。
 (( ${T308_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T309_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T310_SKIPPED:-0} )) && (( want_skip += 1 ))
@@ -20374,25 +18432,20 @@ else
 fi
 
 # T229's flag is consumed HERE, not in the block above, because T229 RUNS after
-# that block: its flag is not yet set when the block executes. It used to add
-# to want_skip inline instead, which was correct and invisible -- and that
-# invisibility cost a false defect record. A scan showed T229's name missing
-# from the list of `${X:-0}` consumers, and I concluded it was an uncounted
-# skip without reading the code around the flag. It had been counted all along.
+# that block: its flag is not yet set when the block executes.
 #
-# So there is now ONE mechanism: every flag is consumed by a `${X:-0}` line,
-# and a case that runs late has that line placed after it. T241a's model --
-# every flag set is consumed, every consumer has a flag -- is true again, which
-# it was not while inline arithmetic existed as a second, unlisted way to count.
+# There is ONE mechanism: every flag is consumed by a `${X:-0}` line, and a
+# case that runs late has that line placed after it. Inline arithmetic on
+# want_skip would be a second, unlisted way to count, invisible to a scan of
+# `${X:-0}` consumers, and would break T241a's model -- every flag set is
+# consumed, every consumer has a flag.
 #
 # T229 的旗標在**這裡**被消費，而不是在上面那個區塊裡，因為 T229 **跑在那個區塊之後**：那個
-# 區塊執行時它的旗標還沒被設。它原本改用 inline 直接加 want_skip，那是正確的、也是看不見的
-# ——而那份看不見換來一條不成立的缺陷記錄。一次掃描顯示 T229 的名字不在 `${X:-0}` 消費者清單
-# 裡，我就斷定它是一個沒有被計數的跳過，而沒有去讀那個旗標周圍的程式碼。它一直都被計數著。
+# 區塊執行時它的旗標還沒被設。
 #
-# 所以現在只有**一種**機制：每一個旗標都由一行 `${X:-0}` 消費，而跑得晚的案例就把那一行放在
-# 它後面。T241a 的模型——每個被設定的旗標都被消費、每個消費者都有旗標——重新成立了；在 inline
-# 算術還存在、作為第二種沒有被列出的計數方式時，它並不成立。
+# 只有**一種**機制：每一個旗標都由一行 `${X:-0}` 消費，而跑得晚的案例就把那一行放在它後面。
+# 直接對 want_skip 做 inline 算術，會是第二種沒有被列出的計數方式，掃描 `${X:-0}` 消費者時
+# 看不見，也會破壞 T241a 的模型——每個被設定的旗標都被消費、每個消費者都有旗標。
 (( ${T229_SKIPPED:-0} )) && (( want_skip += 1 ))
 if [[ "$skip" == "$want_skip" ]]; then
     ok "T69b there are exactly $want_skip SKIPs, each one accounted for / 恰好有 $want_skip 個 SKIP，每一個都有交代"
@@ -20400,16 +18453,6 @@ else
     bad "T69b expected $want_skip SKIP(s) on this platform, the suite produced $skip / 本平台預期 $want_skip 個 SKIP，測試產生了 $skip 個"
 fi
 
-# Anything the handler caught, added back here because it could not add itself
-# -- and NAMED here, because its own FAIL line goes wherever the caller's
-# stdout went. When the missing command sat inside `x=$(...)`, that line was
-# captured into a variable and never reached the log: the guest reported eight
-# failures with no names at all, which is a worse report than the one it
-# replaced.
-# 處理常式抓到的東西，在這裡加回去——它自己加不了——並且在這裡「點名」，因為它自己那一行
-# FAIL 會跟著呼叫端的 stdout 走。當那個不存在的指令位在 `x=$(...)` 裡時，那一行會被收進
-# 一個變數、永遠到不了 log：guest 於是回報了八個「沒有名字」的失敗，而那比它取代掉的報告
-# 更糟。
 # Checked last, because the answer only matters once everything above has run.
 # A changed stamp does not mean any particular case is wrong -- it means the
 # whole total is describing a file that no longer exists, so it is reported as
@@ -20425,6 +18468,13 @@ elif [[ $SUITE_STAMP_AT_START != $_suite_stamp_now ]]; then
     fail=$((fail + 1))
 fi
 
+# Anything the missing-command handler caught, added back here because it
+# cannot add itself -- and NAMED here, because its own FAIL line goes wherever
+# the caller's stdout went. Inside `x=$(...)` that line is captured into a
+# variable and never reaches the log, leaving failures with no names.
+# 「指令不存在」處理常式抓到的東西，在這裡加回去——它自己加不了——並且在這裡「點名」，因為它自己
+# 那一行 FAIL 會跟著呼叫端的 stdout 走。在 `x=$(...)` 裡，那一行會被收進一個變數、永遠到不了 log，
+# 留下沒有名字的失敗。
 if [[ -s $MISSING_LOG ]]; then
     for _missing in ${(f)"$(sort -u "$MISSING_LOG")"}; do
         print -r -- "FAIL  the suite called \"$_missing\", which does not exist here / 測試呼叫了「$_missing」，而它在這個平台上不存在"
