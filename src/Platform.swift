@@ -449,7 +449,15 @@ enum Platform {
         // RLIM_INFINITY is not imported on every platform; unlimited clamps to
         // Int.max, which is never "low".
         // RLIM_INFINITY 不是每個平台都匯入；無上限會被夾到 Int.max，永遠不算「低」。
-        guard getrlimit(RLIMIT_NOFILE, &rl) == 0 else { return nil }
+        // The resource argument's type differs as getrusage's does: Int32 on
+        // Darwin, an imported enum on glibc.
+        // resource 參數的型別與 getrusage 一樣有差異：Darwin 上是 Int32，glibc 上是匯入的 enum。
+        #if canImport(Darwin)
+        let resource: Int32 = RLIMIT_NOFILE
+        #else
+        let resource: Int32 = Int32(RLIMIT_NOFILE.rawValue)
+        #endif
+        guard getrlimit(resource, &rl) == 0 else { return nil }
         return Int(clamping: rl.rlim_cur)
         #endif
     }
