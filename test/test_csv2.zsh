@@ -19878,6 +19878,43 @@ assert_eq "$(_t330_md i '| a | b |\n|---|---|\n| 1 | 2 |\n\ntext')" " | a | b | 
 assert_eq "$(_t330_md j '| a | b |\n|---|---|\n| 1 | 2 |\n\n\n')" " | a | b | \\n | - - - | - - - | \\n | 1 | X | \\n \\n \\n " \
     "T330j blank lines at the end of the document are kept / 文件結尾的空行保留"
 
+echo "--- T331: an empty last record survives a missing final newline / T331：沒有結尾換行時，空的最後一筆紀錄保留下來 ---"
+# RL. In a one-column file an empty record is zero bytes; it exists only
+# through the newline that ends it. RK withholds the last record's LF when the
+# input had none, so 'a\nx' with its last record edited to '' came out as
+# 'a\n' -- one record fewer, rc 0, silent. Now that LF is written for a record
+# that is nothing else (a, b for CRLF input, c on stdout, e for a lines file),
+# the record is still counted afterwards (d), and a last record that has bytes
+# of its own still gets no newline the file never had (f).
+# RL。單欄檔案裡的空紀錄是零個位元組，只靠結束它的換行而存在。RK 在輸入沒有結尾換行時扣下最後一筆的
+# LF，於是 'a\nx' 把最後一筆改成 '' 之後寫出 'a\n'——少一筆，rc 0，什麼都沒說。現在一筆除了 LF 之外
+# 什麼都沒有的紀錄，那個 LF 照寫（a；b 是 CRLF 輸入；c 是 stdout；e 是 lines 檔），之後仍算得到那一筆（d）；
+# 而有自己位元組的最後一筆，仍不會被補上一個檔案從來沒有的換行（f）。
+_t331=$TMP/t331
+mkdir -p "$_t331"
+printf 'a\nx' > "$_t331/a.csv"
+"$CSV2" -update 1:1 '' -i "$_t331/a.csv" --in-place 2>/dev/null
+assert_eq "$(_t330_bytes "$_t331/a.csv")" " a \\n \\n " \
+    "T331a one column, no final newline, last record edited to empty: it is kept / 單欄、沒有結尾換行、最後一筆改成空值：那一筆保留"
+printf 'a\r\nx' > "$_t331/b.csv"
+"$CSV2" -update 1:1 '' -i "$_t331/b.csv" --in-place 2>/dev/null
+assert_eq "$(_t330_bytes "$_t331/b.csv")" " a \\n \\n " \
+    "T331b the same from CRLF input / CRLF 輸入也一樣"
+printf 'a\ny\nx' > "$_t331/c.csv"
+"$CSV2" -update 2:1 '' -i "$_t331/c.csv" -so > "$_t331/c.out" 2>/dev/null
+assert_eq "$(_t330_bytes "$_t331/c.out")" " a \\n y \\n \\n " \
+    "T331c the same on stdout, after another record / stdout 上也一樣，前面還有一筆"
+assert_eq "$("$CSV2" -count -i "$_t331/a.csv" 2>&1)" "1" \
+    "T331d the edited file still counts its one record / 改過的檔案仍算得到那一筆"
+printf 'x\ny' > "$_t331/e.txt"
+"$CSV2" -update 2:1 '' -i "$_t331/e.txt" -o "$_t331/e.out.txt" 2>/dev/null
+assert_eq "$(_t330_bytes "$_t331/e.out.txt")" " x \\n \\n " \
+    "T331e a lines file whose last line is edited to empty keeps it / lines 檔把最後一行改成空的，那一行保留"
+printf 'a,b\n1,2' > "$_t331/f.csv"
+"$CSV2" -update 1:1 '' -i "$_t331/f.csv" --in-place 2>/dev/null
+assert_eq "$(_t330_bytes "$_t331/f.csv")" " a , b \\n , 2 " \
+    "T331f a last record with bytes of its own still gains no final newline / 有自己位元組的最後一筆，仍不補結尾換行"
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

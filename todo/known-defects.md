@@ -14340,7 +14340,7 @@ is. Decided the same day: it is a defect. An edit's output now ends the way its 
 did; CRLF still becomes LF. The plan's "add an LF to a .csv that lacks one" was decided for
 appending and had been read as "on every write".
 
-## RL. 單欄檔案沒有結尾換行時，被改成空值的最後一筆紀錄消失（2026-10-29 回報；RK 引入的退化，v0.1.6）
+## RL. 單欄檔案沒有結尾換行時，被改成空值的最後一筆紀錄消失（2026-10-29 回報；RK 引入的退化，v0.1.6；同日修正，T331a–f）
 
 使用者回報：原始檔沒有結尾換行時，最後一筆空紀錄會不見。實測（`csv2 0.1.6 (v0.1.6 / bc3d5024)`，Homebrew
 安裝的那一份），單欄檔案、最後一筆被 `-update` 改成空字串：
@@ -14378,3 +14378,6 @@ one-column empty record is zero bytes and exists only through the newline that e
 withholds the last record's LF when the input had none. Fix: if the last record encodes to no
 bytes, its LF is written; that newline is the record, not an invented line ending. Rejected:
 writing `""`, which keeps the missing newline but rewrites a field encoding nobody asked to change.
+
+**測試**：T331a–e 釘住空的最後一筆（單欄、CRLF、stdout、修改後的筆數、lines 檔）；T331f 釘住另一個方向——有自己
+位元組的最後一筆仍不補結尾換行，確認修正沒有過頭。負控組：同一組指令在 Homebrew 的 0.1.6 上，a–e 五項失敗、f 通過。

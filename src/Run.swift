@@ -2196,11 +2196,22 @@ func runEdit(_ o: Options) throws {
     // 一個行尾換成另一個——它照舊變成 LF。偏移量與行數都把扣著的那個位元組算進去：對它之後的每一筆
     // 都是對的，在最後一筆之後則無關緊要。RK。
     var heldLF = false
+    // RL. A record that encodes to nothing but its LF -- one empty field in a
+    // one-column file -- exists only through that newline, so for it the held
+    // LF is the record itself and is written even when the input had no final
+    // newline. Without this, 'a\nx' edited to an empty last record came out as
+    // 'a\n': one record fewer, rc 0. Writing `""` instead was rejected: it
+    // rewrites a field encoding nobody asked to change.
+    // RL。一筆編碼後只剩 LF 的紀錄——單欄檔案裡的一個空欄位——只靠那個換行而存在，所以對它來說扣著的
+    // LF 就是紀錄本身，即使輸入沒有結尾換行也照寫。少了這一條，'a\nx' 把最後一筆改成空值後寫出
+    // 'a\n'：少一筆，rc 0。否決了改寫成 `""`：那會改動一個沒人要求改的欄位編碼。
+    var heldRecordIsEmpty = false
     func emit(_ r: Record) {
         if o.dryRun { return }
         let bytes = FieldEncoder.encodeRecord(r, format: plan.format, preserveRaw: true)
         if heldLF { sink.write([BYTE_LF]) }
         heldLF = bytes.last == BYTE_LF
+        heldRecordIsEmpty = heldLF && bytes.count == 1
         sink.write(heldLF ? Array(bytes.dropLast()) : bytes)
         outOffset += bytes.count
         outLine += bytes.filter { $0 == BYTE_LF }.count
@@ -2660,7 +2671,7 @@ func runEdit(_ o: Options) throws {
     // path gives, which T202b pins for a file whose last record was cut off.
     // -append 是例外：它加上的紀錄是新的、由 csv2 寫出，因此和 csv2 寫出的每一筆一樣帶著行尾——與
     // 快速路徑給的答案相同，而 T202b 對「最後一筆被切斷」的檔案釘住了那個答案。
-    if heldLF && (!parser.endedWithoutNewline || !appends.isEmpty) { sink.write([BYTE_LF]) }
+    if heldLF && (!parser.endedWithoutNewline || !appends.isEmpty || heldRecordIsEmpty) { sink.write([BYTE_LF]) }
     plan.source.close()
     try sink.close()
     aborted = false
