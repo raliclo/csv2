@@ -734,6 +734,20 @@ enum MarkdownOut {
         // 跳脫慣例，正是上面那則註解一直在反對的漂移。
         if out.hasPrefix(" ") { out = "\\x20" + out.dropFirst() }
         if out.hasSuffix(" ") { out = out.dropLast() + "\\x20" }
+        // RV. A cell made only of `-` and `:` (with at least one `-`) is what a
+        // separator cell looks like, and the reader takes a row of them as a
+        // new table's separator, which turns the row above into a header. The
+        // first character goes out as `\x2D` / `\x3A`, which reads back as the
+        // same byte and no longer looks like a separator.
+        // RV。只由 `-` 與 `:` 組成（至少一個 `-`）的儲存格，正是分隔線儲存格的樣子，而讀取端會把
+        // 一整列這樣的格子當成新表的分隔線，讓上一列變成標頭。第一個字元改寫成 `\x2D`／`\x3A`，讀回
+        // 來是同一個位元組，而且不再像分隔線。
+        let body = out.trimmingCharacters(in: .whitespaces)
+        if body.contains("-"), body.allSatisfy({ $0 == "-" || $0 == ":" }),
+           let first = out.firstIndex(where: { $0 == "-" || $0 == ":" }) {
+            let esc = out[first] == "-" ? "\\x2D" : "\\x3A"
+            out.replaceSubrange(first...first, with: esc)
+        }
         return out
     }
 }

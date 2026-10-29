@@ -2052,7 +2052,21 @@ func baseName(_ name: String) -> String {
 /// would put people one column off when they paste the result into `cut`.
 /// 純數字視為欄號，其餘視為欄名。1-based，因為 `cut -f`、`awk $1` 與所有試算表
 /// 都是 1-based；0-based 會讓人把結果貼進 `cut` 時差一格。
+/// A column position already resolved by csv2 itself (-update-where's hit),
+/// carried as a token. It starts with U+001F, which no address a user types
+/// contains, so it is never read as a number-or-name. RQ.
+/// csv2 自己已經解析好的欄位位置（-update-where 的命中），以 token 的形式帶著。它以 U+001F 開頭，
+/// 使用者打的位址不會含有它，所以永遠不會被當成「數字或名字」去讀。RQ。
+let RESOLVED_COLUMN_MARK: Character = "\u{1F}"
+func resolvedColumnToken(_ index: Int) -> String { "\(RESOLVED_COLUMN_MARK)\(index + 1)" }
+func displayColumnToken(_ token: String) -> String {
+    token.first == RESOLVED_COLUMN_MARK ? String(token.dropFirst()) : token
+}
+
 func resolveColumn(_ token: String, header: Record) throws -> Int {
+    if token.first == RESOLVED_COLUMN_MARK, let n = Int(token.dropFirst()), n >= 1, n <= header.count {
+        return n - 1
+    }
     if let n = Int(token) {
         // A number that is ALSO a column name is a guess waiting to happen.
         // The file `2,1` has a column named "2" at position 1 and one named

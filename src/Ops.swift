@@ -131,13 +131,30 @@ final class CSVEmitter: RecordEmitter {
     private let sink: ByteSink
     init(sink: ByteSink) { self.sink = sink }
 
+    /// RS. Set for an --in-place rewrite (-hash, -encrypt, -decrypt): each
+    /// record's LF is held until the next one, and the last is written only
+    /// if the input's last record had one, the rule an edit follows (RK, RL).
+    /// RS。給 --in-place 的改寫用（-hash、-encrypt、-decrypt）：每一筆的 LF 先扣著，等下一筆寫出
+    /// 時才補；最後一筆的只有在輸入的最後一筆本來有時才寫，與編輯遵守的規則相同（RK、RL）。
+    var inputEndedWithoutNewline: (() -> Bool)?
+    private var heldLF = false
+    private var heldIsEmpty = false
+
+    private func write(_ bytes: [UInt8]) {
+        guard inputEndedWithoutNewline != nil else { sink.write(bytes); return }
+        if heldLF { sink.write([BYTE_LF]) }
+        heldLF = bytes.last == BYTE_LF
+        heldIsEmpty = heldLF && bytes.count == 1
+        sink.write(heldLF ? Array(bytes.dropLast()) : bytes)
+    }
+
     func begin(_ ctx: EmitContext) throws {
         guard ctx.withHeader else { return }
         for (i, h) in ctx.headers.enumerated() {
             var r = h
             if ctx.rownum { r.fields.insert(rownumHeaderFields(ctx, row: i), at: 0) }
-            sink.write(FieldEncoder.encodeRecord(r, format: ctx.format,
-                                                 preserveRaw: ctx.preserveRaw))
+            write(FieldEncoder.encodeRecord(r, format: ctx.format,
+                                            preserveRaw: ctx.preserveRaw))
         }
     }
 
@@ -153,8 +170,8 @@ final class CSVEmitter: RecordEmitter {
         // preserveRaw 是「逐欄位」的——沒有原樣位元組的欄位會退回它的值——因此多一個 rownum
         // 欄，不會讓其他欄位失去「照原樣寫出」。整體關掉它，`-r -rownum` 與 `-r` 對同一個檔案
         // 就會給出不同的引號。
-        sink.write(FieldEncoder.encodeRecord(rec, format: ctx.format,
-                                             preserveRaw: ctx.preserveRaw))
+        write(FieldEncoder.encodeRecord(rec, format: ctx.format,
+                                        preserveRaw: ctx.preserveRaw))
     }
 
     /// grep prints `--` between non-adjacent blocks and so does csv2. It is
@@ -162,9 +179,13 @@ final class CSVEmitter: RecordEmitter {
     /// script that treats it as a record gets one bogus row per block.
     /// grep 在不相鄰的區塊之間印 `--`，此處照做。它在說明中被標示為分隔線而
     /// 非資料，否則下游腳本每個區塊會多讀到一筆假的紀錄。
-    func gap(_ ctx: EmitContext) throws { sink.write("--\n") }
+    func gap(_ ctx: EmitContext) throws { write([UInt8]("--\n".utf8)) }
 
-    func end(_ ctx: EmitContext, records: Int, matched: Int) throws {}
+    func end(_ ctx: EmitContext, records: Int, matched: Int) throws {
+        if heldLF, let ended = inputEndedWithoutNewline, !ended() || heldIsEmpty {
+            sink.write([BYTE_LF])
+        }
+    }
 }
 
 // reportEscape and lineEscape are defined in Support.swift; this is why they
@@ -343,6 +364,18 @@ final class JSONEmitter: RecordEmitter {
     init(sink: ByteSink, reportMode: Bool) { self.sink = sink; self.reportMode = reportMode }
 
     func begin(_ ctx: EmitContext) throws {
+        // SB. The header goes into the meta line, header_en and every record's
+        // keys, so a header that is not UTF-8 came out as U+FFFD -- and a
+        // record keyed by "" -- at rc 0. It is refused the way a value is.
+        // SB。標頭會進入 meta 那一行、header_en 以及每一筆紀錄的鍵，所以不是 UTF-8 的標頭原本會以
+        // U+FFFD 輸出——紀錄還以 "" 為鍵——rc 0。現在與值一樣拒絕。
+        for (row, h) in ctx.headers.enumerated() {
+            for (i, f) in h.fields.enumerated() where !JSONOut.canCarry(f.value) {
+                throw fault(
+                    "header row \(row + 1), field \(i + 1) is not valid UTF-8, and JSON is text: --json would put U+FFFD where those bytes are and key the records by it. The locating report names them in hex",
+                    "第 \(row + 1) 列標頭第 \(i + 1) 欄不是合法的 UTF-8，而 JSON 是文字：--json 會在那些位元組的位置放上 U+FFFD，並以它作為紀錄的鍵。定位報告會以十六進位指出它們")
+            }
+        }
         // A record object keys `fields` by column name, and a JSON object
         // cannot hold two values under one key. Emitting both anyway produces a
         // duplicate key: syntactically permitted by RFC 8259, which leaves the
@@ -709,7 +742,7 @@ final class MarkdownEmitter: RecordEmitter {
 enum CellTransform {
     case none
     case encrypt(columns: [Int], key: [UInt8], fingerprint: String, salt: [UInt8], names: [String])
-    case decrypt(columns: [Int], key: [UInt8], names: [String])
+    case decrypt(columns: [Int], keys: [[UInt8]], names: [String])
     /// `key` nil means plain SHA-256: deterministic, so equal values still
     /// compare equal, and dictionary-attackable for exactly that reason. With a
     /// key it is HMAC-SHA256: still deterministic, but an attacker without the
@@ -773,8 +806,9 @@ func applyTransform(_ t: CellTransform, to record: inout Record, header: Record)
             record.fields[c].set([UInt8](B64.encode(blob).utf8))
         }
 
-    case .decrypt(let cols, let key, let names):
+    case .decrypt(let cols, let keys, let names):
         for (n, c) in cols.enumerated() {
+            let key = keys[n]
             guard c < record.count else { continue }
             let text = String(bytes: record.fields[c].value, encoding: .utf8) ?? ""
             guard let blob = B64.decode(text), blob.count >= 28 else {
@@ -1074,28 +1108,45 @@ func buildTransform(_ o: Options, headers: [Record]) throws -> CellTransform {
             markers.append(m)
         }
         let material = try KeySource.loadKeyMaterial(path: o.keyfile, assumeYes: o.assumeYes)
-        let key = KeySource.derive(material: material.bytes, salt: markers[0].salt)
-        let fp = KeySource.fingerprint(key)
-        if fp != markers[0].fingerprint {
+        // One key per column, from that column's own salt. Columns encrypted
+        // in separate runs carry different salts; deriving once from the first
+        // and applying it to all failed the second column with a diagnosis
+        // that blamed the key. Derivation is slow, so each salt is derived once. SA.
+        // 每一欄一把金鑰，由那一欄自己的 salt 推導。分次加密的欄位帶著不同的 salt；只由第一欄推導一次再
+        // 套用到所有欄，會讓第二欄失敗，而診斷怪到金鑰頭上。推導很慢，所以每個 salt 只推導一次。SA。
+        var bySalt: [[UInt8]: [UInt8]] = [:]
+        var keys: [[UInt8]] = []
+        var fps: [String] = []
+        let names = cols.map { baseName(headerName(header.fields[$0])) }
+        for (n, m) in markers.enumerated() {
+            let key: [UInt8]
+            if let k = bySalt[m.salt] { key = k } else {
+                key = KeySource.derive(material: material.bytes, salt: m.salt)
+                bySalt[m.salt] = key
+            }
+            let fp = KeySource.fingerprint(key)
             // Without the fingerprint this shows up as a Poly1305 failure,
             // which reads like file corruption and sends the user to look at
             // the file rather than at the key.
             // 沒有指紋時，這件事會表現為 Poly1305 認證失敗——那看起來像檔案損毀，
             // 會讓使用者去查檔案而不是去查金鑰。
-            throw fault(
-                "this file was encrypted with key fingerprint \(markers[0].fingerprint), and the key you gave derives \(fp) against this file's stored salt; either the key differs, or this header's salt has been altered. A regenerated key -- mssh-keygen -- is the usual cause",
-                "本檔案以指紋 \(markers[0].fingerprint) 的金鑰加密，而你給的金鑰對這個檔案存下的 salt 推導出 \(fp)；可能是金鑰不同，也可能是這個標頭的 salt 被改動過。最常見的原因是金鑰被 mssh-keygen 重新產生")
+            if fp != m.fingerprint {
+                throw fault(
+                    "column \(names[n]) was encrypted with key fingerprint \(m.fingerprint), and the key you gave derives \(fp) against that column's stored salt; either the key differs, or this header's salt has been altered. A regenerated key -- mssh-keygen -- is the usual cause",
+                    "欄位 \(names[n]) 以指紋 \(m.fingerprint) 的金鑰加密，而你給的金鑰對那一欄存下的 salt 推導出 \(fp)；可能是金鑰不同，也可能是這個標頭的 salt 被改動過。最常見的原因是金鑰被 mssh-keygen 重新產生")
+            }
+            keys.append(key)
+            if !fps.contains(fp) { fps.append(fp) }
         }
-        let names = cols.map { baseName(headerName(header.fields[$0])) }
-        Logger.shared.redactedColumns = Set(names)
         // Logged like -encrypt and -hash: decrypting takes data out, and "who
         // opened this column, with which key" is the line somebody comes
         // looking for. The README's log table promises the fingerprint for
         // -decrypt too. Round 40, defect UU.
         // 與 -encrypt、-hash 一樣要記錄：解密是把資料拿出來，而「誰用哪一把金鑰把這一欄打開了」
         // 正是日後有人會來找的那一行。README 的 log 表也為 -decrypt 承諾了指紋。第 40 回合，缺陷 UU。
-        Logger.shared.info("decrypting columns \(names.joined(separator: ",")) with key \(material.path) (fingerprint \(fp))")
-        return .decrypt(columns: cols, key: key, names: names)
+        Logger.shared.redactedColumns = Set(names)
+        Logger.shared.info("decrypting columns \(names.joined(separator: ",")) with key \(material.path) (fingerprint \(fps.joined(separator: ",")))")
+        return .decrypt(columns: cols, keys: keys, names: names)
     }
     return .none
 }

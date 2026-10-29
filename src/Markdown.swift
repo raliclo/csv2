@@ -239,9 +239,14 @@ extension MarkdownIn {
         // 每一行連同它的行號，讓一句拒絕說得出「在哪裡」。
         var lines: [(no: Int, text: String)] = []
         var n = 0
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        // Split on scalars, not Characters: in Swift "\r\n" is ONE Character,
+        // so splitting on "\n" never broke a CRLF line, and a CRLF table was
+        // reported as having no separator line. RT.
+        // 以 scalar 切，不是以 Character 切：在 Swift 裡 "\r\n" 是**一個** Character，所以以 "\n"
+        // 切永遠切不開 CRLF 的行，CRLF 的表就被回報成沒有分隔線。RT。
+        for raw in text.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false) {
             n += 1
-            var l = String(raw)
+            var l = String(String.UnicodeScalarView(raw))
             if l.hasSuffix("\r") { l.removeLast() }
             lines.append((n, l))
         }

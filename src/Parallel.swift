@@ -372,17 +372,23 @@ private func planChunks(path: String, from headEnd: UInt64, size: UInt64) throws
         // 峰值 RSS 便接近輸入大小（615 MB 的檔案常駐 608 MB，單執行緒只有 9.5 MB）。與
         // `ByteSource.next` 及下方工作者讀取迴圈是同一個缺陷；見 Platform.drainingPool。
         var count = 0
+        var lastByte: UInt8?
         while remaining > 0 {
             let n = Platform.drainingPool { () -> Int in
                 let want = min(remaining, 1 << 20)
                 let d = h.readData(ofLength: want)
                 if d.isEmpty { return 0 }
                 for b in d where b == BYTE_LF { count += 1 }
+                lastByte = d.last
                 return d.count
             }
             if n == 0 { break }
             remaining -= n
         }
+        // A last record with no final newline is a record too; counting LFs
+        // alone made --json's meta say one fewer than were matched. RX.
+        // 沒有結尾換行的最後一筆也是一筆；只數 LF，會讓 --json 的 meta 說得比命中的還少一筆。RX。
+        if i == spans.count - 1, let b = lastByte, b != BYTE_LF { count += 1 }
         spans[i].firstRecord = running
         spans[i].records = count
         running += count
@@ -487,7 +493,7 @@ func runParallelSearch(_ o: Options) throws {
     if o.includeHeaders {
         let e: RecordEmitter = o.json ? JSONEmitter(sink: outSink, reportMode: true)
                                       : ReportEmitter(sink: outSink, needle: needle)
-        for h in headers {
+        for (row, h) in headers.enumerated() {
             var hits: [Int] = []
             for (i, f) in h.fields.enumerated() {
                 let hay = o.normalize ? normalizedBytes(f.value) : f.value
@@ -496,6 +502,12 @@ func runParallelSearch(_ o: Options) throws {
             if !hits.isEmpty {
                 var hh = h
                 hh.number = 0
+                // Which header row, as the single-threaded path sets it: without
+                // it a `.csv2` header hit printed `0:` instead of `0a:`/`0b:`,
+                // and --a1 named the wrong row. RW.
+                // 第幾列標頭，與單執行緒路徑的設定相同：少了它，`.csv2` 的標頭命中印成 `0:` 而不是
+                // `0a:`／`0b:`，--a1 也指到錯的那一列。RW。
+                hh.headerRow = row
                 try e.emit(hh, matches: hits, ctx: ctx)
             }
         }

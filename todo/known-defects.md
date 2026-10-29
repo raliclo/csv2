@@ -14444,7 +14444,7 @@ $ csv2 -delete 2 -i b.csv -so | xxd -p
 筆數正確；之後的 `-append` 會補回分隔。但一筆沒被編輯的紀錄少了自己的結尾位元組。RK 的規則是「輸出最後一筆照輸入最後一筆
 的方式結束」，沒有測試釘住這種情況的任一種讀法。**需要使用者決定**：保留前一筆原有的 LF，或維持現狀並寫明。
 
-## RQ. 欄名是數字時，`-update-where` 拒絕一個唯一的命中
+## RQ. 欄名是數字時，`-update-where` 拒絕一個唯一的命中（2026-10-29 修正，T340a–b）
 
 ```console
 $ printf '2,1\na,b\n' > nm.csv
@@ -14455,7 +14455,7 @@ csv2: "2" is both a column NUMBER and the NAME of a column (position 1); ... add
 `-contains b` 只命中一格。原因：命中的欄位被轉回數字字串再解析一次。使用者沒有打過那個位址，訊息給的建議也無從照做。
 應該：內部直接帶著已解析的欄位編號。
 
-## RS. `-hash --in-place` 仍替沒有結尾換行的檔案補上一個（RK 沒涵蓋到）
+## RS. `-hash --in-place` 仍替沒有結尾換行的檔案補上一個（RK 沒涵蓋到）（2026-10-29 修正，T341a–c）
 
 ```console
 $ printf 'h,k\n1,a' > f.csv; csv2 -hash k -i f.csv --in-place; tail -c 1 f.csv | xxd -p
@@ -14464,7 +14464,7 @@ $ printf 'h,k\n1,a' > f.csv; csv2 -hash k -i f.csv --in-place; tail -c 1 f.csv |
 
 它走 `runSelect`，不是 `runEdit`。RK 的決定是「編輯不補結尾換行」；`--in-place` 的改寫算不算編輯，需要確認範圍。
 
-## RT. CRLF 的 Markdown 表讀不了，而且錯誤訊息講錯原因
+## RT. CRLF 的 Markdown 表讀不了，而且錯誤訊息講錯原因（2026-10-29 修正，T342a–b）
 
 ```console
 $ printf '| a | b |\r\n|---|---|\r\n| 1 | 2 |\r\n' > m4.md
@@ -14498,7 +14498,7 @@ stdout or stderr, at -O and -Onone alike -- libdispatch trapping when it cannot 
 descriptor. The parallel path is now declined when the open-file limit is under 64 (T332b), and
 the worker's open failure is an error as the second line.
 
-## RV. `-md` 寫出的 Markdown，資料列像分隔線時讀回來是錯的
+## RV. `-md` 寫出的 Markdown，資料列像分隔線時讀回來是錯的（2026-10-29 修正，T343）
 
 ```console
 $ printf 'a,b\n1,2\n---,:-:\n3,4\n5,6\n' > dash.csv; csv2 -md -t -i dash.csv -o dash.md; echo $?
@@ -14513,7 +14513,7 @@ $ csv2 -r -i dash.md --md-table 2
 `-md` 不跳脫只由 `-`／`:` 組成的儲存格，而讀取端（RG 之後）把它當成新表的分隔線。審查回報另外指出 `-append --md-table 1 --in-place`
 會把新列插在既有資料前面。應該：`-md` 跳脫這種儲存格，讓自己的輸出讀得回來。
 
-## RW. 平行路徑的 `--include-headers` 在 `.csv2` 上丟掉 0a/0b 標記（HG 在平行路徑上重現）
+## RW. 平行路徑的 `--include-headers` 在 `.csv2` 上丟掉 0a/0b 標記（HG 在平行路徑上重現）（2026-10-29 修正，T344a）
 
 ```console
 $ CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=700 csv2 -contains a -i final.csv2 --include-headers | head -1
@@ -14524,7 +14524,7 @@ $ CSV2_PARALLEL_MIN_BYTES=999999999 csv2 -contains a -i final.csv2 --include-hea
 
 原因：`src/Parallel.swift` 設了 `hh.number = 0` 卻沒設 `hh.headerRow`。審查回報另指出 `--a1` 因此指向錯的儲存格。應該：與單執行緒路徑逐位元組相同。
 
-## RX. 平行路徑 `--json` 的 meta `records` 在 `.csv` 沒有結尾換行時少一筆
+## RX. 平行路徑 `--json` 的 meta `records` 在 `.csv` 沒有結尾換行時少一筆（2026-10-29 修正，T344b）
 
 ```console
 $ CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=1024 csv2 -contains x -i nofinal.csv --json | tail -1
@@ -14568,7 +14568,7 @@ bob,100
 原因：AAD 只有欄名（`src/Ops.swift`），沒有綁定紀錄。認證失敗的訊息還說 tag 偵測得到「儲存格被改過」。
 應該：把一個在紀錄間穩定的值綁進 AAD，或在 README 寫明儲存格只按欄認證、不按位置。**需要使用者決定**（改 AAD 會讓既有密文無法解開）。
 
-## SA. 分兩次加密的兩欄，`-decrypt` 一次解時以錯誤的診斷失敗
+## SA. 分兩次加密的兩欄，`-decrypt` 一次解時以錯誤的診斷失敗（2026-10-29 修正，T345a–b）
 
 ```console
 $ csv2 -encrypt a ... -o two1.csv; csv2 -encrypt b ... -i two1.csv -o two2.csv
@@ -14579,7 +14579,7 @@ csv2: authentication failed at record 1, column b -- ... the key is not the one 
 
 同一把鑰匙逐欄解開都成功。原因：金鑰只由第一欄的 salt 衍生、只檢查第一欄的指紋，卻套用到每一欄。應該：每欄以自己的 salt 衍生並檢查。
 
-## SB. `--json` 遇到非 UTF-8 的標頭時安靜地失真，紀錄以 "" 為鍵
+## SB. `--json` 遇到非 UTF-8 的標頭時安靜地失真，紀錄以 "" 為鍵（2026-10-29 修正，T346a–b）
 
 ```console
 $ printf 'caf\xe9,b\n1,2\n' > lh.csv; csv2 -r -t --json -i lh.csv; echo $?
@@ -14600,3 +14600,26 @@ $ printf 'caf\xe9,b\n1,2\n' > lh.csv; csv2 -r -t --json -i lh.csv; echo $?
   假設 PATH 寫進 `.bashrc`，但 `rc_files` 寫的是 `~/.profile`；`verifications/measure_parallel_rss.zsh` 的 Linux 輸出檔名
   不含架構，guest 與 WSL 會互相覆蓋；`loggedArg` 的說明說它不跳脫，但它呼叫了 `reportEscape`；`RecordParser.endRecord` 的一則
   錯誤訊息字串仍寫著「until 2026-08-26 ...」。
+
+## SC. lines 檔的 `-update --value-file`，值檔以換行結尾時，拒絕訊息講錯原因（2026-10-29 回報，同日修正，T339a–b；README 加上把一行換成好幾行的做法，T347）
+
+使用者回報「`--value-file` 也一樣被拒絕」。實測（`csv2 0.1.7 (v0.1.7 / f563f75d)`）：
+
+```console
+$ printf 'class A {\n  int x = 1;\n}\n' > A.txt
+$ printf '  String s = "a, b";\n' > v.txt          # 編輯器與 echo 都會在結尾加一個換行
+$ csv2 -update 2:1 --value-file v.txt -i A.txt -so; echo $?
+csv2: -update 2:1: the value spans more than one record
+1
+$ printf '  String s = "a, b";' > v2.txt
+$ csv2 -update 2:1 --value-file v2.txt -i A.txt -so   # 沒有結尾換行：照常寫入
+```
+
+拒絕本身是對的：`--value-file` 原樣保留每個位元組（README），而在 lines 檔裡換行就是紀錄的結尾（RN）。缺陷是訊息：
+值只有一行、外加一個結尾換行時，說它「跨越不只一筆紀錄」會讓人去找一個不存在的第二行。應該：只有結尾一個換行時，
+說出那個換行，並給出去掉它的寫法。另外確認了：含逗號與引號的 Java 行在 lines 檔裡不會被當成 CSV 拆開，同一次呼叫裡
+的多個 `-insert` 也各自落在正確的位置。
+
+Refusing is right -- --value-file keeps every byte, and in a lines file a newline ends the
+record -- but "spans more than one record" is wrong for one line plus its trailing newline. The
+message should name that newline and how to drop it.

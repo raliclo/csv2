@@ -702,6 +702,25 @@ literal value or with `-si`. `--value-file -` is not stdin; it is a file named
 directory, a device such as `/dev/null`, and a missing path are each refused
 with the path and the reason named.
 
+**In a lines file a value is one line.** A `.lines` record is one line, so a
+value holding a newline cannot be stored in one cell, and `-update` refuses it,
+`--value-file` included. A value file written by `echo` or an editor usually
+ends with a newline; write it with `printf '%s'` instead. To replace one line
+with several, use one call: `-update` for the first line and `-insert` for
+each of the rest. Every position refers to the original file, so the rest all
+go before the line that followed:
+
+```sh
+# line 2 becomes three lines (the middle one empty)
+csv2 -update 2:1 '  String s = "a, b";' -insert 3 '' -insert 3 '  foo(1, "x");' \
+    -i Example.txt --in-place
+```
+
+Commas, quotes and empty lines are kept as typed. When the line being
+replaced is the last one, add the rest with `-append`, since `-insert`
+cannot point past the end. In a `.csv` none of this is needed: a value with
+newlines is quoted and kept in one cell.
+
 `--in-place` works with `--value-stdin` — the "refuses stdin" rule elsewhere on
 this page is about `-si`, the INPUT, not about where a value comes from.
 

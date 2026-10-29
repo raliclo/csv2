@@ -1383,6 +1383,12 @@ func runSelect(_ o: Options) throws {
         }
     }
 
+    // RS. An --in-place rewrite ends the way its input did, as an edit does.
+    // RS。--in-place 的改寫與編輯一樣，以輸入的方式結束。
+    if o.inPlace, o.hashCols != nil || o.encryptCols != nil || o.decryptCols != nil,
+       let csvOut = emitter as? CSVEmitter {
+        csvOut.inputEndedWithoutNewline = { parser.endedWithoutNewline }
+    }
     while !parser.stopped, let chunk = plan.source.next() {
         try parser.feed(chunk)
     }
@@ -1716,7 +1722,10 @@ func runEdit(_ o: Options) throws {
                     "-update-where edits overlap at \(key); refusing to choose which value should survive",
                     "-update-where 編輯在 \(key) 重疊；拒絕猜測哪一個值應該留下")
             }
-            updates[hit.record, default: []].append((String(hit.column), [UInt8](anchored[i].1.utf8)))
+            // The resolved position, not the number as text: a column whose NAME
+            // is a number would make the text ambiguous. RQ.
+            // 帶著已解析的位置，而不是數字的文字：名字是數字的欄位會讓那段文字變得有歧義。RQ。
+            updates[hit.record, default: []].append((resolvedColumnToken(hit.column - 1), [UInt8](anchored[i].1.utf8)))
         }
         scan.close()
         // Same reason as the scan's own open: this rewind feeds the MAIN pass,
@@ -1960,13 +1969,22 @@ func runEdit(_ o: Options) throws {
     if plan.format == .lines {
         for (record, ups) in updates.sorted(by: { $0.key < $1.key }) {
             for (column, value) in ups {
+                // SC. A value whose only LF is its last byte is one line plus the
+                // newline an editor or `echo` adds; say that, not "more than one
+                // record", which sends the reader looking for a second line.
+                // SC。唯一的 LF 是最後一個位元組的值，是一行加上編輯器或 `echo` 補的換行；要說出這件事，
+                // 而不是「不只一筆紀錄」——那會讓人去找一個不存在的第二行。
+                if value.last == BYTE_LF && value.dropLast().allSatisfy({ $0 != BYTE_LF && $0 != BYTE_CR }) {
+                    throw fault("-update \(record):\(displayColumnToken(column)): the value ends with a newline, and in a lines file a newline ends the record. Remove it, for example write the value with printf '%s' instead of echo",
+                                "-update \(record):\(displayColumnToken(column))：這個值以換行結尾，而在 lines 檔裡換行就是紀錄的結尾。請去掉它，例如改用 printf '%s' 而不是 echo 寫出值")
+                }
                 if value.contains(BYTE_LF) {
-                    throw fault("-update \(record):\(column): the value spans more than one record",
-                                "-update \(record):\(column)：這個值跨越了不只一筆紀錄")
+                    throw fault("-update \(record):\(displayColumnToken(column)): the value spans more than one record",
+                                "-update \(record):\(displayColumnToken(column))：這個值跨越了不只一筆紀錄")
                 }
                 if value.last == BYTE_CR {
-                    throw fault("-update \(record):\(column): in a lines file a value cannot end with a carriage return; it would read back as part of the line ending",
-                                "-update \(record):\(column)：在 lines 檔裡，值不能以歸位字元結尾；讀回時它會成為行尾的一部分")
+                    throw fault("-update \(record):\(displayColumnToken(column)): in a lines file a value cannot end with a carriage return; it would read back as part of the line ending",
+                                "-update \(record):\(displayColumnToken(column))：在 lines 檔裡，值不能以歸位字元結尾；讀回時它會成為行尾的一部分")
                 }
             }
         }

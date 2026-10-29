@@ -564,6 +564,20 @@ printf 'from a pipe' | csv2 -update 1:3 --value-stdin -i data.csv --in-place
 stdin，它是一個名字叫 `-` 的檔案。一個空的**一般**檔案會被接受並把那一格清空（rc=0）；而一個目錄、
 一個像 `/dev/null` 的裝置、以及一個不存在的路徑，都會被拒絕，並指名路徑與理由。
 
+**在 lines 檔裡，一個值就是一行。** `.lines` 的一筆紀錄是一行，所以含換行的值放不進一格，`-update`
+會拒絕它，`--value-file` 也一樣。用 `echo` 或編輯器寫出的值檔通常以換行結尾；請改用 `printf '%s'` 寫。
+要把一行換成好幾行，就在同一次呼叫裡：第一行用 `-update`，其餘每一行用 `-insert`。每個位置都指向原始檔，
+所以其餘幾行都插在原本的下一行之前：
+
+```sh
+# 第 2 行變成三行（中間那行是空的）
+csv2 -update 2:1 '  String s = "a, b";' -insert 3 '' -insert 3 '  foo(1, "x");' \
+    -i Example.txt --in-place
+```
+
+逗號、引號與空行都照原樣保留。要換的是最後一行時，其餘幾行用 `-append` 加上，因為 `-insert` 不能指到
+結尾之後。`.csv` 不需要這些：含換行的值會加上引號，留在同一格裡。
+
 `--in-place` 可以與 `--value-stdin` 併用——這一頁別處那條「拒絕 stdin」講的是 `-si`（**輸入**），
 不是「值從哪裡來」。
 

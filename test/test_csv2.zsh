@@ -18211,6 +18211,152 @@ _t338_b=$("$CSV2" -get 2:salary -i "$_t338/enc.csv" 2>/dev/null)
 assert_eq "$("$CSV2" -decrypt salary -keyfile "$_t338/key.bin" -i "$_t338/swap.csv" 2>&1 | tr '\n' ' ')" "name,salary alice,999999 bob,100 " \
     "T338b as documented, ciphertexts swapped within a column decrypt without error / 如文件所述，同欄互換的密文會無錯誤地解開"
 
+echo "--- T339: a lines value ending in one newline is refused for that reason / T339：lines 值只以一個換行結尾時，以這個理由拒絕 ---"
+# SC. A value file written by echo or an editor ends in a newline. In a lines
+# file that newline ends the record, so the value is refused, but the
+# message said "more than one record", which sends the reader looking for a
+# second line. A value with an LF in its middle still gets that message (b).
+# SC。用 echo 或編輯器寫出的值檔以換行結尾。在 lines 檔裡那個換行就是紀錄的結尾，所以這個值被拒絕；
+# 但訊息說「不只一筆紀錄」，會讓人去找一個不存在的第二行。值的中間有 LF 時仍給那則訊息（b）。
+_t339=$TMP/t339
+mkdir -p "$_t339"
+printf 'x\ny\n' > "$_t339/a.txt"
+printf 'v\n' > "$_t339/v.txt"
+assert_eq "$("$CSV2" -update 2:1 --value-file "$_t339/v.txt" -i "$_t339/a.txt" -so 2>&1 >/dev/null | grep -c 'ends with a newline')" "1" \
+    "T339a a value file ending in a newline is refused, naming that newline / 以換行結尾的值檔被拒絕，並指出那個換行"
+printf 'v\nw' > "$_t339/w.txt"
+assert_eq "$("$CSV2" -update 2:1 --value-file "$_t339/w.txt" -i "$_t339/a.txt" -so 2>&1 >/dev/null | grep -c 'spans more than one record')" "1" \
+    "T339b an LF inside the value still says more than one record / 值中間有 LF 時仍說不只一筆紀錄"
+
+echo "--- T340: -update-where edits a hit in a column whose name is a number / T340：-update-where 改得了欄名是數字的欄位裡的命中 ---"
+# RQ. The hit's column was turned back into a number as text, and a column
+# NAMED "2" made that text ambiguous, so a single unambiguous hit was
+# refused with advice the user could not follow.
+# RQ。命中的欄位被轉回數字文字，而名叫「2」的欄位讓那段文字有了歧義，於是一個明確的命中被拒絕，給的建議還無從照做。
+printf '2,1\na,b\n' > "$TMP/t340.csv"
+assert_eq "$("$CSV2" -update-where b Z -i "$TMP/t340.csv" -so 2>&1 | tr '\n' ' ')" "2,1 a,Z " \
+    "T340a the one hit is edited / 那唯一的命中被改到"
+assert_eq "$("$CSV2" -update 1:2 Z -i "$TMP/t340.csv" -so 2>&1 >/dev/null | grep -c 'both a column NUMBER and the NAME')" "1" \
+    "T340b a typed address that is both a number and a name is still refused / 使用者打的位址同時是數字與名字時仍被拒絕"
+
+echo "--- T341: an --in-place transform keeps a missing final newline missing / T341：--in-place 的轉換保留「沒有結尾換行」 ---"
+# RS. -hash, -encrypt and -decrypt --in-place go through the select path,
+# which ended every record in LF, so a file with no final newline gained one.
+# An edit had stopped doing that (RK); a rewrite in place now follows it.
+# RS。-hash、-encrypt、-decrypt --in-place 走的是選取路徑，那裡每一筆都以 LF 結束，所以沒有結尾換行的
+# 檔案會多出一個。編輯早已不這麼做（RK）；現在就地改寫也照做。
+_t341=$TMP/t341
+mkdir -p "$_t341"
+printf 'h,k\n1,a' > "$_t341/f.csv"
+"$CSV2" -hash k -i "$_t341/f.csv" --in-place 2>/dev/null
+assert_eq "$(tail -c 1 "$_t341/f.csv" | od -An -c | tr -d ' ')" "b" \
+    "T341a -hash --in-place adds no final newline / -hash --in-place 不補結尾換行"
+printf 'h,k\n1,a\n' > "$_t341/g.csv"
+"$CSV2" -hash k -i "$_t341/g.csv" --in-place 2>/dev/null
+assert_eq "$(tail -c 1 "$_t341/g.csv" | od -An -c | tr -d ' ')" '\n' \
+    "T341b a file that ended in LF keeps it / 原本以 LF 結尾的檔案保留它"
+head -c 32 /dev/urandom > "$_t341/k"
+printf 'h,k\n1,a' > "$_t341/e.csv"
+"$CSV2" -encrypt k -keyfile "$_t341/k" -i "$_t341/e.csv" --in-place 2>/dev/null
+"$CSV2" -decrypt k -keyfile "$_t341/k" -i "$_t341/e.csv" --in-place 2>/dev/null
+assert_eq "$(_t330_bytes "$_t341/e.csv")" " h , k \\n 1 , a " \
+    "T341c -encrypt then -decrypt in place gives back the original bytes / 就地加密再解密，交回原本的位元組"
+
+echo "--- T342: a Markdown table with CRLF line endings is read / T342：CRLF 行尾的 Markdown 表讀得了 ---"
+# RT. In Swift "\r\n" is one Character, so splitting on "\n" never broke a
+# CRLF line and the table was reported as having no separator.
+# RT。在 Swift 裡 "\r\n" 是一個 Character，所以以 "\n" 切永遠切不開 CRLF 的行，表就被回報成沒有分隔線。
+printf '| a | b |\r\n|---|---|\r\n| 1 | 2 |\r\n' > "$TMP/t342.md"
+assert_eq "$("$CSV2" -r -t -i "$TMP/t342.md" 2>&1 | tr '\n' ' ')" "a,b 1,2 " \
+    "T342a a CRLF Markdown table reads as its rows / CRLF 的 Markdown 表讀出它的各列"
+printf 'x\r\n\r\n| a | b |\r\n|---|---|\r\n| 1 | 2 |\r\n' > "$TMP/t342b.md"
+"$CSV2" -update 1:2 X -i "$TMP/t342b.md" -md -t --md-table 1 --in-place 2>/dev/null
+assert_eq "$? $("$CSV2" -r -t -i "$TMP/t342b.md" --md-table 1 2>&1 | tr '\n' ' ')" "0 a,b 1,X " \
+    "T342b and is edited in place / 而且可以就地編輯"
+
+echo "--- T343: a row that looks like a separator survives -md and back / T343：看起來像分隔線的一列，經 -md 寫出再讀回仍完整 ---"
+# RV. -md wrote a cell of only dashes and colons as it was, and the reader
+# took a row of them as a new table's separator: the row above became a
+# header and three records were lost at rc 0. The first character is now
+# written as \x2D / \x3A.
+# RV。-md 把只由破折號與冒號組成的儲存格照原樣寫出，而讀取端把一整列這樣的格子當成新表的分隔線：上一列
+# 成了標頭，三筆紀錄在 rc 0 下不見了。現在第一個字元寫成 \x2D／\x3A。
+printf 'a,b\n1,2\n---,:-:\n3,4\n5,6\n' > "$TMP/t343.csv"
+"$CSV2" -md -t -i "$TMP/t343.csv" -o "$TMP/t343.md" 2>/dev/null
+"$CSV2" -r -t -i "$TMP/t343.md" -o "$TMP/t343.back.csv" 2>/dev/null
+assert_eq "$? $(cmp -s "$TMP/t343.csv" "$TMP/t343.back.csv" && print same)" "0 same" \
+    "T343 a dash-only row round-trips byte for byte through -md / 只有破折號的一列經 -md 往返逐位元組相同"
+
+echo "--- T344: the parallel search agrees with the serial one on .csv2 headers and on a missing final newline / T344：平行搜尋在 .csv2 標頭與缺少結尾換行時與單執行緒一致 ---"
+# RW. The parallel path set a header hit's record to 0 but not which header
+# row, so a .csv2 header hit printed 0: instead of 0a:/0b:. RX. It counted
+# records by LF, so --json's meta said one fewer when the file had no final
+# newline.
+# RW。平行路徑把標頭命中的紀錄號設成 0，卻沒設是哪一列標頭，於是 .csv2 的標頭命中印成 0: 而不是 0a:／0b:。
+# RX。它以 LF 計數紀錄，所以檔案沒有結尾換行時，--json 的 meta 少一筆。
+_t344=$TMP/t344
+mkdir -p "$_t344"
+{ print 'name,val'; print '名,值'; for _i in {1..3000}; do print "r$_i,v${_i}x"; done } > "$_t344/h.csv2"
+for _a in "-contains a --include-headers" "-contains 值 --include-headers --json" "-contains name --include-headers --a1"; do
+    _p=$(eval CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=700 '"$CSV2"' $_a -i '"$_t344/h.csv2"' 2>&1)
+    _s=$(eval CSV2_PARALLEL_MIN_BYTES=999999999 '"$CSV2"' $_a -i '"$_t344/h.csv2"' 2>&1)
+    assert_eq "$_p" "$_s" "T344a parallel equals serial: $_a / 平行與單執行緒相同：$_a"
+done
+{ print 'k,v'; for _i in {1..1999}; do print "r$_i,x$_i"; done; printf 'r2000,x2000'; } > "$_t344/n.csv"
+"$CSV2" --build-index -i "$_t344/n.csv" >/dev/null 2>&1
+assert_eq "$(CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=1024 "$CSV2" -contains x -i "$_t344/n.csv" --json 2>&1 | tail -1)" \
+    '{"meta":{"records":2000,"matched":2000}}' \
+    "T344b parallel --json counts an unterminated last record / 平行 --json 算進沒有結尾換行的最後一筆"
+
+echo "--- T345: -decrypt opens columns encrypted in separate runs / T345：-decrypt 解得開分次加密的欄位 ---"
+# SA. The key was derived from the first column's salt and applied to every
+# column, so the second of two separately encrypted columns failed with a
+# diagnosis that blamed the key. A wrong key is still named, by column (b).
+# SA。金鑰只由第一欄的 salt 推導再套用到每一欄，所以分次加密的第二欄會失敗，而診斷怪到金鑰頭上。
+# 金鑰錯時仍會指出，並說是哪一欄（b）。
+_t345=$TMP/t345
+mkdir -p "$_t345"
+head -c 32 /dev/urandom > "$_t345/k"
+head -c 32 /dev/urandom > "$_t345/k2"
+printf 'a,b\n1,2\n3,4\n' > "$_t345/p.csv"
+"$CSV2" -encrypt a -keyfile "$_t345/k" -i "$_t345/p.csv" -o "$_t345/1.csv" 2>/dev/null
+"$CSV2" -encrypt b -keyfile "$_t345/k" -i "$_t345/1.csv" -o "$_t345/2.csv" 2>/dev/null
+assert_eq "$("$CSV2" -decrypt all -keyfile "$_t345/k" -i "$_t345/2.csv" 2>&1 | tr '\n' ' ')" "a,b 1,2 3,4 " \
+    "T345a two columns encrypted in separate runs decrypt together / 分次加密的兩欄一起解開"
+assert_eq "$("$CSV2" -decrypt all -keyfile "$_t345/k2" -i "$_t345/2.csv" 2>&1 | grep -c '^csv2: column a was encrypted with key fingerprint')" "1" \
+    "T345b a wrong key is refused, naming the column / 錯的金鑰被拒絕，並指出欄位"
+
+echo "--- T346: --json refuses a header that is not UTF-8 / T346：--json 拒絕不是 UTF-8 的標頭 ---"
+# SB. Values that are not UTF-8 were refused (FE), headers were not: the
+# meta line carried U+FFFD and records were keyed by "", at rc 0.
+# SB。不是 UTF-8 的值會被拒絕（FE），標頭卻不會：meta 那一行帶著 U+FFFD，紀錄以 "" 為鍵，rc 0。
+printf 'caf\xe9,b\n1,2\n' > "$TMP/t346.csv"
+"$CSV2" -r -t --json -i "$TMP/t346.csv" > "$TMP/t346.out" 2>&1
+assert_eq "$? $(grep -c '"code":"invalid-input"' "$TMP/t346.out")" "1 1" \
+    "T346a a non-UTF-8 header is refused as invalid-input / 不是 UTF-8 的標頭以 invalid-input 拒絕"
+assert_eq "$(printf 'café,b\n1,2\n' | "$CSV2" -r -t --json -si --headers 1 2>&1 | head -1)" '{"meta":{"format":"csv","headers":1,"fields":2,"header":["café","b"]}}' \
+    "T346b a UTF-8 header is carried as before / UTF-8 的標頭照常輸出"
+
+echo "--- T347: the README's recipe for replacing one line of a lines file with several / T347：README 裡把 lines 檔的一行換成好幾行的做法 ---"
+# The README tells users to do this in one call: -update for the first line,
+# -insert for the rest, every position naming the original file, and -append
+# when the line replaced is the last. This pins that recipe, with commas,
+# quotes and an empty line in it.
+# README 教使用者在同一次呼叫裡這樣做：第一行用 -update，其餘用 -insert，每個位置都指原始檔；要換的是最後
+# 一行時用 -append。這裡釘住那個做法，內容含逗號、引號與空行。
+_t347=$TMP/t347
+mkdir -p "$_t347"
+printf 'class A {\n  int x = 1;\n}\n' > "$_t347/Example.txt"
+"$CSV2" -update 2:1 '  String s = "a, b";' -insert 3 '' -insert 3 '  foo(1, "x");' -i "$_t347/Example.txt" --in-place 2>/dev/null
+assert_eq "$(<"$_t347/Example.txt")" $'class A {\n  String s = "a, b";\n\n  foo(1, "x");\n}' \
+    "T347a line 2 becomes three lines, kept as typed / 第 2 行變成三行，照原樣保留"
+printf 'a\nb\nc' > "$_t347/last.txt"
+"$CSV2" -update 3:1 C1 -append C2 -i "$_t347/last.txt" --in-place 2>/dev/null
+assert_eq "$(_t330_bytes "$_t347/last.txt")" " a \\n b \\n C 1 \\n C 2 \\n " \
+    "T347b the last line is replaced with -update and -append / 最後一行以 -update 與 -append 取代"
+assert_eq "$(grep -c 'In a lines file a value is one line' "$ROOT/README.md") $(grep -c '在 lines 檔裡，一個值就是一行' "$ROOT/README.zh-TW.md")" "1 1" \
+    "T347c both READMEs carry the recipe / 兩份 README 都寫著這個做法"
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
