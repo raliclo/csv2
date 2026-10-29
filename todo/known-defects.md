@@ -14623,3 +14623,124 @@ $ csv2 -update 2:1 --value-file v2.txt -i A.txt -so   # 沒有結尾換行：照
 Refusing is right -- --value-file keeps every byte, and in a lines file a newline ends the
 record -- but "spans more than one record" is wrong for one line plus its trailing newline. The
 message should name that newline and how to drop it.
+
+---
+
+# 2026-10-29 審查中未給代號的那幾項，重現後的紀錄（SD–SM）
+
+執行檔：`csv2 0.1.7 (v0.1.7-2-g8db32268-dirty)`，程式碼為 09a9a22。每一項都在記錄前親手重現。
+
+## SD. 平行搜尋退回單執行緒時，已送到 stdout 的結果再印一次（rc 0）
+
+觸發條件：一份過期的索引宣稱「沒有內嵌換行」，而檔案（同大小、同 mtime）其實有。
+
+```console
+$ { print 'k,v'; for i in {1..20000}; do print "r$i,v${i}x"; done } > stale.csv; csv2 --build-index -i stale.csv
+$ # 以同樣長度把 r15000 那一行換成含內嵌換行的引號欄位，並把 mtime 還原到奈秒
+$ CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=1 csv2 -contains x -i stale.csv | wc -l; echo $?
+32158          # 單執行緒、不用索引：20000
+0              # 其中 12158 行重複
+```
+
+原因：前面幾批已經把超過緩衝區的結果寫進 fd 1，偵測到「區塊邊界落在引號內」之後退回單執行緒重跑，又全部印一次；
+`abort()` 對 stdout 只丟得掉還沒送出的那一段。**計畫**：退回之前看輸出是否已經有位元組送出——寫到檔案（`-o`）的暫存檔
+可以丟掉重跑；已經送上 stdout 的就不能重跑，改為以錯誤結束，指名索引與 `--no-index`／重建索引的做法。
+
+## SE. 建立索引期間檔案被換掉，索引以新檔的戳記存檔並被信任
+
+```console
+$ # 2600 萬位元組的 big.csv；背景跑 csv2 --build-index，0.3 秒後以 os.replace 換成第 3 筆多 7 個位元組的版本
+$ csv2 --verify-index -i big.csv
+index MISMATCH: record 257: index says byte 2604, actual 2611
+$ csv2 -mid 257,257 -i big.csv          # 走索引
+,v256x                                  # rc 0；--no-index 給的是 r257,v257x
+```
+
+原因：`save()` 用的是掃描結束時的戳記，掃描開始時沒有留一份來比；而 `recordBeginsAt` 只檢查欄數，沒檢查前一個位元組
+是不是 LF，所以落在紀錄中間的 seek 也會通過。**計畫**：掃描開始時取戳記，結束時再取一次，不同就不存檔並說明；
+seek 之後確認 offset−1 是 LF（或 offset 是檔頭結束處）。
+
+## SF. `--pretty` 把只有零寬字元的字素算成寬 1
+
+```console
+$ printf 'a,b\nxy,1\nx\xe2\x80\x8by,2\n' > zw.csv; csv2 -r -t -md --pretty -i zw.csv
+| xy  | 1 |
+| x​y | 2 |         # 少一個補白，終端機上欄位對不齊
+```
+
+原因：`src/Width.swift` 對每個字素取 `max(width, 1)`。**計畫**：字素裡每個 scalar 都是零寬時寬度為 0。
+
+## SG. Markdown 讀取端接受 `-md` 從不寫出的跳脫
+
+```console
+$ printf '| a |\n|---|\n| \\x+f |\n' > hx.md; csv2 -r -t -i hx.md | xxd -p
+610a0f0a            # \x+f 被讀成位元組 0x0F，rc 0
+$ printf '| a |\n|---|\n| \\<b |\n' > lt.md; csv2 -r -t -i lt.md
+\<b                 # 不是 \<br> 的 \< 被當成字面，而其他未知跳脫（如 \q）都被拒絕
+```
+
+原因：`UInt8(_, radix: 16)` 接受正負號；`\<` 後面不是 `br>` 時沒有拒絕。**計畫**：`\x` 後面必須恰好兩個十六進位數字；
+`\<` 只接受 `\<br>`，其餘與 `\q` 一樣拒絕。
+
+## SH. Markdown 就地編輯丟掉檔頭的 UTF-8 BOM
+
+```console
+$ printf '\xef\xbb\xbfx\n\n| a | b |\n|---|---|\n| 1 | 2 |\n' > bom.md
+$ csv2 -update 1:2 X -i bom.md -md -t --md-table 1 --in-place; head -c 3 bom.md | xxd -p
+780a0a              # BOM 不見了
+```
+
+BOM 在表格之外，而 Markdown 就地編輯的原則是「只換表格那幾行，其餘原樣」（RG、RK）。**計畫**：輸入有 BOM 就原樣保留。
+
+## SI. `-so` 時 `-debug` 仍印「atomic rename OK」
+
+```console
+$ csv2 -update 1:1 Z -i d.csv -so -debug 2>&1 >/dev/null | grep rename
+csv2: ... INFO  wrote 1 records, 2 fields, atomic rename OK
+```
+
+寫到 stdout 時沒有 rename。**計畫**：只有真的做了 rename 才這樣說；寫到 stdout 時說寫到了 stdout。
+
+## SJ. 一則錯誤訊息的字串裡還帶著經過
+
+`src/Core.swift` 的 `RecordParser.endRecord`，Markdown 分隔線那則錯誤訊息（中英兩版）寫著「until 2026-08-26 this sentence
+ended ...」。註解清理只動註解，所以它留下來了，而它會被印給使用者。**計畫**：改成只陳述現況的訊息。
+
+## SK. bash 使用者有 `~/.bash_profile` 時，install.zsh 寫的 PATH 讀不到
+
+```console
+$ print 'export X_EXISTING=1' > $HOME/.bash_profile        # 在一個暫時的 HOME 裡
+$ SHELL=/bin/bash zsh install.zsh --dir $T/bin
+  added the PATH line to .../.profile
+  made .../.bash_profile source ~/.bashrc
+install.zsh: wrote the PATH line to .../.profile and a fresh bash still cannot run csv2
+$ bash -lc 'command -v csv2' || echo NOT-FOUND
+NOT-FOUND
+```
+
+登入的 bash 有 `~/.bash_profile` 時就不讀 `~/.profile`；而 install.zsh 把 PATH 寫進 `~/.profile`，再讓 `.bash_profile` 去讀
+`~/.bashrc`——那裡也沒有 PATH。install.zsh 自己驗出失敗並以非零結束，所以不是靜默的，但安裝沒有成功。**計畫**：bash 時
+把 PATH 寫進登入 bash 實際會讀的那一個（`.bash_profile` > `.bash_login` > `.profile`），移除時也找同一個。
+
+## SL. `measure_parallel_rss.zsh` 的 Linux 輸出檔名不含架構
+
+`verifications/measure_parallel_rss.zsh` 以 `uname -s` 命名：guest（aarch64）與 WSL（x86_64）都寫進
+`measure_parallel_rss_output_linux.txt`，互相覆蓋。`measure.zsh` 已因同樣的問題（PF）加上架構。**計畫**：照 `measure.zsh` 的命名。
+
+## SM. README 的「Build the index」條列數字與表格不符
+
+README 寫「31.150 s to 9.636 s」，而上面的表格與 `verifications/measure_parallel_rss_output.txt` 都是 30.492 s（無索引）與
+9.781 s（有索引）；31.150、9.636 在量測檔裡找不到。**計畫**：改成量測檔裡的數字（中英兩版）。
+
+### 只改註解或測試描述、不是程式缺陷的
+
+- `src/Platform.swift`：`// MARK: - Durability` 底下有一個孤立的 `@discardableResult`，實際套用在 `processID()` 上；幾段說明掛在
+  錯的函式上（`writeAll` 的說明在 `ensureBinaryMode` 上、`fileKind(path:)` 的說明在 `enum FileKind` 上），`Parallel.swift` 與
+  `Support.swift` 各有一兩處相同情形。`loggedArg` 的說明說「不跳脫」，但它呼叫 `reportEscape`（實測 `x\y` 記成 `x\\y`，只跳脫一次）。
+- 測試：T137、T140、T126b、T61c 的註解描述的檢查與程式碼不符；T117 引用的「T137 的 command-not-found 防護」編號可能錯；
+  T154e 的描述說「parser 知道的每個旗標」，實際比對的是 `--help` 印出的旗標；T204a 的縮排與鄰行不同。
+
+### 不修
+
+- 錯誤發生時，平行路徑印出的部分輸出比單執行緒少（批次為單位丟棄）。兩者 rc 與 stderr 相同，README 沒有承諾錯誤時的部分輸出，
+  所以這不是缺陷；記在這裡，避免下次又被當成新發現。
