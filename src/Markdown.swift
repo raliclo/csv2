@@ -87,13 +87,23 @@ enum MarkdownIn {
                 case "<":
                     // `\<br>` -- a literal `<br>` that must not become a newline.
                     // `\<br>` —— 一段字面的 `<br>`，它不能變成換行。
-                    if i + 4 < s.count, s[i+2] == "b", s[i+3] == "r", s[i+4] == ">" {
-                        out.append(contentsOf: Array("<br>".utf8)); i += 5
-                    } else {
-                        out.append(0x5C); i += 1
+                    // SG. -md writes `\<` only as `\<br>`. Any other `\<` is an
+                    // escape it never writes, refused like `\q` rather than kept
+                    // as a literal backslash.
+                    // SG。-md 只會把 `\<` 寫成 `\<br>`。其他的 `\<` 都是它從不寫出的跳脫，與 `\q` 一樣
+                    // 拒絕，而不是留成字面的反斜線。
+                    guard i + 4 < s.count, s[i+2] == "b", s[i+3] == "r", s[i+4] == ">" else {
+                        throw fault(
+                            "a Markdown cell contains the escape \\< not followed by br>, which -md never writes; csv2 will not guess what it meant",
+                            "一個 Markdown 儲存格含有後面不是 br> 的跳脫 \\<，而 -md 從不寫出它；csv2 不會去猜它的意思")
                     }
+                    out.append(contentsOf: Array("<br>".utf8)); i += 5
                 case "x":
-                    guard i + 3 < s.count,
+                    // SG. Exactly two hex digits: UInt8(_, radix: 16) alone also
+                    // accepts a sign, so `\x+f` read as 0x0F.
+                    // SG。必須恰好兩位十六進位數字：單靠 UInt8(_, radix: 16) 也會接受正負號，於是 `\x+f`
+                    // 被讀成 0x0F。
+                    guard i + 3 < s.count, s[i+2].properties.isASCIIHexDigit, s[i+3].properties.isASCIIHexDigit,
                           let b = UInt8(String(String.UnicodeScalarView(s[(i+2)...(i+3)])), radix: 16) else {
                         throw fault(
                             "a Markdown cell contains \\x that is not followed by two hex digits; csv2 wrote \\xNN for the bytes it escaped and will not guess what this one was",

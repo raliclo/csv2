@@ -1349,6 +1349,11 @@ public final class ByteSink {
         buf.removeAll(keepingCapacity: true)
     }
 
+    /// Whether bytes have already left for a destination that cannot take
+    /// them back: a stream rather than a temp file renamed on success. SD.
+    /// 是否已經有位元組送到了收不回來的目的地：一條串流，而不是成功後才 rename 的暫存檔。SD。
+    var hasDeliveredIrrevocably: Bool { tmpPath == nil && bytesWritten > 0 }
+
     /// A write that could not be completed. Reported here and not thrown,
     /// because `flush()` is called from `write()`, which is called from every
     /// formatter in the program: making it throwing would put a `try` on every

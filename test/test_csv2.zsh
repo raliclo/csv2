@@ -18357,6 +18357,145 @@ assert_eq "$(_t330_bytes "$_t347/last.txt")" " a \\n b \\n C 1 \\n C 2 \\n " \
 assert_eq "$(grep -c 'In a lines file a value is one line' "$ROOT/README.md") $(grep -c '在 lines 檔裡，一個值就是一行' "$ROOT/README.zh-TW.md")" "1 1" \
     "T347c both READMEs carry the recipe / 兩份 README 都寫著這個做法"
 
+echo "--- T348: a parallel search that must fall back never prints a hit twice / T348：必須退回的平行搜尋絕不把命中印兩次 ---"
+# SD. A stale index that says "no embedded newlines" sends the search down the
+# parallel path; a chunk ending inside a quoted field then sends it back to
+# the single-threaded one, which re-read from the start and printed every hit
+# already on stdout again, at rc 0. On stdout it now stops with an error
+# naming --no-index (a); into -o the temp file is dropped and the re-read is
+# whole (b). Where touch -r cannot carry nanoseconds the index is simply not
+# trusted, and the same two statements still hold.
+# SD。一份說「沒有內嵌換行」的過期索引讓搜尋走平行路徑；區塊結束在引號欄位內時又退回單執行緒，從頭
+# 再讀一次，把 stdout 上已經印過的每一個命中再印一次，rc 0。現在在 stdout 上會以錯誤停下並指出
+# --no-index（a）；寫到 -o 時丟掉暫存檔，重讀的結果是完整的（b）。touch -r 帶不了奈秒的地方索引根本不
+# 被信任，這兩句話仍然成立。
+_t348=$TMP/t348
+mkdir -p "$_t348"
+{ print 'k,v'; for _i in {1..20000}; do print "r$_i,v${_i}x"; done } > "$_t348/s.csv"
+"$CSV2" --build-index -i "$_t348/s.csv" >/dev/null 2>&1
+cp -p "$_t348/s.csv" "$_t348/ref.csv"
+{ print 'k,v'; for _i in {1..20000}; do
+    if (( _i == 15000 )); then print '"ab'; print 'c",v15000x'; else print "r$_i,v${_i}x"; fi
+  done } > "$_t348/s.csv"
+touch -r "$_t348/ref.csv" "$_t348/s.csv"
+"$CSV2" -contains x -i "$_t348/s.csv" --no-index > "$_t348/serial" 2>/dev/null
+CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=1 "$CSV2" -contains x -i "$_t348/s.csv" > "$_t348/par" 2> "$_t348/err"
+_t348_rc=$?
+if [[ $_t348_rc == 0 ]]; then
+    assert_eq "$(cmp -s "$_t348/par" "$_t348/serial" && print same)" "same" \
+        "T348a rc 0 on stdout means the hits equal the single-threaded ones / stdout 上 rc 0 代表命中與單執行緒相同"
+else
+    assert_eq "$(sort "$_t348/par" | uniq -d | wc -l | tr -d ' ') $(grep -q -- '--no-index' "$_t348/err" && print named)" "0 named" \
+        "T348a stopping on stdout prints no hit twice and names --no-index / 在 stdout 上停下時不重複任何命中，並指出 --no-index"
+fi
+rm -f "$_t348/o.txt"
+CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=1 "$CSV2" -contains x -i "$_t348/s.csv" -o "$_t348/o.txt" 2>/dev/null
+assert_eq "$? $(cmp -s "$_t348/o.txt" "$_t348/serial" && print same)" "0 same" \
+    "T348b into -o the fallback re-reads whole / 寫到 -o 時，退回之後的重讀是完整的"
+
+echo "--- T349: a seek that lands inside a record is not trusted / T349：落在紀錄中間的 seek 不被信任 ---"
+# SE. An index whose offsets no longer match the file (here: same size and
+# mtime, record 100 seven bytes longer and record 400 seven shorter, both
+# past the 64 bytes the stamp hashes at each end) sent
+# -mid 257 into the middle of record 256, and ",v256x" still had two fields,
+# so it was returned at rc 0. A record begins after an LF; the byte before
+# the seek is now checked, and a miss falls back to scanning. The other half
+# of SE, a file replaced while --build-index scans it, is a race and is not
+# pinned here.
+# SE。偏移量已不符合檔案的索引（這裡：大小與 mtime 相同，第 100 筆長 7 個位元組、第 400 筆短 7 個，兩者
+# 都在戳記雜湊的頭尾 64 個位元組之外）讓
+# -mid 257 落到第 256 筆中間，而 ",v256x" 仍是兩欄，於是在 rc 0 下被回傳。紀錄從 LF 之後開始；現在會檢查
+# seek 前一個位元組，不對就退回掃描。SE 的另一半——--build-index 掃描期間檔案被換掉——是競態，這裡不釘。
+_t349=$TMP/t349
+mkdir -p "$_t349"
+{ print 'k,v'; for _i in {1..2000}; do print "r$_i,v${_i}x"; done } > "$_t349/f.csv"
+CSV2_INDEX_MIN_BYTES=1 "$CSV2" --build-index -i "$_t349/f.csv" >/dev/null 2>&1
+cp -p "$_t349/f.csv" "$_t349/ref.csv"
+{ print 'k,v'; for _i in {1..2000}; do
+    if (( _i == 100 )); then print 'r100,v100x-edited'
+    elif (( _i == 400 )); then print 'r,x'
+    else print "r$_i,v${_i}x"; fi
+  done } > "$_t349/f.csv"
+touch -r "$_t349/ref.csv" "$_t349/f.csv"
+assert_eq "$(CSV2_INDEX_MIN_BYTES=1 "$CSV2" -mid 257,257 -i "$_t349/f.csv" 2>/dev/null)" "$("$CSV2" -mid 257,257 --no-index -i "$_t349/f.csv" 2>/dev/null)" \
+    "T349 -mid through a shifted index returns the record a scan returns / 經過偏移索引的 -mid 回傳與掃描相同的紀錄"
+
+echo "--- T350: --pretty gives a zero-width character no column / T350：--pretty 不替零寬字元算欄寬 ---"
+# SF. A grapheme made only of zero-width scalars (a lone U+200B) was counted
+# as one column, so its row came out one pad short.
+# SF。只由零寬 scalar 組成的字素（單獨的 U+200B）被算成一欄，於是那一列少一個補白。
+printf 'a,b\nxy,1\nx\xe2\x80\x8by,2\n' > "$TMP/t350.csv"
+"$CSV2" -r -t -md --pretty -i "$TMP/t350.csv" > "$TMP/t350.md" 2>/dev/null
+assert_eq "$(sed -n 3p "$TMP/t350.md" | sed 's/xy/XY/') | $(sed -n 4p "$TMP/t350.md" | sed $'s/x\xe2\x80\x8by/XY/')" "| XY | 1 | | | XY | 2 |" \
+    "T350 the ZWSP row is padded like the row without it / 含 ZWSP 的那一列與不含的那一列補白相同"
+
+echo "--- T351: the Markdown reader refuses escapes -md never writes / T351：Markdown 讀取端拒絕 -md 從不寫出的跳脫 ---"
+# SG. \x+f was read as byte 0x0F (UInt8(_, radix:16) accepts a sign) and a \<
+# not followed by br> was kept as a literal, while every other unknown escape
+# was refused.
+# SG。\x+f 被讀成位元組 0x0F（UInt8(_, radix:16) 接受正負號），後面不是 br> 的 \< 被留成字面，而其他
+# 未知的跳脫都會被拒絕。
+printf '| a |\n|---|\n| \\x+f |\n' > "$TMP/t351a.md"
+"$CSV2" -r -t -i "$TMP/t351a.md" >/dev/null 2>&1
+assert_eq "$?" "1" "T351a \\x with a sign is refused / 帶正負號的 \\x 被拒絕"
+printf '| a |\n|---|\n| \\<b |\n' > "$TMP/t351b.md"
+"$CSV2" -r -t -i "$TMP/t351b.md" >/dev/null 2>&1
+assert_eq "$?" "1" "T351b \\< not followed by br> is refused / 後面不是 br> 的 \\< 被拒絕"
+printf '| a |\n|---|\n| \\x2D\\<br>ok\\x41 |\n' > "$TMP/t351c.md"
+assert_eq "$("$CSV2" -r -t -i "$TMP/t351c.md" 2>&1 | tail -1)" "-<br>okA" \
+    "T351c the escapes -md does write still read / -md 會寫的跳脫照常讀回"
+
+echo "--- T352: Markdown in place keeps a UTF-8 BOM / T352：Markdown 就地編輯保留 UTF-8 BOM ---"
+# SH. The BOM is outside the table, and only the table's lines change; it was
+# dropped because the file was read as a String. A file without one does not
+# gain one (b).
+# SH。BOM 在表格之外，而只有表格那幾行會變；它被丟掉，是因為檔案被讀成 String。沒有 BOM 的檔案不會多出
+# 一個（b）。
+printf '\xef\xbb\xbfx\n\n| a | b |\n|---|---|\n| 1 | 2 |\n' > "$TMP/t352.md"
+"$CSV2" -update 1:2 X -i "$TMP/t352.md" -md -t --md-table 1 --in-place 2>/dev/null
+assert_eq "$(head -c 4 "$TMP/t352.md" | od -An -tx1 | tr -d ' \n')" "efbbbf78" \
+    "T352a the BOM is still the first three bytes / BOM 仍是開頭的三個位元組"
+printf 'x\n\n| a | b |\n|---|---|\n| 1 | 2 |\n' > "$TMP/t352b.md"
+"$CSV2" -update 1:2 X -i "$TMP/t352b.md" -md -t --md-table 1 --in-place 2>/dev/null
+assert_eq "$(head -c 1 "$TMP/t352b.md")" "x" \
+    "T352b a file without a BOM does not gain one / 沒有 BOM 的檔案不會多出一個"
+
+echo "--- T353: -debug does not report a rename that did not happen / T353：-debug 不回報一個沒有發生的 rename ---"
+# SI. An edit written with -so said "atomic rename OK", though a stream has no
+# rename.
+# SI。以 -so 寫出的編輯說「atomic rename OK」，但串流沒有 rename。
+printf 'a,b\n1,2\n' > "$TMP/t353.csv"
+assert_eq "$("$CSV2" -update 1:1 Z -i "$TMP/t353.csv" -so -debug 2>&1 >/dev/null | grep -c 'atomic rename') $("$CSV2" -update 1:1 Z -i "$TMP/t353.csv" -so -debug 2>&1 >/dev/null | grep -c 'fields to stdout')" "0 1" \
+    "T353 -so says it wrote to stdout, not that it renamed / -so 說寫到了 stdout，而不是 rename"
+
+echo "--- T354: install.zsh puts csv2 where a login bash with .bash_profile finds it / T354：install.zsh 把 csv2 放到有 .bash_profile 的登入 bash 找得到的地方 ---"
+# SK. A login bash reads the first of .bash_profile, .bash_login, .profile, so
+# with a .bash_profile present the PATH line written to ~/.profile was never
+# read. Run in a throwaway HOME.
+# SK。登入的 bash 只讀 .bash_profile、.bash_login、.profile 之中第一個存在的，所以有 .bash_profile 時，寫進
+# ~/.profile 的 PATH 從來沒有被讀到。在一個暫時的 HOME 裡跑。
+if (( IS_WINDOWS )) || [[ ! -x /bin/bash || ! -r $ROOT/install.zsh || ! -x $ROOT/release/csv2 ]]; then
+    skipt "T354 needs /bin/bash and a POSIX install.zsh target / 需要 /bin/bash 與 POSIX 上的 install.zsh 目標"
+    T354_SKIPPED=1
+else
+    _t354=$TMP/t354
+    mkdir -p "$_t354/h" "$_t354/bin"
+    print 'export T354=1' > "$_t354/h/.bash_profile"
+    HOME=$_t354/h SHELL=/bin/bash zsh "$ROOT/install.zsh" --dir "$_t354/bin" >/dev/null 2>&1
+    assert_eq "$? $(env -i HOME=$_t354/h PATH=/usr/bin:/bin /bin/bash -lc 'command -v csv2' 2>/dev/null)" "0 $_t354/bin/csv2" \
+        "T354a a login bash with .bash_profile runs the installed csv2 / 有 .bash_profile 的登入 bash 執行得到裝好的 csv2"
+    HOME=$_t354/h SHELL=/bin/bash zsh "$ROOT/install.zsh" --uninstall --dir "$_t354/bin" >/dev/null 2>&1
+    assert_eq "$(grep -l 'csv2 install.zsh' "$_t354/h"/.*(N) 2>/dev/null | wc -l | tr -d ' ')" "0" \
+        "T354b and --uninstall leaves no block behind / 而 --uninstall 不留下任何區塊"
+fi
+
+echo "--- T355: measure_parallel_rss.zsh names its Linux output by architecture / T355：measure_parallel_rss.zsh 依架構命名 Linux 的輸出 ---"
+# SL. The aarch64 guest and WSL2 both wrote measure_parallel_rss_output_linux.txt;
+# measure.zsh already names by architecture (PF).
+# SL。aarch64 guest 與 WSL2 都寫進 measure_parallel_rss_output_linux.txt；measure.zsh 早已依架構命名（PF）。
+assert_eq "$(grep -c 'measure_parallel_rss_output_linux_$(uname -m).txt' "$ROOT/verifications/measure_parallel_rss.zsh")" "1" \
+    "T355 the x86_64 Linux output has a name of its own / x86_64 Linux 的輸出有自己的名字"
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -18475,6 +18614,7 @@ fi
 (( ${T329_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T337_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T332_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T354_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode

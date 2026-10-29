@@ -576,6 +576,18 @@ final class IndexBuilder {
         self.isCSV2 = isCSV2
     }
 
+    /// SE. The stamp of the file as the scan began. An index records offsets
+    /// into the file it scanned; if the file was replaced or rewritten during
+    /// the scan, stamping the result with the NEW file's stamp made a wrong
+    /// index pass every later check. finish() compares and refuses instead.
+    /// Only for a scan of a file csv2 did not write in the same run.
+    /// SE。掃描開始時檔案的戳記。索引記下的是它所掃描之檔案的偏移量；若檔案在掃描期間被換掉或改寫，
+    /// 用**新**檔的戳記蓋上去，一份錯的索引就會通過之後每一次檢查。finish() 改為比對並拒絕。只用於
+    /// 「不是同一次執行裡 csv2 自己寫的」檔案的掃描。
+    private var startStamp: FileStamp?
+    private(set) var changedDuringScan = false
+    func expectUnchanged(dataPath: String) { startStamp = FileStamp.of(path: dataPath) }
+
     func headerEnded(at offset: UInt64) { headEnd = offset }
 
     /// How many records have been added. The append fast path continues the
@@ -600,6 +612,13 @@ final class IndexBuilder {
     /// 情況——本 repo 樹內每一份 CSV 都是這樣。
     func finish(dataPath: String) -> CSVIndex? {
         guard let stamp = FileStamp.of(path: dataPath) else { return nil }
+        if let s0 = startStamp,
+           s0.size != stamp.size || s0.mtimeSec != stamp.mtimeSec || s0.mtimeNsec != stamp.mtimeNsec
+            || s0.hashHead != stamp.hashHead || s0.hashTail != stamp.hashTail {
+            changedDuringScan = true
+            Logger.shared.warn("\(dataPath) changed while its index was being built; the index was not saved")
+            return nil
+        }
         return CSVIndex(stride: stride,
                         noEmbeddedNewlines: !embeddedNewlineSeen,
                         isCSV2: isCSV2,

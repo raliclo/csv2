@@ -14630,7 +14630,7 @@ message should name that newline and how to drop it.
 
 執行檔：`csv2 0.1.7 (v0.1.7-2-g8db32268-dirty)`，程式碼為 09a9a22。每一項都在記錄前親手重現。
 
-## SD. 平行搜尋退回單執行緒時，已送到 stdout 的結果再印一次（rc 0）
+## SD. 平行搜尋退回單執行緒時，已送到 stdout 的結果再印一次（rc 0）（2026-10-29 修正，T348a–b）
 
 觸發條件：一份過期的索引宣稱「沒有內嵌換行」，而檔案（同大小、同 mtime）其實有。
 
@@ -14646,7 +14646,7 @@ $ CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=1 csv2 -contains x -i stal
 `abort()` 對 stdout 只丟得掉還沒送出的那一段。**計畫**：退回之前看輸出是否已經有位元組送出——寫到檔案（`-o`）的暫存檔
 可以丟掉重跑；已經送上 stdout 的就不能重跑，改為以錯誤結束，指名索引與 `--no-index`／重建索引的做法。
 
-## SE. 建立索引期間檔案被換掉，索引以新檔的戳記存檔並被信任
+## SE. 建立索引期間檔案被換掉，索引以新檔的戳記存檔並被信任（2026-10-29 修正，T349（競態的那一半無法穩定重現，未釘））
 
 ```console
 $ # 2600 萬位元組的 big.csv；背景跑 csv2 --build-index，0.3 秒後以 os.replace 換成第 3 筆多 7 個位元組的版本
@@ -14660,7 +14660,7 @@ $ csv2 -mid 257,257 -i big.csv          # 走索引
 是不是 LF，所以落在紀錄中間的 seek 也會通過。**計畫**：掃描開始時取戳記，結束時再取一次，不同就不存檔並說明；
 seek 之後確認 offset−1 是 LF（或 offset 是檔頭結束處）。
 
-## SF. `--pretty` 把只有零寬字元的字素算成寬 1
+## SF. `--pretty` 把只有零寬字元的字素算成寬 1（2026-10-29 修正，T350）
 
 ```console
 $ printf 'a,b\nxy,1\nx\xe2\x80\x8by,2\n' > zw.csv; csv2 -r -t -md --pretty -i zw.csv
@@ -14670,7 +14670,7 @@ $ printf 'a,b\nxy,1\nx\xe2\x80\x8by,2\n' > zw.csv; csv2 -r -t -md --pretty -i zw
 
 原因：`src/Width.swift` 對每個字素取 `max(width, 1)`。**計畫**：字素裡每個 scalar 都是零寬時寬度為 0。
 
-## SG. Markdown 讀取端接受 `-md` 從不寫出的跳脫
+## SG. Markdown 讀取端接受 `-md` 從不寫出的跳脫（2026-10-29 修正，T351a–c）
 
 ```console
 $ printf '| a |\n|---|\n| \\x+f |\n' > hx.md; csv2 -r -t -i hx.md | xxd -p
@@ -14682,7 +14682,7 @@ $ printf '| a |\n|---|\n| \\<b |\n' > lt.md; csv2 -r -t -i lt.md
 原因：`UInt8(_, radix: 16)` 接受正負號；`\<` 後面不是 `br>` 時沒有拒絕。**計畫**：`\x` 後面必須恰好兩個十六進位數字；
 `\<` 只接受 `\<br>`，其餘與 `\q` 一樣拒絕。
 
-## SH. Markdown 就地編輯丟掉檔頭的 UTF-8 BOM
+## SH. Markdown 就地編輯丟掉檔頭的 UTF-8 BOM（2026-10-29 修正，T352a–b）
 
 ```console
 $ printf '\xef\xbb\xbfx\n\n| a | b |\n|---|---|\n| 1 | 2 |\n' > bom.md
@@ -14692,7 +14692,7 @@ $ csv2 -update 1:2 X -i bom.md -md -t --md-table 1 --in-place; head -c 3 bom.md 
 
 BOM 在表格之外，而 Markdown 就地編輯的原則是「只換表格那幾行，其餘原樣」（RG、RK）。**計畫**：輸入有 BOM 就原樣保留。
 
-## SI. `-so` 時 `-debug` 仍印「atomic rename OK」
+## SI. `-so` 時 `-debug` 仍印「atomic rename OK」（2026-10-29 修正，T353）
 
 ```console
 $ csv2 -update 1:1 Z -i d.csv -so -debug 2>&1 >/dev/null | grep rename
@@ -14706,7 +14706,7 @@ csv2: ... INFO  wrote 1 records, 2 fields, atomic rename OK
 `src/Core.swift` 的 `RecordParser.endRecord`，Markdown 分隔線那則錯誤訊息（中英兩版）寫著「until 2026-08-26 this sentence
 ended ...」。註解清理只動註解，所以它留下來了，而它會被印給使用者。**計畫**：改成只陳述現況的訊息。
 
-## SK. bash 使用者有 `~/.bash_profile` 時，install.zsh 寫的 PATH 讀不到
+## SK. bash 使用者有 `~/.bash_profile` 時，install.zsh 寫的 PATH 讀不到（2026-10-29 修正，T354a–b）
 
 ```console
 $ print 'export X_EXISTING=1' > $HOME/.bash_profile        # 在一個暫時的 HOME 裡
@@ -14722,7 +14722,7 @@ NOT-FOUND
 `~/.bashrc`——那裡也沒有 PATH。install.zsh 自己驗出失敗並以非零結束，所以不是靜默的，但安裝沒有成功。**計畫**：bash 時
 把 PATH 寫進登入 bash 實際會讀的那一個（`.bash_profile` > `.bash_login` > `.profile`），移除時也找同一個。
 
-## SL. `measure_parallel_rss.zsh` 的 Linux 輸出檔名不含架構
+## SL. `measure_parallel_rss.zsh` 的 Linux 輸出檔名不含架構（2026-10-29 修正，T355）
 
 `verifications/measure_parallel_rss.zsh` 以 `uname -s` 命名：guest（aarch64）與 WSL（x86_64）都寫進
 `measure_parallel_rss_output_linux.txt`，互相覆蓋。`measure.zsh` 已因同樣的問題（PF）加上架構。**計畫**：照 `measure.zsh` 的命名。

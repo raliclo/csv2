@@ -35,7 +35,16 @@ fi
 if [[ -z ${MEASURE_OUTPUT:-} ]]; then
     case $(uname -s) in
         Darwin)        MEASURE_OUTPUT=$HERE/measure_parallel_rss_output.txt ;;
-        Linux)         MEASURE_OUTPUT=$HERE/measure_parallel_rss_output_linux.txt ;;
+        # By architecture as well, as measure.zsh does (PF): the aarch64 guest
+        # and WSL2 on x86_64 are both Linux, and one name made them overwrite
+        # each other. SL.
+        # 也依架構命名，與 measure.zsh 相同（PF）：aarch64 guest 與 x86_64 上的 WSL2 都是 Linux，只用
+        # 一個名字會讓它們互相覆蓋。SL。
+        Linux)
+            case $(uname -m) in
+                aarch64|arm64) MEASURE_OUTPUT=$HERE/measure_parallel_rss_output_linux.txt ;;
+                *)             MEASURE_OUTPUT=$HERE/measure_parallel_rss_output_linux_$(uname -m).txt ;;
+            esac ;;
         MSYS*|MINGW*|CYGWIN*|Windows*) MEASURE_OUTPUT=$HERE/measure_parallel_rss_output_windows.txt ;;
         *)             MEASURE_OUTPUT=$HERE/measure_parallel_rss_output_$(uname -s).txt ;;
     esac

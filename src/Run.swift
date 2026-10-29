@@ -109,6 +109,12 @@ func runMarkdownEdit(_ o: Options) throws {
     rendered.markdown = true
     try runSelect(rendered)
 
+    // SH. A UTF-8 BOM before the document is outside the table, and the rule
+    // here is that only the table's lines change. String(contentsOfFile:)
+    // drops it, so it is looked for in the bytes and written back first.
+    // SH。文件前面的 UTF-8 BOM 在表格之外，而這裡的規則是只有表格那幾行會變。String(contentsOfFile:)
+    // 會把它丟掉，所以從位元組裡找，寫出時先放回去。
+    let hadBOM = (FileManager.default.contents(atPath: input).map { [UInt8]($0.prefix(3)) } ?? []) == [0xEF, 0xBB, 0xBF]
     let original = try String(contentsOfFile: input, encoding: .utf8)
         .replacingOccurrences(of: "\r\n", with: "\n")
         .replacingOccurrences(of: "\r", with: "\n")
@@ -201,6 +207,7 @@ func runMarkdownEdit(_ o: Options) throws {
     let combined = Array(oldLines[..<start]) + newLines + Array(oldLines[end...])
     if o.backup { try makeInPlaceBackup(input) }
     let sink = try ByteSink(atomicPath: o.output ?? resolved(input))
+    if hadBOM { sink.write([0xEF, 0xBB, 0xBF]) }
     sink.write(Array(combined.joined(separator: "\n").utf8))
     try sink.close()
 }
@@ -389,6 +396,17 @@ func readHeaderRows(path: String, format: Format, want: Int) throws -> [Record] 
 /// 而這個還能多抓一些。
 func recordBeginsAt(path: String, offset: UInt64, format: Format,
                     expectedFields: Int, truncatePartial: Bool) -> Bool {
+    // SE. A record begins right after an LF, or at the start of the file. A
+    // seek into the middle of a record could still parse the right number of
+    // fields (",v256x" in a 2-column file), so the byte before is checked.
+    // SE。一筆紀錄從一個 LF 之後、或檔案開頭開始。seek 到一筆紀錄中間時，解析出來的欄數仍可能
+    // 正好對（2 欄檔案裡的 ",v256x"），所以要檢查前一個位元組。
+    if offset > 0 {
+        guard let h = FileHandle(forReadingAtPath: path) else { return true }
+        defer { try? h.close() }
+        h.seek(toFileOffset: offset - 1)
+        guard h.readData(ofLength: 1).first == BYTE_LF else { return false }
+    }
     guard expectedFields > 0 else { return true }
     guard let src = try? ByteSource(path: path, chunkSize: 1 << 16, startAt: offset) else {
         return true
@@ -468,6 +486,7 @@ func planIndex(_ o: Options, plan: InputPlan, lower: Int, upper: Int) -> IndexPl
     guard o.tail != nil else { return out }
     guard let st = FileStamp.of(path: path), st.size >= UInt64(indexMinBytes()) else { return out }
     out.builder = IndexBuilder(isCSV2: plan.format == .csv2)
+    out.builder?.expectUnchanged(dataPath: path)
     return out
 }
 
@@ -499,6 +518,7 @@ func runBuildIndex(_ o: Options) throws {
     var expectedFields = 0
     var pendingError: Error?
     let builder = IndexBuilder(isCSV2: plan.format == .csv2)
+    builder.expectUnchanged(dataPath: path)
 
     let parser = RecordParser(format: plan.format, truncatePartial: o.truncatePartial) { rec in
         do {
@@ -552,6 +572,10 @@ func runBuildIndex(_ o: Options) throws {
                     "\(path)：預期 \(plan.headerRows) 列標頭，實際只有 \(headers.count) 列")
     }
     guard let idx = builder.finish(dataPath: path) else {
+        if builder.changedDuringScan {
+            throw fault("\(path) changed while its index was being built, so the offsets describe a file that is no longer there; nothing was saved. Run --build-index again once the file is quiet",
+                        "\(path) 在建立索引期間被改動了，所以那些偏移量描述的是一個已經不在的檔案；什麼都沒有存。等檔案不再變動後再跑一次 --build-index")
+        }
         throw fault("cannot stat \(path)", "無法取得 \(path) 的狀態")
     }
     Metrics.report(bytesRead: plan.source.bytesRead, fileSize: Int(idx.stamp.size))
@@ -2517,6 +2541,10 @@ func runEdit(_ o: Options) throws {
     // `headers[0]` 已經移除過被刪掉的欄位，所以它的寬度就是輸出的寬度。
     if o.dryRun {
         Logger.shared.info("dry run: \(dryRunChanges.count) change(s), wrote nothing")
+    } else if o.useStdout {
+        // SI. -so writes a stream; there is no rename to report.
+        // SI。-so 寫的是串流；沒有 rename 可回報。
+        Logger.shared.info("wrote \(outRecords) records, \(headers.first?.count ?? expectedFields) fields to stdout")
     } else {
         Logger.shared.info("wrote \(outRecords) records, \(headers.first?.count ?? expectedFields) fields, atomic rename OK")
     }

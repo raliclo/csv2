@@ -631,7 +631,23 @@ func runParallelSearch(_ o: Options) throws {
         }
 
         let batchResult = results.snapshot()
-        if let e = batchResult.error { throw e }
+        if let e = batchResult.error {
+            // SD. Falling back to the single-threaded path re-reads from the
+            // start, so on stdout every hit already sent would be printed twice
+            // at rc 0. A temp file is discarded and the re-read is safe; a
+            // stream cannot be taken back, so the run fails instead and says
+            // how to get a clean one.
+            // SD。退回單執行緒會從頭再讀一次，所以在 stdout 上，每一筆已送出的命中都會在 rc 0 下再印
+            // 一次。暫存檔會被丟掉，重讀是安全的；串流收不回來，所以改成讓這次執行失敗，並說明怎麼得到
+            // 乾淨的結果。
+            if let ce = e as? CSV2Error, ce.message.hasPrefix("a chunk boundary fell inside"),
+               outSink.hasDeliveredIrrevocably {
+                throw fault(
+                    "\(path): the index says this file has no embedded newlines, but a quoted field holds one; results already written to the output cannot be taken back, so the search stops here. Run it again with --no-index, or rebuild the index with --build-index",
+                    "\(path)：索引說這個檔案沒有內嵌換行，但有一個引號欄位裡有；已經寫到輸出的結果收不回來，所以搜尋在此停止。請加上 --no-index 重跑，或以 --build-index 重建索引")
+            }
+            throw e
+        }
         let fragments = batchResult.fragments
         let counts = batchResult.counts
         // What this batch actually held, which decides the next one. Measured

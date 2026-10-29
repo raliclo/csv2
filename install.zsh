@@ -125,14 +125,21 @@ rc_files() {
         # 是一個非互動、非登入的 shell，只讀 .zshenv。寫進 .zshrc 會修好某個人的終端機，卻讓那支
         # 腳本繼續失敗，同時這支安裝程式回報成功。IW。
         zsh)  print -r -- $HOME/.zshenv ;;
-        # No bash branch. bash has no .zshenv, and BASH_ENV, the equivalent, is
-        # not set by default. A bash account falls to `*)` and gets ~/.profile,
-        # which a bash LOGIN shell reads. zsh is the one shell where a single
-        # file is read by EVERY invocation, non-interactive and non-login
-        # included, and that is the property this tree needs. IW.
-        # 沒有 bash 分支。bash 沒有 .zshenv，對應的 BASH_ENV 預設也沒有設定。bash 帳號會落到
-        # `*)`、拿到 ~/.profile，由 bash 的**登入** shell 讀取。zsh 是唯一一個「單一檔案會被**每一種**
-        # 呼叫讀到」的 shell，非互動與非登入都包含在內，而那正是這棵樹需要的性質。IW。
+        # bash has no .zshenv, and BASH_ENV, the equivalent, is not set by
+        # default, so the PATH line goes in the file a LOGIN bash reads -- and
+        # that is the FIRST of .bash_profile, .bash_login, .profile that
+        # exists. With a .bash_profile present, ~/.profile is never read, which
+        # is how a PATH line written there was never seen. SK. zsh is the one
+        # shell where a single file is read by EVERY invocation. IW.
+        # bash 沒有 .zshenv，對應的 BASH_ENV 預設也沒有設定，所以 PATH 那一行寫進**登入** bash 會讀的
+        # 那個檔——也就是 .bash_profile、.bash_login、.profile 之中**第一個**存在的。有 .bash_profile
+        # 時 ~/.profile 永遠不會被讀，寫在那裡的 PATH 就是這樣從未被看見的。SK。zsh 是唯一一個「單一
+        # 檔案會被**每一種**呼叫讀到」的 shell。IW。
+        bash)
+            if   [[ -f $HOME/.bash_profile ]]; then print -r -- $HOME/.bash_profile
+            elif [[ -f $HOME/.bash_login ]];   then print -r -- $HOME/.bash_login
+            else                                    print -r -- $HOME/.profile
+            fi ;;
         *)    print -r -- $HOME/.profile ;;
     esac
 }
@@ -743,27 +750,6 @@ for f in $(rc_files); do
     rc_written="$rc_written $f"
 done
 
-# bash only: a login shell does not read .bashrc unless a login file says so.
-# Debian's own ~/.profile does exactly this; without it the line above is read
-# by an interactive `bash` but not by the shell a login hands you.
-# 只有 bash 需要：登入 shell 不會讀 .bashrc，除非某個登入檔叫它讀。Debian 自己的 ~/.profile
-# 做的就是這件事；少了它，上面那一行互動的 `bash` 讀得到，而登入時拿到的那個 shell 讀不到。
-if [[ $LOGIN_SHELL_NAME == bash ]]; then
-    login_file=$HOME/.profile
-    [[ -f $HOME/.bash_login ]]   && login_file=$HOME/.bash_login
-    [[ -f $HOME/.bash_profile ]] && login_file=$HOME/.bash_profile
-    if ! grep -q 'bashrc' $login_file 2>/dev/null; then
-        {
-            print -r -- ""
-            print -r -- "$RC_BEGIN"
-            print -r -- "# a login bash does not read ~/.bashrc on its own."
-            print -r -- "# 登入的 bash 自己不會去讀 ~/.bashrc。"
-            print -r -- "[ -f \"\$HOME/.bashrc\" ] && . \"\$HOME/.bashrc\""
-            print -r -- "$RC_END"
-        } >> $login_file
-        say "  made $login_file source ~/.bashrc / 已讓 $login_file 去 source ~/.bashrc"
-    fi
-fi
 say "  this shell is unaffected; a new one will have it / 目前這個 shell 不受影響，新開的會有"
 say ""
 

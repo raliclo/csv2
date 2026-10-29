@@ -242,7 +242,12 @@ enum DisplayWidth {
             if w > maxW { maxW = w }
         }
         if forcedWide { return 2 }
-        return max(maxW, 1)
+        // A cluster whose every scalar is zero-width -- a lone ZWSP (U+200B),
+        // a word joiner -- occupies no column. Rounding it up to 1 left that
+        // row one pad short under --pretty. SF.
+        // 每個 scalar 都是零寬的 cluster——單獨的 ZWSP（U+200B）、word joiner——不佔欄位。把它進位成 1，
+        // 會讓 --pretty 下那一列少一個補白。SF。
+        return maxW
     }
 
     static func of(_ s: String) -> Int {
