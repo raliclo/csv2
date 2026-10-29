@@ -871,6 +871,27 @@ after that first one was sound and faithfully inherited a false premise. The
 lesson is one sentence: ask the machine, not the file that describes it. It was
 booted at the time.
 
+## ~~v0.1.8~~ 已出貨
+
+### 2026-10-29：v0.1.8 出了，四個平台，五個節點都升級了
+
+`https://github.com/raliclo/csv2/releases/tag/v0.1.8`，tag 指向 `8a7fa70`。
+內容：RQ、RS、RT、RV、RW、RX、SA、SB、SC、SD、SE、SF、SG、SH、SI、SK（見 known-defects.md）。
+SN 是 RQ 造成、從未出貨的退化，已在本版之前修好。
+
+| 平台 | 建置於 | build id | 套件 | 封存 sha256 | 升級後 PATH 上的那一份 |
+|---|---|---|---|---|---|
+| macOS arm64 | M4 | `v0.1.8 / 8a7fa704` | 1578/0/1 | `2a973393…` | M4、M6 `brew upgrade` → 0.1.8 |
+| Linux aarch64 | guest VM | `v0.1.8 / 8a7fa704` | 1564/0/6 | `3fd36c11…` | `/workspace/csv2/release/csv2`，在 tag 上建 → 0.1.8 |
+| Linux x86_64 | WSL2 | `v0.1.8 / 8a7fa704` | 1575/0/2 | `1eafcacb…` | `/usr/local/bin/csv2` → 0.1.8 |
+| Windows x86_64 | Ralic-W11，Swift 6.4.1 | `v0.1.8 / 8a7fa704` | 1537/0/19 | `f64b3c54…` | scoop → 0.1.8 |
+
+- **Windows 由 csv2-M4 建置**：同 v0.1.7，在 `C:/Users/lowei/proj/csv2-m4-verify` 建置與測試，封存複製到
+  `C:/Users/lowei/proj/csv2/dist/`；csv2-win 的工作樹沒有被動到。
+- **發布由使用者執行**：auto mode 的分類器再次擋下 `publish.zsh --publish`，使用者以 `!` 自己跑。
+- **guest 的 prebuilt**：母專案 `prebuilt/csv2` 歸 LinuxCS-M4，已請它換成 0.1.8 的封存。
+- **v0.1.7 紀錄最後一條「其餘各項仍待處理」已不成立**：那些項目都在本版出貨，known-defects 裡沒有未處理的缺陷。
+
 ## ~~v0.1.7~~ 已出貨
 
 ### 2026-10-29：v0.1.7 出了，四個平台，五個節點都升級了
