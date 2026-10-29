@@ -1,5 +1,5 @@
 {
-    "version": "0.1.7",
+    "version": "0.1.8",
     "description": "Fail-loudly CSV parser and editor: names the record and field, never repairs",
     "homepage": "https://github.com/raliclo/csv2",
     "license": "MIT",
@@ -28,9 +28,9 @@
     ],
     "architecture": {
         "64bit": {
-            "url": "https://github.com/raliclo/csv2/releases/download/v0.1.7/csv2-0.1.7-windows-x86_64.tar.zst",
-            "hash": "798edb1c41c73e3dea7c01cf18525951b420224b6ecaed2209fc288e7304331c",
-            "extract_dir": "csv2-0.1.7-windows-x86_64"
+            "url": "https://github.com/raliclo/csv2/releases/download/v0.1.8/csv2-0.1.8-windows-x86_64.tar.zst",
+            "hash": "f64b3c5426785593f0de4a0d15920b5c2b53cc70ace46b26671228771a14af27",
+            "extract_dir": "csv2-0.1.8-windows-x86_64"
         }
     },
     "bin": "csv2.exe",
