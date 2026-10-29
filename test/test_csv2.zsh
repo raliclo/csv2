@@ -17685,9 +17685,16 @@ echo "--- T323: install.zsh says what it is about to replace / T323：install.zs
 # install.zsh installs the binary in ITS tree's release/, which is not
 # necessarily the $CSV2 under test, so that file is the one copied and asked.
 # install.zsh 裝的是**它那棵樹**的 release/ 裡的執行檔，不一定是受測的 $CSV2，所以被複製與被問的是那個檔案。
+# csv2.exe first. msys answers `-x release/csv2` true when only csv2.exe is
+# there, and the dead copy below would then be written as `csv2` while
+# install.zsh looks for `csv2.exe` -- reported as "nothing there" in a fresh
+# Windows clone, and passing only in a tree with a stray extensionless file.
+# 先找 csv2.exe。msys 在只有 csv2.exe 時也會對 `-x release/csv2` 回答真，於是下面那份跑不起來的
+# 複本會被寫成 `csv2`，而 install.zsh 找的是 `csv2.exe`——在全新的 Windows clone 裡被回報成「那裡
+# 沒有東西」，只有在一棵留著無副檔名雜檔的樹裡才會通過。
 _t323_bin=
-[[ -x $ROOT/release/csv2 ]] && _t323_bin=$ROOT/release/csv2
-[[ -z $_t323_bin && -x $ROOT/release/csv2.exe ]] && _t323_bin=$ROOT/release/csv2.exe
+[[ -x $ROOT/release/csv2.exe ]] && _t323_bin=$ROOT/release/csv2.exe
+[[ -z $_t323_bin && -x $ROOT/release/csv2 ]] && _t323_bin=$ROOT/release/csv2
 if [[ ! -r $ROOT/install.zsh || -z $_t323_bin ]]; then
     T323_SKIPPED=1
     skipt "T323 install.zsh says what it is about to replace / install.zsh 說出它即將取代的是什麼 (no install.zsh, or no release/ binary for it to install, in this tree / 這棵樹裡沒有 install.zsh，或沒有可供它安裝的 release/ 執行檔)"
