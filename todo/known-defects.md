@@ -14339,3 +14339,42 @@ The defect is documentation: plan.md says both costs are in the README, and only
 is. Decided the same day: it is a defect. An edit's output now ends the way its input
 did; CRLF still becomes LF. The plan's "add an LF to a .csv that lacks one" was decided for
 appending and had been read as "on every write".
+
+## RL. 單欄檔案沒有結尾換行時，被改成空值的最後一筆紀錄消失（2026-10-29 回報；RK 引入的退化，v0.1.6）
+
+使用者回報：原始檔沒有結尾換行時，最後一筆空紀錄會不見。實測（`csv2 0.1.6 (v0.1.6 / bc3d5024)`，Homebrew
+安裝的那一份），單欄檔案、最後一筆被 `-update` 改成空字串：
+
+```console
+$ printf 'a\nx' > u.csv; csv2 -count -i u.csv
+1
+$ csv2 -update 1:1 '' -i u.csv --in-place; echo $?; xxd -p u.csv; csv2 -count -i u.csv
+0
+610a
+0
+$ printf 'a\ny\nx' > v.csv
+$ csv2 -update 2:1 '' -i v.csv -so | xxd -p                # -so 也一樣
+610a790a
+$ printf 'a\r\nx' > w.csv
+$ csv2 -update 1:1 '' -i w.csv --in-place; xxd -p w.csv   # CRLF 也一樣
+610a
+```
+
+紀錄從 1 筆變成 0 筆、從 2 筆變成 1 筆，rc 0，什麼都沒印。同樣的三個指令在
+`csv2 0.1.5 (v0.1.5 / 695d5bd5)`（dist/ 裡的發布封存）寫出 `610a0a`、`610a0a`、`610a790a0a`，筆數不變。
+
+**原因**：單欄的空紀錄編碼成零個位元組，它**只靠**那個結束它的換行而存在。RK 讓最後一筆紀錄的 LF 跟著輸入
+（輸入沒有結尾換行，輸出也不寫），於是那一筆什麼都沒有寫出來。RK 的測試（T330a–j）沒有一個案例的最後一筆是空的。
+多欄的空紀錄（`,`）與引號空字串（`""`）都有位元組，不受影響，實測保留下來了。
+
+**修法**：最後一筆紀錄編碼之後若一個位元組都沒有，它的 LF 照寫——那個換行就是這筆紀錄本身，不是「憑空多出的
+行尾」。否決的另一個做法：把它寫成 `""`。那樣保住了「沒有結尾換行」，但改寫了一個 csv2 沒被要求改的欄位編碼，
+而且與 0.1.5 寫出的位元組不同。
+
+Reported: when the source has no final newline, an empty last record disappears. Measured on
+0.1.6: in a one-column file, `-update` of the last record to '' writes nothing for it -- 1
+record becomes 0, rc 0, silent; `-so` and CRLF input too. 0.1.5 wrote `a\n\n` and kept it. A
+one-column empty record is zero bytes and exists only through the newline that ends it, and RK
+withholds the last record's LF when the input had none. Fix: if the last record encodes to no
+bytes, its LF is written; that newline is the record, not an invented line ending. Rejected:
+writing `""`, which keeps the missing newline but rewrites a field encoding nobody asked to change.
