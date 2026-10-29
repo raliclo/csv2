@@ -11,6 +11,7 @@
         "  csv2 0.1.4  was built with Swift 6.4.0  -> needs Runtimes\\6.4.0\\usr\\bin on PATH",
         "  csv2 0.1.5  was built with Swift 6.4.1  -> needs Runtimes\\6.4.1\\usr\\bin on PATH",
         "  csv2 0.1.6  was built with Swift 6.4.1  -> needs Runtimes\\6.4.1\\usr\\bin on PATH",
+        "  csv2 0.1.7  was built with Swift 6.4.1  -> needs Runtimes\\6.4.1\\usr\\bin on PATH",
         "(each comes from the swift.org installer of that version). With another runtime",
         "version csv2 may print NOTHING and exit 0xC0000139 (127 from bash/zsh).",
         "Check with:  where swiftCore.dll",
