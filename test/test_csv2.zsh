@@ -18474,8 +18474,18 @@ echo "--- T354: install.zsh puts csv2 where a login bash with .bash_profile find
 # read. Run in a throwaway HOME.
 # SK。登入的 bash 只讀 .bash_profile、.bash_login、.profile 之中第一個存在的，所以有 .bash_profile 時，寫進
 # ~/.profile 的 PATH 從來沒有被讀到。在一個暫時的 HOME 裡跑。
+# install.zsh asks the ACCOUNT for its login shell (getent where it exists)
+# and ignores $SHELL, by design. So the case can only pose as a bash user where
+# there is no getent (macOS), or where the account's shell is bash already.
+# install.zsh 向**帳號**詢問登入 shell（有 getent 的地方用 getent），刻意忽略 $SHELL。所以這個案例只能在
+# 沒有 getent 的地方（macOS），或帳號本來就是 bash 的地方，扮演一個 bash 使用者。
+_t354_acct=
+(( $+commands[getent] )) && _t354_acct=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)
 if (( IS_WINDOWS )) || [[ ! -x /bin/bash || ! -r $ROOT/install.zsh || ! -x $ROOT/release/csv2 ]]; then
     skipt "T354 needs /bin/bash and a POSIX install.zsh target / 需要 /bin/bash 與 POSIX 上的 install.zsh 目標"
+    T354_SKIPPED=1
+elif [[ -n $_t354_acct && ${_t354_acct:t} != bash ]]; then
+    skipt "T354 this account's login shell is ${_t354_acct:t}, and install.zsh asks the account, not \$SHELL / 這個帳號的登入 shell 是 ${_t354_acct:t}，而 install.zsh 問的是帳號，不是 \$SHELL"
     T354_SKIPPED=1
 else
     _t354=$TMP/t354

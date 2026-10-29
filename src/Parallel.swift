@@ -108,14 +108,6 @@ func workerCount() -> Int {
     max(1, ProcessInfo.processInfo.activeProcessorCount)
 }
 
-/// Only the locating report is parallelised. Its output is one short line per
-/// matching CELL, so the fragments held in memory while chunks are in flight
-/// stay small. `--filter` emits whole records and could hold a copy of the
-/// entire file, which would trade the memory bound for speed -- on a machine
-/// that has 2-4 GiB, that is the wrong trade.
-/// 只有定位報告走平行。它的輸出是每個命中儲存格一行短文字，因此區塊在處理中時
-/// 保留在記憶體裡的片段很小。`--filter` 輸出的是完整紀錄，可能等於整個檔案的
-/// 副本——那是拿記憶體上界去換速度，而在一台只有 2–4 GiB 的機器上，那是錯的交換。
 /// Returns the reason parallelism was declined, or nil when it can run.
 ///
 /// A reason rather than a bare false, because otherwise "did the parallel path
@@ -137,6 +129,14 @@ func parallelDeclineReason(_ o: Options, format: Format) -> String? {
     // 上下文放在 filter **之前**：`-A`／`-B`／`-C` 在內部隱含 `--filter`，而婉拒理由會被讀成
     // 「你做了這件事」；指名呼叫端沒給過的旗標，只會讓人去找一個不存在的東西。OJ。
     if o.after != 0 || o.before != 0 { return "-A/-B/-C" }
+    // Only the locating report is parallelised. Its output is one short line
+    // per matching CELL, so the fragments held in memory while chunks are in
+    // flight stay small. `--filter` emits whole records and could hold a copy
+    // of the entire file, which would trade the memory bound for speed -- on a
+    // machine that has 2-4 GiB, that is the wrong trade.
+    // 只有定位報告走平行。它的輸出是每個命中儲存格一行短文字，因此區塊在處理中時保留在記憶體裡的
+    // 片段很小。`--filter` 輸出的是完整紀錄，可能等於整個檔案的副本——那是拿記憶體上界去換速度，
+    // 而在一台只有 2–4 GiB 的機器上，那是錯的交換。
     if o.filter { return "--filter" }
     if o.markdown { return "-md" }
     if o.head != nil || o.tail != nil || o.mid != nil { return "-head/-tail/-mid" }

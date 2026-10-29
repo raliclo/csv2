@@ -368,14 +368,16 @@ enum Platform {
     ///
     /// Takes a DESCRIPTOR, not a FileHandle, because Swift for Windows marks
     /// `FileHandle.fileDescriptor` unavailable outright ("Cannot perform
-    /// non-owning handle to fd conversion"). Only the stdout sink needs this
-    /// path -- a file sink cannot meet a broken pipe -- and stdout is fd 1 in
-    /// the C runtime on every platform csv2 builds for, so nothing has to be
-    /// converted.
+    /// non-owning handle to fd conversion"). Every sink writes through it --
+    /// stdout and stderr (fd 1 and 2 in the C runtime on every platform csv2
+    /// builds for), temp files opened by openForWrite, and the append path's
+    /// descriptor -- so nothing has to be converted. Only a pipe can meet
+    /// EPIPE; for a file the failure is a full disk or the like, returned as
+    /// the errno.
     /// 接受的是「描述子」而不是 FileHandle，因為 Swift for Windows 直接把
-    /// `FileHandle.fileDescriptor` 標為不可用。只有 stdout 那個 sink 需要這條路徑——
-    /// 檔案 sink 不可能遇到管線斷掉——而 stdout 在 csv2 建置的每個平台上、於 C runtime 中
-    /// 都是 fd 1，因此沒有任何東西需要轉換。
+    /// `FileHandle.fileDescriptor` 標為不可用。每個 sink 都經由它寫出——stdout 與 stderr（在 csv2
+    /// 建置的每個平台上、於 C runtime 中是 fd 1 與 2）、openForWrite 開的暫存檔、以及追加路徑的描述子——
+    /// 因此沒有任何東西需要轉換。只有管線會遇到 EPIPE；檔案的失敗是磁碟寫滿之類，以 errno 回傳。
     @discardableResult
     static func writeAll(fd: Int32, _ bytes: [UInt8]) -> Int32 {
         if bytes.isEmpty { return 0 }
