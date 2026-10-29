@@ -14744,3 +14744,27 @@ README 寫「31.150 s to 9.636 s」，而上面的表格與 `verifications/measu
 
 - 錯誤發生時，平行路徑印出的部分輸出比單執行緒少（批次為單位丟棄）。兩者 rc 與 stderr 相同，README 沒有承諾錯誤時的部分輸出，
   所以這不是缺陷；記在這裡，避免下次又被當成新發現。
+
+## SN. 沒有標頭列的檔案上，`-update-where` 一律失敗（RQ 引入的退化，只在未發布的 develop）（2026-10-29 修正，T356a–b）
+
+Swift-Cross-UI-M4 回報，`csv2 0.1.7 (v0.1.7-7-gf49f5f92-dirty)`：
+
+```console
+$ printf 'a\nx1\nb\n' > r.txt
+$ csv2 --headers 0 -update-where 'x1' 'y' -i r.txt --in-place; echo $?
+csv2: \x1F1: this file has no header row, so a column can only be addressed by NUMBER here
+1
+$ /opt/homebrew/bin/csv2 --headers 0 -update-where 'x1' 'y' -i r.txt -so    # 0.1.7
+a
+y
+b
+```
+
+`.csv` 加 `--headers 0` 也一樣。原因：RQ 讓 `-update-where` 帶著「已解析的位置」（以 U+001F 開頭的 token），而
+`resolveColumn` 認得它；但套用更新時，沒有標頭列的那條分支不呼叫 `resolveColumn`，直接以 `Int(token)` 讀欄號，
+讀不出來就拒絕。RQ 的測試（T340）只用了有標頭的檔案。那是 swift-cross-ui 的 CLAUDE.md 裡記載的「安全的單行編輯」，
+每個用它的 session 都受影響。**計畫**：沒有標頭的分支也接受已解析的位置；加上無標頭 lines 檔與 `.csv --headers 0` 的測試。
+
+Reported by another session: on the unreleased develop, -update-where fails on every file with
+no header row. RQ's resolved-position token is understood by resolveColumn, but the headerless
+branch reads the column with Int(token) instead. T340 only used a file with a header.

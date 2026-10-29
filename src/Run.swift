@@ -2332,9 +2332,13 @@ func runEdit(_ o: Options) throws {
                     if let h0 = addressHeader ?? headers.first {
                         c = try resolveColumn(colToken, header: h0)
                         name = baseName(headerName(h0.fields[c]))
-                    } else if let numeric = Int(colToken), numeric >= 1 {
+                    } else if let numeric = Int(colToken) ?? (colToken.first == RESOLVED_COLUMN_MARK ? Int(colToken.dropFirst()) : nil),
+                              numeric >= 1 {
+                        // A position -update-where already resolved (RQ) is a number
+                        // here too; without a header there is nothing else it can be. SN.
+                        // -update-where 已解析好的位置（RQ）在這裡也是一個數字；沒有標頭時它不可能是別的。SN。
                         c = numeric - 1
-                        name = colToken
+                        name = displayColumnToken(colToken)
                     } else {
                         throw fault("\(colToken): this file has no header row, so a column can only be addressed by NUMBER here",
                                     "\(colToken)：這個檔案沒有標頭列，因此在這裡只能以「編號」定址欄位")
@@ -2367,9 +2371,13 @@ func runEdit(_ o: Options) throws {
                     if let h0 = addressHeader ?? headers.first {
                         c = try resolveColumn(colToken, header: h0)
                         name = baseName(headerName(h0.fields[c]))
-                    } else if let numeric = Int(colToken), numeric >= 1 {
+                    } else if let numeric = Int(colToken) ?? (colToken.first == RESOLVED_COLUMN_MARK ? Int(colToken.dropFirst()) : nil),
+                              numeric >= 1 {
+                        // A position -update-where already resolved (RQ) is a number
+                        // here too; without a header there is nothing else it can be. SN.
+                        // -update-where 已解析好的位置（RQ）在這裡也是一個數字；沒有標頭時它不可能是別的。SN。
                         c = numeric - 1
-                        name = colToken
+                        name = displayColumnToken(colToken)
                     } else {
                         throw fault("\(colToken): this file has no header row, so a column can only be addressed by NUMBER here",
                                     "\(colToken)：這個檔案沒有標頭列，因此在這裡只能以「編號」定址欄位")

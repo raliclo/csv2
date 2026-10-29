@@ -18506,6 +18506,24 @@ echo "--- T355: measure_parallel_rss.zsh names its Linux output by architecture 
 assert_eq "$(grep -c 'measure_parallel_rss_output_linux_$(uname -m).txt' "$ROOT/verifications/measure_parallel_rss.zsh")" "1" \
     "T355 the x86_64 Linux output has a name of its own / x86_64 Linux 的輸出有自己的名字"
 
+echo "--- T356: -update-where on a file with no header row / T356：沒有標頭列的檔案上的 -update-where ---"
+# SN. RQ made -update-where carry its hit as a resolved position; the
+# branch for a file with no header read the column with Int(token) and
+# refused every edit, naming "\x1F1". T340 had used only a file with a
+# header. This is the single-line edit other projects document for source
+# files, so both shapes are pinned: a lines file (a) and a .csv read with
+# --headers 0 (b).
+# SN。RQ 讓 -update-where 以「已解析的位置」帶著命中；沒有標頭的那條分支以 Int(token) 讀欄位，於是
+# 拒絕每一次編輯，並指名「\x1F1」。T340 只用了有標頭的檔案。這是別的專案為原始碼檔記載的單行編輯，
+# 所以兩種形狀都釘住：lines 檔（a）與以 --headers 0 讀的 .csv（b）。
+printf 'a\nx1\nb\n' > "$TMP/t356.txt"
+"$CSV2" --headers 0 -update-where x1 y -i "$TMP/t356.txt" --in-place 2>/dev/null
+assert_eq "$? $(tr '\n' ' ' < "$TMP/t356.txt")" "0 a y b " \
+    "T356a a headerless lines file: the matching line is edited / 沒有標頭的 lines 檔：符合的那一行被改到"
+printf 'p,q\nx1,z\n' > "$TMP/t356.csv"
+assert_eq "$("$CSV2" --headers 0 -update-where x1 y -i "$TMP/t356.csv" -so 2>&1 | tr '\n' ' ')" "p,q y,z " \
+    "T356b a .csv with --headers 0: the matching cell is edited / 以 --headers 0 讀的 .csv：符合的那一格被改到"
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
