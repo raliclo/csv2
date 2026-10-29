@@ -14,44 +14,30 @@
 # THIS IS NOT A HOMEBREW INSTALL. Read the warning it prints.
 # 這不是 Homebrew 安裝。請讀它印出的警告。
 #
-# Not covered here: the guest. csv2 is deliberately NOT shipped in the LinuxCS
-# rootfs (plan.md, "目前不進 rootfs") -- the scripts that need it run on the
-# macOS host, and the guest carries a fixed 128 MiB rootfs whose budget is not
-# spent on a tool nothing in there calls. The guest builds csv2 from source for
-# testing and throws it away with the per-run image clone. Installing there is
-# phase 7 and is a deliberate deferral, not an oversight.
-# 不涵蓋 guest。csv2 刻意不隨 LinuxCS rootfs 出貨（plan.md「目前不進 rootfs」）——
-# 需要它的腳本都在 macOS host 上，而 guest 的 rootfs 固定 128 MiB，那份預算不該花在
-# 一個 guest 裡沒有東西會呼叫的工具上。guest 是為了測試而從原始碼建置 csv2，並隨著
-# 每次執行的 image 複本一起丟棄。在那裡安裝屬於第 7 階段，是刻意暫緩而非疏漏。
+# Not covered here: the guest. csv2 is deliberately NOT in the LinuxCS rootfs
+# (plan.md, "目前不進 rootfs"): the scripts that need it run on the macOS host,
+# and the guest's fixed 128 MiB rootfs is not spent on a tool nothing there calls.
+# 不涵蓋 guest。csv2 刻意不放進 LinuxCS rootfs（plan.md「目前不進 rootfs」）：需要它的腳本都在
+# macOS host 上，而 guest 固定 128 MiB 的 rootfs 不該花在一個裡面沒有東西會呼叫的工具上。
+# The guest builds csv2 from source for testing and discards it with the
+# per-run image clone; installing there is phase 7, deferred on purpose.
+# guest 為了測試而從原始碼建置 csv2，並隨每次執行的 image 複本一起丟棄；在那裡安裝屬於
+# 第 7 階段，是刻意暫緩。
 # =====================================================================
 
 emulate -L zsh
 setopt no_unset pipe_fail
 
 ROOT=${0:A:h}
-# The SOURCE needs the same `.exe` the destination has had all along, and the
-# asymmetry is what made this wrong. `DEST` is `csv2.exe` on Windows; `BIN` was
-# `csv2` everywhere -- and on that node `release/` holds BOTH, because the
-# Windows build writes `csv2.exe` beside a `csv2` left by something earlier. So
-# install copied a 496,128-byte file that was not the 543,744-byte one just
-# built, ran its verification against what it had copied, and reported success.
+# The SOURCE needs the same `.exe` the destination has. On Windows `release/`
+# can hold BOTH `csv2.exe` from the current build and a stale `csv2` from an
+# earlier one, so a source of `csv2` installs the wrong file and the
+# verification checks what was copied. The post-install check compares FILES,
+# not versions, because both would report the same version. NN.
 #
-# The node's own check is what caught it: "the shell runs
-# C:/Users/lowei/AppData/Local/csv2/csv2.exe, which is NOT the binary just
-# built". That check compares FILES rather than versions for exactly this
-# reason -- both would have said `csv2 0.1.0`. It was added after a scoop shim
-# resolved to a year-old binary in 2026-08-20 (NN), and this is the second
-# thing it has caught that a version string could not.
-#
-# **來源**需要目的地一直都有的那個 `.exe`，而那個不對稱正是它出錯的原因。`DEST` 在 Windows 上是
-# `csv2.exe`；`BIN` 在每個平台上都是 `csv2`——而那個節點的 `release/` 裡**兩個都有**，因為 Windows
-# 的建置會把 `csv2.exe` 寫在一個「更早的什麼東西留下的 `csv2`」旁邊。於是安裝複製了一個 496,128
-# 位元組、而且不是剛建的那個 543,744 位元組的檔案，拿它複製過去的東西去做驗證，然後回報成功。
-# 抓到它的是那個節點自己的檢查：「shell 執行到的是 C:/Users/lowei/AppData/Local/csv2/csv2.exe，
-# 而那不是剛建好的那個二進位檔」。那個檢查之所以比對**檔案**而不是版本，正是為了這種情況——兩者都會
-# 說自己是 `csv2 0.1.0`。它是在 2026-08-20 一個 scoop shim 解析到一年前的二進位檔之後加的（NN），
-# 而這是它抓到的第二件「版本字串抓不到」的事。
+# **來源**需要與目的地相同的 `.exe`。在 Windows 上，`release/` 可能**同時有**這次建置的
+# `csv2.exe` 與先前留下的過期 `csv2`，來源若寫成 `csv2`，裝上去的就是錯的檔案，而驗證檢查的
+# 也是被複製過去的那一份。安裝後的檢查比對的是**檔案**而不是版本，因為兩者會回報同一個版本。NN。
 case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*|CYGWIN*) BIN=$ROOT/release/csv2.exe ;;
     *)                    BIN=$ROOT/release/csv2 ;;
@@ -60,12 +46,11 @@ DRY=0
 MODE=install
 # Two ways to name a destination, because "prefix" already means something.
 # --prefix DIR installs into DIR/bin, which is what --prefix means everywhere
-# else and what this file already does with `brew --prefix` six lines below
-# target_dir(). --dir DIR is the older behaviour under a name that says it:
-# use exactly this directory.
+# else and what target_dir() does with `brew --prefix`. --dir DIR means use
+# exactly this directory.
 # 兩種指定目的地的方式，因為「prefix」這個詞早就有意思了。--prefix DIR 會裝進 DIR/bin，
-# 那是 --prefix 在其他每個地方的意思，也是這個檔案在 target_dir() 底下六行處理 `brew --prefix`
-# 時本來就在做的事。--dir DIR 是舊的行為，換一個名副其實的名字：就用這個目錄。
+# 那是 --prefix 在其他每個地方的意思，也是 target_dir() 處理 `brew --prefix` 的方式。
+# --dir DIR 則是「就用這個目錄」。
 PREFIX=""
 DEST_DIR=""
 RC=1
@@ -85,12 +70,11 @@ done
 
 # `-r` on every print that carries a value from outside. Without it zsh reads
 # backslashes as escapes, and a Windows path is nothing but backslashes:
-# `C:\Users\...\apps\csv2` printed `C:` NUL `sers...` BEL `pps`, and `\c`
-# stopped the output there -- so the refusal never reached the two ways
-# forward it was written to name. `say` had `-r`; `die` did not. QL.
+# `C:\Users\...\apps\csv2` prints `C:` NUL `sers...` BEL `pps`, and `\c`
+# stops the output there, before a refusal names its ways forward. QL.
 # 每一個帶著外來值的 print 都要 `-r`。少了它，zsh 會把反斜線當成跳脫，而一個 Windows 路徑全是反斜線：
-# `C:\Users\...\apps\csv2` 印成 `C:` NUL `sers...` BEL `pps`，而 `\c` 讓輸出就停在那裡——那道拒絕
-# 從來沒有印到它要說出的那兩條路。`say` 有 `-r`，`die` 沒有。QL。
+# `C:\Users\...\apps\csv2` 會印成 `C:` NUL `sers...` BEL `pps`，而 `\c` 讓輸出停在那裡——拒絕訊息
+# 還沒說出可走的路就斷了。QL。
 say()  { print -r -- "$1" }
 die()  { print -r -u2 -- "install.zsh: $1"; exit 1 }
 run()  { if (( DRY )); then say "  DRY  $*"; else "$@" || die "failed: $*"; fi }
@@ -100,17 +84,15 @@ run()  { if (( DRY )); then say "  DRY  $*"; else "$@" || die "failed: $*"; fi }
 #
 # ASK the account, never assume the one running this script. install.zsh is
 # `#!/usr/bin/env zsh`, so the shell it is running in is always zsh -- and that
-# says nothing about the shell the person gets when they open a terminal. On
-# the WSL node on 2026-08-25 the login shell was /bin/bash, and the ONLY rc
-# file in that home directory was `.zshrc`. Writing the export where this
-# script runs would have put the right line into the one file nothing reads,
-# and then reported success.
+# says nothing about the shell the person gets when they open a terminal. An
+# account whose login shell is bash can still have a `.zshrc`; writing the
+# export for the shell this script runs in puts the right line into a file
+# nothing reads, and then reports success.
 #
 # 問這個帳號，絕不假設「執行本腳本的那個 shell」。install.zsh 是 `#!/usr/bin/env zsh`，
 # 所以它執行時所在的 shell 永遠是 zsh——而那對「這個人開終端機時拿到的是哪個 shell」
-# 毫無說明力。2026-08-25 的 WSL 節點，登入 shell 是 /bin/bash，而那個家目錄裡**唯一**
-# 存在的 rc 檔是 `.zshrc`。把 export 寫到「本腳本執行的那個 shell」對應的位置，會把正確
-# 的那一行放進一個沒有東西會讀的檔案，然後回報成功。
+# 毫無說明力。登入 shell 是 bash 的帳號，家目錄裡照樣可能有 `.zshrc`；按本腳本所在的 shell
+# 寫 export，會把正確的那一行放進一個沒有東西會讀的檔案，然後回報成功。
 # ---------------------------------------------------------------------
 login_shell() {
     local sh=""
@@ -122,65 +104,47 @@ login_shell() {
 LOGIN_SHELL=$(login_shell)
 LOGIN_SHELL_NAME=${LOGIN_SHELL:t}
 
-# Which files that shell reads, and why more than one for bash.
+# Which file that shell reads.
 #
-# bash reads the LOGIN files (~/.bash_profile, ~/.bash_login, ~/.profile --
-# first one that exists) for a login shell, and ~/.bashrc for an interactive
-# non-login one. Neither file alone covers both, which is why Debian ships a
-# ~/.profile that sources ~/.bashrc; we reproduce that arrangement rather than
-# invent one. zsh reads ~/.zshrc for every interactive shell, so one file does.
+# zsh gets ~/.zshenv, the one file every zsh invocation reads. Any other shell
+# gets ~/.profile, which a login shell reads; the reachability report then says
+# "login shells only", which is true.
 #
-# bash 在「登入 shell」時讀登入檔（~/.bash_profile、~/.bash_login、~/.profile，取
-# 第一個存在的），在「互動非登入」時讀 ~/.bashrc。任何一個檔案單獨都蓋不住兩者，
-# 這正是 Debian 的 ~/.profile 會去 source ~/.bashrc 的原因；我們沿用那個安排，而不是
-# 自己發明一個。zsh 每個互動 shell 都讀 ~/.zshrc，所以一個檔案就夠。
+# 那個 shell 會讀哪個檔案。
+#
+# zsh 拿到 ~/.zshenv——每一種 zsh 呼叫都會讀的那一個檔案。其他 shell 拿到 ~/.profile，由登入
+# shell 讀取；可達性報告接著會說「只有登入 shell」，而那是實話。
 rc_files() {
     case $LOGIN_SHELL_NAME in
         # .zshenv, not .zshrc. zsh reads .zshrc only for INTERACTIVE shells,
-        # and the thing that needed csv2 on the WSL node was record_release.zsh
-        # running over multissh -- a non-interactive, non-login shell that
-        # reads .zshenv and nothing else. Putting the line in .zshrc would have
-        # fixed a person's terminal and left the script that actually failed
-        # still failing, while this installer reported success. The node had
-        # already learned this: its .zshrc says the Swift toolchain PATH lives
-        # in .zshenv "because `zsh -lc` does not read this file".
-        # 是 .zshenv 而不是 .zshrc。zsh 只有在**互動** shell 才讀 .zshrc，而在 WSL 節點上
-        # 需要 csv2 的是經 multissh 執行的 record_release.zsh——一個非互動、非登入的
-        # shell，它只讀 .zshenv。把那一行寫進 .zshrc，會修好某個人的終端機，而讓當初真正
-        # 失敗的那支腳本繼續失敗，同時這支安裝程式回報成功。那個節點其實已經學會這件事：
-        # 它的 .zshrc 自己寫著，Swift 工具鏈的 PATH 放在 .zshenv，「因為 `zsh -lc` 不讀這個檔案」。
+        # and a script run over multissh is a non-interactive, non-login shell
+        # that reads .zshenv and nothing else. .zshrc would fix a person's
+        # terminal and leave the script failing, while this installer reported
+        # success. IW.
+        # 是 .zshenv 而不是 .zshrc。zsh 只有在**互動** shell 才讀 .zshrc，而經 multissh 執行的腳本
+        # 是一個非互動、非登入的 shell，只讀 .zshenv。寫進 .zshrc 會修好某個人的終端機，卻讓那支
+        # 腳本繼續失敗，同時這支安裝程式回報成功。IW。
         zsh)  print -r -- $HOME/.zshenv ;;
-        # bash has no .zshenv. BASH_ENV would be the equivalent and is not set
-        # by default, so .bashrc plus a login file is as far as bash goes.
-        # bash 沒有 .zshenv 的對應物。BASH_ENV 是對應的機制但預設沒有設定，因此 bash 能做到
-        # 的就是 .bashrc 加上一個登入檔。
-        # No bash branch. A bash account falls to `*)` and gets ~/.profile,
-        # which a bash LOGIN shell reads -- and install.zsh reports that as
-        # "login shells only", which is true. zsh is the one shell where a
-        # single file is read by EVERY invocation, non-interactive and
-        # non-login included, and that is the property this tree needs: the
-        # thing that wanted csv2 on the WSL node was a script over multissh.
-        # See IW, where writing .zshrc instead of .zshenv looked correct and
-        # was not.
-        # 沒有 bash 分支。一個 bash 帳號會落到 `*)`、拿到 ~/.profile，而 bash 的**登入** shell
-        # 會讀它——install.zsh 則把那回報成「只有登入 shell」，而那是實話。zsh 是唯一一個
-        # 「單一檔案會被**每一種**呼叫讀到」的 shell，非互動與非登入都包含在內，而那正是這棵樹
-        # 需要的性質：在 WSL 節點上需要 csv2 的，是一支經 multissh 執行的腳本。見 IW——那次把
-        # .zshrc 寫成了正確答案，而它不是。
+        # No bash branch. bash has no .zshenv, and BASH_ENV, the equivalent, is
+        # not set by default. A bash account falls to `*)` and gets ~/.profile,
+        # which a bash LOGIN shell reads. zsh is the one shell where a single
+        # file is read by EVERY invocation, non-interactive and non-login
+        # included, and that is the property this tree needs. IW.
+        # 沒有 bash 分支。bash 沒有 .zshenv，對應的 BASH_ENV 預設也沒有設定。bash 帳號會落到
+        # `*)`、拿到 ~/.profile，由 bash 的**登入** shell 讀取。zsh 是唯一一個「單一檔案會被**每一種**
+        # 呼叫讀到」的 shell，非互動與非登入都包含在內，而那正是這棵樹需要的性質。IW。
         *)    print -r -- $HOME/.profile ;;
     esac
 }
 
 # Every file this script may ever have written a block into -- which is not
 # the same list as the one it writes to TODAY. Uninstall has to ask the wider
-# question: the bash install writes to ~/.bashrc AND to a login file, and an
-# uninstall that only consulted rc_files() removed one of the two and left the
-# other behind, still carrying a marker that says csv2 put it there. Verified
-# on 2026-08-25; that is what this list exists to prevent.
+# question: an install can leave blocks in more than one file (a bash install
+# also writes a login file), and an uninstall that only consulted rc_files()
+# would leave one behind, still carrying a marker that says csv2 put it there.
 # 這支腳本「曾經可能」寫過區塊的每一個檔案——而那不等於它「今天」會寫的那一份清單。
-# 移除必須問比較寬的那個問題：bash 的安裝會寫進 ~/.bashrc **以及**一個登入檔，而一個只
-# 看 rc_files() 的移除，會拿掉兩者之一、留下另一個，且那一個上面還標著「csv2 放的」。
-# 2026-08-25 實測如此，這份清單就是為了擋住它而存在。
+# 移除必須問比較寬的那個問題：一次安裝可能在不只一個檔案裡留下區塊（bash 的安裝還會寫一個
+# 登入檔），只看 rc_files() 的移除會留下其中一個，且上面還標著「csv2 放的」。
 rc_candidates() {
     print -l -- $HOME/.zshenv $HOME/.zshrc $HOME/.zprofile $HOME/.bashrc \
                 $HOME/.profile $HOME/.bash_profile $HOME/.bash_login
@@ -189,8 +153,9 @@ rc_candidates() {
 RC_BEGIN='# >>> csv2 install.zsh >>>'
 RC_END='# <<< csv2 install.zsh <<<'
 
-# Remove any block we previously wrote, so a second install does not leave two.
-# 移除我們先前寫過的區塊，讓第二次安裝不會留下兩份。
+# Remove any block this script previously wrote, so a second install does not
+# leave two.
+# 移除本腳本先前寫過的區塊，讓第二次安裝不會留下兩份。
 rc_strip() {
     local f=$1
     [[ -f $f ]] || return 0
@@ -219,25 +184,21 @@ rc_append() {  # <file> <dir>
     } >> $f || die "could not append to $f / 無法附加到 $f"
 }
 
-# Run a command the way the person's own shell would: login AND interactive,
-# because that is the only combination that reads every file we may have
-# written. `zsh -lc` -- what this script used to verify with -- is login but
-# NOT interactive, and zsh reads .zshrc only when interactive. It would have
-# missed the very line we just added.
-# 以「這個人自己的 shell」的方式執行：同時是登入與互動的，因為只有這個組合會讀到我們
-# 可能寫過的每一個檔案。`zsh -lc`——本腳本原本用來驗證的方式——是登入但**不是**互動，
-# 而 zsh 只有在互動時才讀 .zshrc。它會漏掉我們剛加上的那一行。
+# Run a command the way the person's own shell would. `zsh -lc` alone is login
+# but NOT interactive, and zsh reads .zshrc only when interactive, so it would
+# miss a line there; `-lic` is the combination that reads every rc file.
+# 以「這個人自己的 shell」的方式執行。單用 `zsh -lc` 是登入但**不是**互動，而 zsh 只有在互動時
+# 才讀 .zshrc，因此會漏掉那裡的一行；`-lic` 才是會讀到每一個 rc 檔的組合。
 # Non-interactive FIRST, and remember which one answered.
 #
 # The three cases are not equivalent and the difference is the whole point:
 # `-c` is what a script reached over ssh gets, `-lc` a login shell, `-lic` a
 # terminal. A directory reachable only from the last of those satisfies a
-# person typing `csv2` and still fails record_release.zsh, which is the exact
-# failure that made this installer touch rc files at all.
-# 先問最嚴格的那一個，並記住是哪一個回答的。
+# person typing `csv2` and still fails a script run over ssh.
+# 先問非互動的那一個，並記住是哪一個回答的。
 # 三種情況並不等價，而那個差別正是重點：`-c` 是「經 ssh 執行的腳本」拿到的，`-lc` 是登入
 # shell，`-lic` 是終端機。一個只有在最後一種情況下才找得到的目錄，滿足了「有人打 csv2」，
-# 卻仍然讓 record_release.zsh 失敗——而那正是這支安裝程式會去動 rc 檔的原因。
+# 卻仍然讓經 ssh 執行的腳本失敗。
 # The result comes back in globals, not on stdout. A function whose caller
 # writes `x=$(f)` runs it in a SUBSHELL, so anything f records about HOW it got
 # the answer dies with that subshell -- a check that measured the right thing
@@ -249,18 +210,16 @@ rc_append() {  # <file> <dir>
 #
 # `zsh -c` does not reset PATH -- it inherits the exported PATH of whatever
 # called it. So probing with a plain `$LOGIN_SHELL -c` asks "is csv2 on the
-# PATH I already have", answers yes, and reports it as "every shell finds it".
-# Seen here on 2026-08-25: a --prefix install into a temp directory reported
-# success while the shell had resolved csv2 out of /opt/homebrew/bin, which the
-# rc file it had just written had nothing to do with. The question is what a
-# shell started from nothing can see, so start one from nothing.
+# PATH I already have", answers yes, and reports it as "every shell finds it"
+# -- even when the csv2 it found is an unrelated one elsewhere on that PATH.
+# The question is what a shell started from nothing can see, so start one from
+# nothing.
 #
 # 用一個**全新的**環境，不是現在這個。
 # `zsh -c` 不會重設 PATH——它繼承呼叫者匯出的 PATH。因此用單純的 `$LOGIN_SHELL -c` 去探測，
-# 問的是「csv2 在我已經有的那個 PATH 上嗎」，答案是「在」，然後被回報成「每一種 shell 都
-# 找得到」。2026-08-25 在此見到：一次裝進暫存目錄的 --prefix 安裝回報成功，而那個 shell 解析
-# 到的是 /opt/homebrew/bin 裡的 csv2，與它剛寫下的那個 rc 檔毫無關係。要問的是「一個從零
-# 開始的 shell 看得到什麼」，那就從零開始一個。
+# 問的是「csv2 在現有的 PATH 上嗎」，答案是「在」，然後被回報成「每一種 shell 都找得到」——
+# 即使它找到的是那個 PATH 上別處一支不相干的 csv2。要問的是「一個從零開始的 shell 看得到
+# 什麼」，那就從零開始一個。
 probe_env() {
     local -a keep out
     # HOME because rc files are found through it; the rest so that a shell on
@@ -286,28 +245,23 @@ in_user_shell() {
         # one. The ladder below reads as "least-equipped environment first, so
         # anything richer must also succeed" -- true if a login shell only ADDS
         # to PATH. On macOS it does not: `path_helper`, run from /etc/zprofile
-        # for login shells, REORDERS it. README.md:35-39 explains that exact
-        # mechanism, and the check three lines up did not use it.
+        # for login shells, REORDERS it. README.md explains that mechanism.
         #
         # So a second csv2 earlier in the login PATH -- which is what you have
         # the moment you install twice, which is what --prefix and --dir are
-        # for -- makes `reachable from: every shell` true about reachability and
-        # false about identity, while the line beside it promises identity:
-        # "and it is the file just installed".
-        #
-        # Round 96 hit this with a /usr/local/bin/csv2 nobody in the round had
-        # placed. OK.
+        # for -- would make `reachable from: every shell` true about
+        # reachability and false about identity, while the line beside it
+        # promises identity: "and it is the file just installed". Round 96, OK.
         #
         # 一個非登入 shell 找得到它，**不**蘊涵每一種 shell 都找得到**這一個**。底下那個階梯的讀法是
         # 「先問配備最少的環境，因此更豐富的環境必然也成功」——那在「登入 shell 只會**增加** PATH」時
         # 成立。而 macOS 上不成立：`path_helper` 由 /etc/zprofile 在登入 shell 執行，它會**重排** PATH。
-        # README.md 第 35–39 行解釋的正是那個機制，而上面三行的檢查沒有用到它。
+        # README.md 解釋了這個機制。
         #
-        # 於是一個排在登入 PATH 更前面的第二個 csv2——那正是「你裝第二次」時會有的東西，而
-        # --prefix 與 --dir 存在的理由就是讓你裝第二次——會讓 `reachable from: every shell` 對
+        # 於是一個排在登入 PATH 更前面的第二個 csv2——那正是「裝第二次」時會有的東西，而
+        # --prefix 與 --dir 存在的理由就是讓人裝第二次——會讓 `reachable from: every shell` 對
         # **可達性**為真、對**同一性**為假；而它旁邊那一行承諾的正是同一性：「就是剛剛裝的那個檔案」。
-        #
-        # 第 96 回合就是被一個「沒有任何人在那個回合裡放置」的 /usr/local/bin/csv2 撞到的。OK。
+        # 第 96 回合，OK。
         local login_out
         if login_out=$($E $LOGIN_SHELL -lc "$1" 2>/dev/null) && [[ -n $login_out ]] \
            && [[ $login_out != $out ]]; then
@@ -349,14 +303,13 @@ fi
 
 target_dir() {
     # --dir is taken as given; --prefix gets /bin, exactly as the brew branch
-    # below does with the prefix IT is handed. Until 2026-09-02 the flag was
-    # taken as given too, so `--prefix /usr/local` wrote /usr/local/csv2 --
-    # a file on no PATH -- and then offered to add a PATH line to an rc file
-    # to reach it, turning a misreading into configuration. KV.
+    # below does with the prefix IT is handed. Taking --prefix as given would
+    # make `--prefix /usr/local` write /usr/local/csv2 -- a file on no PATH --
+    # and then add an rc PATH line to reach it, turning a misreading into
+    # configuration. KV.
     # --dir 照給的用；--prefix 會加上 /bin，與底下 brew 那一支對它拿到的 prefix 所做的完全相同。
-    # 在 2026-09-02 之前，這個旗標也是照給的用，於是 `--prefix /usr/local` 寫出 /usr/local/csv2
-    # ——一個不在任何 PATH 上的檔案——然後主動提議在 rc 檔裡加一行 PATH 去搆到它，把一個誤讀
-    # 固化成設定。KV。
+    # 若 --prefix 也照給的用，`--prefix /usr/local` 會寫出 /usr/local/csv2——一個不在任何 PATH 上
+    # 的檔案——再在 rc 檔裡加一行 PATH 去搆到它，把一個誤讀固化成設定。KV。
     if [[ -n $DEST_DIR ]]; then
         print -r -- $DEST_DIR
         return
@@ -367,9 +320,9 @@ target_dir() {
     fi
     local p
     if p=$(brew --prefix 2>/dev/null) && [[ -d $p/bin ]]; then
-        # Refuse when brew already manages csv2. QL is this same defect on the
-        # scoop side; macOS never had the equivalent, and here it is worse,
-        # because the destination IS brew's own bin directory. `cp -f` replaces
+        # Refuse when brew already manages csv2. QL is the same refusal on the
+        # scoop side, and here it matters more, because the destination IS
+        # brew's own bin directory. `cp -f` replaces
         # brew's symlink with a plain file while brew's database still believes
         # it owns that path, and the NOTE printed alongside -- "brew list will
         # not show it", "brew upgrade will never update it" -- is false line by
@@ -379,20 +332,17 @@ target_dir() {
         # `brew list --formula` and NOT `brew --prefix csv2`: the latter returns
         # 0 and a plausible path for a formula that is merely KNOWN, so using it
         # would refuse on every Mac with Homebrew, csv2 installed or not. It
-        # answers "where would this go", not "is it installed". That is the
-        # scoop trap in reverse -- there the wrong probe failed to refuse, here
-        # it would refuse everything. QR.
+        # answers "where would this go", not "is it installed". QR.
         #
-        # brew 已經管理著 csv2 時要拒絕。QL 是 scoop 那一側的同一件事；macOS 從來沒有對應的檢查，
-        # 而這裡更糟，因為目的地**就是 brew 自己的 bin 目錄**。`cp -f` 會把 brew 的 symlink 換成
+        # brew 已經管理著 csv2 時要拒絕。QL 是 scoop 那一側的同一道拒絕，而這裡更要緊，
+        # 因為目的地**就是 brew 自己的 bin 目錄**。`cp -f` 會把 brew 的 symlink 換成
         # 一個普通檔案，而 brew 的資料庫仍認為它擁有那條路徑；同一畫面上那段 NOTE（「brew list
         # 不會列出它」「brew upgrade 不會更新它」）在這個情境下逐行皆假——它是為「brew 沒有管理
         # csv2」寫的。
         #
         # 用 `brew list --formula` 而**不是** `brew --prefix csv2`：後者對一個「只是已知」的 formula
         # 同樣回傳 0 與一個看起來合理的路徑，拿它當偵測會在每一台裝了 Homebrew 的 Mac 上誤擋，
-        # 不論有沒有裝過 csv2。它回答的是「若安裝會在哪裡」，不是「它裝了沒有」。那是 scoop 那個
-        # 陷阱的反面——那裡是該拒絕時沒拒絕，這裡會變成不該拒絕時拒絕。QR。
+        # 不論有沒有裝過 csv2。它回答的是「若安裝會在哪裡」，不是「它裝了沒有」。QR。
         if command -v brew >/dev/null 2>&1 && brew list --formula csv2 >/dev/null 2>&1; then
             [[ $MODE == uninstall ]] && die "Homebrew manages csv2 here ($p/bin/csv2). Remove it with \`brew uninstall csv2\`; this script did not put it there. / Homebrew 在這裡管理著 csv2（$p/bin/csv2）。請用 \`brew uninstall csv2\` 移除；它不是這支腳本放的。"
             die "Homebrew manages csv2 here ($p/bin/csv2). Writing there replaces brew's symlink with a plain file while brew still believes it owns that path. Use \`brew upgrade csv2\` for a release, or --dir DIR to place a development build somewhere brew does not own. / Homebrew 在這裡管理著 csv2（$p/bin/csv2）。寫進去會把 brew 的 symlink 換成一個普通檔案，而 brew 仍認為它擁有那條路徑。要裝正式版請用 \`brew upgrade csv2\`；要放一份開發建置，請用 --dir DIR 指到一個不屬於 brew 的地方。"
@@ -404,72 +354,43 @@ target_dir() {
     # No brew. On the Linux guest there never will be one: /opt/homebrew does
     # not exist there and Homebrew is not installed. The conventional
     # equivalent is /usr/local/bin, and the guest's runtime PATH already
-    # contains it -- verified in build_multissh_in_linux_vm.zsh, which exports
-    # /workspace/opt/swift/usr/bin:/usr/local/sbin:/usr/local/bin:... -- even
-    # though buildroot does not create the directory. So it is the right place
-    # when we can write there.
+    # contains it (build_multissh_in_linux_vm.zsh exports
+    # /workspace/opt/swift/usr/bin:/usr/local/sbin:/usr/local/bin:...) even
+    # though buildroot does not create the directory. So the Linux branch below
+    # uses it when it is writable.
     # 沒有 brew。Linux guest 上永遠不會有：那裡沒有 /opt/homebrew，也沒有安裝
     # Homebrew。慣用的對應位置是 /usr/local/bin，而 guest 的執行期 PATH 已經包含它
-    # ——在 build_multissh_in_linux_vm.zsh 中查證過，它 export 的是
-    # /workspace/opt/swift/usr/bin:/usr/local/sbin:/usr/local/bin:...——即使
-    # buildroot 並未建立該目錄。因此只要我們寫得進去，那就是對的位置。
-    # Windows. The first Windows install put the binary in
-    # $HOME/.local/bin, which is not on PATH there, and said so -- honestly,
-    # but the node upgrade around it then found an OLDER csv2 through a scoop
-    # shim and reported success. 2026-08-20, defect MM.
-    #
-    # The convention on that machine is scoop's: the executable lives under
+    # （build_multissh_in_linux_vm.zsh export 的是
+    # /workspace/opt/swift/usr/bin:/usr/local/sbin:/usr/local/bin:...），即使
+    # buildroot 並未建立該目錄。因此底下的 Linux 分支在寫得進去時就用它。
+    # Windows. The convention there is scoop's: the executable lives under
     # %LOCALAPPDATA%\csv2 and a shim in ~/scoop/shims points at it, with
     # scoop/shims on PATH. Installing to the place the shim ALREADY names means
     # the shell resolves to the new build without this script writing anything
-    # into scoop's own directory -- creating shims is scoop's business, not
-    # ours.
+    # into scoop's own directory -- creating shims is scoop's business.
     #
-    # Windows。第一次在 Windows 上安裝時，執行檔被放進 $HOME/.local/bin，而那裡不在 PATH 上；
-    # 它誠實地說了，但外圍的節點升級腳本接著透過一個 scoop shim 找到了「更舊的」csv2，
-    # 並回報成功。2026-08-20，缺陷 MM。
-    # 那台機器上的慣例是 scoop 的：執行檔放在 %LOCALAPPDATA%\csv2 底下，由 ~/scoop/shims
+    # Windows。那裡的慣例是 scoop 的：執行檔放在 %LOCALAPPDATA%\csv2 底下，由 ~/scoop/shims
     # 裡的一個 shim 指向它，而 scoop/shims 在 PATH 上。**裝到 shim 本來就指著的那個位置**，
     # 會讓 shell 解析到新的建置，而這支腳本完全不必往 scoop 自己的目錄裡寫東西——建立 shim
-    # 是 scoop 的事，不是我們的。
-    # ASK the shim where it points; do not assume. The line above this one
-    # used to print %LOCALAPPDATA%/csv2 unconditionally, with a comment
-    # explaining that the shim on that machine names exactly that directory.
-    # It does -- measured on 2026-09-10, the shim file says
-    # `path = "C:\\Users\\lowei\\AppData\\Local\\csv2\\csv2.exe"` -- but that is a fact
-    # about one machine, and the macOS branch six lines up does not assume the
-    # equivalent: it runs `brew --prefix`. This is the same question asked the
-    # same way.
+    # 是 scoop 的事。
+    # ASK the shim where it points; do not assume a directory. Which directory a
+    # shim names is a fact about one machine, and the macOS branch above does
+    # not assume the equivalent either: it runs `brew --prefix`.
     #
-    # **問** shim 它指向哪裡，不要假設。這一段原本無條件印出 %LOCALAPPDATA%/csv2，附一段註解
-    # 說明「那台機器上的 shim 指的正是那個目錄」。它確實是——2026-09-10 實測，那個 shim 檔寫的是
-    # `path = "C:\\Users\\lowei\\AppData\\Local\\csv2\\csv2.exe"`——但那是一個關於**某一台機器**的
-    # 事實，而上面六行的 macOS 分支並沒有做等價的假設：它去跑 `brew --prefix`。這裡問的是同一個
-    # 問題，用同一種方式。
+    # **問** shim 它指向哪裡，不要假設目錄。shim 指向哪個目錄，是關於**某一台機器**的事實；
+    # 上面的 macOS 分支同樣沒有做等價的假設，而是去跑 `brew --prefix`。
     #
     # The shim is the authoritative answer to the only question that matters
     # here: where will the shell find csv2 after this install. Writing anywhere
-    # else produces defect MM again -- an install that succeeds while the shell
-    # goes on resolving an older binary through a shim nobody looked at.
-    # shim 是「這次安裝之後，shell 會在哪裡找到 csv2」這個唯一要緊的問題的權威答案。裝到別的地方
-    # 會再次產生缺陷 MM——一次成功的安裝，而 shell 仍然透過一個沒有人去看的 shim 解析到更舊的
-    # 執行檔。
+    # else gives an install that succeeds while the shell goes on resolving an
+    # older binary through a shim nobody looked at. MM.
+    # shim 是「這次安裝之後，shell 會在哪裡找到 csv2」這個唯一要緊的問題的權威答案。裝到別的地方，
+    # 會得到一次成功的安裝，而 shell 仍然透過一個沒有人去看的 shim 解析到更舊的執行檔。MM。
     #
-    # A csv2 that scoop itself manages IS handled now, above. It was recorded
-    # as an honest gap first, because `scoop prefix csv2` answers "Could not
-    # find app path" on the node and an untested refusal is worse than a stated
-    # one. What could not be exercised, though, was that FACT and not the
-    # query: scoop manages other apps there, and a fake `scoop` early on PATH
-    # produces the condition. The two were separable and had not been
-    # separated. Both directions were then measured on the node -- the real
-    # state still resolves through the shim, and a scoop that claims csv2
-    # refuses.
-    # 「由 scoop 自己管理的 csv2」現在**已經處理**，就在上面。它先前是被當成一個誠實的缺口記
-    # 下來的，因為 `scoop prefix csv2` 在那個節點上回答「Could not find app path」，而一個沒被
-    # 測過的拒絕比一個講明白的缺口更糟。但執行不到的是那個**事實**，不是那個查詢：那台機器上
-    # scoop 管理著別的 app，而一個放在 PATH 前面的假 `scoop` 就能製造出那個條件。兩者可以分開，
-    # 而先前沒有分開。之後兩個方向都在節點上量過——真實狀態仍然經由 shim 解析，而一個宣稱管理著
-    # csv2 的 scoop 會被拒絕。
+    # A csv2 that scoop itself manages is refused first, below. A fake `scoop`
+    # early on PATH produces that condition for testing.
+    # 「由 scoop 自己管理的 csv2」會先在底下被拒絕。把一個假的 `scoop` 放在 PATH 前面，就能為測試
+    # 製造出那個條件。
     case "$(uname -s)" in
         MINGW*|MSYS*|CYGWIN*)
             setopt local_options extended_glob
@@ -484,15 +405,15 @@ target_dir() {
             # 產生一個「能用到下一次 `scoop update` 為止」的安裝。
             #
             # The exit status is USELESS here: `scoop prefix csv2` answers
-            # "Could not find app path for 'csv2'." and still exits 0. Measured
-            # on the Windows node, 2026-09-10. So the discriminator is the
+            # "Could not find app path for 'csv2'." and still exits 0. So the
+            # discriminator is the
             # OUTPUT -- it must look like a Windows path AND name a directory
             # that exists -- which is the same shape as reading a version out
             # of `--version`: match something self-validating, never split and
             # hope.
             #
             # 這裡的退出碼**沒有用**：`scoop prefix csv2` 會回答「Could not find app path for
-            # 'csv2'.」而且仍然以 0 結束。2026-09-10 在 Windows 節點上量到。所以判別式看的是
+            # 'csv2'.」而且仍然以 0 結束。所以判別式看的是
             # **輸出**——它必須長得像一個 Windows 路徑，而且指向一個存在的目錄——那與「從
             # `--version` 讀出版本號」是同一個形狀：比對一個能自我驗證的東西，不要切了就用。
             if (( $+commands[scoop] )); then
@@ -562,16 +483,13 @@ target_dir() {
 }
 
 # `|| exit`, because target_dir runs in a command substitution: a `die` inside
-# it ends that SUBSHELL, not this script. Without this, the scoop refusal
-# printed its message and the script went on with an empty DEST_DIR --
-# `--dry-run` exited 0 planning `cp ... /csv2.exe`, and a real run stopped only
-# because `mkdir -p ''` happened to fail. The emptiness check behind it is for
-# the next branch that prints nothing: an install with no destination is never
-# right, whatever the reason. QL.
+# it ends that SUBSHELL, not this script. Without this, a refusal prints its
+# message and the script goes on with an empty DEST_DIR, planning
+# `cp ... /csv2.exe`. The emptiness check behind it is for any branch that
+# prints nothing: an install with no destination is never right. QL.
 # `|| exit`，因為 target_dir 是在命令替換裡跑的：它裡面的 `die` 結束的是那個**子 shell**，不是這支
-# 腳本。少了它，scoop 那道拒絕印完訊息後，腳本帶著空的 DEST_DIR 繼續——`--dry-run` 以 0 結束並規劃
-# `cp ... /csv2.exe`，而真的執行之所以停下，只是因為 `mkdir -p ''` 剛好失敗。後面那道「是否為空」的
-# 檢查，是給下一個什麼都沒印的分支：一次沒有目的地的安裝，不論理由為何都不會是對的。QL。
+# 腳本。少了它，拒絕印完訊息後，腳本會帶著空的 DEST_DIR 繼續，規劃出 `cp ... /csv2.exe`。後面那道
+# 「是否為空」的檢查，是給任何什麼都沒印的分支：一次沒有目的地的安裝，絕不會是對的。QL。
 DEST_DIR=$(target_dir) || exit $?
 [[ -n $DEST_DIR ]] || die "no destination directory was determined; refusing to install to /csv2 / 沒有決定出目的地目錄；拒絕安裝到 /csv2"
 # `.exe` on Windows, because the shell will not run it otherwise and the scoop
@@ -632,21 +550,18 @@ BUILT_VERSION=${BUILT_VERSION%$'\r'}
 say "csv2 install / 安裝"
 say "  from    : $BIN ($BUILT_VERSION)"
 say "  to      : $DEST"
-# What is already there, asked by RUNNING it. Without this line the gap between
-# an installed copy and the tree announced itself only to someone who went and
-# compared `csv2 --version` against HEAD -- and twice nobody did: a 0.1.0 sat on
-# a PATH for a day in September and for a month before 2026-10-07 (todo.md,
-# "Nothing keeps the installed copy current"). This is the moment somebody is
-# looking, so it is said here. A copy that will not RUN is reported as that,
-# not as absent: on 2026-10-12 an installed 0.1.3 printed nothing and exited
-# 127 once its Swift runtime was removed (RC), and "nothing installed" would
-# have been the wrong thing to tell its owner.
-# 那裡已經有的是什麼，靠**執行它**問出來。少了這一行，「已安裝的那一份」與「這棵樹」之間的落差，
-# 只會對主動去比對 `csv2 --version` 與 HEAD 的人現身——而有兩次沒有人去比：一份 0.1.0 在九月待在
-# PATH 上一整天，又在 2026-10-07 之前待了一個月（todo.md，「已安裝的那一份沒有東西讓它跟上」）。
-# 這裡正是有人在看的時刻，所以在這裡說。一份**跑不起來**的複本要照實說它跑不起來，而不是說它不存在：
-# 2026-10-12 一份已安裝的 0.1.3 在它的 Swift runtime 被移除後什麼都不印、以 127 結束（RC），
-# 而對它的主人說「這裡沒有安裝任何東西」會是錯的。
+# What is already there, asked by RUNNING it. Otherwise the gap between an
+# installed copy and the tree shows only to someone who compares
+# `csv2 --version` against HEAD (todo.md, "Nothing keeps the installed copy
+# current"); this is the moment somebody is looking. A copy that will not RUN
+# is reported as that, not as absent: a dynamically linked copy whose Swift
+# runtime is gone prints nothing and exits 127, and "nothing installed" would
+# be the wrong thing to tell its owner. RC.
+# 那裡已經有的是什麼，靠**執行它**問出來。否則「已安裝的那一份」與「這棵樹」之間的落差，只會對
+# 主動去比對 `csv2 --version` 與 HEAD 的人現身（todo.md，「已安裝的那一份沒有東西讓它跟上」）；
+# 而這裡正是有人在看的時刻。一份**跑不起來**的複本要照實說它跑不起來，而不是說它不存在：一份動態
+# 連結、Swift runtime 已被移除的複本什麼都不印、以 127 結束，對它的主人說「這裡沒有安裝任何東西」
+# 會是錯的。RC。
 if [[ -e $DEST ]]; then
     if OLD_VERSION=$($DEST --version 2>/dev/null) && [[ -n $OLD_VERSION ]]; then
         OLD_VERSION=${OLD_VERSION%$'\r'}
@@ -683,12 +598,12 @@ run chmod 755 $DEST
 #
 # /usr/local/bin is Homebrew's only where brew SAYS its prefix is /usr/local
 # (Intel macOS). On a Linux with no brew, and on Apple silicon where the prefix
-# is /opt/homebrew, it is an ordinary directory, and this note warned about a
-# package manager that was not there. So that case asks brew; the two names
+# is /opt/homebrew, it is an ordinary directory, and the note would warn about
+# a package manager that is not there. So that case asks brew; the two names
 # that only Homebrew uses still answer for themselves. RF.
 # /usr/local/bin 只有在 brew **自己說**它的 prefix 是 /usr/local 時（Intel macOS）才是 Homebrew 的。
-# 在一台沒有 brew 的 Linux、以及 prefix 是 /opt/homebrew 的 Apple silicon 上，它只是普通目錄，而這段
-# 說明對一個不存在的套件管理員發出了警告。所以那個情況去問 brew；只有 Homebrew 會用的那兩個名字，
+# 在一台沒有 brew 的 Linux、以及 prefix 是 /opt/homebrew 的 Apple silicon 上，它只是普通目錄，這段
+# 說明會對一個不存在的套件管理員發出警告。所以那個情況去問 brew；只有 Homebrew 會用的那兩個名字，
 # 仍然自己就說明了自己。RF。
 _brew_bin=""
 if command -v brew >/dev/null 2>&1; then
@@ -709,45 +624,30 @@ fi
 # ---------------------------------------------------------------------
 # Ask whether the shell can run csv2, not whether a string is in PATH.
 #
-# `case ":$PATH:" in *":$DEST_DIR:"*` -- what this used to test -- is the wrong
-# question in both directions. On the Windows node $DEST_DIR is NOT on PATH and
-# `csv2` resolves perfectly well, through a scoop shim in a different
-# directory; that test would have had this script edit that machine's
-# ~/.profile to fix something that was not broken. And a directory CAN be on
-# PATH while the shell still runs a different csv2 out of an earlier one.
+# `case ":$PATH:" in *":$DEST_DIR:"*` is the wrong question in both
+# directions. On Windows $DEST_DIR is NOT on PATH and `csv2` resolves through
+# a scoop shim in a different directory, so that test would edit ~/.profile to
+# fix something that is not broken. And a directory CAN be on PATH while the
+# shell still runs a different csv2 out of an earlier one.
 #
 # 問「shell 能不能執行 csv2」，不要問「某個字串在不在 PATH 裡」。
-# `case ":$PATH:" in *":$DEST_DIR:"*`——這裡原本測的東西——在兩個方向上都問錯了。Windows 節點
-# 上 $DEST_DIR **不在** PATH 上，而 `csv2` 解析得好好的，靠的是另一個目錄裡的 scoop shim；
-# 那個測試會讓這支腳本去改那台機器的 ~/.profile，修一個沒有壞的東西。反過來，一個目錄可以
-# 在 PATH 上，而 shell 仍然執行到更前面某個目錄裡的另一支 csv2。
+# `case ":$PATH:" in *":$DEST_DIR:"*` 在兩個方向上都問錯了。Windows 上 $DEST_DIR **不在** PATH 上，
+# 而 `csv2` 透過另一個目錄裡的 scoop shim 解析得好好的，那個測試會去改 ~/.profile，修一個沒有壞的
+# 東西。反過來，一個目錄可以在 PATH 上，而 shell 仍然執行到更前面某個目錄裡的另一支 csv2。
 # ---------------------------------------------------------------------
-# `sum_of` stood here and was never called -- defined once, referenced nowhere.
-# It went out for two reasons, either of which is enough.
+# No checksum helper here, and none should be added back. `shasum` is a Perl
+# script on macOS, and this project does not depend on Perl (see AGENTS.md);
+# the aarch64 guest has neither perl nor python. And a fallback written as
+# `shasum ... | cut ... || sha256sum ...` cannot work: the pipeline's status is
+# `cut`'s, 0 whether or not `shasum` exists, so the `||` half is unreachable
+# and the result is an empty string with nothing said. Files are compared with
+# `-ef` below instead.
 #
-# It ran Perl. `shasum` is a Perl script on macOS, and this project does not
-# depend on Perl (see AGENTS.md); the aarch64 guest has neither perl nor python.
-#
-# And its fallback could not work. `shasum ... | cut ... || sha256sum ...` takes
-# the exit status of the PIPELINE, which is `cut`'s, which is 0 whether or not
-# `shasum` exists -- so the `||` half was unreachable, and on a node without
-# `shasum` the function would have returned the empty string with nothing said.
-# That is the same shape as T246a's first version, which passed in the guest by
-# comparing "" with "". Dead code cannot be caught by a test, so it is deleted
-# rather than fixed: a repaired function nobody calls is still a claim nobody
-# checks.
-#
-# `sum_of` 曾經在這裡，而且**從來沒有被呼叫過**——定義一次、引用零次。它被移除有兩個理由，
-# 任何一個都足夠。
-#
-# 它會啟動 Perl。`shasum` 在 macOS 上是一支 Perl 腳本，而本專案不依賴 Perl（見 AGENTS.md）；
-# aarch64 guest 上既沒有 perl 也沒有 python。
-#
-# 而且它的 fallback 根本不會運作。`shasum ... | cut ... || sha256sum ...` 取的是**管線**的
-# 退出碼，也就是 `cut` 的，無論 `shasum` 在不在都是 0——因此 `||` 那一半到不了，而在沒有
-# `shasum` 的節點上，這個函式會回傳空字串而且什麼都不說。那與 T246a 的第一版是同一個形狀，
-# 它在 guest 裡以「拿 "" 比 ""」的方式通過了。死碼抓不到，因為沒有測試會呼叫它——所以它被
-# **刪除**而不是修好：一個沒有人呼叫的、修好的函式，仍然是一個沒有人檢查的宣稱。
+# 這裡沒有校驗和輔助函式，也不要加回來。`shasum` 在 macOS 上是一支 Perl 腳本，而本專案不依賴
+# Perl（見 AGENTS.md）；aarch64 guest 上既沒有 perl 也沒有 python。而寫成
+# `shasum ... | cut ... || sha256sum ...` 的 fallback 不會運作：管線的退出碼是 `cut` 的，不論
+# `shasum` 在不在都是 0，因此 `||` 那一半到不了，結果是一個空字串而且什麼都不說。底下改以 `-ef`
+# 比對檔案。
 
 # Follow a shim rather than hashing it: its own bytes are not the program's.
 # 遇到 shim 要跟著它走，而不是對它算雜湊：shim 自己的位元組不是那支程式的。
@@ -760,25 +660,20 @@ resolved_target() {
     fi
 }
 
-# Does a shell started from nothing run the file we just installed?
-# 一個從零開始的 shell，執行到的是不是我們剛裝上的那個檔案？
+# Does a shell started from nothing run the file just installed?
+# 一個從零開始的 shell，執行到的是不是剛裝上的那個檔案？
 RESOLVED=""; REACH=""; TARGET=""
 resolves_to_dest() {
     in_user_shell 'command -v csv2' || return 1
     RESOLVED=$PROBE_OUT; REACH=$PROBE_KIND
     TARGET=$(resolved_target $RESOLVED)
     # `-ef`, not a hash. Two builds of the same commit have identical bytes at
-    # different paths, and this question is "is the shell running THE FILE I
-    # just placed", not "is it running something that looks like it". The same
-    # mistake was fixed twenty lines below on 2026-08-25 and its comment spells
-    # out the distinction; this second site was left asking the wrong one. It
-    # only became reachable on 2026-09-02, when csv2 moved to /usr/local/bin --
-    # a directory that IS on the clean default PATH, unlike Homebrew's. KW.
+    # different paths, and this question is "is the shell running THE FILE just
+    # placed", not "is it running something that looks like it". The check on
+    # `_inherited` below makes the same distinction. KW.
     # 用 `-ef`，不是雜湊。同一個 commit 的兩份建置在不同路徑上有相同的位元組，而這裡要問的是
-    # 「這個 shell 執行到的是不是我剛放下的**那個檔案**」，不是「它執行到的東西看起來像不像」。
-    # 同一個錯誤在二十行之下已於 2026-08-25 修過，那段註解把這個區分寫得很清楚；而這第二處被留著
-    # 問了錯的問題。它一直到 2026-09-02 才變得可觸發——那天 csv2 搬到了 /usr/local/bin，
-    # 一個與 Homebrew 的目錄不同、確實在乾淨預設 PATH 上的地方。KW。
+    # 「這個 shell 執行到的是不是剛放下的**那個檔案**」，不是「它執行到的東西看起來像不像」。
+    # 底下對 `_inherited` 的檢查做的是同一個區分。KW。
     [[ -n $TARGET && "$TARGET" -ef "$DEST" ]]
 }
 
@@ -810,18 +705,14 @@ fi
 # 從零開始的那個問法沒有答案。在寫任何東西之前，先問「**這個**環境」能不能執行它——在 Windows
 # 上，通往 scoop shim 的那個 PATH 來自 Windows 的行程環境而不是任何 rc 檔，`env -i` 重現不了
 # 它。在那裡改 rc 檔不會有任何效果，卻仍然會留下一個區塊。
-# Same FILE, not same bytes. A hash comparison here matched
-# /opt/homebrew/bin/csv2 against an install into a temp prefix -- a different
-# file at a different path with identical contents, because both were the same
-# build -- and concluded that this shell already ran the new install, so no rc
-# file was written and the temp prefix stayed unreachable. Byte equality is the
-# right question for "will the shell run this program" and the wrong one for
-# "is this the copy I just placed". 2026-08-25, seen here.
-# 是同一個「檔案」，不是同樣的位元組。這裡用雜湊比對時，把 /opt/homebrew/bin/csv2 比中了一次
-# 裝進暫存 prefix 的安裝——不同路徑的不同檔案，內容相同，因為兩者是同一次建置——於是結論是
-# 「這個 shell 已經在執行新裝的那個」，沒有寫任何 rc 檔，而那個暫存 prefix 仍然叫不出來。
-# 位元組相等，是「shell 會不會執行到這支程式」的正確問法，卻是「這是不是我剛放的那個複本」
-# 的錯誤問法。2026-08-25 在此見到。
+# Same FILE, not same bytes. A hash comparison would match an older install of
+# the same build elsewhere on PATH, conclude this shell already runs the new
+# one, write no rc file, and leave the new location unreachable. Byte equality
+# answers "will the shell run this program", not "is this the copy just
+# placed".
+# 是同一個「檔案」，不是同樣的位元組。用雜湊比對，會把 PATH 上別處同一次建置的舊安裝比中，
+# 斷定「這個 shell 已經在執行新裝的那個」，不寫任何 rc 檔，而新的位置仍然叫不出來。位元組相等
+# 回答的是「shell 會不會執行到這支程式」，不是「這是不是剛放的那個複本」。
 _inherited=$(command -v csv2 2>/dev/null) || _inherited=""
 if [[ -n $_inherited ]] && [[ "$(resolved_target $_inherited)" -ef "$DEST" ]]; then
     say "installed to $DEST, and this shell runs it as \`csv2\`."

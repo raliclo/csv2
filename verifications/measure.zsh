@@ -1,18 +1,15 @@
 #!/usr/bin/env zsh
 # =====================================================================
-# measure.zsh — the three numbers plan/plan.md said to measure BEFORE
-#               writing any code, and which nobody measured
-# measure.zsh — plan/plan.md 說「寫程式之前應該先量」、而始終沒有人量的三個數字
+# measure.zsh — the three numbers the thresholds in plan/plan.md depend on
+# measure.zsh — plan/plan.md 裡那些門檻所依賴的三個數字
 #
-# The plan's own words: "本專案有過『開機時間結論錯誤、事後要更正並修一輪文件』
-# 的紀錄。這幾項要在寫程式之前量，不是事後。" They were not measured before, and
-# every threshold in the scale section inherits from a host-side memchr figure
-# of 2900 MiB/s that the plan itself says the real parser will miss by an order
-# of magnitude. If that is true, the 16 MiB index and parallel thresholds were
-# chosen against the wrong number.
-# 計畫自己寫著：「這幾項要在寫程式之前量，不是事後。」它們沒有被事先量過，而規模那
-# 一節的每個門檻都繼承自 host 端 2900 MiB/s 的 memchr 數字——計畫自己又說真正的解析器
-# 會慢一個數量級。若真是如此，16 MiB 的索引與平行門檻就是對著錯的數字挑的。
+# Every threshold in the plan's scale section inherits from a host-side memchr
+# figure of 2900 MiB/s, which the plan itself says the real parser will miss by
+# an order of magnitude. If so, the 16 MiB index and parallel thresholds rest
+# on the wrong number; this measures the right one.
+# 計畫規模那一節的每個門檻，都繼承自 host 端 2900 MiB/s 的 memchr 數字——而計畫自己又說
+# 真正的解析器會慢一個數量級。若是如此，16 MiB 的索引與平行門檻就建立在錯的數字上；
+# 這支腳本量的是正確的那一個。
 #
 # This is a MEASUREMENT, not a test: it has no pass/fail and asserts nothing.
 # benchmark.zsh applies calibrated limits to these same readings.
@@ -36,14 +33,12 @@ zmodload zsh/datetime
 HERE=${0:A:h}
 ROOT=${HERE:h}
 # `release/csv2` on macOS and Linux, `release/csv2.exe` on Windows -- the same
-# name compile_csv2.zsh's Windows branch produces. Hard-wiring the POSIX name
-# made this script exit "build first" on a node that HAD just built, and the one
-# Windows measurement on record was taken by passing CSV2= by hand, an
-# incantation that appears nowhere. 2026-09-08.
+# name compile_csv2.zsh's Windows branch produces. With only the POSIX name,
+# this script would exit "build first" on a node that HAS just built, unless
+# CSV2= is passed by hand. PD.
 # macOS 與 Linux 上是 `release/csv2`，Windows 上是 `release/csv2.exe`——也就是 compile_csv2.zsh
-# 的 Windows 分支產生的那個名字。寫死 POSIX 那個名字，會讓這支腳本在一個**剛剛建置完成**的節點上
-# 印出「build first」而結束，而現存唯一一份 Windows 量測，是靠手動傳入 CSV2= 取得的——那個咒語
-# 不存在於任何地方。2026-09-08。
+# 的 Windows 分支產生的那個名字。只寫 POSIX 檔名，這支腳本在**剛建置完成**的節點上也會以
+# 「build first」結束，除非手動傳入 CSV2=。PD。
 if [[ -z ${CSV2:-} ]]; then
     if [[ -x $ROOT/release/csv2 ]]; then
         CSV2=$ROOT/release/csv2
@@ -63,37 +58,22 @@ fi
 [[ -x $CSV2 ]] || { print -u2 -- "build first: $ROOT/compile_csv2.zsh"; exit 1 }
 
 # Named for the platform, because the repo keeps one committed record PER
-# platform and this script used to write `measure_output.txt` on all of them.
-# Running the documented command on the Windows node therefore overwrote the
-# macOS record -- silently, in the working tree, where the next `git add -A`
-# would have published Windows numbers under the macOS name. Found on
-# 2026-09-08 when the node refused to pull: the only thing standing between
-# that and a published wrong column was git noticing an unstaged change.
-# 依平台命名，因為這個 repo 為**每個平台**各保存一份已提交的紀錄，而這支腳本先前在所有平台上
-# 寫的都是 `measure_output.txt`。於是在 Windows 節點上執行那個被記載的指令，會覆蓋掉 macOS 的
-# 那份紀錄——靜默地、就在工作複本裡，而下一次 `git add -A` 就會把 Windows 的數字掛在 macOS 的
-# 名字底下發表出去。2026-09-08 因為節點拒絕 pull 才發現：擋在那與「發表一個錯誤欄位」之間的，
-# 只有 git 注意到有一個未暫存的變更。
+# platform. One shared name would let a run on one node silently overwrite
+# another node's record in the working tree, and the next `git add -A` would
+# publish those numbers under the wrong name. PF.
+# 依平台命名，因為這個 repo 為**每個平台**各保存一份已提交的紀錄。共用一個檔名，某個節點上的
+# 執行就會在工作複本裡靜默覆蓋另一個節點的紀錄，而下一次 `git add -A` 會把那些數字掛在錯的
+# 名字底下發表出去。PF。
 if [[ -z ${MEASURE_OUTPUT:-} ]]; then
     # The OS is not enough: there are TWO Linux nodes in this project -- the
-    # aarch64 guest and WSL2 on x86_64 -- and naming by `uname -s` alone put
-    # them on the same file. On 2026-09-10 a WSL run wrote `host: Linux x86_64`
-    # and 200,000 records over measure_output_linux.txt, which holds the guest's
+    # aarch64 guest and WSL2 on x86_64 -- and naming by `uname -s` alone puts
+    # them on the same file. measure_output_linux.txt holds the guest's
     # 20,000-record run and backs the "Linux aarch64 guest" column of the
-    # README. Nothing failed; the file simply started describing another
-    # machine.
-    #
-    # That was my own fix (PF) applied to part of where it holds: it separated
-    # operating systems and stopped at the first axis that looked sufficient.
+    # README, so the architecture is part of the name. PF.
     #
     # 只看作業系統是不夠的：這個專案有**兩個** Linux 節點——aarch64 guest 與 x86_64 的 WSL2
-    # ——而只用 `uname -s` 命名會讓它們共用同一個檔案。2026-09-10 一次 WSL 的執行，把
-    # `host: Linux x86_64`、200,000 筆的數字寫進了 measure_output_linux.txt，而那個檔案裝的是
-    # guest 的 20,000 筆執行、也是 README「Linux aarch64 guest」那一欄的來源。沒有任何東西失敗；
-    # 那個檔案只是開始描述另一台機器。
-    #
-    # 那是我自己的修正（PF）只套用到它成立範圍的一部分：它分開了作業系統，然後停在第一個
-    # 看起來足夠的軸上。
+    # ——而只用 `uname -s` 命名會讓它們共用同一個檔案。measure_output_linux.txt 裝的是 guest 的
+    # 20,000 筆執行，也是 README「Linux aarch64 guest」那一欄的來源，所以架構也是檔名的一部分。PF。
     case $(uname -s) in
         Darwin)        MEASURE_OUTPUT=$HERE/measure_output.txt ;;
         Linux)
@@ -230,11 +210,10 @@ done
 # A default of 1 turns a FAILED measurement into a plausible number: if the run
 # did not go parallel there is no worker count to find, and dividing the speedup
 # by 1 reports "1.00x on 1 workers" as though that were the result. Refuse
-# instead. OX -- the same missing assertion that let OW stand for three weeks in
-# the RSS harness next door.
+# instead. OX; the RSS harness next door makes the same assertion (OW).
 # 預設 1 會把一次**失敗的量測**變成一個合理的數字：沒走平行時根本沒有工作者數可找，而把加速比
-# 除以 1 會印出「1.00x on 1 workers」，看起來就像那是結果。改成拒絕。OX——正是隔壁那支 RSS
-# harness 讓 OW 站了三個星期的、同一個缺席的斷言。
+# 除以 1 會印出「1.00x on 1 workers」，看起來就像那是結果。改成拒絕。OX；隔壁的 RSS harness
+# 也做同樣的斷言（OW）。
 if ! grep -qE 'DEBUG parallel: [0-9]+ chunks' $TMP/dbg.txt; then
     print -u2 -- "the parallel row did not take the parallel path; this measurement would be of something else"
     print -u2 -- "平行那一列沒有走平行路徑；這次量測會量到別的東西"

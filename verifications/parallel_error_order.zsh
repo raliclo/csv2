@@ -3,41 +3,38 @@
 # parallel_error_order.zsh — one broken file, one reason, every time.
 # parallel_error_order.zsh — 同一個壞掉的檔案，每一次都給同一個原因。
 #
-# LE. The parallel path kept whichever worker's error arrived FIRST, and the
-# workers run concurrently, so which of two true statements a user saw was
-# decided by thread scheduling. Measured before the fix: 1185 runs said
-# "record 1 (line 3): a raw newline inside a cell" and 15 said "record 2
-# (line 4) has 1 fields but the header has 2" -- the second being what a chunk
-# that began mid-record saw, not what is wrong with the file. Someone following
-# it to line 4 finds an ordinary row.
+# LE. If the parallel path kept whichever worker's error arrived FIRST, thread
+# scheduling would decide which of two messages a user sees: "record 1
+# (line 3): a raw newline inside a cell", or "record 2 (line 4) has 1 fields
+# but the header has 2" -- the second being what a chunk that began mid-record
+# saw, not what is wrong with the file. Someone following it to line 4 finds
+# an ordinary row.
 #
-# LE。平行路徑留住的是「最先**到達**」的那個 worker 的錯誤，而 worker 是並行的，於是使用者
-# 看到兩句都為真的話裡的哪一句，由執行緒排程決定。修正前量到：1185 次說「record 1 (line 3)：
-# 儲存格裡有裸換行」，15 次說「record 2 (line 4) 有 1 欄而標頭有 2 欄」——後者是「一個從紀錄
-# 中間開始的區塊」看到的東西，不是那個檔案真正的毛病。照著它去找第 4 行，會看到一列正常的資料。
+# LE。平行路徑若留住「最先**到達**」的那個 worker 的錯誤，使用者看到哪一則訊息就由執行緒排程
+# 決定：「record 1 (line 3)：儲存格裡有裸換行」，或「record 2 (line 4) 有 1 欄而標頭有 2 欄」——
+# 後者是「一個從紀錄中間開始的區塊」看到的東西，不是那個檔案真正的毛病。照著它去找第 4 行，
+# 會看到一列正常的資料。
 #
 # WHY THIS IS NOT A CASE IN test_csv2.zsh:
-# T118b runs each chunk size once, so it met this roughly one run in eighty --
-# it had been passing for as long as the defect existed and failed for the
-# first time under the load of a full suite run. A case that catches a race
-# 1.25% of the time is not a guard; it is a lottery ticket. The guard is this
-# script, which runs the comparison enough times, under load, for absence to
-# mean something.
+# T118b runs each chunk size once, so it meets this race roughly one run in
+# eighty. A case that catches a race 1.25% of the time is not a guard; it is a
+# lottery ticket. The guard is this script, which runs the comparison enough
+# times, under load, for absence to mean something.
 #
 # 為什麼這不是 test_csv2.zsh 裡的一個案例：
-# T118b 每個 chunk 大小只跑一次，因此大約每八十次執行才遇到一次——在這個缺陷存在的整段期間
-# 它都在通過，而第一次失敗是在一次完整執行的負載下。一個「1.25% 的機率抓得到競態」的案例
-# 不是守衛，是彩券。守衛是這支腳本：它跑夠多次、而且在負載下跑，好讓「沒有出現」這件事有意義。
+# T118b 每個 chunk 大小只跑一次，因此大約每八十次執行才遇到一次這個競態。一個「1.25% 的機率
+# 抓得到競態」的案例不是守衛，是彩券。守衛是這支腳本：它跑夠多次、而且在負載下跑，好讓「沒有
+# 出現」這件事有意義。
 #
 # Usage / 用法：
 #   ./verifications/parallel_error_order.zsh              # 50 x 4 x 6 = 1200 runs
 #   ROUNDS=200 ./verifications/parallel_error_order.zsh   # longer
 #   PAR=12 ./verifications/parallel_error_order.zsh       # more contention
 #
-# Verified to BITE: with the fix reverted to first-arrival ordering, a 1200-run
-# pass reported 1162 of one message and 38 of the other and exited 1. An
-# unproven guard against a 1.25% race is indistinguishable from no guard.
-# **證明它會咬**：把修正還原成「先到者勝」之後，一次 1200 次的執行回報 1162 對 38，並以 1 結束。
+# Verified to BITE: with first-arrival ordering restored, a 1200-run pass
+# reports both messages and exits 1. An unproven guard against a 1.25% race is
+# indistinguishable from no guard.
+# **證明它會咬**：還原成「先到者勝」之後，一次 1200 次的執行會回報兩種訊息，並以 1 結束。
 # 一道未經證明的守衛，對一個 1.25% 的競態來說，與沒有守衛分不出來。
 # =====================================================================
 set -eu
@@ -61,18 +58,16 @@ trap 'rm -rf "$TMP"' EXIT
 printf 'pkg,note\ntext,text\nzlib,"has a\nraw newline"\nzstd,ok\n' > "$TMP/t.csv2"
 
 # Contention comes from running the copies CONCURRENTLY, not from busy loops.
-# The first version spawned `( while :; do :; done ) &` for load, and those
-# inherit every open descriptor -- so piping this script into anything hung
-# forever waiting for an EOF the loops were holding. They also have to be
-# killed reliably, and a trap that kills an empty list returns non-zero under
-# `set -e`. Concurrent csv2 runs contend for the same cores, need no cleanup,
-# and are closer to what the suite was doing when this first appeared.
+# A `( while :; do :; done ) &` load loop inherits every open descriptor, so
+# piping this script into anything hangs waiting for an EOF the loops hold;
+# and a trap that kills an empty list returns non-zero under `set -e`.
+# Concurrent csv2 runs contend for the same cores, need no cleanup, and are
+# closer to the load of a full suite run.
 #
-# 爭用來自「並行地跑那些複本」，不是來自忙迴圈。第一版用 `( while :; do :; done ) &` 製造
-# 負載，而那種行程會繼承每一個已開啟的描述子——於是把這支腳本接進任何管線都會永遠掛住，
-# 等一個被那些迴圈持有著的 EOF。它們也必須被可靠地收掉，而一個「kill 一個空清單」的 trap
-# 在 `set -e` 之下會回傳非零。並行的 csv2 執行會爭用同樣的核心、不需要善後，而且更接近這件事
-# 第一次出現時整套測試正在做的事。
+# 爭用來自「並行地跑那些複本」，不是來自忙迴圈。用 `( while :; do :; done ) &` 製造負載，那種
+# 行程會繼承每一個已開啟的描述子，於是把這支腳本接進任何管線都會一直掛住，等一個被那些迴圈
+# 持有的 EOF；而「kill 一個空清單」的 trap 在 `set -e` 之下會回傳非零。並行的 csv2 執行會爭用
+# 同樣的核心、不需要善後，也更接近整套測試執行時的負載。
 print -- "rounds=$ROUNDS x 4 chunk sizes x $PAR concurrent = $(( ROUNDS * 4 * PAR )) runs"
 
 for r in {1..$ROUNDS}; do

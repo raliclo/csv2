@@ -64,22 +64,22 @@ for f in $SUBSET; do
     SRCS+=($ROOT/src/$f.swift)
 done
 
-# A DYNAMIC library, not a static one, and the reason is a platform difference
-# that made this pass on macOS and fail on Linux.
+# A DYNAMIC library, not a static one, because of a platform difference: a
+# static library passes on macOS and fails on Linux.
 #
 # A `.a` only contributes the object files something references, and on Linux
 # a Swift type's metadata is referenced from `.data.rel.ro` in a way the linker
-# does not follow into the archive: the client failed with `undefined reference
+# does not follow into the archive: the client fails with `undefined reference
 # to $s8CSV2Core5FieldVMn` -- Field's metadata -- while the same command
-# produced a working binary on macOS, where Mach-O resolves it. Whole-archive
+# produces a working binary on macOS, where Mach-O resolves it. Whole-archive
 # would also work and is spelled differently by each linker; a shared library
 # needs no per-platform flag at all.
 #
-# 用**動態** library，不是靜態的，而理由是一個「讓這件事在 macOS 上通過、在 Linux 上失敗」的平台
-# 差異。一個 `.a` 只會貢獻「有東西引用到」的目標檔，而在 Linux 上，一個 Swift 型別的 metadata 是從
-# `.data.rel.ro` 被引用的，那種引用 linker 不會追進封存檔裡：客戶端以
+# 用**動態** library，不是靜態的，理由是一個平台差異：靜態 library 在 macOS 上通過、在 Linux 上失敗。
+# 一個 `.a` 只會貢獻「有東西引用到」的目標檔，而在 Linux 上，一個 Swift 型別的 metadata 是從
+# `.data.rel.ro` 被引用的，那種引用 linker 不會追進封存檔裡：客戶端會以
 # `undefined reference to $s8CSV2Core5FieldVMn`（Field 的 metadata）失敗，而同一道指令在 macOS 上
-# 產出了可用的執行檔，因為 Mach-O 解析得了它。whole-archive 也行得通，但每一個 linker 的寫法都不同；
+# 產出可用的執行檔，因為 Mach-O 解析得了它。whole-archive 也行得通，但每一個 linker 的寫法都不同；
 # 一個共享 library 則完全不需要任何平台專屬旗標。
 # Three platforms, three spellings, and Windows differs in more than the
 # extension: its import library is `CSV2Core.lib` and gets no `lib` prefix, so
@@ -183,16 +183,14 @@ print -r -- "通過  那六個檔案的子集建得成 module，而一個客戶�
 #
 # Everything above uses bare `swiftc`, so `-swift-version 6` is explicit there.
 # A real consumer takes the module through SPM, and that path must use Swift 6
-# language mode too. The two former blockers were resolved rather than hidden:
-# redundant binary-mode bookkeeping was removed, while the signal-handler
-# pointer carries the narrow `nonisolated(unsafe)` its async-signal-safe design
+# language mode too, with nothing suppressed: the signal-handler pointer
+# carries only the narrow `nonisolated(unsafe)` its async-signal-safe design
 # requires.
 #
 # 同一個子集，改走 SPM——那才是一個真實消費端取用它的方式。
 # 上面每一步用的都是裸 `swiftc`，因此明確給 `-swift-version 6`。真正的消費端會經由 SPM
-# 取用 module，那條路徑也必須使用 Swift 6 語言模式。原本的兩個阻礙已被解決而非隱藏：多餘的
-# binary-mode 記帳已移除；訊號處理常式的指標則只帶上其 async-signal-safe 設計所需、範圍狹窄的
-# `nonisolated(unsafe)`。
+# 取用 module，那條路徑也必須使用 Swift 6 語言模式，而且不壓掉任何東西：訊號處理常式的指標
+# 只帶上其 async-signal-safe 設計所需、範圍狹窄的 `nonisolated(unsafe)`。
 # ---------------------------------------------------------------------
 if (( ! $+commands[swift] )); then
     print -r -- "SKIP  no swift driver here, so the SPM path is unchecked / 這裡沒有 swift driver，SPM 那條路徑未檢查"
@@ -213,30 +211,27 @@ let package = Package(
 )
 PKG
     # `> log 2>&1`, not `2>&1 > log`. The second binds stderr to the terminal
-    # first and only then moves stdout, so a failing v6 build printed the whole
-    # frontend invocation to the screen -- the classic ordering mistake, made
-    # in a script whose subject is checking things properly.
+    # first and only then moves stdout, so a failing v6 build would print the
+    # whole frontend invocation to the screen instead of the log.
     # 是 `> log 2>&1`，不是 `2>&1 > log`。後者會先把 stderr 綁到終端機、之後才移動 stdout，於是
-    # 一次失敗的 v6 建置把整個 frontend 呼叫印到了螢幕上——那個經典的順序錯誤，犯在一支「主題就是
-    # 好好檢查東西」的腳本裡。
+    # 一次失敗的 v6 建置會把整個 frontend 呼叫印到螢幕上，而不是寫進 log。
     ( cd $pkg && swift build -Xswiftc -warnings-as-errors > $WORK/spm_v6.log 2>&1 )
     return $?
 }
 
 # Can this environment build ANY package? Ask with an empty one first.
 #
-# The guest failed here, and "the SPM build does not work" is two different
-# statements: this package is broken, or SwiftPM cannot run here at all. The
-# guest builds from a tar payload with no network and a toolchain assembled for
-# cross-compiling, and an empty package is the cheapest way to tell those
-# apart. Without it, the guest reported a defect in a module that builds fine
-# there through swiftc, three lines above.
+# "The SPM build does not work" is two different statements: this package is
+# broken, or SwiftPM cannot run here at all. The guest builds from a tar
+# payload with no network and a toolchain assembled for cross-compiling, and
+# an empty package is the cheapest way to tell those apart. Without it, the
+# guest would report a defect in a module that builds fine there through
+# swiftc above.
 #
 # 這個環境建得起**任何**一個 package 嗎？先用一個空的問。
-# guest 在這裡失敗了，而「SPM 建置不成功」是兩句不同的話：這個 package 壞了，或者 SwiftPM 在這裡
-# 根本跑不起來。guest 是從一個沒有網路的 tar payload 建置的，工具鏈也是為了交叉編譯而組起來的，
-# 而一個空 package 是分辨這兩件事最便宜的方式。少了它，guest 會為一個「在它上面用 swiftc 建得好好
-# 的、就在三行之上」的 module 回報一個缺陷。
+# 「SPM 建置不成功」是兩句不同的話：這個 package 壞了，或者 SwiftPM 在這裡根本跑不起來。guest 是
+# 從一個沒有網路的 tar payload 建置的，工具鏈也是為了交叉編譯而組起來的，而一個空 package 是分辨
+# 這兩件事最便宜的方式。少了它，guest 會為一個「在它上面用 swiftc 建得好好的」module 回報缺陷。
 spm_probe=$WORK/spm_probe
 mkdir -p $spm_probe/Sources/Probe
 print -r -- 'public let probe = 1' > $spm_probe/Sources/Probe/Probe.swift
@@ -257,14 +252,14 @@ fi
 # asks for them -- the guest's buildroot ncurses under an Ubuntu-built Swift.
 # SwiftPM relays a child's stderr as `warning: '<package>': ...`, so that line
 # arrives looking like a compiler warning. It says nothing about the code
-# being compiled, and counting it failed T212 on the first image where
-# SwiftPM could build at all. QV. It is excluded by its exact wording and
-# COUNTED OUT LOUD; every other warning still fails.
+# being compiled, and counting it fails T212 wherever that pairing exists. QV.
+# It is excluded by its exact wording and COUNTED OUT LOUD; every other
+# warning still fails.
 # 這裡什麼算警告。glibc 的載入器在「沒有符號版本的函式庫」遇上「要求符號版本的執行檔」時，會在
 # stderr 印出上面那一行——guest 裡 buildroot 建的 ncurses 配上 Ubuntu 建的 Swift。SwiftPM 把子
 # 行程的 stderr 轉述成 `warning: '<套件>': ...`，於是那一行看起來像編譯警告。它對被編譯的程式碼
-# 什麼都沒說，而把它算進去，讓 T212 在第一個 SwiftPM 跑得起來的映像上失敗。QV。它以確切的字句
-# 排除，而且**說出排除了幾行**；其他任何警告照舊判失敗。
+# 什麼都沒說，把它算進去，會讓 T212 在有那種組合的地方失敗。QV。它以確切的字句排除，而且
+# **說出排除了幾行**；其他任何警告照舊判失敗。
 _loader_noise='no version information available'
 # A second line of the same kind, from the toolchain rather than the loader.
 # Swift 6.4.0 on Windows prints
@@ -275,16 +270,15 @@ _loader_noise='no version information available'
 # package and none of this project's code:
 #   swiftc -swift-version 6 -parse-as-library -emit-module -index-store-path idx P.swift
 # where P.swift is `import WinSDK` and one call; drop the flag and it is silent.
-# It is about the SDK's own prebuilt module, and it failed T212 on the day this
-# node's Swift 6.3.3 was removed and 6.4.0 became the only toolchain. RA.
+# It is about the SDK's own prebuilt module, not this project's code. RA.
 # Excluded by its exact wording and counted out loud, like the line above --
 # NOT by passing --disable-index-store, which would stop checking the build a
 # client actually gets.
 # 同一類的第二行，來自工具鏈而不是載入器。Windows 上的 Swift 6.4.0，只要以 `-index-store-path`
 # 編譯一個 import WinSDK 的檔案就會印出上面那則警告，而 debug 的 `swift build` 一律帶那個旗標。
 # 上面那一行指令就能重現，不需要套件，也不含本專案的任何程式碼；拿掉那個旗標就沒有聲音。它說的是
-# SDK 自己預先建好的 module，而它在這個節點的 Swift 6.3.3 被移除、只剩 6.4.0 的那天讓 T212 失敗。
-# RA。與上面那一行一樣：以確切的字句排除，並說出排除了幾行——**不是**改傳
+# SDK 自己預先建好的 module，不是本專案的程式碼。RA。與上面那一行一樣：以確切的字句排除，
+# 並說出排除了幾行——**不是**改傳
 # --disable-index-store，那會讓這裡不再檢查「客戶端真的會拿到的那種建置」。
 _winsdk_index_noise="broken by a context change; 'wchar_t' was expected to be in '_Builtin_stddef'"
 real_warnings() {   # real_warnings <log>  -- prints the warnings that are about the code

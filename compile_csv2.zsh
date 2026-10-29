@@ -28,38 +28,19 @@ case "$HOST_KERNEL" in
         # /d and /c as Windows switches rather than POSIX paths.
         # 原生 batch bootstrap 會先尋找並初始化 MSVC，再呼叫 swiftc。關閉 MSYS
         # 參數改寫，避免 cmd.exe 的 /d 與 /c 被當成 POSIX 路徑轉換。
-        # `.\` is required and is not decoration. cmd.exe does not search the
-        # current directory for an executable unless the path says so -- a bare
-        # name is looked up on PATH only -- so this failed with
+        # `.\` is required. When the process carries
+        # NoDefaultCurrentDirectoryInExePath, cmd.exe does not search the
+        # current directory for an executable, and a bare name fails with
         # "'compile_csv2_win.bat' is not recognized as an internal or external
-        # command" while the file was sitting in the working directory, named
-        # correctly, one `ls` away. The Swift build was never reached.
-        #
-        # It cost a `build: FAILED` on the Windows node from the very commit
-        # whose subject was hardening Windows verification, and the node kept
-        # its previous binary -- which is the shape this tree recorded on
-        # 2026-08-19 and again this morning: a build that never ran, with tests
-        # afterwards reporting on a program that was never made.
-        #
-        # `.\` 是必要的，不是裝飾。cmd.exe 不會為了找一個執行檔而搜尋當前目錄，除非路徑裡明說
-        # ——一個裸名字只會在 PATH 上被查找——因此這裡會以
-        # 「'compile_csv2_win.bat' is not recognized as an internal or external command」失敗，
-        # 而那個檔案就在工作目錄裡、名字正確、`ls` 一下就看得到。Swift 的建置根本沒有被走到。
-        # 它讓 Windows 節點在「主旨正是強化 Windows 驗證」的那個 commit 上得到一次
-        # `build: FAILED`，而那個節點保留了它先前的二進位檔——那正是這棵樹在 2026-08-19、
-        # 以及今天早上各記錄過一次的形狀：一次從未執行的建置，之後的測試回報的是一個從未被造出來
-        # 的程式。
-        #
-        # Correction, 2026-09-17: the sentence above over-generalises. cmd.exe
-        # DOES search the current directory by default; it stops when the
-        # process carries NoDefaultCurrentDirectoryInExePath, which the
-        # environment that hit this failure did. `.\` is still right -- it works
-        # either way -- but the reason is that variable, not cmd.exe itself. The
-        # same variable is what hid vswhere.exe from VsDevCmd.bat. QK.
-        # 更正（2026-09-17）：上面那句概括過頭了。cmd.exe **預設會**搜尋當前目錄；是行程帶著
-        # NoDefaultCurrentDirectoryInExePath 時才不搜，而碰到這次失敗的環境正帶著它。`.\` 仍然是對的
-        # ——兩種情況都有效——但理由是那個變數，不是 cmd.exe 本身。讓 VsDevCmd.bat 找不到
-        # vswhere.exe 的也是同一個變數。QK。
+        # command" before the Swift build is reached; the node then keeps its
+        # previous binary and the tests report on that. `.\` works with or
+        # without the variable. The same variable hides vswhere.exe from
+        # VsDevCmd.bat. QK.
+        # `.\` 是必要的。行程帶著 NoDefaultCurrentDirectoryInExePath 時，cmd.exe 不會在當前目錄
+        # 尋找執行檔，裸檔名會以「'compile_csv2_win.bat' is not recognized as an internal or
+        # external command」失敗，根本走不到 Swift 建置；節點於是保留舊的執行檔，之後的測試
+        # 測的是那一個。不論有無這個變數，`.\` 都有效。讓 VsDevCmd.bat 找不到 vswhere.exe 的
+        # 也是同一個變數。QK。
         MSYS2_ARG_CONV_EXCL='*' cmd.exe /d /c '.\compile_csv2_win.bat' "$@"
         exit $?
         ;;
@@ -78,46 +59,32 @@ for arg in "$@"; do
     esac
 done
 
-# Generated BEFORE the list is validated, because the list names it and the
-# check would otherwise fail on a file this script is about to write. The first
-# version put it beside the swiftc line and the build stopped with
-# "missing source: src/BuildInfo.swift".
-# 在清單被檢驗**之前**產生，因為那份清單指名了它，否則那道檢查會為了一個「這支腳本正要寫出來的
-# 檔案」而失敗。第一版把它放在 swiftc 那一行旁邊，於是建置以
-# 「missing source: src/BuildInfo.swift」停了下來。
-# The build identity, written before the compile so it is part of it.
-#
-# `git describe --always --dirty` gives the short hash, and `-dirty` when the
-# tree has uncommitted changes -- which is the case that matters most, because
-# a dirty build is the one nobody can reproduce. Where there is no git at all
-# -- the guest builds from a tar payload with no .git -- it says `unknown`
-# rather than guessing, and that is a true answer about that build.
-#
-# 這次建置的身分，在編譯之前寫好，成為它的一部分。
-# `git describe --always --dirty` 會給出短雜湊，而在工作樹有未提交的改動時加上 `-dirty`
-# ——那正是最要緊的情況，因為一個 dirty 的建置是沒有人重現得了的那一個。完全沒有 git 的地方
-# ——guest 是從一個沒有 .git 的 tar payload 建置的——它會說 `unknown` 而不是用猜的，
-# 而那是關於那次建置的一句真話。
-# One place decides the shape; see build_id.zsh for why it is not `git
-# describe` alone. QD.
-# 形狀由一個地方決定；為什麼不是單用 `git describe`，見 build_id.zsh。QD。
+# Generated BEFORE the list is validated, because the list names
+# src/BuildInfo.swift and the check would otherwise fail on a file this script
+# is about to write.
+# 在清單檢驗**之前**產生，因為清單裡列了 src/BuildInfo.swift，否則檢查會因為這支腳本
+# 正要寫出的檔案而失敗。
+# The build identity, written before the compile so it is part of it. A dirty
+# tree is marked `-dirty`, because a dirty build is the one nobody can
+# reproduce. One place decides the shape; see build_id.zsh for why it is not
+# `git describe` alone. QD.
+# 這次建置的身分，在編譯之前寫好，成為它的一部分。工作樹有未提交改動時標上 `-dirty`，
+# 因為 dirty 的建置沒有人能重現。形狀由一個地方決定；為什麼不單用 `git describe`，
+# 見 build_id.zsh。QD。
 # build_id.zsh is not in the guest's payload -- run_csv2_test.zsh tars a fixed
-# list of files -- and a hard `source` of it turned a working build into
-# "swiftc failed" with the real reason two lines further down. The payload has
-# no .git either, so the answer there is `unknown` whatever computes it, and a
-# missing file with no git to ask is not a problem worth failing over.
+# list of files -- and the payload has no .git either, so the answer there is
+# `unknown` whatever computes it. A hard `source` would fail that build for
+# nothing.
 #
-# It IS worth failing over when there is a git repo: then the id would be
-# guessed by whatever fallback got written here, and a second copy of that rule
-# is what build_id.zsh exists to prevent. QD.
+# With a git repo it IS worth failing: the id would otherwise come from a
+# fallback written here, and a second copy of that rule is what build_id.zsh
+# exists to prevent. QD.
 #
-# build_id.zsh 不在 guest 的 payload 裡——run_csv2_test.zsh 打包的是一份固定的檔案清單——而對它做
-# 硬性的 `source`，把一次本來會成功的建置變成了「swiftc failed」，真正的理由在兩行之後。那份
-# payload 裡也沒有 .git，所以那裡的答案無論由誰計算都是 `unknown`；「檔案不在，而且也沒有 git
-# 可問」不值得為它失敗。
+# build_id.zsh 不在 guest 的 payload 裡（run_csv2_test.zsh 打包的是固定的檔案清單），而 payload
+# 也沒有 .git，所以那裡的答案不論由誰計算都是 `unknown`。硬性 `source` 只會讓那次建置白白失敗。
 #
-# 但「有 git repo」時就值得：那時這個 id 會由「後來被寫在這裡的某個 fallback」猜出來，而
-# **那條規則的第二份副本**正是 build_id.zsh 存在所要防止的東西。QD。
+# 有 git repo 時就該失敗：否則 id 會由寫在這裡的 fallback 產生，而那條規則的第二份副本，
+# 正是 build_id.zsh 存在所要防止的。QD。
 if [[ -r "${0:A:h}/build_id.zsh" ]]; then
     source "${0:A:h}/build_id.zsh"
     build_id=$(csv2_build_id "${0:A:h}")

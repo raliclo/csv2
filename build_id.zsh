@@ -5,58 +5,50 @@
 #
 #  Sourced by compile_csv2.zsh, compile_csv2_linux.zsh and release.zsh, so
 #  the thing that STAMPS the binary and the thing that CHECKS the stamp
-#  cannot disagree about its shape. release.zsh's version check has been
-#  wrong three times, each time by enumerating the shapes `git describe`
-#  can answer with instead of asking for the answer. QC.
+#  cannot disagree about its shape. A checker that enumerates the shapes
+#  `git describe` can answer with, instead of asking for the answer, goes
+#  wrong. QC.
 #
 #  由 compile_csv2.zsh、compile_csv2_linux.zsh 與 release.zsh 共同 source，讓「在執行檔上
-#  蓋章的那一方」與「檢查那個章的那一方」不可能對它的形狀有不同意見。release.zsh 的版本檢查
-#  錯過三次，每一次都是去**列舉** `git describe` 可能回答的形式，而不是去問那個答案。QC。
+#  蓋章的一方」與「檢查章的一方」對它的形狀不可能有歧見。去**列舉** `git describe` 可能
+#  回答的形式、而不是直接問答案的檢查，遲早會錯。QC。
 #
 #  compile_csv2_win.bat carries its own copy in batch, which cannot source
-#  this. T303 pins the property both must satisfy, so a copy that drifts is
-#  reported rather than discovered during a release.
-#  compile_csv2_win.bat 帶著它自己的 batch 版本——它 source 不了這個檔案。T303 釘住兩者都必須
-#  滿足的那個性質，於是一份漂掉的副本會被回報，而不是在某次出貨當中才被發現。
+#  this. T303 pins the property both must satisfy, so a drifting copy is
+#  reported by the suite.
+#  compile_csv2_win.bat 有自己的 batch 版本，因為它無法 source 這個檔案。T303 釘住兩者都必須
+#  滿足的性質，副本一旦漂移，測試就會回報。
 # =====================================================================
 
 # The build id ALWAYS contains the commit, and says the tag when there is one.
 #
-# `git describe --always` answers according to whether a tag existed WHEN THE
-# BUILD RAN, not according to the source: the three published v0.1.0 archives
-# say `(8d5600e)` because they were built before the tag was cut, and the same
-# commit built afterwards says `(v0.1.0)`. Same source, two strings, and no
-# rebuild changes that -- so the id could not answer the one question it exists
-# to answer, "which commit is this". QD.
+# `git describe --always` answers according to whether a tag existed when the
+# build ran, not according to the source: the same commit says `(8d5600e)`
+# before the tag is cut and `(v0.1.0)` after. Without the hash, the id cannot
+# answer "which commit is this". QD.
 #
-# 這個 build id **永遠含有那個 commit**，而在有 tag 時也說出 tag。
+# 這個 build id **永遠含有 commit**，有 tag 時也說出 tag。
 #
-# `git describe --always` 的答案取決於「**建置執行的當下**有沒有 tag」，不取決於原始碼：已發布的
-# 三份 v0.1.0 封存說的是 `(8d5600e)`，因為它們是在 tag 被打之前建的，而同一個 commit 之後建出來
-# 說的是 `(v0.1.0)`。同一份原始碼、兩種字串，而重建改不了——於是那個 id 回答不了它存在所要回答的
-# 唯一問題：「這是哪一個 commit」。QD。
+# `git describe --always` 的答案取決於「**建置當下**有沒有 tag」，而不是原始碼：同一個 commit
+# 在打 tag 之前是 `(8d5600e)`，之後是 `(v0.1.0)`。少了雜湊，這個 id 就答不出「這是哪個 commit」。QD。
 #
 # The hash is ALWAYS 8 characters (`--abbrev=8`, `--short=8`), never git's
 # default. That default grows with the clone's object count and follows each
-# machine's `core.abbrev`, so the published 0.1.3 reads `fa2e792b` on WSL --
-# a clone of ~56k objects -- and `fa2e792` on the other three: one commit, two
-# strings, from a property of the build machine. The user chose 8. git still
-# lengthens it if 8 would be ambiguous, which is the one case where a longer
-# hash is the right answer. QT.
+# machine's `core.abbrev`, so one commit would print differently on different
+# build machines. git still lengthens it if 8 would be ambiguous, which is the
+# one case where a longer hash is right. QT.
 #
-# 雜湊**一律 8 碼**（`--abbrev=8`、`--short=8`），不用 git 的預設值。那個預設值隨 clone 的物件數
-# 成長、也跟著每台機器的 `core.abbrev`，於是已發布的 0.1.3 在 WSL（約 56k 個物件的 clone）上說
-# `fa2e792b`、在另外三台說 `fa2e792`：同一個 commit、兩種字串，來自建置機器的一個屬性。使用者選了
-# 8。若 8 碼會有歧義，git 仍會加長——那是唯一一種「較長才對」的情況。QT。
+# 雜湊**一律 8 碼**（`--abbrev=8`、`--short=8`），不用 git 的預設值。預設值會隨 clone 的物件數
+# 增長，也受各機器的 `core.abbrev` 影響，同一個 commit 在不同建置機上會印成不同字串。若 8 碼
+# 有歧義，git 仍會加長——那是唯一「較長才對」的情況。QT。
 # `cd` in a subshell rather than `git -C`, because the shell and git do not
 # agree about what a path is on Windows. There, zsh's `pwd` is MSYS-style
 # `/c/Users/...` -- so `${0:A:h}` is too -- and git for Windows answers
-# `fatal: cannot change to '/c/Users/...'`. The shell can cd there perfectly
-# well, and git asked from inside that directory needs no path at all. QN.
-# 在子 shell 裡 `cd`，不用 `git -C`：在 Windows 上 shell 與 git 對「路徑是什麼」的看法不同。
-# 那裡 zsh 的 `pwd` 是 MSYS 風格的 `/c/Users/...`（於是 `${0:A:h}` 也是），而 git for Windows 會說
-# `fatal: cannot change to '/c/Users/...'`。shell 進得去那個目錄，而從那個目錄裡問 git，就完全
-# 不需要路徑了。QN。
+# `fatal: cannot change to '/c/Users/...'`. The shell can cd there, and git
+# asked from inside that directory needs no path at all. QN.
+# 在子 shell 裡 `cd`，不用 `git -C`：在 Windows 上 shell 與 git 對路徑的認知不同。
+# 那裡 zsh 的 `pwd` 是 MSYS 風格的 `/c/Users/...`（`${0:A:h}` 也是），而 git for Windows 會回答
+# `fatal: cannot change to '/c/Users/...'`。shell 進得去那個目錄，在目錄裡問 git 就不需要路徑。QN。
 csv2_build_id() {   # csv2_build_id <repo-dir>
     local dir=$1 described short
     described=$(cd "$dir" 2>/dev/null && git describe --always --dirty --abbrev=8 2>/dev/null) || described=""
@@ -64,19 +56,14 @@ csv2_build_id() {   # csv2_build_id <repo-dir>
     # No git at all: the guest builds from a tar payload with no .git, and
     # `unknown` is a true thing to say about that build rather than a guess.
     #
-    # But `unknown` was ALSO the answer when git was present and the question
-    # was malformed -- one string standing for "there is no git here" and for
-    # "I asked git the wrong way". That is how QN presented: a Windows release
-    # refused with "rebuild before releasing", when the binary was right and
-    # the checker was wrong. Where a repository exists, an empty answer is a
-    # failure and is reported as one.
+    # Where a repository exists, an empty answer means the question was
+    # malformed, not that there is no git, so it is reported as a failure
+    # rather than printed as `unknown`. QN.
     #
-    # 完全沒有 git：guest 是從一個沒有 .git 的 tar payload 建的，而 `unknown` 是關於那次建置的
-    # 一句真話，不是猜測。
+    # 完全沒有 git：guest 是從沒有 .git 的 tar payload 建置的，此時 `unknown` 是實話，不是猜測。
     #
-    # 但 `unknown` **同時也是**「git 在，而我問錯了」的答案——一個字串代表兩件事。QN 就是這樣現形的：
-    # 一次 Windows 出貨以「發行前請重新建置」被拒，而執行檔是對的、錯的是檢查它的那一方。只要那裡
-    # 有一個 repository，空的答案就是一次失敗，並且要被當成失敗講出來。
+    # 只要有 repository，空的答案就代表提問方式有誤、而不是沒有 git，因此當成失敗回報，
+    # 不印成 `unknown`。QN。
     if [[ -z $described && -z $short ]]; then
         if [[ -e $dir/.git ]]; then
             print -u2 -- "csv2_build_id: $dir has a .git but git answered nothing; the question was malformed, not the tree"

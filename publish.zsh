@@ -7,12 +7,12 @@
 #    ./publish.zsh 0.1.1 --publish    do it
 #    ./publish.zsh --help             print this and do nothing / 印出這段說明，什麼都不做
 #
-#  release.zsh makes ONE archive on ONE node and is strict about it. Getting
-#  from those archives to a release was seven manual steps for v0.1.0, and the
-#  only mistake in that release lived in them. This is those steps.
+#  release.zsh makes ONE archive on ONE node and is strict about it. This
+#  script does the steps between those archives and a release, which by hand
+#  are where a release goes wrong.
 #
-#  release.zsh 在**一個**節點上產生**一份**封存，而且對它很嚴格。從那些封存走到一個 release，
-#  在 v0.1.0 時是七個手動步驟——而那次出貨唯一的錯誤就住在裡面。這支腳本就是那七步。
+#  release.zsh 在**一個**節點上產生**一份**封存，而且對它很嚴格。這支腳本做的是從那些封存
+#  走到 release 之間的步驟——那些步驟若靠手做，正是出貨出錯的地方。
 #
 #  What it will NOT do: build, test, or collect the archives. Each node runs
 #  ./release.zsh itself, because an archive must be made where its binary was
@@ -28,12 +28,10 @@ emulate -L zsh
 setopt no_unset pipe_fail errexit
 
 # No line number: `$LINENO` inside a trap function reports the line within THAT
-# FUNCTION, not the line that failed. On 2026-09-10 this printed "stopped at
-# line 2" for a failure a hundred lines away. A message naming the wrong line is
-# worse than one naming none -- it sends the reader somewhere and they believe it.
+# FUNCTION, not the line that failed. A message naming the wrong line is worse
+# than one naming none -- it sends the reader somewhere and they believe it.
 # 不報行號：`$LINENO` 在 trap 函式內回報的是**那個函式**裡的行號，不是失敗的那一行。
-# 2026-09-10 它為一個相隔上百行的失敗印出「停在第 2 行」。一則指名錯行號的訊息，比不指名
-# 更糟——它把讀者送去某個地方，而他們會相信它。
+# 指名錯行號的訊息比不指名更糟——它把讀者帶到別處，而讀者會相信它。
 TRAPZERR() {
     print -u2 -- "publish.zsh: a command failed and errexit stopped the run; the last line above says how far it got"
     print -u2 -- "publish.zsh：某個命令失敗，errexit 中止了這次執行；上面最後一行說明它走到哪裡"
@@ -45,9 +43,9 @@ HERE=${0:A:h}
 cd -- "$HERE"
 
 REPO=raliclo/csv2
-# --help answers before the version is read. Until 2026-10-12 it WAS read as
-# the version, and the run went looking for dist/csv2---help-*.tar.zst. RB.
-# --help 在讀取版本之前就回答。直到 2026-10-12 為止它**被當成**版本，於是這次執行去找
+# --help answers before the version is read; otherwise it would be taken as
+# the version and the run would look for dist/csv2---help-*.tar.zst. RB.
+# --help 在讀取版本之前就回答；否則它會被當成版本，這次執行就會去找
 # dist/csv2---help-*.tar.zst。RB。
 case ${1:-} in
     -h|--help) sed -n '3,24p' ${0:A} | sed 's/^# \{0,2\}//'; exit 0 ;;
@@ -93,14 +91,13 @@ fi
 # An archive has to be built AT the tag or its build id cannot say the version
 # -- that is QD -- so the working order is: tag, build on each node, collect,
 # publish. A blanket refusal on an existing tag makes that order impossible and
-# the only way through it would be to build before tagging, which is the defect
-# it was trying to protect against.
+# forces building before tagging, which is the defect it would protect against.
 #
 # 值得拒絕的是一個**已發布的 release**，不是 tag 本身。
 #
 # 一份封存必須**在 tag 上**建置，否則它的 build id 說不出版本號——那就是 QD——所以可行的順序是：
-# 先打 tag、各節點建置、收集、發布。對「tag 已存在」一律拒絕，會讓那個順序不可能成立，而唯一的
-# 繞法就是「在打 tag 之前建置」——那正是它想防的那個缺陷。
+# 先打 tag、各節點建置、收集、發布。對「tag 已存在」一律拒絕，會讓這個順序無法成立，逼人
+# 「在打 tag 之前建置」——那正是它想防的缺陷。
 TAG_EXISTED=0
 if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
     if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
@@ -124,12 +121,10 @@ gh auth status >/dev/null 2>&1 || { print -u2 -- "gh is not authenticated"; exit
 
 # ---------------------------------------------------------------------
 # 2. The archives. Their checksums are RECOMPUTED here, never read from the
-#    .sha256 files and never copied from a terminal. Steps 6 and 7 of the
-#    v0.1.0 release were transcribing a 64-character hex string by hand into
-#    two files, which nothing reports getting wrong.
-# 2. 那些封存。它們的校驗和在這裡**重新計算**，不從 .sha256 檔讀、也不從終端機複製。v0.1.0
-#    那次出貨的第 6、7 步，是把一個 64 字元的十六進位字串**手抄**進兩個檔案——而抄錯了沒有
-#    任何東西會回報。
+#    .sha256 files and never copied from a terminal: a 64-character hex string
+#    transcribed by hand into two files can be wrong and nothing reports it.
+# 2. 那些封存。它們的校驗和在這裡**重新計算**，不從 .sha256 檔讀、也不從終端機複製：手抄進
+#    兩個檔案的 64 字元十六進位字串可能抄錯，而沒有任何東西會回報。
 # ---------------------------------------------------------------------
 sha256_of() {
     if command -v sha256sum >/dev/null 2>&1; then
@@ -150,22 +145,18 @@ HEAD_SHA=$(git rev-parse HEAD)
 # Nothing else here can tell. The two checksums agree, the archive unpacks, the
 # name says the right version -- and every one of those is equally true of an
 # archive built from the PREVIOUS commit, because the node that built it also
-# wrote the .sha256 beside it. Not hypothetical: on 2026-09-18 a `git fetch`
-# failed on the WSL node, `&&` stopped the checkout after it, and the message
-# had gone to /dev/null; release.zsh then packaged the stale binary and exited
-# 0, because its own check compares the binary against the CHECKOUT and both
-# were consistently one commit behind. What caught it was reading `--version`
-# by hand afterwards. This is that reading, done by the script, against the
-# commit actually being published rather than against anything a node said.
+# wrote the .sha256 beside it. release.zsh cannot catch it either: it compares
+# the binary against the node's CHECKOUT, and a checkout left behind by a
+# failed fetch is consistently one commit behind with its binary. So this
+# checks the build id inside the binary against the commit actually being
+# published, not against anything a node said.
 #
 # 封存裡的那個執行檔必須帶著**這一個** commit。
 #
-# 這裡沒有別的東西看得出來：兩份校驗和相符、封存解得開、名字寫著正確的版本——而其中每一項對「用**上一個**
-# commit 建出來的封存」同樣成立，因為那份 `.sha256` 正是建置它的節點自己寫的。那不是假設：2026-09-18
-# WSL 節點上一次 `git fetch` 失敗，`&&` 讓後面的 checkout 沒跑，而訊息被送進了 /dev/null；接著
-# release.zsh 打包了那個過期的執行檔並以 0 結束——**它自己的檢查比對的是執行檔與 checkout，而兩者
-# 一致地都停在舊 commit。** 抓到它的是事後手動去讀 `--version`。這個函式就是那次閱讀，改由腳本做，
-# 而且比對的是「真正正在發布的那個 commit」，不是任何一個節點說過的話。
+# 這裡沒有別的東西看得出來：兩份校驗和相符、封存解得開、名字寫著正確的版本——而這每一項對「用**上一個**
+# commit 建出來的封存」同樣成立，因為那份 `.sha256` 正是建置它的節點自己寫的。release.zsh 也抓不到：
+# 它比對的是執行檔與節點的 **checkout**，而一次失敗的 fetch 留下的 checkout，與它的執行檔一致地停在
+# 舊 commit。所以這裡拿執行檔裡的 build id 去比「真正正在發布的那個 commit」，不比任何節點說過的話。
 ARCHIVE_BUILD_ID=""
 archive_commit_ok() {   # archive_commit_ok <archive> <inner path>
     local a=$1 inner=$2 base=${1:t} bx ids id sha bad=""
@@ -175,17 +166,14 @@ archive_commit_ok() {   # archive_commit_ok <archive> <inner path>
     zstd -dq -c -- "$a" | ( cd -- "$bx" && tar -xf - "$inner" )
     # `grep -a`: these are binaries, and without it grep replaces every match
     # with a single "Binary file matches" line -- which reads as a count of one
-    # and, in a check shaped like this, as a pass. T307's counter was fooled
-    # exactly that way, against a message that happened to contain a NUL.
+    # and, in a check shaped like this, as a pass. T307.
     # `grep -a`：這些是二進位檔，少了它，grep 會用一行「Binary file matches」取代所有比對結果——那讀起來
-    # 像是「命中一次」，而在這種形狀的檢查裡就像是通過。T307 的計數器正是這樣被騙過的。
+    # 像是「命中一次」，而在這種形狀的檢查裡就像是通過。T307。
     # The pattern is the BUILD ID alone, `vX.Y.Z / <commit>`, not the whole
     # `--version` line: swift builds that line from pieces at run time, so
-    # `0.1.2 (v0.1.2 / 3a472bb)` is nowhere in the file. The first version of
-    # this function looked for the assembled form, matched nothing, and
-    # rejected all four archives with "no build id of that form" -- a check
-    # that is always red, which gets worked around rather than read. Found by
-    # running it against the four archives already on disk.
+    # `0.1.2 (v0.1.2 / 3a472bb)` is nowhere in the file. Searching for the
+    # assembled form matches nothing and rejects every archive -- a check that
+    # is always red, which gets worked around rather than read.
     #
     # Matching `v$VERSION / …` asserts two things at once: the tag the binary
     # was built at, and its commit. It does NOT separately verify CSV2_VERSION
@@ -194,9 +182,8 @@ archive_commit_ok() {   # archive_commit_ok <archive> <inner path>
     # binary, and to the archive name checked above.
     #
     # 這個樣式是 **build id 本身**（`vX.Y.Z / <commit>`），不是整行 `--version`：那一行是 swift 在執行時
-    # 組出來的，`0.1.2 (v0.1.2 / 3a472bb)` 根本不在檔案裡。這個函式的第一版找的是組好的形式，一個都
-    # 比不到，於是把四份封存全部以「沒有那個形狀的 build id」拒絕——**一個永遠是紅燈的檢查，會被繞過
-    # 而不是被讀。** 那是拿磁碟上現有的四份封存跑一次才發現的。
+    # 組出來的，`0.1.2 (v0.1.2 / 3a472bb)` 根本不在檔案裡。找組好的形式會一個都比不到，把每一份封存
+    # 都拒絕——**一個永遠是紅燈的檢查，會被繞過而不是被讀。**
     #
     # 比對 `v$VERSION / …` 同時斷言兩件事：執行檔建置時所在的 tag，以及它的 commit。它**不**另外驗證
     # 執行檔裡的 CSV2_VERSION——單獨的 `0.1.2` 太常見，定位不可靠——那件事交給節點上跑過該執行檔的
@@ -209,20 +196,19 @@ archive_commit_ok() {   # archive_commit_ok <archive> <inner path>
         return 1
     fi
     # Into an ARRAY, not a subscript on the expansion. `${${(f)ids}[1]}` looks
-    # like "the first line" and is the first CHARACTER -- it reported a build id
-    # of `v` on the passing path while the refusing path was entirely correct,
-    # so only the green line was wrong. Caught by reading it.
-    # 存進**陣列**，不要對展開式直接下標。`${${(f)ids}[1]}` 看起來像「第一行」，實際上是第一個**字元**
-    # ——它在通過那一路回報的 build id 是 `v`，而拒絕那一路完全正確，所以**錯的只有綠燈那一行**。
-    # 靠讀它才發現。
+    # like "the first line" and is the first CHARACTER, so the passing path
+    # would report a build id of `v`.
+    # 存進**陣列**，不要對展開式直接下標。`${${(f)ids}[1]}` 看起來像「第一行」，實際上是第一個**字元**，
+    # 通過那一路回報的 build id 會變成 `v`。
     idlist=(${(f)ids})
     for id in $idlist; do
         sha=${id##* / }
-        # A node's short hash length varies -- WSL prints 8 where the others
-        # print 7 -- so this asks whether it is a PREFIX of the commit, not
-        # whether it equals some length this script picked.
-        # 各節點的短雜湊長度不同——WSL 印 8 而其他印 7——所以這裡問的是「它是不是那個 commit 的前綴」，
-        # 不是「它等不等於本腳本挑的某個長度」。
+        # The short hash length is not guaranteed (git lengthens it when 8
+        # would be ambiguous, and older builds used git's default), so this
+        # asks whether it is a PREFIX of the commit, not whether it equals some
+        # length this script picked. QT.
+        # 短雜湊的長度沒有保證（8 碼有歧義時 git 會加長，較舊的建置用的是 git 預設值），所以這裡問的是
+        # 「它是不是那個 commit 的前綴」，不是「它等不等於本腳本挑的某個長度」。QT。
         [[ $HEAD_SHA == $sha* ]] || bad="$bad $id"
     done
     if [[ -n $bad ]]; then
@@ -272,12 +258,9 @@ for a in $ARCHIVES; do
     stem=${base%.tar.zst}
     # `|| true`: with errexit and pipe_fail, a grep that finds nothing returns 1,
     # the command substitution inherits it, and the assignment kills the script
-    # BEFORE the refusal below can say what was wrong. That is PE exactly --
-    # already recorded, already fixed once in measure_parallel_rss.zsh, and
-    # written again here from memory.
+    # BEFORE the refusal below can say what was wrong. PE.
     # `|| true`：在 errexit 與 pipe_fail 之下，一個找不到東西的 grep 回傳 1，命令替換繼承它，
-    # 而那個賦值會在底下那道拒絕來得及說明之前就殺掉腳本。那正是 PE——已經記錄過、已經在
-    # measure_parallel_rss.zsh 修過一次，而我在這裡又憑記憶寫了一遍。
+    # 而那個賦值會在底下那道拒絕來得及說明之前就殺掉腳本。PE。
     inner=$(zstd -dq -c -- "$a" | tar -tf - | grep -E "^$stem/csv2(\.exe)?$" | head -1 || true)
     [[ -n $inner ]] || {
         print -u2 -- "$base does not contain $stem/csv2 or $stem/csv2.exe"
@@ -320,9 +303,9 @@ fi
 # ---------------------------------------------------------------------
 # 5. Re-download from the PUBLIC url and compare. Not a good habit -- a step.
 #    "gh release create exited 0" says the upload was accepted, which is a
-#    different claim from "what a stranger downloads is what I built".
+#    different claim from "what a stranger downloads is what was built".
 # 5. 從**公開** URL 重新下載並比對。這不是好習慣，是一個步驟。「gh release create 以 0 結束」
-#    說的是「上傳被接受了」，而那與「一個陌生人下載到的，就是我建出來的那個」是兩件事。
+#    說的是「上傳被接受了」，而那與「陌生人下載到的，就是建出來的那一份」是兩件事。
 # ---------------------------------------------------------------------
 would "re-download each asset from the public URL and compare against the local file"
 if (( DO_PUBLISH )); then
@@ -349,12 +332,11 @@ fi
 # ---------------------------------------------------------------------
 # 6/7. The package files, GENERATED from the archives rather than typed.
 #      Each url and hash is rewritten from ${HASH[...]}, and the result is
-#      read back and compared. This is the step that carried the v0.1.0
-#      mistake, and it is the one a person is least able to check by eye:
-#      two hex strings differ in one character and look identical.
+#      read back and compared. This is the step a person is least able to
+#      check by eye: two hex strings differ in one character and look identical.
 # 6/7. 套件檔，由封存**產生**而不是打進去。每一個 url 與 hash 都從 ${HASH[...]} 改寫，
-#      而結果會被讀回來比對。這正是 v0.1.0 那次錯誤所在的步驟，也是最不可能靠肉眼檢查的一步：
-#      兩個十六進位字串差一個字元，看起來一模一樣。
+#      而結果會被讀回來比對。這是最不可能靠肉眼檢查的一步：兩個十六進位字串差一個字元，
+#      看起來一模一樣。
 # ---------------------------------------------------------------------
 base_url=https://github.com/$REPO/releases/download/$TAG
 
@@ -366,62 +348,50 @@ base_url=https://github.com/$REPO/releases/download/$TAG
 # 依賴，而一支悄悄取得該依賴的腳本會「在這裡能跑、在沒有 python3 的節點上失敗」——訊息講的是
 # 直譯器，而失敗的時機是正在發布的那一步。
 #
-# The python3 version this replaced also had a defect that had never run: it
-# counted every url containing the platform suffix, and scoop/csv2.json has a
-# SECOND one in its autoupdate block -- a template carrying a literal $version.
-# It would have found two and refused. Lines carrying $version are templates
+# scoop/csv2.json has a SECOND url per platform in its autoupdate block -- a
+# template carrying a literal $version -- so counting every url with the
+# platform suffix finds two and refuses. Lines carrying $version are templates
 # and are deliberately left alone.
-# 被它取代的那個 python3 版本還帶著一個從來沒有執行過的缺陷：它會數「每一個含有該平台後綴的
-# url」，而 scoop/csv2.json 的 autoupdate 區塊裡有**第二個**——一個帶著字面 $version 的模板。
-# 它會數到兩個然後拒絕。含有 $version 的行是模板，這裡刻意不動它們。
+# scoop/csv2.json 的 autoupdate 區塊裡，每個平台有**第二個** url——一個帶著字面 $version 的模板——
+# 所以數「每一個含有該平台後綴的 url」會數到兩個然後拒絕。含有 $version 的行是模板，這裡刻意不動。
 # The url and the hash are not the only things carrying a version. scoop's
 # extract_dir must equal the directory inside the archive or the install puts
 # the binary nowhere; the Formula's `version` and its `assert_match "csv2 X"`
-# are two more. Rewriting only the pair leaves four stale sites in two files --
-# found on 2026-09-10 by rewriting a copy and grepping it for the old number,
-# which is the check the read-back at the end now also performs.
+# are two more. Rewriting only the pair leaves four stale sites in two files;
+# the read-back at the end greps for any old number.
 # 帶著版本號的不只 url 與 hash。scoop 的 extract_dir 必須等於封存內的目錄名，否則安裝會把
 # 執行檔放到不存在的地方；Formula 的 `version` 與它的 `assert_match "csv2 X"` 是另外兩個。
-# 只改 url/hash 那一對，會在兩個檔案裡留下四個過期的位置——2026-09-10 是靠「改寫一份複本、
-# 再 grep 舊版本號」發現的，而那正是結尾的讀回來檢查現在也會做的事。
+# 只改 url/hash 那一對，會在兩個檔案裡留下四個過期的位置；結尾的讀回檢查會 grep 任何舊版本號。
 # Which lines carry the version as DATA, and which merely TALK ABOUT it.
 #
 # Both rewritten files contain prose that names a version as history, and
-# history does not move with a new release. Before 2026-09-18 the rewrite did
-# not distinguish them, so publishing v0.1.1 turned the Formula's
-# "aarch64 arrives in v0.1.1. It was absent from v0.1.0" into "absent from
-# v0.1.1" -- a sentence contradicting itself, shipped. Publishing 0.1.2 would
-# have done worse: scoop's notes carry a DATED record of a real Windows
-# verification, and the rewrite would have made it claim that run printed
-# `csv2 0.1.2`, on a day 0.1.2 did not exist, with v0.1.1's commit still beside
-# it. A record that says it was verified is the one a reader has least reason
-# to doubt. That is QM.
+# history does not move with a new release. Rewriting it turns a sentence like
+# "aarch64 arrives in v0.1.1. It was absent from v0.1.0" into one that
+# contradicts itself, and makes a dated verification record claim a version
+# that did not exist that day. A record that says it was verified is the one a
+# reader has least reason to doubt. QM.
 #
 # ONE definition, used by the rewrite AND by the read-back that demands no
 # stale version remains. If they disagreed, prose left correct by one would be
-# failed by the other, and the only way to satisfy both would be to corrupt it
-# -- which is precisely how the defect survived: the check made the damage a
-# PASSING condition.
+# failed by the other, and the only way to satisfy both would be to corrupt
+# it: the check would make the damage a PASSING condition.
 #
 # 哪些行「帶著版本號這個資料」，哪些只是「在談論那個版本號」。
 #
-# 兩個被改寫的檔案裡都有把版本號當成**歷史**來記的散文，而歷史不隨新版本前進。2026-09-18 之前
-# 改寫不分這兩者，於是發布 v0.1.1 那一步把 Formula 裡的「aarch64 arrives in v0.1.1. It was
-# absent from v0.1.0」改成「absent from v0.1.1」——一句自相矛盾的話，而且出貨了。發布 0.1.2 會
-# 更糟：scoop 的 notes 裡有一筆**帶日期**的 Windows 查證紀錄，改寫會讓它宣稱那次執行印出
-# `csv2 0.1.2`——在 0.1.2 還不存在的那一天——而 v0.1.1 的 commit 原封不動留在旁邊。一則說自己
-# 「已被驗證」的紀錄，是讀者最沒有理由懷疑的那一種。那就是 QM。
+# 兩個被改寫的檔案裡都有把版本號當成**歷史**來記的散文，而歷史不隨新版本前進。改寫它，會把
+# 「aarch64 arrives in v0.1.1. It was absent from v0.1.0」這類句子改成自相矛盾，也會讓一筆帶日期的
+# 查證紀錄宣稱一個當天還不存在的版本。一則說自己「已被驗證」的紀錄，是讀者最沒有理由懷疑的那一種。QM。
 #
 # **一份定義**，同時給改寫與「不得殘留舊版本號」那道讀回檢查用。兩者若各有一份，被其中一個
-# 正確留下的散文會被另一個判定失敗，而唯一能同時滿足它們的做法就是把散文改壞——這正是這個缺陷
-# 活下來的方式：那道檢查把「破壞」變成了**通過條件**。
+# 正確留下的散文會被另一個判定失敗，而唯一能同時滿足它們的做法就是把散文改壞——那道檢查會把
+# 「破壞」變成**通過條件**。
 # The KIND is passed explicitly rather than taken from the name, because the
 # leftover check runs against `$file.rewriting.$$`, whose extension is a process
 # id. Deriving it there would classify nothing as prose and quietly restore the
 # old behaviour for the one check that matters most.
 # **種類**是明白傳進來的，不是從檔名推的：殘留檢查跑的對象是 `$file.rewriting.$$`，它的副檔名是
 # 一個 process id。在那裡用推的會把「沒有任何一行是散文」當成結論，於是最重要的那道檢查會安靜地
-# 退回舊行為。
+# 退回不分散文的行為。
 prose_lines() {   # prose_lines <file> <kind> — prints the prose line numbers, one per line
     setopt local_options extended_glob
     local file=$1 kind=$2 line trimmed
@@ -480,15 +450,12 @@ rewrite_version() {   # $1 = file
         [[ -n $ln ]] && prose[$ln]=1
     done
     # The version this file currently declares, taken as the first X.Y.Z token
-    # on a line that mentions "version". An earlier attempt read "the first
-    # quoted word after the first quote", which on scoop's `"version": "0.1.0",`
-    # yielded `: ` -- and then replaced `: ` throughout, mangling 22 of the
-    # file's 38 lines. It was caught because the rewrite was tried on a COPY
-    # first; on the real file it would have run during a publish.
-    # 這個檔案目前宣告的版本，取自「提到 version 的那一行上的第一個 X.Y.Z token」。先前的寫法是
-    # 「第一個引號之後的第一個帶引號字詞」，而它在 scoop 的 `"version": "0.1.0",` 上得到的是
-    # `: `——接著把整個檔案裡的 `: ` 都替換掉，38 行裡弄爛了 22 行。它被抓到，是因為改寫先在
-    # **一份複本**上試過；在真的檔案上，它會發生在一次發布的當中。
+    # on a line that mentions "version". Reading "the first quoted word after
+    # the first quote" instead yields `: ` on scoop's `"version": "0.1.0",`, and
+    # replacing that throughout mangles most of the file.
+    # 這個檔案目前宣告的版本，取自「提到 version 的那一行上的第一個 X.Y.Z token」。若改用
+    # 「第一個引號之後的第一個帶引號字詞」，在 scoop 的 `"version": "0.1.0",` 上會得到 `: `，
+    # 再全檔替換就會弄爛大半個檔案。
     while IFS= read -r line; do
         lineno+=1
         [[ -n ${prose[$lineno]-} ]] && continue
@@ -515,12 +482,12 @@ rewrite_version() {   # $1 = file
         fi
         print -r -- "$line" >> $tmpf
     done < $file
-    # Check the RESULT before adopting it. The mangling described above left a
-    # file that was still readable and still contained the new version; only a
-    # look at the whole product showed it. `|| true` because a grep that finds
-    # nothing returns 1 and would kill the script under errexit -- PE.
-    # 在採用之前先檢查**產物**。上面那次破壞留下的檔案仍然讀得動、也仍然含有新版本號；只有看
-    # 整份產物才看得出來。`|| true` 是因為找不到東西的 grep 回傳 1，在 errexit 之下會殺掉腳本——PE。
+    # Check the RESULT before adopting it. A mangled file is still readable and
+    # still contains the new version; only a look at the whole product shows
+    # it. `|| true` because a grep that finds nothing returns 1 and would kill
+    # the script under errexit -- PE.
+    # 在採用之前先檢查**產物**。被弄爛的檔案仍然讀得動、也仍然含有新版本號；只有看整份產物才
+    # 看得出來。`|| true` 是因為找不到東西的 grep 回傳 1，在 errexit 之下會殺掉腳本——PE。
     local left
     left=$(data_text $tmpf $kind | LC_ALL=C grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | LC_ALL=C sort -u \
            | LC_ALL=C grep -vxF -- "$VERSION" || true)
@@ -589,10 +556,10 @@ for a in $ARCHIVES; do
     [[ -r $target ]] || continue
     grep -q -- "${base##csv2-$VERSION-}" "$target" 2>/dev/null || {
         # The platform is not listed in that file. That is a decision, not an
-        # oversight -- v0.1.0 deliberately omitted platforms whose archive
-        # could not be verified where it was made -- so say so and move on.
-        # 那個平台沒有列在那個檔案裡。那是一個決定而不是疏漏——v0.1.0 刻意略過了「封存無法在
-        # 產生它的地方被驗證」的平台——所以說出來就好，不要自作主張加進去。
+        # oversight -- a platform whose archive could not be verified where it
+        # was made is left out on purpose -- so say so and move on.
+        # 那個平台沒有列在那個檔案裡。那是一個決定而不是疏漏——「封存無法在產生它的地方被驗證」
+        # 的平台是刻意略過的——所以說出來就好，不要自作主張加進去。
         say "    $base: no entry in ${target:t}, leaving it alone"
         continue
     }
@@ -621,11 +588,10 @@ if (( DO_PUBLISH )); then
         done
     done
     # And no OTHER version may remain anywhere in either file. This is what
-    # would have caught extract_dir and assert_match; the pair check above
-    # cannot, because both were already correct about the pair.
-    # 而兩個檔案裡的任何地方都不可以再留著**別的**版本號。這正是會抓到 extract_dir 與
-    # assert_match 的那道檢查；上面那個「成對」的檢查抓不到，因為它們兩個對「那一對」而言
-    # 本來就是正確的。
+    # catches a stale extract_dir or assert_match; the pair check above cannot,
+    # because they are not part of the pair.
+    # 而兩個檔案裡的任何地方都不可以再留著**別的**版本號。過期的 extract_dir 或 assert_match
+    # 要靠這道檢查抓；上面那個「成對」的檢查抓不到，因為它們不屬於那一對。
     for f in $HERE/Formula/csv2.rb $HERE/scoop/csv2.json; do
         [[ -r $f ]] || continue
         # Every distinct X.Y.Z token in the file, minus the one being
@@ -653,12 +619,10 @@ say ""
 if (( DO_PUBLISH )); then
     say "published: https://github.com/$REPO/releases/tag/$TAG"
     # The version in the package files is NOT left to a person: rewrite_version
-    # did it above and the read-back confirmed it. This hint said otherwise
-    # until 2026-09-10, which is a correct instruction turned wrong by the work
-    # being done -- it told the reader to redo something already finished.
-    # 套件檔裡的版本號**不是**留給人做的：上面的 rewrite_version 已經改了，而讀回來那一步確認過。
-    # 這句提示直到 2026-09-10 為止說的是相反的事——一句正確的指示，因為那件事被做掉了而變成錯的，
-    # 它在叫讀者重做一件已經完成的事。
+    # did it above and the read-back confirmed it, so the hint must not tell
+    # the reader to redo it.
+    # 套件檔裡的版本號**不是**留給人做的：上面的 rewrite_version 已經改了，而讀回來那一步確認過，
+    # 所以提示不可以叫讀者重做。
     say "next, by hand and on purpose: the release notes. The version in the"
     say "package files was rewritten above and read back."
     say "接下來是刻意留給人做的：release notes。套件檔裡的版本號，上面已經改寫並讀回確認過了。"
@@ -666,16 +630,14 @@ if (( DO_PUBLISH )); then
     say "然後跑 ./test/test_csv2.zsh——那些套件檔由它檢查"
     # The release is not finished until the copy each node RUNS is the new one.
     # A suite passing on a node says nothing about this: it tests release/csv2,
-    # not the csv2 on PATH. On 2026-10-07 WSL's PATH still resolved to a
-    # root-owned 0.1.0 placed a month earlier, two releases behind, while its
-    # suite had passed repeatedly. brew and scoop keep their nodes current;
-    # WSL has no package manager, so the user decided it is upgraded on EVERY
-    # release. This line exists so that step is not the one that is skipped.
+    # not the csv2 on PATH, which can stay several releases behind while the
+    # suite keeps passing. brew and scoop keep their nodes current; WSL has no
+    # package manager, so it is upgraded on EVERY release. These lines exist so
+    # that step is not the one that is skipped.
     # 一次出貨，要到每個節點**實際執行**的那一份換成新版才算結束。某個節點的套件通過，對這件事什麼
-    # 也沒說：它測的是 release/csv2，不是 PATH 上的 csv2。2026-10-07 WSL 的 PATH 仍然解析到一個月前
-    # 以 root 放進去的 0.1.0，落後兩個版本，而那段期間它的套件一再通過。brew 與 scoop 會讓它們的
-    # 節點跟上；WSL 沒有套件管理員，所以使用者決定**每次出貨**都要升級它。這幾行存在，是為了讓那一步
-    # 不會是被跳過的那一步。
+    # 也沒說：它測的是 release/csv2，不是 PATH 上的 csv2——後者可能落後好幾個版本，而套件照樣通過。
+    # brew 與 scoop 會讓它們的節點跟上；WSL 沒有套件管理員，所以**每次出貨**都要升級它。這幾行存在，
+    # 是為了讓那一步不會是被跳過的那一步。
     say "then upgrade the copy each node RUNS, and read its --version on PATH:"
     say "  macOS   brew update && brew upgrade raliclo/csv2/csv2"
     say "  Windows scoop update csv2"

@@ -9,14 +9,12 @@ zmodload zsh/datetime
 HERE=${0:A:h}
 ROOT=${HERE:h}
 # `release/csv2` on macOS and Linux, `release/csv2.exe` on Windows -- the same
-# name compile_csv2.zsh's Windows branch produces. Hard-wiring the POSIX name
-# made this script exit "build first" on a node that HAD just built, and the one
-# Windows measurement on record was taken by passing CSV2= by hand, an
-# incantation that appears nowhere. 2026-09-08.
+# name compile_csv2.zsh's Windows branch produces. With only the POSIX name,
+# this script would exit "build first" on a node that HAS just built, unless
+# CSV2= is passed by hand. PD.
 # macOS 與 Linux 上是 `release/csv2`，Windows 上是 `release/csv2.exe`——也就是 compile_csv2.zsh
-# 的 Windows 分支產生的那個名字。寫死 POSIX 那個名字，會讓這支腳本在一個**剛剛建置完成**的節點上
-# 印出「build first」而結束，而現存唯一一份 Windows 量測，是靠手動傳入 CSV2= 取得的——那個咒語
-# 不存在於任何地方。2026-09-08。
+# 的 Windows 分支產生的那個名字。只寫 POSIX 檔名，這支腳本在**剛建置完成**的節點上也會以
+# 「build first」結束，除非手動傳入 CSV2=。PD。
 if [[ -z ${CSV2:-} ]]; then
     if [[ -x $ROOT/release/csv2 ]]; then
         CSV2=$ROOT/release/csv2
@@ -28,17 +26,12 @@ if [[ -z ${CSV2:-} ]]; then
 fi
 : ${RSS_RECORDS:=10000000}
 # Named for the platform, because the repo keeps one committed record PER
-# platform and this script used to write `measure_output.txt` on all of them.
-# Running the documented command on the Windows node therefore overwrote the
-# macOS record -- silently, in the working tree, where the next `git add -A`
-# would have published Windows numbers under the macOS name. Found on
-# 2026-09-08 when the node refused to pull: the only thing standing between
-# that and a published wrong column was git noticing an unstaged change.
-# 依平台命名，因為這個 repo 為**每個平台**各保存一份已提交的紀錄，而這支腳本先前在所有平台上
-# 寫的都是 `measure_output.txt`。於是在 Windows 節點上執行那個被記載的指令，會覆蓋掉 macOS 的
-# 那份紀錄——靜默地、就在工作複本裡，而下一次 `git add -A` 就會把 Windows 的數字掛在 macOS 的
-# 名字底下發表出去。2026-09-08 因為節點拒絕 pull 才發現：擋在那與「發表一個錯誤欄位」之間的，
-# 只有 git 注意到有一個未暫存的變更。
+# platform. One shared name would let a run on one node silently overwrite
+# another node's record in the working tree, and the next `git add -A` would
+# publish those numbers under the wrong name. PF.
+# 依平台命名，因為這個 repo 為**每個平台**各保存一份已提交的紀錄。共用一個檔名，某個節點上的
+# 執行就會在工作複本裡靜默覆蓋另一個節點的紀錄，而下一次 `git add -A` 會把那些數字掛在錯的
+# 名字底下發表出去。PF。
 if [[ -z ${MEASURE_OUTPUT:-} ]]; then
     case $(uname -s) in
         Darwin)        MEASURE_OUTPUT=$HERE/measure_parallel_rss_output.txt ;;
@@ -54,19 +47,17 @@ fi
     exit 1
 }
 
-# errexit ends this script wherever it fails, and until 2026-09-08 it ended it
-# with no output at all. A measurement harness that dies quietly is worse than
-# one that crashes loudly: it leaves a plausible-looking partial file behind.
-# errexit 會讓這支腳本在失敗的地方結束，而直到 2026-09-08 為止，它結束時什麼都不印。一支
-# 安靜死掉的量測腳本，比大聲當掉的更糟：它會留下一個看起來很合理的半成品檔案。
+# errexit ends this script wherever it fails, so the trap says so. A
+# measurement harness that dies quietly is worse than one that crashes loudly:
+# it leaves a plausible-looking partial file behind.
+# errexit 會讓這支腳本在失敗的地方結束，所以由 trap 說出來。一支安靜死掉的量測腳本，比大聲
+# 當掉的更糟：它會留下一個看起來很合理的半成品檔案。
 TRAPZERR() {
 # No line number: `$LINENO` inside a trap function reports the line within THAT
-# FUNCTION, not the line that failed. On 2026-09-10 this printed "stopped at
-# line 2" for a failure a hundred lines away. A message naming the wrong line is
-# worse than one naming none -- it sends the reader somewhere and they believe it.
+# FUNCTION, not the line that failed. A message naming the wrong line is worse
+# than one naming none -- it sends the reader somewhere and they believe it.
 # 不報行號：`$LINENO` 在 trap 函式內回報的是**那個函式**裡的行號，不是失敗的那一行。
-# 2026-09-10 它為一個相隔上百行的失敗印出「停在第 2 行」。一則指名錯行號的訊息，比不指名
-# 更糟——它把讀者送去某個地方，而他們會相信它。
+# 指名錯行號的訊息比不指名更糟——它把讀者帶到別處，而讀者會相信它。
     print -u2 -- "measure_parallel_rss.zsh: a command failed; $MEASURE_OUTPUT is incomplete"
     print -u2 -- "measure_parallel_rss.zsh：某個命令失敗；$MEASURE_OUTPUT 並不完整"
 }
@@ -99,15 +90,14 @@ make_corpus $csv2_corpus csv2
 # A `.csv` takes the parallel path only when an `.index` beside it proves one
 # record per line; CSV2_PARALLEL_MIN_BYTES=1 does not buy that, because the
 # obstacle is not the size threshold. Without this line the two `.csv` rows of
-# this table were SINGLE-THREADED runs published under a parallel heading, with
-# the scan path's memory: 9.28 MiB where a real parallel search of the same
-# corpus costs 36-52 MiB. A reader sizing a container from that number OOMs.
-# OW.
+# this table are SINGLE-THREADED runs under a parallel heading, with the scan
+# path's memory -- several times less than a real parallel search of the same
+# corpus. A reader sizing a container from that number OOMs. OW.
 #
 # 一個 `.csv` 只有在旁邊有一個「證明每行一筆」的 `.index` 時才會走平行路徑；
 # `CSV2_PARALLEL_MIN_BYTES=1` 買不到那件事，因為阻擋者不是大小門檻。少了這一行，這張表的
-# 兩個 `.csv` 列就是**掛在平行標題底下的單執行緒量測**，帶著掃描路徑的記憶體用量：9.28 MiB，
-# 而同一份語料真正的平行搜尋要 36–52 MiB。一個依那個數字去開容器的讀者會 OOM。OW。
+# 兩個 `.csv` 列就是**掛在平行標題底下的單執行緒量測**，帶著掃描路徑的記憶體用量——比同一份
+# 語料真正的平行搜尋少好幾倍。一個依那個數字去開容器的讀者會 OOM。OW。
 "$CSV2" --build-index -i $csv_corpus >/dev/null
 
 csv_bytes=$(wc -c < $csv_corpus | tr -d ' ')
@@ -127,22 +117,17 @@ say "workers      : $(sysctl -n hw.ncpu 2>/dev/null || print unknown)"
 say "chunk bytes  : ${CSV2_PARALLEL_CHUNK_BYTES:-default}"
 say ""
 
-# One run per row was not enough. On 2026-09-08 a single-run table put `.csv`
-# at 9.4 s and `.csv2` at 37.1 s, while a run an hour earlier on the same host
-# and binary put them the other way round -- a 4x swing that a single number
-# reports as a fact about the FORMAT. Two 1.3 GB corpora do not both stay in
-# the page cache, so whichever is searched first is searched warm, and the
-# published ordering between formats was an artefact of that order.
+# One run per row is not enough. Two 1.3 GB corpora do not both stay in the
+# page cache, so whichever is searched first is searched warm, and a single
+# run per row can swing several-fold and report search order as a fact about
+# the FORMAT.
 #
 # So: interleave, and keep the minimum. The elapsed time and the peak RSS are
 # kept FROM THE SAME RUN -- pairing the fastest time with the smallest memory
 # seen in any run would describe an execution that never happened.
 #
-# 一列跑一次是不夠的。2026-09-08 一份「每列一次」的表把 `.csv` 放在 9.4 秒、`.csv2` 放在
-# 37.1 秒，而一小時前在同一台主機、同一個執行檔上的另一次執行，兩者的順序是反過來的——那是
-# 4 倍的擺盪，而一個單一數字會把它回報成「關於**格式**的事實」。兩份 1.3 GB 的語料不會同時
-# 留在 page cache 裡，於是先被搜尋的那一份就是熱的，而先前公布的「格式間排序」是那個順序的
-# 產物。
+# 一列跑一次是不夠的。兩份 1.3 GB 的語料不會同時留在 page cache 裡，於是先被搜尋的那一份就是
+# 熱的；每列只跑一次，結果可能相差數倍，並把「搜尋順序」回報成「關於**格式**的事實」。
 #
 # 因此：交錯執行，取最小值。經過時間與 peak RSS 取自**同一次執行**——把最快的時間配上任一次
 # 執行中最小的記憶體，描述的會是一次從未發生過的執行。
@@ -163,17 +148,14 @@ for round in 1 2 3; do
             fi
             end=$EPOCHREALTIME
             elapsed=$(( end - start ))
-            # Assert WHICH PATH was timed. This harness used to check only for a
-            # `metrics:` line, which BOTH paths print, and for `parallel: holding`
-            # lines, which a run under no cap pressure prints on NEITHER -- so a
-            # single-threaded run produced a complete, plausible table at exit 0.
-            # That is how OW survived: nothing here was ever asked the one
-            # question the table's own heading answers.
+            # Assert WHICH PATH was timed. A `metrics:` line is printed by BOTH
+            # paths, and `parallel: holding` by NEITHER under no cap pressure,
+            # so checking only those lets a single-threaded run produce a
+            # complete, plausible table at exit 0. OW.
             #
-            # 斷言剛剛計時的是**哪一條路徑**。這支 harness 先前只檢查 `metrics:`（兩條路徑都會
-            # 印）與 `parallel: holding`（沒有 cap 壓力時兩條路徑都不會印），於是一次單執行緒的
-            # 執行會產生一張完整、合理的表並以 0 結束。OW 就是這樣活下來的：這裡從來沒有人被
-            # 問過那張表的標題自己就在回答的那個問題。
+            # 斷言剛剛計時的是**哪一條路徑**。`metrics:` 兩條路徑都會印，`parallel: holding` 在沒有
+            # cap 壓力時兩條路徑都不會印，因此只檢查這兩者，一次單執行緒的執行也會產生一張完整、
+            # 合理的表並以 0 結束。OW。
             if ! grep -qE 'DEBUG (parallel: [0-9]+ chunks|parallel: trusting index)' $log; then
                 print -u2 -- "$format ($cap) did not take the parallel path -- this table would be measuring something else"
                 print -u2 -- "$format（$cap）沒有走平行路徑——這張表會量到別的東西"
@@ -190,18 +172,14 @@ for round in 1 2 3; do
                 best_rss[$key]=$rss
                 # `|| true`: with errexit AND pipe_fail, a grep that finds
                 # nothing returns 1, the command substitution inherits it, and
-                # the assignment kills the script -- SILENTLY, having already
-                # truncated the output file. That is what happened on the first
-                # run of this version: the published file was left holding a
-                # header and no rows, which reads like a table that was cut
-                # short rather than a run that died. There is no `holding` line
-                # on the default-cap rows because there is no cap pressure, so
-                # the empty case is the NORMAL one.
+                # the assignment kills the script, having already truncated the
+                # output file to a header and no rows. There is no `holding`
+                # line on the default-cap rows because there is no cap
+                # pressure, so the empty case is the NORMAL one. PE.
                 # `|| true`：在 errexit 與 pipe_fail 之下，一個找不到東西的 grep 回傳 1，命令
-                # 替換繼承它，而那個賦值會**無聲地**殺掉整支腳本——而且是在它已經清空輸出檔
-                # 之後。這一版第一次執行時就是這樣：發表用的檔案只剩下一個表頭和零列，讀起來
-                # 像是一張被截斷的表，而不是一次死掉的執行。預設 cap 的那兩列沒有 `holding`
-                # 行，因為那裡沒有 cap 壓力——所以「空的」才是正常情況。
+                # 替換繼承它，而那個賦值會殺掉整支腳本——而且是在它已經把輸出檔清成只剩表頭
+                # 之後。預設 cap 的那兩列沒有 `holding` 行，因為那裡沒有 cap 壓力——所以「空的」
+                # 才是正常情況。PE。
                 best_holding[$key]=$(grep -E 'parallel: holding' $log | head -1 || true)
             fi
         done
@@ -229,19 +207,17 @@ for cap in default 8388608; do
     say ""
 done
 
-# The path the old table was actually measuring, kept as a row of its own.
+# The single-threaded fallback, kept as a row of its own.
 #
-# Without an index a `.csv` is not parallel at all -- so this line is both the
-# single most useful tuning fact on the page (build one) and the evidence for
-# what the four rows above used to be. If someone deletes the --build-index
-# call, the numbers move back to THIS row and the assertion above fires; this
-# row is what they would have moved to.
+# Without an index a `.csv` is not parallel at all -- so this row is the most
+# useful tuning fact on the page (build one). If someone deletes the
+# --build-index call, the `.csv` rows above fall back to THIS path and the
+# assertion above fires.
 #
-# 舊的那張表實際上在量的那條路徑，獨立成一列。
+# 單執行緒的後備路徑，獨立成一列。
 #
-# 沒有索引時一個 `.csv` 根本不會平行——因此這一行同時是這一頁上最有用的一條調校事實（去建一個），
-# 以及「上面那四列以前是什麼」的證據。若有人刪掉 --build-index 那個呼叫，數字會回到**這一列**，
-# 而上面那道斷言會觸發；這一列就是它們會退回去的地方。
+# 沒有索引時一個 `.csv` 根本不會平行——因此這一列是這一頁上最有用的一條調校事實（去建一個）。
+# 若有人刪掉 --build-index 那個呼叫，上面的 `.csv` 列會退回**這條路徑**，而上面那道斷言會觸發。
 rm -f $csv_corpus.index
 ni_best=999999
 ni_rss=0

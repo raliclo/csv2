@@ -26,14 +26,13 @@ emulate -L zsh
 setopt no_unset pipe_fail
 
 TRAPZERR() {
-    # This script does NOT set errexit, so it did not stop -- an earlier version
-    # of this message said "stopped at line N" and both halves were false: the
-    # run carried on, and the line was the trap function's own. TRAPZERR fires on
-    # any non-zero return regardless of errexit, so the honest thing to say is
-    # that something failed and the numbers may not be comparable.
-    # 這支腳本**沒有**設 errexit，所以它並沒有停——這則訊息的前一版寫著「停在第 N 行」，而兩半都是
-    # 假的：那次執行繼續跑了，而那個行號是 trap 函式自己的。TRAPZERR 在任何非零返回時都會觸發，
-    # 與 errexit 無關，因此誠實的說法是「有東西失敗了，這些數字可能不能拿來比較」。
+    # This script does NOT set errexit, so the run carries on, and inside the
+    # trap the line number would be the trap's own. TRAPZERR fires on any
+    # non-zero return regardless of errexit, so the message says only that
+    # something failed and the numbers may not be comparable.
+    # 這支腳本**沒有**設 errexit，所以執行會繼續；而在 trap 裡取到的行號是 trap 自己的。
+    # TRAPZERR 不論有無 errexit，遇到任何非零返回都會觸發，因此訊息只說「有東西失敗了，
+    # 這些數字可能不能拿來比較」。
     print -u2 -- "benchmark.zsh: a command failed; the run continues but the numbers may not be comparable"
     print -u2 -- "benchmark.zsh：某個命令失敗；這次執行會繼續，但這些數字可能不能拿來比較"
 }
@@ -61,13 +60,11 @@ for arg in "$@"; do
     esac
 done
 
-# The binary is asked for its version by RUNNING it. Naming both spellings
-# because compile_csv2.zsh's Windows branch produces csv2.exe, and hard-wiring
-# the POSIX name once made a measurement script exit "build first" on a node
-# that had just built successfully.
-# 執行檔的版本是靠**執行它**問出來的。兩種拼法都指名，因為 compile_csv2.zsh 的 Windows 分支
-# 產生的是 csv2.exe——而寫死 POSIX 那個名字，曾讓一支量測腳本在剛建置成功的節點上印出
-# 「build first」而結束。
+# The binary is asked for its version by RUNNING it. Both spellings are named
+# because compile_csv2.zsh's Windows branch produces csv2.exe; with only the
+# POSIX name, a node that just built successfully would exit "build first".
+# 執行檔的版本是靠**執行它**問出來的。兩種檔名都列出，因為 compile_csv2.zsh 的 Windows 分支
+# 產生的是 csv2.exe；只寫 POSIX 檔名，剛建置成功的節點也會以「build first」結束。
 if [[ -x $HERE/release/csv2 ]]; then
     BIN=$HERE/release/csv2
 elif [[ -x $HERE/release/csv2.exe ]]; then
@@ -82,12 +79,11 @@ print -r -- "csv2 benchmark / csv2 效能量測"
 print -r -- "  binary  : $("$BIN" --version)"
 print -r -- "  host    : $(uname -sm)"
 
-# The single most important caveat, printed BEFORE the numbers rather than
-# after them. Where the corpus lives moved the write rows by 4.8x on one
-# machine -- same binary, same minute, different filesystem -- and a reader who
-# meets that fact after the numbers has already drawn a conclusion.
-# 最重要的那個但書印在數字**之前**，而不是之後。語料放在哪裡，曾在同一台機器、同一分鐘、
-# 同一個執行檔上，讓寫入列相差 4.8 倍——而一個在數字之後才讀到這件事的人，已經下了結論。
+# The most important caveat is printed BEFORE the numbers: the filesystem the
+# corpus lives on can move the write rows several-fold with the same binary,
+# and a reader who meets that after the numbers has already drawn a conclusion.
+# 最重要的但書印在數字**之前**：語料所在的檔案系統，可以讓同一個執行檔的寫入列相差數倍，
+# 而在數字之後才讀到這件事的人，早已下了結論。
 print -r -- "  corpus  : built inside $HERE/verifications, so this measures THAT filesystem"
 print -r -- "  語料    : 造在 $HERE/verifications 之內，因此量到的是**那個**檔案系統"
 if [[ -n "$(git -C "$HERE" status --porcelain 2>/dev/null)" ]]; then

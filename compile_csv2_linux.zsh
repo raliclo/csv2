@@ -5,15 +5,11 @@
 # compile_csv2_linux.zsh — 在它被執行的地方原生建置 csv2 成 Linux ELF：aarch64 的
 #                          guest VM，或 x86_64 上的 WSL2。
 #
-# LA. It said "aarch64" here and in its banner, and it is run on WSL2 too, so
-# on that node it announced an architecture it was not building for -- while
-# `file` two lines from the end printed the truth. Nothing broke; a reader of
-# the four-node matrix simply attributed the result to the wrong node. There is
-# no architecture-specific step in this script: no target triple, no arch flag.
-# LA。這裡與它的橫幅都寫著 "aarch64"，而它同時也在 WSL2 上執行，於是在那個節點上它宣告了一個
-# 自己並沒有在建置的架構——同時結尾前兩行的 `file` 印出的是真相。沒有東西壞掉；只是讀四節點
-# 矩陣的人會把結果歸給錯的節點。這支腳本裡沒有任何架構專屬的步驟：沒有 target triple、沒有
-# 架構旗標。
+# There is no architecture-specific step in this script: no target triple, no
+# arch flag. So it must not name an architecture it did not measure, or a
+# reader of the four-node matrix attributes a result to the wrong node. LA.
+# 這支腳本沒有任何架構專屬的步驟：沒有 target triple，也沒有架構旗標。因此它不得寫出一個
+# 沒有實際量到的架構，否則讀四節點矩陣的人會把結果歸給錯的節點。LA。
 #
 # Kept separate from the auto-detecting compile_csv2.zsh because the guest
 # requires an explicit toolchain and source location. They otherwise differ
@@ -60,33 +56,24 @@ done
 
 # The build identity, produced the same way the macOS script produces it and
 # before the list that names it is validated. In the guest there is no .git --
-# the source arrives as a tar payload -- so this says `unknown`, which is a
-# true statement about that build rather than a guess. The version string is
-# still able to say "this is not the same build as that one", which is the
-# question it exists to answer.
-# 這次建置的身分，與 macOS 那支腳本以同樣方式產生，並且在「指名它的那份清單」被檢驗之前。
-# guest 上沒有 .git——原始碼是以 tar payload 送進去的——因此這裡會說 `unknown`，那是關於那次建置
-# 的一句真話，而不是猜測。版本字串仍然說得出「這不是那一個建置」，而那正是它存在所要回答的問題。
-# Same single source as the macOS build. On the guest there is no .git and
-# it answers `unknown`, which is a true thing to say about that build.
-# 與 macOS 建置同一個來源。guest 上沒有 .git，它會回答 `unknown`——那是關於那次建置的一句真話。
+# the source arrives as a tar payload -- so this says `unknown`, which is true
+# of that build rather than a guess.
+# 這次建置的身分，與 macOS 腳本以同樣方式產生，並且在列出它的清單被檢驗之前。guest 上沒有
+# .git（原始碼以 tar payload 送入），因此這裡會說 `unknown`——那是實話，不是猜測。
 # build_id.zsh is not in the guest's payload -- run_csv2_test.zsh tars a fixed
-# list of files -- and a hard `source` of it turned a working build into
-# "swiftc failed" with the real reason two lines further down. The payload has
-# no .git either, so the answer there is `unknown` whatever computes it, and a
-# missing file with no git to ask is not a problem worth failing over.
+# list of files -- and the payload has no .git either, so the answer there is
+# `unknown` whatever computes it. A hard `source` would fail that build for
+# nothing.
 #
-# It IS worth failing over when there is a git repo: then the id would be
-# guessed by whatever fallback got written here, and a second copy of that rule
-# is what build_id.zsh exists to prevent. QD.
+# With a git repo it IS worth failing: the id would otherwise come from a
+# fallback written here, and a second copy of that rule is what build_id.zsh
+# exists to prevent. QD.
 #
-# build_id.zsh 不在 guest 的 payload 裡——run_csv2_test.zsh 打包的是一份固定的檔案清單——而對它做
-# 硬性的 `source`，把一次本來會成功的建置變成了「swiftc failed」，真正的理由在兩行之後。那份
-# payload 裡也沒有 .git，所以那裡的答案無論由誰計算都是 `unknown`；「檔案不在，而且也沒有 git
-# 可問」不值得為它失敗。
+# build_id.zsh 不在 guest 的 payload 裡（run_csv2_test.zsh 打包的是固定的檔案清單），而 payload
+# 也沒有 .git，所以那裡的答案不論由誰計算都是 `unknown`。硬性 `source` 只會讓那次建置白白失敗。
 #
-# 但「有 git repo」時就值得：那時這個 id 會由「後來被寫在這裡的某個 fallback」猜出來，而
-# **那條規則的第二份副本**正是 build_id.zsh 存在所要防止的東西。QD。
+# 有 git repo 時就該失敗：否則 id 會由寫在這裡的 fallback 產生，而那條規則的第二份副本，
+# 正是 build_id.zsh 存在所要防止的。QD。
 if [[ -r "$SRC_DIR/build_id.zsh" ]]; then
     source "$SRC_DIR/build_id.zsh"
     build_id=$(csv2_build_id "$SRC_DIR")
@@ -118,16 +105,16 @@ HOST_UNAME=$(uname -sm)
 print -- "Building csv2 for $HOST_UNAME ($OPT) / 正在為 $HOST_UNAME 建置 csv2（$OPT）"
 # RJ. Static, always. swiftc on Linux writes the toolchain's RESOLVED,
 # version-numbered path into RPATH, and Swift has no ABI stability there, so a
-# dynamic binary is tied to the exact toolchain that built it: the published
-# 0.1.5 aarch64 binary stopped running when the guest moved from 6.3.3 to
-# 6.4.0. -static-stdlib leaves only libc, libm, libstdc++ and libgcc_s. The
+# dynamic binary is tied to the exact toolchain that built it and stops
+# running when the toolchain version changes. -static-stdlib leaves only libc,
+# libm, libstdc++ and libgcc_s. The
 # price is size -- about 59 MB stripped against 1 MB, 37 MB of it ICU data.
 # An -O build is stripped HERE rather than at packaging, so the suite runs the
 # binary that gets archived; --debug keeps its symbols. T329 pins all of it.
 # RJ。一律靜態。swiftc 在 Linux 上把工具鏈「解開後、帶版本號」的路徑寫進 RPATH，而 Swift 在
-# Linux 上沒有 ABI 穩定性，所以動態的執行檔被綁死在建置它的那一份工具鏈上：guest 從 6.3.3 換到
-# 6.4.0 時，已發布的 0.1.5 aarch64 執行檔就跑不起來了。-static-stdlib 之後只剩 libc、libm、
-# libstdc++、libgcc_s。代價是大小——strip 後約 59 MB，原本 1 MB，其中 37 MB 是 ICU 資料。
+# Linux 上沒有 ABI 穩定性，所以動態的執行檔被綁死在建置它的那一份工具鏈上，工具鏈版本一換
+# 就跑不起來。-static-stdlib 之後只剩 libc、libm、
+# libstdc++、libgcc_s。代價是大小——strip 後約 59 MB，動態版約 1 MB，其中 37 MB 是 ICU 資料。
 # -O 建置在**這裡** strip，而不是封存時，所以測試跑的就是要封存的那一份；--debug 保留符號。
 # T329 釘住這一切。
 "$SWIFTC" -swift-version 6 -warnings-as-errors $OPT -static-stdlib -o release/csv2 $SOURCES
@@ -135,11 +122,11 @@ print -- "Building csv2 for $HOST_UNAME ($OPT) / 正在為 $HOST_UNAME 建置 cs
 
 # Verify by RUNNING it, not by checking the file exists -- the same rule the
 # macOS build follows. Here it also proves the Swift runtime resolves: a binary
-# that links but cannot find libswiftCore at run time is the exact failure
-# swift_tar hit with libxml2, and it is invisible until something runs it.
+# that links but cannot find libswiftCore at run time is invisible until
+# something runs it.
 # 以執行來驗證，而非檢查檔案存在——與 macOS 版同一條規則。在這裡它還額外證明
 # Swift runtime 解析得到：一個「連結成功但執行時找不到 libswiftCore」的執行檔，
-# 正是 swift_tar 在 libxml2 上踩過的失敗，而它在真的被執行之前完全看不見。
+# 在真的被執行之前完全看不見。
 ./release/csv2 --version >/dev/null
 print -- "OK: $(./release/csv2 --version) -> $SRC_DIR/release/csv2"
 file release/csv2 2>/dev/null || true

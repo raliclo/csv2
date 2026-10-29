@@ -16,14 +16,12 @@ setopt no_unset pipe_fail
 HERE=${0:A:h}
 ROOT=${HERE:h}
 # `release/csv2` on macOS and Linux, `release/csv2.exe` on Windows -- the same
-# name compile_csv2.zsh's Windows branch produces. Hard-wiring the POSIX name
-# made this script exit "build first" on a node that HAD just built, and the one
-# Windows measurement on record was taken by passing CSV2= by hand, an
-# incantation that appears nowhere. 2026-09-08.
+# name compile_csv2.zsh's Windows branch produces. With only the POSIX name,
+# this script would exit "build first" on a node that HAS just built, unless
+# CSV2= is passed by hand. PD.
 # macOS 與 Linux 上是 `release/csv2`，Windows 上是 `release/csv2.exe`——也就是 compile_csv2.zsh
-# 的 Windows 分支產生的那個名字。寫死 POSIX 那個名字，會讓這支腳本在一個**剛剛建置完成**的節點上
-# 印出「build first」而結束，而現存唯一一份 Windows 量測，是靠手動傳入 CSV2= 取得的——那個咒語
-# 不存在於任何地方。2026-09-08。
+# 的 Windows 分支產生的那個名字。只寫 POSIX 檔名，這支腳本在**剛建置完成**的節點上也會以
+# 「build first」結束，除非手動傳入 CSV2=。PD。
 if [[ -z ${CSV2:-} ]]; then
     if [[ -x $ROOT/release/csv2 ]]; then
         CSV2=$ROOT/release/csv2

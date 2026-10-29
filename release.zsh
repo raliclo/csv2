@@ -13,11 +13,11 @@
 #    ./release.zsh           package release/csv2[.exe] into dist/ / 把 release/csv2[.exe] 打包進 dist/
 #    ./release.zsh --help    print this and do nothing / 印出這段說明，什麼都不做
 #
-#  It takes no other argument, and refuses one rather than ignoring it: until
-#  2026-10-12 nothing here read "$@", so `./release.zsh --help` PACKAGED -- an
-#  untagged build, under the release's own name, reported as verified. RB.
-#  它不收其他引數，而且會拒絕而不是忽略：直到 2026-10-12 為止這裡沒有任何東西讀 "$@"，於是
-#  `./release.zsh --help` 真的**打包**了——一份未打 tag 的建置，掛著正式封存的名字，並回報已驗證。RB。
+#  It takes no other argument, and refuses one rather than ignoring it: an
+#  ignored flag would package an untagged build under the release's own name
+#  and report it verified. RB.
+#  它不收其他引數，而且會拒絕而不是忽略：被忽略的旗標，會讓一份未打 tag 的建置掛著
+#  正式封存的名字被打包，並回報已驗證。RB。
 # =====================================================================
 
 emulate -L zsh
@@ -32,16 +32,14 @@ case ${1:-} in
 esac
 
 # A release script that dies quietly leaves a half-written archive with a
-# plausible name. Say where it stopped.
-# 一支安靜死掉的發行腳本，會留下一份名字看起來很合理的半成品封存。要說出它停在哪裡。
+# plausible name. Say that it failed.
+# 一支安靜死掉的發行腳本，會留下一份名字看起來很合理的半成品封存。要說出它失敗了。
 TRAPZERR() {
 # No line number: `$LINENO` inside a trap function reports the line within THAT
-# FUNCTION, not the line that failed. On 2026-09-10 this printed "stopped at
-# line 2" for a failure a hundred lines away. A message naming the wrong line is
-# worse than one naming none -- it sends the reader somewhere and they believe it.
+# FUNCTION, not the line that failed. A message naming the wrong line is worse
+# than one naming none -- it sends the reader somewhere and they believe it.
 # 不報行號：`$LINENO` 在 trap 函式內回報的是**那個函式**裡的行號，不是失敗的那一行。
-# 2026-09-10 它為一個相隔上百行的失敗印出「停在第 2 行」。一則指名錯行號的訊息，比不指名
-# 更糟——它把讀者送去某個地方，而他們會相信它。
+# 指名錯行號的訊息比不指名更糟——它把讀者帶到別處，而讀者會相信它。
     print -u2 -- "release.zsh: a command failed; nothing in dist/ should be trusted"
     print -u2 -- "release.zsh：某個命令失敗；dist/ 裡的東西一律不可信"
 }
@@ -49,34 +47,20 @@ TRAPZERR() {
 HERE=${0:A:h}
 cd -- "$HERE"
 
-# The version comes from the BINARY, not from a constant written here. This
-# line said `${VERSION:-0.1.0}` until 2026-09-10, and on the day v0.1.1 was cut
-# it packaged a binary reporting `csv2 0.1.1` into an archive named
-# `csv2-0.1.0-macos-arm64.tar.zst`, said "verified: extracted, ran, and read a
-# CSV" -- which was TRUE, every check held and none of them was the name -- and
-# overwrote the local copy of the PUBLISHED v0.1.0 archive on the way. QI.
+# The version comes from the BINARY, not from a constant written here: a
+# constant is wrong exactly when the version changes, and then the archive name
+# and the binary inside disagree while every other check still passes. QI.
 #
-# A constant that is only wrong when the version changes is wrong at the one
-# moment it matters. Same family as QC and QD: what this script knew about what
-# it was releasing came from inside itself rather than from the thing it was
-# releasing.
-#
-# 版本來自**執行檔**，不是來自寫在這裡的一個常數。這一行直到 2026-09-10 為止寫的是
-# `${VERSION:-0.1.0}`，而在 v0.1.1 被打出來的那天，它把一個回報 `csv2 0.1.1` 的執行檔打包成一份
-# 叫 `csv2-0.1.0-macos-arm64.tar.zst` 的封存，然後說「已驗證：解開、執行過，而且讀得了一個
-# CSV」——那是**真的**，它檢查的每一件事都成立，而其中沒有一件是「這個名字對不對」——並且順手
-# 覆蓋掉了**已發布**的 v0.1.0 封存的本機複本。QI。
-#
-# 一個「只有在版本改變時才會錯」的常數，會在它唯一要緊的那一刻出錯。與 QC、QD 同一族：這支腳本
-# 對「它正在發行什麼」的認識，來自它自己，而不是來自它正在發行的那個東西。
+# 版本來自**執行檔**，不是寫在這裡的常數：常數恰好在版本改變時出錯，那時封存的名字與
+# 裡面的執行檔不一致，而其他每一道檢查仍然通過。QI。
 DIST=$HERE/dist
 
 # ---------------------------------------------------------------------
 # Which file did this platform build? compile_csv2.zsh's Windows branch
-# produces csv2.exe; naming only the POSIX one is what made measure.zsh
-# exit "build first" on a node that had just built successfully (PD).
-# 這個平台建出來的是哪一個檔案？compile_csv2.zsh 的 Windows 分支產生 csv2.exe；只指名
-# POSIX 那個名字，正是讓 measure.zsh 在一個剛建置成功的節點上印出「build first」的原因（PD）。
+# produces csv2.exe; with only the POSIX name, a node that just built
+# successfully would exit "build first". PD.
+# 這個平台建出來的是哪一個檔案？compile_csv2.zsh 的 Windows 分支產生 csv2.exe；只寫 POSIX
+# 檔名，剛建置成功的節點也會以「build first」結束。PD。
 # ---------------------------------------------------------------------
 if [[ -x $HERE/release/csv2 ]]; then
     BIN=$HERE/release/csv2
@@ -96,21 +80,16 @@ case "$(uname -s)" in
     MSYS*|MINGW*|CYGWIN*|Windows*) OS=windows ;;
     *)                             OS=$(uname -s | tr '[:upper:]' '[:lower:]') ;;
 esac
-# The binary is asked EVERY time, whatever the environment holds. This was
-# `VERSION=${VERSION:-}` followed by `if [[ -z $VERSION ]]`, so a VERSION that
-# happened to be exported -- a common name; CI sets it -- skipped the whole
-# block: `VERSION=9.9.9 ./release.zsh` packaged a 0.1.4 binary as
-# csv2-9.9.9-…, and said "verified". QI replaced a constant with an empty
-# default and left the "or take the environment's" half standing. RE.
+# The binary is asked EVERY time, whatever the environment holds. VERSION is a
+# common name and CI sets it, so taking an inherited one would package a binary
+# under another version's name. RE.
 #
 # An inherited VERSION that AGREES is harmless; one that disagrees is refused
 # rather than silently overridden, because whoever set it expected something
 # this run is not going to produce.
-# **每一次**都去問執行檔，不管環境裡有什麼。這裡原本是 `VERSION=${VERSION:-}` 再接
-# `if [[ -z $VERSION ]]`，於是一個碰巧被 export 的 VERSION——很常見的名字，CI 會設——就跳過整段：
-# `VERSION=9.9.9 ./release.zsh` 把一個 0.1.4 的執行檔打包成 csv2-9.9.9-…，並說「已驗證」。QI 把
-# 常數換成了空的預設值，卻讓「否則用環境裡的」那一半原樣留著。RE。
-# 繼承來的 VERSION 若**相符**則無害；不相符時是拒絕而不是靜默覆蓋，因為設定它的人預期的是一個
+# **每一次**都去問執行檔，不管環境裡有什麼。VERSION 是常見的名字，CI 也會設；若採用繼承來的
+# 值，執行檔就會被掛上別的版本號打包。RE。
+# 繼承來的 VERSION 若**相符**則無害；不相符時拒絕而不是靜默覆蓋，因為設定它的人預期的是
 # 這次執行不會產生的東西。
 _env_version=${VERSION:-}
 _rv=$("$BIN" --version 2>/dev/null)
@@ -152,10 +131,8 @@ if ! command -v zstd >/dev/null 2>&1; then
 fi
 
 # 2. A dirty tree means the archive's commit id names a state that is not
-#    what was packaged. This tree has paid for that once already: a commit
-#    string written into a timestamp column, with nothing raising an error.
-# 2. 工作區不乾淨，代表封存上的 commit id 指的是一個「不等於被打包的內容」的狀態。這棵樹
-#    為此付過一次代價：一個 commit 字串被寫進時間戳欄位，而沒有任何東西報錯。
+#    what was packaged.
+# 2. 工作區不乾淨，代表封存上的 commit id 指的是一個「不等於被打包內容」的狀態。
 if [[ -n "$(git status --porcelain)" ]]; then
     print -u2 -- "the working tree is not clean; an archive built from it would carry a commit id that describes something else"
     print -u2 -- "工作區不乾淨；由它產生的封存，會帶著一個描述著別的東西的 commit id"
@@ -165,49 +142,31 @@ fi
 
 # 3. The binary must report the commit that is checked out. `--version` is
 #    asked for by RUNNING it, not by reading the file, because "the file is
-#    there" is the check this project keeps finding to be worthless.
+#    there" proves nothing about what it reports.
 # 3. 執行檔必須回報「目前 checkout 的那個 commit」。`--version` 是靠**執行它**問出來的，
-#    不是靠讀檔案——因為「檔案在那裡」正是這個專案一再發現毫無價值的那種檢查。
+#    不是靠讀檔案——因為「檔案在那裡」證明不了它回報什麼。
 REPORTED=$("$BIN" --version)
-# Ask the expression that PRODUCED the id, do not derive a second answer.
-# compile_csv2.zsh and compile_csv2_linux.zsh both embed
-# `git describe --always --dirty`, so comparing against the same call cannot
-# disagree with them about form.
+# Ask the code that PRODUCED the id, do not derive a second answer. Both
+# compile scripts take it from csv2_build_id in build_id.zsh, so comparing
+# against the same function cannot disagree with them about form. A check that
+# enumerates the forms the string can take instead -- `(SHORTHASH`, "the hash
+# appears somewhere" -- refuses at a tagged commit, where `describe` answers
+# only the tag. QC.
 #
-# 問「產生那個 id 的運算式」，不要自己推導出第二個答案。compile_csv2.zsh 與
-# compile_csv2_linux.zsh 內嵌的都是 `git describe --always --dirty`，因此拿同一次呼叫去比，
-# 不可能與它們在形式上分歧。
-#
-# This check has now been wrong twice, both times by enumerating the forms that
-# string can take instead of asking for it. First it compared for equality
-# against `(SHORTHASH`, and v0.1.0 made `describe` answer
-# `v0.1.0-4-g3515258` -- it would have refused every build from the first tag
-# onwards, which is exactly when a release script starts being used. That was
-# corrected to "the hash appears anywhere in the string", which still assumed a
-# hash was in there. AT A TAGGED COMMIT `describe` answers `v0.1.0` and nothing
-# else, so on 2026-09-10 this refused at v0.1.0 -- the one commit it exists to
-# serve -- advising "rebuild before releasing", which produces the identical
-# string. QC.
-#
-# 這道檢查現在已經錯了兩次，兩次都是去**列舉**那個字串可能的形式，而不是去問它。第一次它拿
-# `(SHORTHASH` 比相等，而 v0.1.0 讓 `describe` 開始回答 `v0.1.0-4-g3515258`——那會讓它從第一個
-# tag 起拒絕每一次建置，而第一個 tag 正好就是一支發行腳本開始被使用的時刻。那次改成了「雜湊
-# 出現在字串的任何位置」，而它**仍然假設那裡面有一個雜湊**。在一個 tag 所指的 commit 上，
-# `describe` 回答的就只是 `v0.1.0`，因此 2026-09-10 它在 v0.1.0 上拒絕了——那是它存在所要服務的
-# 唯一那個 commit——並建議「發行前請重新建置」，而重建產生的是同一個字串。QC。
+# 問「產生那個 id 的程式」，不要自己推導出第二個答案。兩支編譯腳本都從 build_id.zsh 的
+# csv2_build_id 取得它，因此拿同一個函式去比，不可能在形式上分歧。改用列舉字串可能形式的
+# 檢查（`(SHORTHASH`、「雜湊出現在某處」），會在打了 tag 的 commit 上拒絕——那裡 `describe`
+# 只回答 tag。QC。
 source "${0:A:h}/build_id.zsh"
 EXPECTED_ID=$(csv2_build_id "${0:A:h}")
-# ANCHORED, not "contains". The first attempt at this fix compared containment
-# and let a WORSE thing through than the bug it replaced: at v0.1.0 the expected
-# id is `v0.1.0`, and `csv2 0.1.0 (v0.1.0-13-g1750de3)` contains that string --
-# so a binary built thirteen commits later would have shipped as the release.
-# Caught by testing the refusal direction, which is the direction a guard is
-# for; the passing direction had already looked right.
+# ANCHORED, not "contains": at v0.1.0 the expected id is `v0.1.0`, and
+# `csv2 0.1.0 (v0.1.0-13-g1750de3)` contains that string, so containment would
+# ship a binary built thirteen commits later as the release. Test the refusal
+# direction; that is the direction a guard is for.
 #
-# 用**錨定**，不用「包含」。這個修正的第一版比的是包含，而它放行的東西比它取代的缺陷更糟：
-# 在 v0.1.0 上，預期的 id 是 `v0.1.0`，而 `csv2 0.1.0 (v0.1.0-13-g1750de3)` **含有**那個字串
-# ——於是一個晚了十三個 commit 的執行檔會被當成那次 release 出貨。它是靠測「拒絕」那個方向
-# 抓到的，而那正是一道守衛存在的方向；「通過」那個方向早就看起來是對的。
+# 用**錨定**，不用「包含」：在 v0.1.0 上預期的 id 是 `v0.1.0`，而
+# `csv2 0.1.0 (v0.1.0-13-g1750de3)` **含有**那個字串，比包含就會把晚了十三個 commit 的執行檔
+# 當成那次 release 出貨。要測「拒絕」的方向，那才是守衛存在的方向。
 if [[ $REPORTED != *"($EXPECTED_ID)" ]]; then
     print -u2 -- "the binary reports [$REPORTED] but this checkout is [$EXPECTED_ID]; rebuild before releasing"
     print -u2 -- "執行檔回報 [$REPORTED]，而這個 checkout 是 [$EXPECTED_ID]；發行前請重新建置"
@@ -221,13 +180,11 @@ fi
 # 打包。封存裡只有一個目錄，這樣解開時不會把檔案灑進呼叫端的目前目錄——那是
 # 「`tar xf` 是安全的」與「有人得手動收拾」之間的差別。
 # ---------------------------------------------------------------------
-# Refuse to overwrite. `rm -rf` on the archive path is how the local copy of
-# the PUBLISHED v0.1.0 macOS archive was destroyed on 2026-09-10, together with
-# its .sha256 -- leaving a self-consistent pair that was no longer the file
-# anyone had downloaded. Making an archive has no reason to overwrite one.
-# 拒絕覆寫。對封存路徑下 `rm -rf`，正是 2026-09-10 那份**已發布**的 v0.1.0 macOS 封存的本機複本
-# 連同它的 .sha256 一起被毀掉的方式——留下一對彼此自洽、卻已經不是任何人下載到的那個檔案。
-# 「產生一份封存」這件事沒有任何理由需要覆寫另一份。
+# Refuse to overwrite. Replacing an archive and its .sha256 leaves a
+# self-consistent pair that is no longer the file anyone downloaded, and making
+# an archive has no reason to overwrite one. QI.
+# 拒絕覆寫。取代一份封存與它的 .sha256，會留下一對彼此自洽、卻已不是任何人下載到的檔案；
+# 「產生一份封存」沒有任何理由需要覆寫另一份。QI。
 if [[ -e $ARCHIVE ]]; then
     print -u2 -- "$ARCHIVE already exists; remove it first if you mean to replace it"
     print -u2 -- "$ARCHIVE 已經存在；若真要取代它，請先自行刪除"
@@ -248,14 +205,12 @@ chmod 755 "$DIST/$STEM/$BIN_NAME"
 #     echo hi | zstd -q -o C:/Users/.../probe.zst   ok
 #     echo hi | zstd -q -o dist/probe.zst           ok
 #
-# The sha256 block below already did this. QO is that the practice was in this
-# file and had not been carried to the rest of its range.
+# QO.
 #
 # 底下每一個工具拿到的都是「從正確目錄裡看出去的相對名稱」，不是絕對路徑。`$DIST` 來自
 # `${0:A:h}`，在 Windows 上是 MSYS 風格的 `/c/Users/...`（那是 zsh 的 `pwd` 在那裡給的形狀），
 # 而 zstd 與 csv2.exe 是原生 Windows 程式，開不了它——相對路徑與原生路徑都可以，只有絕對的
-# MSYS 路徑不行。底下寫 sha256 那一段本來就是這樣做的；QO 就是「那個做法已經在這個檔案裡，
-# 只是沒有推廣到它成立的其餘範圍」。
+# MSYS 路徑不行。QO。
 ( cd -- "$DIST" && tar -cf - "$STEM" | zstd -19 -q -o "$STEM.tar.zst" )
 
 # ---------------------------------------------------------------------
@@ -263,13 +218,13 @@ chmod 755 "$DIST/$STEM/$BIN_NAME"
 #
 # This is compile_csv2.zsh's rule applied one layer out. An archive that
 # unpacks to a binary this machine cannot execute is exactly the failure a
-# release makes permanent: the person who finds it is not you, and they
-# cannot rebuild it.
+# release makes permanent: whoever finds it did not build it and cannot
+# rebuild it.
 #
 # 以「解開並執行」驗證，而不是檢查封存存在。
 #
 # 這是 compile_csv2.zsh 那條規則往外推一層。一份「解開後得到一個這台機器執行不了的執行檔」的
-# 封存，正是發行會讓它變成永久的那種失敗：發現它的人不是你，而且他重建不了它。
+# 封存，正是發行會讓它變成永久的那種失敗：發現它的人不是建置者，也無法重建它。
 # ---------------------------------------------------------------------
 CHECK=$(mktemp -d "$DIST/.verify.XXXXXX")
 trap 'rm -rf -- "$CHECK"' EXIT
