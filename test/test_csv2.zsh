@@ -18062,6 +18062,22 @@ else
         "T332a a run that could not search everything fails and says why / 搜不完的執行會失敗並說明原因"
 fi
 
+# T332b: under such a limit the search does not start the parallel path at
+# all. On Linux, libdispatch traps without a message (rc 133) when it cannot
+# get a descriptor, so the single-threaded path is the one that finishes.
+# Windows has no such limit to read.
+# T332b：在這樣的上限之下，搜尋根本不啟動平行路徑。在 Linux 上，libdispatch 拿不到描述子時會不留
+# 訊息地中止（rc 133），所以跑得完的是單執行緒路徑。Windows 沒有這種上限可讀。
+if (( IS_WINDOWS )); then
+    skipt "T332b no open-file limit to read on Windows / Windows 上沒有開檔上限可讀"
+    T332_SKIPPED=1
+else
+    sh -c 'ulimit -n 8 2>/dev/null; exec "$@"' sh env CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=2048 \
+        "$CSV2" -contains x -i "$_t332/fd.csv2" -debug > /dev/null 2> "$_t332/dbg"
+    assert_eq "$(grep -c 'single-threaded: the open-file limit is 8' "$_t332/dbg")" "1" \
+        "T332b under a low open-file limit the search runs single-threaded / 開檔上限很低時，搜尋以單執行緒進行"
+fi
+
 echo "--- T333: a .csv2 on standard input with no final newline is refused / T333：標準輸入上沒有結尾換行的 .csv2 被拒絕 ---"
 # RO. A .csv2 file without its final newline is refused as a torn append;
 # the same bytes on standard input were read, and an edit of them wrote a
@@ -18305,6 +18321,7 @@ fi
 (( ${T328_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T329_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T337_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T332_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode

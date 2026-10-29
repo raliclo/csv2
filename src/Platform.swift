@@ -438,6 +438,22 @@ enum Platform {
     /// csv2 在 Windows 上無聲死去，每一次 `-o` 與 `--in-place` 都是。Windows 上的
     /// FileHandle 自己帶著一個 HANDLE，而「別人交給它的描述子」不是同一個東西。暫存檔在
     /// 每個平台上都以描述子開啟、寫入、同步與關閉，這也讓兩條程式路徑併成一條。
+    /// The soft limit on open descriptors, or nil where there is none to read
+    /// (Windows).
+    /// 開啟描述子數量的軟上限；沒有可讀的上限（Windows）時為 nil。
+    static func openFileLimit() -> Int? {
+        #if canImport(ucrt)
+        return nil
+        #else
+        var rl = rlimit()
+        // RLIM_INFINITY is not imported on every platform; unlimited clamps to
+        // Int.max, which is never "low".
+        // RLIM_INFINITY 不是每個平台都匯入；無上限會被夾到 Int.max，永遠不算「低」。
+        guard getrlimit(RLIMIT_NOFILE, &rl) == 0 else { return nil }
+        return Int(clamping: rl.rlim_cur)
+        #endif
+    }
+
     static func openForWrite(path: String) -> Int32? {
         #if canImport(ucrt)
         let h: HANDLE = path.withCString(encodedAs: UTF16.self) { wpath in

@@ -144,6 +144,16 @@ func parallelDeclineReason(_ o: Options, format: Format) -> String? {
     if !o.edits.isEmpty { return "an edit" }
     guard let path = o.input else { return "stdin (the file must be seekable)" }
     if workerCount() <= 1 { return "one core" }
+    // RU. Each worker opens its own handle, and on Linux libdispatch traps
+    // without a message when it cannot get a descriptor of its own (measured:
+    // rc 133 under `ulimit -n 8`, at -O and -Onone alike). Under a low limit
+    // the single-threaded path is the one that can finish, so take it.
+    // RU。每個 worker 各自開一個 handle，而在 Linux 上 libdispatch 拿不到自己要的描述子時會不留訊息
+    // 地中止（實測：`ulimit -n 8` 之下 rc 133，-O 與 -Onone 都一樣）。上限很低時，單執行緒路徑才是
+    // 跑得完的那一條，所以走它。
+    if let limit = Platform.openFileLimit(), limit < 64 {
+        return "the open-file limit is \(limit), under 64"
+    }
     guard let st = FileStamp.of(path: path) else { return "the file could not be stamped" }
     if st.size < UInt64(parallelMinBytes()) {
         return "file is \(st.size) bytes, under CSV2_PARALLEL_MIN_BYTES (\(parallelMinBytes()))"

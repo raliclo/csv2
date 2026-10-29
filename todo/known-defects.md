@@ -14475,7 +14475,7 @@ csv2: m4.md line 2: a Markdown table's second line is the separator (|---|---|),
 原因：Swift 的 `"\r\n"` 是一個 Character，`String.split(separator: "\n")` 不會在 CRLF 處切開（`src/Markdown.swift`）。
 `--in-place` 編輯同一個檔案則回報「沒有 Markdown 表」。應該：以位元組或 unicodeScalars 切，或先把 CRLF 正規化。
 
-## RU. 平行搜尋在 worker 開不了檔案時安靜地丟掉整段結果，rc 0（嚴重）（2026-10-29 修正，T332a）
+## RU. 平行搜尋在 worker 開不了檔案時安靜地丟掉整段結果，rc 0（嚴重）（2026-10-29 修正，T332a–b）
 
 ```console
 $ sh -c 'ulimit -n 8; CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=2048 csv2 -contains x -i fd.csv2 --json > o.out; echo $?'
@@ -14486,6 +14486,17 @@ $ tail -1 o.out
 
 `fd.csv2` 有 20000 筆含 `x` 的紀錄。原因：`src/Parallel.swift` 的 worker 在 `FileHandle(forReadingAtPath:)` 失敗時 `return`，
 沒有記錄錯誤。應該：存下一個「無法開啟」的錯誤，整次執行以非零結束（或退回單執行緒）。
+
+**修正時在 aarch64 guest 上多量到一件事**：worker 改成拋出錯誤之後，guest 上同一條指令以 **rc 133（SIGTRAP）**
+結束，stdout 與 stderr 都是空的。單執行緒路徑在 `ulimit -n 8` 下正常；平行路徑在上限 16 以上正常；`-Onone` 的建置也一樣
+不留訊息——那不是 Swift 的檢查，是 Linux 的 libdispatch 拿不到自己的描述子時直接中止。所以修法有兩層：開檔上限低於 64 時
+根本不啟動平行路徑（`-debug` 印 `single-threaded: the open-file limit is N, under 64`，T332b），worker 開不了檔案時
+拋出錯誤留作第二道防線。Windows 沒有可讀的上限，T332b 在那裡略過。
+
+While fixing it, the guest showed a second failure under the same limit: rc 133 with nothing on
+stdout or stderr, at -O and -Onone alike -- libdispatch trapping when it cannot get a
+descriptor. The parallel path is now declined when the open-file limit is under 64 (T332b), and
+the worker's open failure is an error as the second line.
 
 ## RV. `-md` 寫出的 Markdown，資料列像分隔線時讀回來是錯的
 
