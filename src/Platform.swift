@@ -445,7 +445,7 @@ enum Platform {
                         DWORD(GENERIC_WRITE),
                         DWORD(FILE_SHARE_READ),
                         nil,
-                        DWORD(CREATE_ALWAYS),
+                        DWORD(CREATE_NEW),
                         DWORD(FILE_ATTRIBUTE_NORMAL),
                         nil)
         }
@@ -468,7 +468,12 @@ enum Platform {
         // 對所有人可讀，而 README 那句「一次編輯不會改變誰讀得到它」就只對完成後的檔案成立。
         // 先私有、最後再放寬，才是對的順序：寫入期間該生效的是來源的模式，而 0600 永遠不會
         // 比它更寬。
-        let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
+        // O_EXCL (CREATE_NEW on Windows): the name must not exist yet, so a
+        // file or symlink planted at the temp name is refused rather than
+        // written through. O_NOFOLLOW says the same for a symlink. RY.
+        // O_EXCL（Windows 上是 CREATE_NEW）：這個名字必須尚不存在，所以預先放在暫存名上的檔案或
+        // symlink 會被拒絕，而不是被穿透寫入。O_NOFOLLOW 對 symlink 說的是同一件事。RY。
+        let fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
         guard fd >= 0 else { return nil }
         return fd
         #endif

@@ -525,6 +525,11 @@ public final class RecordParser {
     /// 輸出以同樣的方式結束，而不是多出一個沒有人寫過的行尾。RK。
     private(set) var endedWithoutNewline = false
     private let truncatePartial: Bool
+    /// The input is one row typed on a command line (-insert, -append), not a
+    /// file or a stream, so a `.csv2` row without a newline is whole, not torn.
+    /// 輸入是在命令列上打出的一列（-insert、-append），不是檔案或串流，所以沒有換行的 `.csv2`
+    /// 一列是完整的，不是撕裂的。
+    var isRowLiteral = false
 
     /// `firstRecordNumber`, `firstOffset` and `firstLine` let parsing resume
     /// at an index grid point while producing exactly the numbers a full scan
@@ -1073,11 +1078,18 @@ public final class RecordParser {
                     "record \(n): the input ends inside a quoted field -- the closing quote is missing. The record is incomplete; pass --truncate-partial to discard it.",
                     "第 \(n) 筆：輸入在引號欄位內就結束了——缺少收尾的引號。該紀錄不完整；要丟棄它請給 --truncate-partial。")
             }
-            // `.csv2` without a trailing newline is reported by checkTornAppend
-            // before parsing begins, so reaching here means the caller chose to
-            // continue; emit it rather than inventing a second error.
-            // `.csv2` 缺少結尾換行，在解析開始前就由 checkTornAppend 回報過了，
-            // 因此走到這裡表示呼叫端選擇繼續；照常吐出，不要再造一個錯誤。
+            // `.csv2` without a trailing newline. For a file, checkTornAppend
+            // refuses it before parsing begins; standard input has no file to
+            // check, so it is refused here, the same way. Emitting it would let
+            // an edit write a .csv2 that csv2 then rejects as torn. RO.
+            // `.csv2` 缺少結尾換行。檔案在解析開始前就由 checkTornAppend 拒絕；標準輸入沒有檔案
+            // 可檢查，所以在這裡以同樣的方式拒絕。若照常吐出，一次編輯就會寫出一個 csv2 隨後判定
+            // 為撕裂的 .csv2。RO。
+            if format == .csv2 && !isRowLiteral {
+                throw fault(
+                    "the input does not end with a newline; in .csv2 that means the last record is incomplete (a torn append). Pass --truncate-partial to drop it -- csv2 will not drop a record on its own.",
+                    "輸入未以換行結尾；在 .csv2 中這表示最後一筆不完整（撕裂的追加）。要丟棄它請給 --truncate-partial——csv2 不會自行丟棄任何一筆。")
+            }
         }
         endedWithoutNewline = true
         try endRecord()
@@ -1287,8 +1299,19 @@ public final class ByteSink {
         let dir = (path as NSString).deletingLastPathComponent
         let base = (path as NSString).lastPathComponent
         let dirPart = dir.isEmpty ? "." : dir
-        let tmp = "\(dirPart)/.\(base).csv2tmp.\(Platform.processID())"
-        guard let fd = Platform.openForWrite(path: tmp) else {
+        // The pid alone made the name predictable, so anyone able to write in
+        // the directory could plant a symlink there first. A random part and
+        // an exclusive open (Platform.openForWrite) close that; a name that
+        // is taken is retried with another. RY.
+        // 只用 pid 讓這個名字可以預測，於是任何能在該目錄寫入的人都可以先在那裡放一個 symlink。
+        // 加上隨機的一段與排他的開檔（Platform.openForWrite）就堵住了；名字已被佔用時換一個重試。RY。
+        var opened: (Int32, String)?
+        for _ in 0..<8 {
+            let suffix = String(UInt32.random(in: .min ... .max), radix: 16)
+            let candidate = "\(dirPart)/.\(base).csv2tmp.\(Platform.processID()).\(suffix)"
+            if let fd = Platform.openForWrite(path: candidate) { opened = (fd, candidate); break }
+        }
+        guard let (fd, tmp) = opened else {
             let e = Platform.errorText(errno)
             throw fault("cannot create temporary file beside \(path): \(e)",
                         "無法在 \(path) 旁建立暫存檔：\(e)")

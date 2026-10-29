@@ -770,6 +770,14 @@ keyed that way is reproducible only on a machine holding that file, so prefer
 `-encrypt` uses ChaCha20-Poly1305 with a fresh nonce, so encrypting the same
 input twice gives different bytes; both decrypt.
 
+**Each cell is authenticated per column, not per position.** The tag covers the
+ciphertext and the column's name, not the record it sits in. A cell altered on
+its own, or moved to another column, fails to decrypt; two ciphertexts swapped
+between records of the same column decrypt cleanly, each to the other's value,
+and the records are reordered or exchanged without an error. If the position of
+a value matters, protect the file as a whole by other means, such as a
+signature over it.
+
 **`-t` is not needed for `-hash` or `-encrypt`** and changes nothing there — the
 examples above carry it, but it is not required. These verbs always write the header row,
 because that is where the protection marker lives. `-md` editing genuinely does

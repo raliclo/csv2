@@ -1119,6 +1119,7 @@ func parseRowLiteral(_ text: String, format: Format, expected: Int, what: String
         if out == nil { out = r }
         return true
     }
+    parser.isRowLiteral = true
     try parser.feed([UInt8](text.utf8))
     try parser.finish()
     guard var r = out else {

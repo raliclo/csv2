@@ -14388,12 +14388,12 @@ writing `""`, which keeps the missing newline but rewrites a field encoding nobo
 
 以下 15 項來自兩個審查 agent 對 `src/` 的唯讀審查，每一項都在記錄前由主 session 親手重現。執行檔是
 `csv2 0.1.6 (v0.1.6-4-g5af6b9d3-dirty)`——程式碼與 5af6b9d 相同（之後的 d9e4290..45bad1e 只改註解與文件）。
-除 RO 外都與 RK/RL 無關；0.1.5 也有的會註明。**全部尚未修。** `n.csv` = `printf 'h\n1\n2\n3\n4\n5\n'`。
+除 RO 外都與 RK/RL 無關；0.1.5 也有的會註明。各項的狀態寫在它的標題上。 `n.csv` = `printf 'h\n1\n2\n3\n4\n5\n'`。
 
 The fifteen findings below came from a read-only review of src/ and were each reproduced by hand
 before being written down. None is fixed yet.
 
-## RM. `-delete a,` 與 `-delete ,b` 只刪一筆，不是一個範圍（rc 0；0.1.5 亦同）
+## RM. `-delete a,` 與 `-delete ,b` 只刪一筆，不是一個範圍（rc 0；0.1.5 亦同）（2026-10-29 修正，T335a–d）
 
 ```console
 $ csv2 -delete 2, -i n.csv -so | tr '\n' ' '      → h 1 3 4 5
@@ -14405,7 +14405,7 @@ $ csv2 -mid 2,,4 -i n.csv                          → csv2: -mid takes a,b (eit
 README 說 `-delete a,b` 與 `-mid a,b` 讀法相同，而 `-mid 4,` 是「4 到結尾」。原因：`src/main.swift` 以
 `split(separator: ",")` 切，空的一段被丟掉。應該：與 `-mid` 同樣切法；開放端要嘛照 `-mid` 的意思支援，要嘛拒絕；`2,,4` 拒絕。
 
-## RN. lines 檔的 `-update` 值裡有換行時，安靜地多出紀錄（rc 0；0.1.5 亦同）
+## RN. lines 檔的 `-update` 值裡有換行時，安靜地多出紀錄（rc 0；0.1.5 亦同）（2026-10-29 修正，T336a–d）
 
 ```console
 $ printf 'x\ny' > ln.txt
@@ -14419,7 +14419,7 @@ csv2: -insert 1: the value spans more than one record
 `-insert`／`-append` 會拒絕，`-update` 不會。另見審查回報：`--value-file` 內容為 `a\r` 時寫出一個 csv2 自己隨後拒讀的檔案。
 應該：`.lines` 的 `-update`（含 `-update-where`、`--value-file`、`--value-stdin`）以與 `-insert` 相同的訊息拒絕。
 
-## RO. 從 stdin 編輯 `.csv2` 時寫出一個被自己判定為撕裂寫入的 `.csv2`（RK 引入的退化）
+## RO. 從 stdin 編輯 `.csv2` 時寫出一個被自己判定為撕裂寫入的 `.csv2`（RK 引入的退化）（2026-10-29 修正：stdin 上撕裂的 `.csv2` 與檔案一樣被拒絕，T333a–d）
 
 ```console
 $ printf 'a,b\n甲,乙\n1,2' | csv2 -update 1:1 Q -si --headers 2 -o o.csv2; echo $?
@@ -14433,7 +14433,7 @@ csv2: o.csv2 does not end with a newline; in .csv2 that means the last record is
 0.1.5 寫出的檔案以 LF 結尾。原因：撕裂檢查只在 `-i` 時跑，`-si` 不跑，於是 RK 把沒有結尾換行的輸入當成「保留沒有結尾換行」。
 應該：`.csv2` 的輸出一律以 LF 結尾；並讓 `-si` 讀 `.csv2` 時也做撕裂檢查。
 
-## RP. 刪掉沒有結尾換行的最後一筆時，前一筆（沒被編輯）失去它的 LF——待決定
+## RP. 刪掉沒有結尾換行的最後一筆時，前一筆（沒被編輯）失去它的 LF——待決定（2026-10-29 使用者決定保留前一筆的 LF，同日修正，T334a–d）
 
 ```console
 $ printf 'h,k\n1,a\n2,b' > b.csv
@@ -14475,7 +14475,7 @@ csv2: m4.md line 2: a Markdown table's second line is the separator (|---|---|),
 原因：Swift 的 `"\r\n"` 是一個 Character，`String.split(separator: "\n")` 不會在 CRLF 處切開（`src/Markdown.swift`）。
 `--in-place` 編輯同一個檔案則回報「沒有 Markdown 表」。應該：以位元組或 unicodeScalars 切，或先把 CRLF 正規化。
 
-## RU. 平行搜尋在 worker 開不了檔案時安靜地丟掉整段結果，rc 0（嚴重）
+## RU. 平行搜尋在 worker 開不了檔案時安靜地丟掉整段結果，rc 0（嚴重）（2026-10-29 修正，T332a）
 
 ```console
 $ sh -c 'ulimit -n 8; CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=2048 csv2 -contains x -i fd.csv2 --json > o.out; echo $?'
@@ -14524,7 +14524,7 @@ $ CSV2_PARALLEL_MIN_BYTES=999999999 csv2 -contains x -i nofinal.csv --json | tai
 
 `nofinal.csv` 有 2000 筆、沒有結尾換行、有索引。原因：平行路徑以 LF 計數。
 
-## RY. 暫存檔名可預測，而且開檔時沒有 O_EXCL／O_NOFOLLOW：預先放好的 symlink 會把寫入導到別處（安全）
+## RY. 暫存檔名可預測，而且開檔時沒有 O_EXCL／O_NOFOLLOW：預先放好的 symlink 會把寫入導到別處（安全）（2026-10-29 修正：隨機後綴加排他開檔，T337）
 
 ```console
 $ printf 'a,b\n1,2\n' > in.csv; echo precious > victim.txt
@@ -14539,7 +14539,7 @@ l                   # out.csv 成了指向 victim.txt 的 symlink
 暫存名是 `.<base>.csv2tmp.<pid>`（`src/Core.swift`），以 `open(O_WRONLY|O_CREAT|O_TRUNC)` 開（`src/Platform.swift`）。
 應該：`O_CREAT|O_EXCL|O_NOFOLLOW` 加上隨機後綴，遇 EEXIST 重試。
 
-## RZ. 加密的儲存格可以在紀錄之間互換而不被偵測（加密）
+## RZ. 加密的儲存格可以在紀錄之間互換而不被偵測（加密）（2026-10-29 使用者決定寫進文件而非改 AAD；README 已寫明，T338a–b）
 
 ```console
 $ cat pay.csv

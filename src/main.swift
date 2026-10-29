@@ -871,15 +871,25 @@ func parseDelete(_ spec: String, cell: Bool, col: Bool, argvTail: [String], inde
         let (r, c) = try parseCellAddress(spec, flag: "-delete -cell", claims: &claims)
         return .deleteCell(record: r, column: c)
     }
-    let parts = spec.split(separator: ",").map(String.init)
+    // Read the way -mid reads a,b: an empty side is open, so `4,` is 4 to the
+    // end and `,2` is 1 to 2. Splitting with empty pieces dropped turned `2,`
+    // into `-delete 2` and accepted `2,,4` as `2,4`. RM. An open end is
+    // carried as Int.max.
+    // 與 -mid 讀 a,b 的方式相同：空的一端是開放的，因此 `4,` 是從 4 到結尾、`,2` 是 1 到 2。
+    // 丟掉空段的切法會把 `2,` 變成 `-delete 2`，並把 `2,,4` 當成 `2,4` 接受。RM。開放端以
+    // Int.max 表示。
+    let parts = spec.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
     if parts.count == 1 {
         guard let n = Int(parts[0]), n >= 1 else {
             throw usageError("-delete: not a record number: \(spec)", "-delete：不是紀錄號：\(spec)")
         }
         return .deleteRange(from: n, to: n)
     }
-    guard parts.count == 2, let a = Int(parts[0]), let b = Int(parts[1]), a >= 1 else {
-        throw usageError("-delete takes N or a,b", "-delete 的格式是 N 或 a,b")
+    guard parts.count == 2,
+          let a = parts[0].isEmpty ? 1 : Int(parts[0]),
+          let b = parts[1].isEmpty ? Int.max : Int(parts[1]), a >= 1 else {
+        throw usageError("-delete takes N or a,b (either side may be empty)",
+                         "-delete 的格式是 N 或 a,b（任一端可留空）")
     }
     if b < a {
         throw usageError("-delete \(a),\(b): a is greater than b", "-delete \(a),\(b)：a 大於 b")

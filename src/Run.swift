@@ -1949,6 +1949,28 @@ func runEdit(_ o: Options) throws {
     }
 
     var dryRunChanges: [String] = []
+    // RN. In `.lines` a value is written raw, so an LF in it ends the record
+    // and starts another, and a CR at its end joins the LF after it into a
+    // CRLF that reads back as the line ending. -insert and -append refuse such
+    // a value; -update (and -update-where, --value-file, --value-stdin, which
+    // all arrive here) must too, before anything is written.
+    // RN。`.lines` 的值是原樣寫出的，所以值裡的 LF 會結束這一筆並開始另一筆；值結尾的 CR 會和
+    // 後面的 LF 合成 CRLF，讀回來就成了行尾。-insert 與 -append 都拒絕這種值；-update（以及
+    // -update-where、--value-file、--value-stdin，它們都走到這裡）也必須在寫出任何東西之前拒絕。
+    if plan.format == .lines {
+        for (record, ups) in updates.sorted(by: { $0.key < $1.key }) {
+            for (column, value) in ups {
+                if value.contains(BYTE_LF) {
+                    throw fault("-update \(record):\(column): the value spans more than one record",
+                                "-update \(record):\(column)：這個值跨越了不只一筆紀錄")
+                }
+                if value.last == BYTE_CR {
+                    throw fault("-update \(record):\(column): in a lines file a value cannot end with a carriage return; it would read back as part of the line ending",
+                                "-update \(record):\(column)：在 lines 檔裡，值不能以歸位字元結尾；讀回時它會成為行尾的一部分")
+                }
+            }
+        }
+    }
     // Each record's closing LF is held back until the next record goes out, so
     // that the LAST one can end the way the input's last one did; otherwise a
     // file with no final newline gains one from any edit. CRLF is a different case -- one line ending
@@ -1970,24 +1992,35 @@ func runEdit(_ o: Options) throws {
     // LF 就是紀錄本身，即使輸入沒有結尾換行也照寫。少了這一條，'a\nx' 把最後一筆改成空值後會寫出
     // 'a\n'：少一筆，rc 0。否決了改寫成 `""`：那會改動一個沒人要求改的欄位編碼。
     var heldRecordIsEmpty = false
+    // RP. The LF is withheld only when the record written last IS the input's
+    // final record -- the one that ended without a newline. When that record
+    // is deleted, the record now written last is one that had its LF in the
+    // input, and it keeps it. Inserted and appended records are not input
+    // records, so they never take the input's missing newline.
+    // RP。只有在最後寫出的那一筆「就是」輸入的最後一筆（那筆沒有結尾換行的）時，才扣下 LF。那一筆
+    // 被刪掉時，現在最後寫出的是一筆在輸入裡本來就有 LF 的紀錄，它保留它的 LF。插入與追加的紀錄
+    // 不是輸入的紀錄，所以永遠不會沿用輸入缺少的換行。
+    var inputRecordsSeen = 0
+    var heldSeenAt = -1
     // Every byte that leaves this function is counted here -- offset AND
     // line. Header rows go out through this function too, so counting lines
     // only in emitData would put record 1 of a `.csv2` on line 1 in the index
     // instead of line 3.
     // 每一個離開這個函式的位元組都在這裡被計入——偏移量「與」行號。標頭列也走這個函式，若只在
     // emitData 裡數行，索引會說 `.csv2` 的第 1 筆在第 1 行，而它其實在第 3 行。
-    func emit(_ r: Record) {
+    func emit(_ r: Record, fromInput: Bool = true) {
         if o.dryRun { return }
         let bytes = FieldEncoder.encodeRecord(r, format: plan.format, preserveRaw: true)
         if heldLF { sink.write([BYTE_LF]) }
         heldLF = bytes.last == BYTE_LF
+        heldSeenAt = fromInput ? inputRecordsSeen : -1
         heldRecordIsEmpty = heldLF && bytes.count == 1
         sink.write(heldLF ? Array(bytes.dropLast()) : bytes)
         outOffset += bytes.count
         outLine += bytes.filter { $0 == BYTE_LF }.count
     }
 
-    func emitData(_ r: Record) {
+    func emitData(_ r: Record, fromInput: Bool = true) {
         outRecords += 1
         // A record that itself contains a newline makes the record number stop
         // matching the line number, and the index cannot then be used to seek
@@ -2000,10 +2033,11 @@ func runEdit(_ o: Options) throws {
         // 與另外兩個呼叫點由同一個函式回答，因此三者不可能說法不一。
         builder?.add(record: outRecords, at: UInt64(outOffset), line: UInt64(outLine),
                      spansLines: recordSpansLines(r, format: plan.format))
-        emit(r)
+        emit(r, fromInput: fromInput)
     }
 
     let parser = RecordParser(format: plan.format, truncatePartial: o.truncatePartial) { rec in
+        inputRecordsSeen += 1
         do {
             if headers.count < plan.headerRows {
                 var h = rec
@@ -2212,7 +2246,7 @@ func runEdit(_ o: Options) throws {
                     // 的索引會在 N+1 筆的檔案裡數出 N 筆，插入點之後的每一個格點指的都是另一筆
                     // 紀錄的位元組——`-mid` 會很快地以 rc=0 回傳錯的紀錄，本設計稱之為比沒有索引
                     // 糟得多。
-                    emitData(ins)
+                    emitData(ins, fromInput: false)
                 }
             }
             if deletes.contains(where: { r.number >= $0.0 && r.number <= $0.1 }) {
@@ -2361,7 +2395,7 @@ func runEdit(_ o: Options) throws {
     for row in appends {
         let rec = try parseRowLiteral(row, format: plan.format, expected: expectedFields,
                                       what: "-append")
-        emitData(rec)
+        emitData(rec, fromInput: false)
         total += 1
         Logger.shared.info("append record \(total)")
     }
@@ -2375,7 +2409,9 @@ func runEdit(_ o: Options) throws {
     // 原檔完好。
     var bad: [String] = []
     for k in inserts.keys where k > total { bad.append("-insert \(k)") }
-    for (a, b) in deletes where a > total || b > total { bad.append("-delete \(a),\(b)") }
+    for (a, b) in deletes where a > total || (b != Int.max && b > total) {
+        bad.append(b == Int.max ? "-delete \(a)," : "-delete \(a),\(b)")
+    }
     for k in updates.keys where k > total { bad.append("-update \(k):…") }
     for k in blanks.keys where k > total { bad.append("-delete -cell \(k):…") }
     if !bad.isEmpty {
@@ -2421,7 +2457,8 @@ func runEdit(_ o: Options) throws {
     // 扣著的 LF 會寫出，除非輸入的最後一筆本來就沒有（RK）。-append 是例外：它加上的紀錄是新的、
     // 由 csv2 寫出，因此和 csv2 寫出的每一筆一樣帶著行尾——與快速路徑給的答案相同，而 T202b 對
     // 「最後一筆被切斷」的檔案釘住了那個答案。
-    if heldLF && (!parser.endedWithoutNewline || !appends.isEmpty || heldRecordIsEmpty) { sink.write([BYTE_LF]) }
+    let heldIsUnterminatedInput = parser.endedWithoutNewline && heldSeenAt == inputRecordsSeen
+    if heldLF && (!heldIsUnterminatedInput || heldRecordIsEmpty) { sink.write([BYTE_LF]) }
     plan.source.close()
     try sink.close()
     aborted = false

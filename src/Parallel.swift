@@ -534,7 +534,13 @@ func runParallelSearch(_ o: Options) throws {
             var bytes: [UInt8] = []
             var hitCount = 0
             do {
-                guard let h = FileHandle(forReadingAtPath: path) else { return }
+                // RU. A worker that cannot open the file must fail the run: a bare
+                // `return` here dropped the chunk's hits and still exited 0.
+                // RU。打不開檔案的 worker 必須讓整次執行失敗：這裡原本直接 `return`，那一段的命中就
+                // 不見了，而結束碼仍是 0。
+                guard let h = FileHandle(forReadingAtPath: path) else {
+                    throw fault("cannot open input file: \(path)", "無法開啟輸入檔：\(path)")
+                }
                 defer { try? h.close() }
                 h.seek(toFileOffset: span.start)
 
@@ -584,6 +590,13 @@ func runParallelSearch(_ o: Options) throws {
                         return !parser.stopped
                     }
                     if !more { break }
+                }
+                // RU. A chunk that ends early was not searched to its end; say so
+                // rather than report the hits of part of it.
+                // RU。提早結束的區塊並沒有被搜尋到底；要說出來，而不是只回報其中一部分的命中。
+                if remaining > 0 && !parser.stopped {
+                    throw fault("\(path) is shorter than when the search began; it changed while being read",
+                                "\(path) 比搜尋開始時短；它在讀取期間被改動了")
                 }
                 if !parser.stopped { try parser.finish() }
                 if let e = localError { throw e }

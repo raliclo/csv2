@@ -18033,6 +18033,161 @@ printf 'a,b\n1,2' > "$_t331/f.csv"
 assert_eq "$(_t330_bytes "$_t331/f.csv")" " a , b \\n , 2 " \
     "T331f a last record with bytes of its own still gains no final newline / 有自己位元組的最後一筆，仍不補結尾換行"
 
+echo "--- T332: a parallel worker that cannot open the file fails the run / T332：打不開檔案的平行 worker 讓整次執行失敗 ---"
+# RU. Under a low open-file limit, workers that could not open the input
+# returned with nothing and the run still exited 0, reporting only part of the
+# hits. The rule pinned: rc 0 means every hit was reported; a run that could
+# not search everything fails and says why on stderr.
+# RU。開檔數上限很低時，打不開輸入的 worker 什麼都沒交就返回，而整次執行仍以 0 結束，只回報了一部分
+# 命中。釘住的規則：rc 0 代表每一個命中都回報了；搜不完的執行要失敗，並在 stderr 說明原因。
+_t332=$TMP/t332
+mkdir -p "$_t332"
+{ print 'name,val'; print '名,值'; for _i in {1..20000}; do print "r$_i,v${_i}x"; done } > "$_t332/fd.csv2"
+# sh sets the limit and execs csv2, with the redirections opened out here.
+# zsh's own ulimit -n does not take effect in this position, and a zsh
+# subshell under the limit cannot open the files it would write to.
+# 由 sh 設定上限並 exec csv2，重導在外面就開好。zsh 自己的 ulimit -n 在這個位置不生效，而在上限
+# 之下的 zsh 子 shell 也開不了它要寫的檔案。
+sh -c 'ulimit -n 8 2>/dev/null; exec "$@"' sh env CSV2_PARALLEL_MIN_BYTES=1 CSV2_PARALLEL_CHUNK_BYTES=2048 \
+    "$CSV2" -contains x -i "$_t332/fd.csv2" --json > "$_t332/out" 2> "$_t332/err"
+_t332_rc=$?
+_t332_meta=$(tail -1 "$_t332/out")
+if [[ $_t332_rc == 0 ]]; then
+    assert_eq "$_t332_meta" '{"meta":{"records":20000,"matched":20000}}' \
+        "T332a rc 0 under a low open-file limit means every hit was reported / 開檔上限很低而 rc 0 時，每一個命中都有回報"
+else
+    # Under --json the refusal is a JSON line on stdout; otherwise it is on stderr.
+    # 在 --json 之下，拒絕訊息是 stdout 上的一行 JSON；否則在 stderr。
+    assert_eq "$({ [[ -s $_t332/err ]] || grep -q '"error"' "$_t332/out"; } && print said)" "said" \
+        "T332a a run that could not search everything fails and says why / 搜不完的執行會失敗並說明原因"
+fi
+
+echo "--- T333: a .csv2 on standard input with no final newline is refused / T333：標準輸入上沒有結尾換行的 .csv2 被拒絕 ---"
+# RO. A .csv2 file without its final newline is refused as a torn append;
+# the same bytes on standard input were read, and an edit of them wrote a
+# .csv2 that csv2 then refused (a, b). --truncate-partial still drops the
+# torn record (c), and a whole .csv2 edited from stdin ends in LF (d).
+# RO。沒有結尾換行的 .csv2 檔會被當成撕裂的追加而拒絕；同樣的位元組從標準輸入進來卻被讀進去，對它的
+# 編輯寫出一個 csv2 隨後拒讀的 .csv2（a、b）。--truncate-partial 仍會丟掉撕裂的那一筆（c），而從
+# stdin 編輯一份完整的 .csv2，輸出以 LF 結尾（d）。
+_t333=$TMP/t333
+mkdir -p "$_t333"
+printf 'a,b\n甲,乙\n1,2' | "$CSV2" -update 1:1 Q -si --headers 2 -o "$_t333/o.csv2" 2>/dev/null
+assert_eq "$? $([[ -e $_t333/o.csv2 ]] && print written)" "1 " \
+    "T333a an edit of a torn .csv2 from stdin is refused and writes nothing / 從 stdin 編輯撕裂的 .csv2 被拒絕，什麼都沒寫出"
+printf 'a,b\n甲,乙\n1,2' | "$CSV2" -r -si --headers 2 >/dev/null 2>&1
+assert_eq "$?" "1" \
+    "T333b reading a torn .csv2 from stdin is refused, as for a file / 從 stdin 讀撕裂的 .csv2 被拒絕，與檔案相同"
+assert_eq "$(printf 'a,b\n甲,乙\n1,2\n3' | "$CSV2" -r -si --headers 2 --truncate-partial 2>/dev/null)" "1,2" \
+    "T333c --truncate-partial drops the torn record from stdin / --truncate-partial 丟掉 stdin 上撕裂的那一筆"
+printf 'a,b\nA,B\n1,2\n' | "$CSV2" -update 1:1 Q -si --headers 2 -o "$_t333/d.csv2" 2>/dev/null
+assert_eq "$(_t330_bytes "$_t333/d.csv2")" " a , b \\n A , B \\n Q , 2 \\n " \
+    "T333d a whole .csv2 edited from stdin ends in LF / 從 stdin 編輯完整的 .csv2，以 LF 結尾"
+
+echo "--- T334: deleting an unterminated last record leaves the record before it whole / T334：刪掉沒有結尾換行的最後一筆，前一筆保持完整 ---"
+# RP. The decided reading: only the input's own final record carries its
+# missing newline. Deleting it leaves the record now last with the LF it had
+# (a), the header too when every record goes (b); editing that record keeps
+# the missing newline (c, RK); a record inserted before it does not take it (d).
+# RP。決定的讀法：只有輸入自己的最後一筆帶著它缺少的換行。刪掉它之後，現在的最後一筆保留它原有的 LF
+# （a），全部刪掉時標頭也一樣（b）；改的是那一筆時仍不補換行（c，RK）；插在它前面的紀錄不沿用它（d）。
+_t334=$TMP/t334
+mkdir -p "$_t334"
+printf 'h,k\n1,a\n2,b' > "$_t334/b.csv"
+"$CSV2" -delete 2 -i "$_t334/b.csv" -so > "$_t334/a.out" 2>/dev/null
+assert_eq "$(_t330_bytes "$_t334/a.out")" " h , k \\n 1 , a \\n " \
+    "T334a -delete of the unterminated last record: the record before it keeps its LF / 刪掉沒有結尾換行的最後一筆：前一筆保留它的 LF"
+"$CSV2" -delete 1,2 -i "$_t334/b.csv" -so > "$_t334/b.out" 2>/dev/null
+assert_eq "$(_t330_bytes "$_t334/b.out")" " h , k \\n " \
+    "T334b deleting every record: the header keeps its LF / 刪掉全部紀錄：標頭保留它的 LF"
+"$CSV2" -update 2:1 Z -i "$_t334/b.csv" -so > "$_t334/c.out" 2>/dev/null
+assert_eq "$(_t330_bytes "$_t334/c.out")" " h , k \\n 1 , a \\n Z , b " \
+    "T334c editing that last record still adds no newline / 改的是那最後一筆時仍不補換行"
+"$CSV2" -insert 2 9,z -i "$_t334/b.csv" -so > "$_t334/d.out" 2>/dev/null
+assert_eq "$(_t330_bytes "$_t334/d.out")" " h , k \\n 1 , a \\n 9 , z \\n 2 , b " \
+    "T334d an inserted record before it does not take the missing newline / 插在它前面的紀錄不沿用缺少的換行"
+
+echo "--- T335: -delete a,b reads an empty side as open, the way -mid does / T335：-delete a,b 把空的一端當成開放，與 -mid 相同 ---"
+# RM. The pieces were split with empty ones dropped, so `2,` deleted record 2
+# alone, `,3` record 3 alone, and `2,,4` was taken as `2,4`, all at rc 0.
+# RM。原本切的時候丟掉了空段，於是 `2,` 只刪第 2 筆、`,3` 只刪第 3 筆，`2,,4` 被當成 `2,4`，全都 rc 0。
+printf 'h\n1\n2\n3\n4\n5\n' > "$TMP/t335.csv"
+assert_eq "$("$CSV2" -delete 2, -i "$TMP/t335.csv" -so 2>&1 | tr '\n' ' ')" "h 1 " \
+    "T335a -delete 2, deletes record 2 to the end / -delete 2, 刪掉第 2 筆到結尾"
+assert_eq "$("$CSV2" -delete ,3 -i "$TMP/t335.csv" -so 2>&1 | tr '\n' ' ')" "h 4 5 " \
+    "T335b -delete ,3 deletes records 1 to 3 / -delete ,3 刪掉第 1 到第 3 筆"
+assert_eq "$("$CSV2" -delete 2,,4 -i "$TMP/t335.csv" -so 2>&1 >/dev/null | grep -c 'either side may be empty')" "1" \
+    "T335c -delete 2,,4 is refused, naming the a,b form / -delete 2,,4 被拒絕，並指出 a,b 的寫法"
+"$CSV2" -delete 7, -i "$TMP/t335.csv" -so >/dev/null 2>&1
+assert_eq "$?" "1" \
+    "T335d an open range starting past the end is out of range / 起點超過結尾的開放範圍算越界"
+
+echo "--- T336: -update refuses a value a lines file cannot hold / T336：-update 拒絕 lines 檔裝不下的值 ---"
+# RN. In .lines a value is written raw: an LF in it made a second record, a CR
+# at its end read back as part of the line ending. -insert refused both,
+# -update did neither. A .csv quotes the same value and keeps it (d).
+# RN。在 .lines 裡值是原樣寫出的：值裡的 LF 會多出一筆，結尾的 CR 讀回時成了行尾的一部分。-insert
+# 兩者都拒絕，-update 兩者都沒拒絕。.csv 會把同樣的值加上引號保留下來（d）。
+_t336=$TMP/t336
+mkdir -p "$_t336"
+printf 'x\ny' > "$_t336/ln.txt"
+"$CSV2" -update 2:1 "$(printf 'a\nb')" -i "$_t336/ln.txt" --in-place 2>/dev/null
+assert_eq "$? $(_t330_bytes "$_t336/ln.txt")" "1  x \\n y " \
+    "T336a an LF in a lines value is refused and the file is untouched / lines 值裡的 LF 被拒絕，檔案未被動到"
+printf 'a\r' > "$_t336/cr.bin"
+"$CSV2" -update 2:1 --value-file "$_t336/cr.bin" -i "$_t336/ln.txt" -so >/dev/null 2>&1
+assert_eq "$?" "1" \
+    "T336b a lines value ending in CR is refused / 以 CR 結尾的 lines 值被拒絕"
+assert_eq "$("$CSV2" -update 2:1 ok -i "$_t336/ln.txt" -so 2>&1 | tr '\n' ' ')" "x ok" \
+    "T336c an ordinary lines value is still written / 一般的 lines 值照常寫出"
+printf 'h\nx\n' > "$_t336/c.csv"
+"$CSV2" -update 1:1 "$(printf 'a\nb')" -i "$_t336/c.csv" -so > "$_t336/c.out" 2>/dev/null
+assert_eq "$(_t330_bytes "$_t336/c.out")" ' h \n " a \n b " \n ' \
+    "T336d the same value in a .csv is quoted and kept / 同樣的值在 .csv 裡加上引號保留"
+
+echo "--- T337: a symlink planted at the temp name is not written through / T337：預先放在暫存名上的 symlink 不會被穿透寫入 ---"
+# RY. The temp name was `.<base>.csv2tmp.<pid>` opened with O_TRUNC, so a
+# symlink planted there first redirected the whole write to its target. The
+# planted link uses the old name, reached by exec keeping the pid.
+# RY。暫存名原本是 `.<base>.csv2tmp.<pid>`，以 O_TRUNC 開啟，所以先放在那裡的 symlink 會把整份寫入導到
+# 它的目標。這裡放的 link 用的是舊名字，靠 exec 保留 pid 來命中。
+_t337=$TMP/t337
+mkdir -p "$_t337"
+printf 'a,b\n1,2\n' > "$_t337/in.csv"
+print precious > "$_t337/victim.txt"
+( cd "$_t337" && sh -c 'ln -s victim.txt .out.csv.csv2tmp.$$ 2>/dev/null && [ -L .out.csv.csv2tmp.$$ ] || exit 77; exec "$0" -r -t -i in.csv -o out.csv' "$CSV2" ) >/dev/null 2>&1
+_t337_rc=$?
+if [[ $_t337_rc == 77 ]]; then
+    skipt "T337 this platform cannot make the symlink the case needs / 此平台做不出這個案例需要的 symlink"
+    T337_SKIPPED=1
+else
+    assert_eq "$(<"$_t337/victim.txt") $([[ -L $_t337/out.csv ]] && print link || print file)" "precious file" \
+        "T337 the planted symlink's target is untouched and the output is a regular file / 預先放好的 symlink 目標未被動到，輸出是一般檔案"
+fi
+
+echo "--- T338: the README says encrypted cells are authenticated per column / T338：README 寫明加密的儲存格按欄認證 ---"
+# RZ. The tag covers the ciphertext and the column name, not the record, so
+# two ciphertexts swapped within a column decrypt cleanly. The decision was
+# to document it rather than bind the record, which would make existing
+# ciphertext undecryptable. The case also shows the swap itself.
+# RZ。tag 涵蓋密文與欄名，不涵蓋紀錄，所以同一欄裡互換的兩段密文會順利解開。決定是寫進文件，而不是把
+# 紀錄綁進去——那會讓既有的密文解不開。這個案例也實際做一次互換。
+assert_eq "$(grep -c 'authenticated per column, not per position' "$ROOT/README.md") $(grep -c '按欄認證的，不是按位置' "$ROOT/README.zh-TW.md")" "1 1" \
+    "T338a both READMEs say cells are authenticated per column, not per position / 兩份 README 都寫明按欄認證、不按位置"
+_t338=$TMP/t338
+mkdir -p "$_t338"
+head -c 32 /dev/urandom > "$_t338/key.bin"
+printf 'name,salary\nalice,100\nbob,999999\n' > "$_t338/pay.csv"
+"$CSV2" -encrypt salary -keyfile "$_t338/key.bin" -i "$_t338/pay.csv" -o "$_t338/enc.csv" 2>/dev/null
+# csv2 refuses to -update an encrypted column, so the swapped file is written
+# from parts csv2 reads out; the ciphertexts are base64, with no comma or quote.
+# csv2 拒絕 -update 加密的欄位，所以互換後的檔案由 csv2 讀出的各部分寫成；密文是 base64，沒有逗號或引號。
+_t338_a=$("$CSV2" -get 1:salary -i "$_t338/enc.csv" 2>/dev/null)
+_t338_b=$("$CSV2" -get 2:salary -i "$_t338/enc.csv" 2>/dev/null)
+{ head -1 "$_t338/enc.csv"; print -r -- "alice,$_t338_b"; print -r -- "bob,$_t338_a"; } > "$_t338/swap.csv"
+assert_eq "$("$CSV2" -decrypt salary -keyfile "$_t338/key.bin" -i "$_t338/swap.csv" 2>&1 | tr '\n' ' ')" "name,salary alice,999999 bob,100 " \
+    "T338b as documented, ciphertexts swapped within a column decrypt without error / 如文件所述，同欄互換的密文會無錯誤地解開"
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -18149,6 +18304,7 @@ fi
 (( ${T324_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T328_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T329_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T337_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode
