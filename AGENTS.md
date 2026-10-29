@@ -4,25 +4,22 @@ Guidance for coding agents working in this repository.
 供 coding agent 在本 repo 工作時參考。
 
 Blind documentation testing -- how a round is run, and why each rule exists --
-is [blind-test-flow.md](./blind-test-flow.md). Seventy-nine rounds have gone
-through it; each rule there carries the round number where it was learned.
+is [blind-test-flow.md](./blind-test-flow.md). Each rule there carries the
+number of the round it came from.
 
 盲測文件——一個回合怎麼跑、每一條規則為什麼存在——寫在
-[blind-test-flow.md](./blind-test-flow.md)。已經跑過七十九個回合；那裡的每一條規則都帶著
-「它是在哪一回合被學到的」那個編號。
+[blind-test-flow.md](./blind-test-flow.md)。那裡的每一條規則都帶著它來自的回合編號。
 
 ## Status / 狀態
 
 Everything the plan describes is implemented except shipping (phase 7), which
 is a deliberate deferral rather than a gap. Both READMEs describe the state in
-prose; this heading used to carry a list of phase numbers and fell behind the
-plan twice -- once when phases 8-10 landed, and again when phase 11 did. A
-status line built from numbers goes stale every time a phase lands, and nothing
-reports it. What the checkboxes in `plan/plan.md` say is the answer.
+prose. Do not put a list of phase numbers here: it goes stale every time a
+phase lands, and nothing reports it. The checkboxes in `plan/plan.md` are the
+answer.
 
 計畫描述的一切都已實作，唯獨出貨（第 7 階段）除外，那是刻意暫緩而非缺口。兩份 README 以散文
-描述現況；這個標題原本帶著一串階段編號，而它落後於計畫兩次——第 8–10 階段落地時一次，第 11
-階段落地時又一次。一行由編號組成的狀態，每有一個階段落地就過期一次，而且沒有任何東西會回報它。
+描述現況。這裡不要放階段編號清單：每有一個階段落地它就過期一次，而且沒有任何東西會回報。
 答案以 `plan/plan.md` 的核取方塊為準。
 
 ```zsh
@@ -47,19 +44,17 @@ MSYS2_ARG_CONV_EXCL='*' cmd.exe /d /c '.\compile_csv2_win.bat' "$@"
 the switch is consumed, **the batch file never runs**, and the result is exit
 status 0, a log carrying only the banner, and a binary byte-identical to the
 one already there. The `.\` is there because cmd does not search the working
-directory for an executable; a bare name is looked up on PATH only, and that
-cost a `build: FAILED` on 2026-08-19 with the file sitting one `ls` away.
+directory for an executable; a bare name is looked up on PATH only and gives
+`build: FAILED`.
 
-This is worth stating because the instruction to run the batch file directly is
-what produced KY on 2026-09-03: the request came from the macOS session, the
-node followed it, and the dispatcher that already knew all of this was stepped
-around. If you must invoke it by hand, copy the dispatcher's line exactly --
-and there is no reason to. Do not reach for `cmd //c` or a bare `cmd /c`: each
-works under only one of the two MSYS shells this node has had, and each failed
-with exit status 0 under the other (2026-09-18 and 2026-10-07, QK). The form
-above works under both, because a shell that does not convert ignores the
-variable. That a remote command needs a working directory does not change
-this: `cd ~/proj/csv2 && ./compile_csv2.zsh`.
+Telling a node to run the batch file directly is what caused KY: the
+dispatcher that already knew all of this was stepped around. If you must
+invoke it by hand, copy the dispatcher's line exactly. Do not use `cmd //c` or
+a bare `cmd /c`: each works under only one of the two MSYS shells this node
+has had and fails with exit status 0 under the other (QK). The form above
+works under both, because a shell that does not convert ignores the variable.
+A remote command that needs a working directory changes nothing:
+`cd ~/proj/csv2 && ./compile_csv2.zsh`.
 
 **在 Windows 上，用 `./compile_csv2.zsh` 建置，與其他平台一樣。不要自己去叫
 `compile_csv2_win.bat`。** dispatcher 的 Windows 分支已經帶著那個呼叫所需要的兩件事，
@@ -67,50 +62,46 @@ this: `cd ~/proj/csv2 && ./compile_csv2.zsh`.
 
 `MSYS2_ARG_CONV_EXCL='*'` 阻止 MSYS 把 `/c` 改寫成路徑——少了它，那個開關會被吃掉、
 **批次檔根本不會執行**，結果是退出碼 0、log 只有橫幅、二進位檔與原本那個一個位元組都不差。
-`.\` 的存在是因為 cmd 不會為了找執行檔而搜尋工作目錄；一個裸名字只會在 PATH 上被查找，
-而那在 2026-08-19 換來一次 `build: FAILED`，當時那個檔案就在旁邊、`ls` 一下就看得到。
+`.\` 的存在是因為 cmd 不會為了找執行檔而搜尋工作目錄；裸名字只會在 PATH 上查找，結果是
+`build: FAILED`。
 
-這件事值得寫下來，是因為 **KY 的成因正是「叫人直接跑那個批次檔」這個指示**：要求來自 macOS
-的 session，節點照做了，而那個早就知道這一切的 dispatcher 被繞了過去。若非得手動呼叫不可，
-就**原樣照抄 dispatcher 那一行**——而沒有理由那樣做。不要改用 `cmd //c` 或裸的 `cmd /c`：
-這台節點有過兩種 MSYS shell，這兩種寫法各只在其中一種下成立，在另一種下都以退出碼 0 失敗過
-（2026-09-18 與 2026-10-07，QK）。上面那個形式在兩種下都成立，因為不做轉換的 shell 會忽略那個
-變數。遠端命令需要工作目錄也不改變這一點：`cd ~/proj/csv2 && ./compile_csv2.zsh`。
+**KY 的成因正是「叫節點直接跑那個批次檔」**：早就知道這一切的 dispatcher 被繞了過去。若非得
+手動呼叫不可，就**原樣照抄 dispatcher 那一行**。不要改用 `cmd //c` 或裸的 `cmd /c`：這台節點
+有過兩種 MSYS shell，這兩種寫法各只在其中一種下成立，在另一種下以退出碼 0 失敗（QK）。上面那個
+形式在兩種下都成立，因為不做轉換的 shell 會忽略那個變數。遠端命令需要工作目錄也不改變這一點：
+`cd ~/proj/csv2 && ./compile_csv2.zsh`。
 
-**On WSL2, run the suite from the native filesystem, not from `/mnt/c`.**
-Measured on 2026-09-03, same machine and same build: on native ext4 the suite
-is clean with T47 the only skip, exactly like macOS, while on `/mnt/c` it
-produces eighteen failures. All of them come from 9p/DrvFs having no POSIX
-permissions, no atomic rename, no FIFOs and different streaming timing. None
-of them is about csv2. There is no start-up refusal for this, deliberately:
-see LD. (The counts are in LD, not here -- T69a fails any document that quotes
-a PASS count, because those go stale silently, and it caught this paragraph.)
+**On WSL2, run the suite from the native filesystem, not from `/mnt/c`.** On
+native ext4 the suite is clean with T47 the only skip, exactly like macOS; on
+`/mnt/c` it fails, because 9p/DrvFs has no POSIX permissions, no atomic
+rename, no FIFOs and different streaming timing. None of those failures is
+about csv2. There is deliberately no start-up refusal for this: see LD. (The
+counts are in LD, not here -- T69a fails any document that quotes a PASS
+count, because those go stale silently.)
 
-**在 WSL2 上，從原生檔案系統執行這套測試，不要從 `/mnt/c`。** 2026-09-03 實測，同一台機器、
-同一個建置：在原生 ext4 上這套測試是乾淨的，唯一的略過是 T47——與 macOS 完全相同；而在 `/mnt/c`
-上它產生十八個失敗。那些全部來自 9p／DrvFs 沒有 POSIX 權限、沒有 rename 原子性、沒有 FIFO，
-以及串流時序不同，**沒有一個和 csv2 有關**。這件事刻意沒有做成啟動期拒絕，理由見 LD。
-（數字寫在 LD，不寫在這裡——T69a 會讓任何引用 PASS 數量的文件失敗，因為那種數字會安靜地過期，
-而它抓到了這一段。）
+**在 WSL2 上，從原生檔案系統執行這套測試，不要從 `/mnt/c`。** 在原生 ext4 上這套測試是乾淨的，
+唯一的略過是 T47——與 macOS 完全相同；在 `/mnt/c` 上則會失敗，因為 9p／DrvFs 沒有 POSIX 權限、
+沒有 rename 原子性、沒有 FIFO，串流時序也不同，**沒有一個和 csv2 有關**。這件事刻意沒有做成啟動期
+拒絕，理由見 LD。（數字寫在 LD，不寫在這裡——T69a 會讓任何引用 PASS 數量的文件失敗，因為那種數字
+會安靜地過期。）
 
 **Do not run the suite with `zsh -f`.** It reads no start-up files, so a
 packaged zsh never builds its `module_path` and `zsh/stat` cannot load. The
-suite refuses at start-up with rc=2 and says so; before that refusal existed it
-produced three failures pointing in three different directions and moved the
-skip count. KZ, and T238 proves the refusal bites.
+suite refuses at start-up with rc=2 and says so; without that refusal it
+produces three failures pointing in three different directions and moves the
+skip count. KZ; T238 proves the refusal bites.
 
 **不要用 `zsh -f` 跑這套測試。** 它不讀啟動檔，封裝版 zsh 因此沒有建立 `module_path`，
-`zsh/stat` 載不進來。現在這套測試會在啟動時以 rc=2 拒絕並說明原因；在那道拒絕存在之前，它會
-產生三個指向三個不同方向的失敗，並讓略過數跟著變。這是 KZ，而 T238 證明那道拒絕會咬。
+`zsh/stat` 載不進來。這套測試會在啟動時以 rc=2 拒絕並說明原因；少了那道拒絕，它會產生三個指向
+三個不同方向的失敗，並讓略過數跟著變。KZ；T238 證明那道拒絕會咬。
 
 **The source list lives in `src/sources.list`, read by BOTH build scripts.**
-Add a `.swift` file there, never to a script. The two scripts each carried
-their own copy once and drifted; the Linux build then failed with
-`cannot find 'runParallelSearch' in scope` -- a message naming a symbol, not
-the missing file.
+Add a `.swift` file there, never to a script. Two copies drift, and the Linux
+build then fails with `cannot find 'runParallelSearch' in scope` -- a message
+naming a symbol, not the missing file.
 **原始檔清單在 `src/sources.list`，兩支建置腳本都讀它。** 新增 `.swift` 請加在那裡，
-不要加進腳本。那兩支腳本曾各自持有一份而分岔，Linux 建置因此以
-`cannot find 'runParallelSearch' in scope` 失敗——那個訊息指出的是符號，不是缺少的檔案。
+不要加進腳本。兩份清單會分岔，Linux 建置會以 `cannot find 'runParallelSearch' in scope`
+失敗——那個訊息指出的是符號，不是缺少的檔案。
 
 Working: the RFC 4180 parser, `-r`, the selection flags, two-row headers,
 `--json`, `-md` including `--pretty` with a UAX #11 width table, reading a
@@ -222,65 +213,51 @@ do not quietly implement something else.
 **Nothing in this tree may depend on Perl or Python.** The aarch64 guest is one
 of the four nodes every change is verified on, and it has neither: its
 userspace is busybox. A script that reaches for a scripting language works on
-three nodes and fails on the fourth, and it fails there for a reason that has
-nothing to do with what it was testing.
+three nodes and fails on the fourth, for a reason unrelated to what it tests.
 
 **`shasum` is Perl.** On macOS its shebang is a perl interpreter, so every call
-starts one. It is banned here by name because the name does not look like Perl
-and so it does not look like a violation -- it came back into this tree twice
-after the rule was agreed, and both times nothing said anything.
+starts one. It is banned by name because the name does not look like Perl, so
+a use of it does not look like a violation.
 
 For an independent SHA-256, use `sha256sum` (busybox, coreutils, MSYS2) and
 fall back to `openssl dgst -sha256`, which stock macOS ships at
 /usr/bin/openssl. To assert a file did not change, do not hash it at all: `cp`
 it first and use `cmp -s`. Hashing the same path twice passes when the hash
-tool is missing, because the empty string equals the empty string -- T246a did
-exactly that in the guest and reported PASS having measured nothing.
+tool is missing, because the empty string equals the empty string (T246a).
 
-**This rule lived only in one comment beside T68 until 2026-09-06.** That
-comment gave the reason (the guest has no perl or python) and it constrained
-that one case and nothing else, because a rule written next to its first
-application is a note about that application. It is here now because this is a
-file that gets read before the work, not during it.
+The rule is written here, not only beside T68, because a rule written next to
+its first application reads as a note about that application, and this file
+is read before the work.
 
-**The ban covers documents too, and that half survived until 2026-09-10.** The
-scan enforcing it read `.zsh` files, so a reproduction in
-`todo/known-defects.md` kept a `$ shasum -a 256 ...` line -- written six days
-before the rule existed -- and nothing objected, because it was not code. A
-reproduction that cannot be RUN in this tree is worse than none: that file says
-the reproductions are the only way to tell later whether a fix has regressed,
-and one needing Perl in a tree without Perl quietly stops being that. T249d now
-reads the documents, and it looks for an INVOCATION rather than a mention --
-a line starting with a shell prompt, or with the tool followed by a flag --
-because prose about this ban is everywhere on purpose and must not be flagged.
+**The ban covers documents too.** A reproduction that cannot be RUN in this
+tree is worse than none: `todo/known-defects.md` says the reproductions are the
+only way to tell later whether a fix has regressed, and one needing Perl in a
+tree without Perl quietly stops being that. T249d reads the documents and looks
+for an INVOCATION rather than a mention -- a line starting with a shell prompt,
+or with the tool followed by a flag -- because prose about this ban is
+everywhere on purpose and must not be flagged.
 
 ## 不用 Perl，因此不用 `shasum`
 
 **這棵樹上任何東西都不得依賴 Perl 或 Python。** aarch64 guest 是每一次變更都要驗證的四個節點
 之一，而它兩者皆無：它的 userspace 是 busybox。一支伸手去拿腳本語言的腳本，會在三個節點上正常、
-在第四個上失敗，而它在那裡失敗的理由與它原本要測的事情毫無關係。
+在第四個上失敗，而失敗的理由與它要測的事情毫無關係。
 
 **`shasum` 就是 Perl。** 在 macOS 上它的 shebang 是一個 perl 直譯器，因此每一次呼叫都會啟動一個。
-這裡**指名**禁止它，因為那個名字看起來不像 Perl，於是它也看起來不像違規——在規則講定之後，它兩度
-回到這棵樹裡，而兩次都沒有任何東西出聲。
+這裡**指名**禁止它，因為那個名字看起來不像 Perl，用了它也就看起來不像違規。
 
 需要一份獨立的 SHA-256 時，用 `sha256sum`（busybox、coreutils、MSYS2 都有），退路是
 `openssl dgst -sha256`——原廠 macOS 的 /usr/bin/openssl 就有。而要斷言「一個檔案沒有被改動」時，
 **根本不要對它取雜湊**：先 `cp` 一份，再用 `cmp -s`。對同一個路徑取兩次雜湊，會在雜湊工具缺席時
-通過，因為空字串等於空字串——T246a 在 guest 上就是這樣，回報 PASS 而什麼都沒量。
+通過，因為空字串等於空字串（T246a）。
 
-**這條禁令也涵蓋文件，而那一半活到了 2026-09-10。** 執行它的掃描讀的是 `.zsh`，
-於是 `todo/known-defects.md` 裡一段重現保留著 `$ shasum -a 256 …` 這一行——寫於這條規則存在的
-六天之前——而沒有任何東西反對，因為它不是程式碼。**一段在這棵樹裡跑不起來的重現，比沒有重現
-更糟**：那個檔案自己說那些重現是「日後判斷修正有沒有退化的唯一依據」，而一段需要 Perl 的重現，
-在一棵沒有 Perl 的樹裡會安靜地不再是那個依據。T249d 現在會讀那些文件，而且它找的是**呼叫**而
-不是**提及**——一行以 shell 提示符開頭，或以那個工具名開頭且後面跟著旗標——因為談論這條禁令的
-散文到處都是，那是刻意的，絕不能被標記。
+這條規則寫在這裡、而不只寫在 T68 旁邊，因為**一條寫在它第一個應用旁邊的規則，讀起來只是那個應用
+的附註**，而這份檔案是在動手**之前**被讀到的。
 
-**這條規則直到 2026-09-06 為止，只活在 T68 旁邊的一段註解裡。** 那段註解寫出了理由（guest 上沒有
-perl 或 python），而它只約束了那一個案例、沒有約束別的，因為**一條寫在它第一個應用旁邊的規則，
-是一則關於那個應用的附註。** 它現在在這裡，因為這是一份會在動手**之前**被讀到的檔案，而不是動手
-當中。
+**這條禁令也涵蓋文件。** **一段在這棵樹裡跑不起來的重現，比沒有重現更糟**：`todo/known-defects.md`
+說那些重現是「日後判斷修正有沒有退化的唯一依據」，而一段需要 Perl 的重現，在一棵沒有 Perl 的樹裡
+會安靜地不再是那個依據。T249d 會讀那些文件，而且找的是**呼叫**而不是**提及**——一行以 shell 提示符
+開頭，或以那個工具名開頭且後面跟著旗標——因為談論這條禁令的散文到處都是，那是刻意的，絕不能被標記。
 
 ## Splitting CSV on commas, here of all places / 在這裡，切 CSV 的逗號
 
@@ -290,24 +267,20 @@ T64a and T65c, which exist to PROVE `cut -d,` returns the wrong value, and two
 build T301's own probe.
 
 This is not a ban, because two of the cases must keep doing it. It is a
-requirement to say why -- so that deliberate and casual look different in the
-file, which they did not before.
+requirement to say why, so that deliberate and casual look different in the
+file.
 
-**The rule existed from the beginning; nothing enforced it until 2026-09-10.**
-Defect M removed twelve `cut -d, -fN` from the suite in August and left `cell()`
-behind, but no check -- and seven came back. One of them counted fields with
-`awk -F','` on `TARGET_PACKAGES.csv`, the fixture this tree uses to show that a
-comma inside quotes is DATA, and it PASSED: both sides counted the same wrong
-way, so two wrong numbers agreed. QF.
+A rule with no check does not hold: comma-splits came back into the suite
+after defect M removed them, and one of them counted fields with `awk -F','`
+on `TARGET_PACKAGES.csv` and PASSED, because both sides counted the same wrong
+way. QF.
 
 Use `cell()`, `header_cell()` or `column()` in the suite; all three address
 through csv2 and none of them splits anything.
 
-**T301 covers all four shapes the rule names, and until 2026-09-10 it covered
-three.** The missing one was `${line%,*}` -- the expansion that rewrote
-`status_notes` in `TARGET_PACKAGES.csv` and is the direct reason this tree
-exists. It had two sites in the suite, both correct by accident. It was found
-because another session aimed ITS guard here; mine reported clean. QH.
+**T301 covers all four shapes the rule names**, including `${line%,*}` -- the
+expansion that rewrote `status_notes` in `TARGET_PACKAGES.csv` and is the
+direct reason this tree exists. QH.
 
 **What is NOT enforced: documents.** `todo/known-defects.md` quotes comma-splits
 inside reproductions of defects that were ABOUT comma-splitting, and no check
@@ -321,20 +294,16 @@ is not.
 由 T301 執行。目前有四行：兩行是 T64a 與 T65c——它們存在的理由就是**證明** `cut -d,` 會給出
 錯的值——另外兩行是在建構 T301 自己的探針。
 
-這不是禁止，因為其中兩個案例非這樣做不可。它要求的是**說出理由**——讓「刻意」與「順手」在檔案
-裡看得出差別，而在此之前看不出來。
+這不是禁止，因為其中兩個案例非這樣做不可。它要求的是**說出理由**，讓「刻意」與「順手」在檔案
+裡看得出差別。
 
-**這條規則從一開始就在，而直到 2026-09-10 才有東西在執行它。** 缺陷 M 在八月從測試裡移除了十二處
-`cut -d, -fN` 並留下 `cell()`，卻沒有留下檢查——於是回來了七處。其中一處用 `awk -F','` 去數
-`TARGET_PACKAGES.csv` 的欄數（正是這棵樹用來示範「引號內的逗號是資料」的那個 fixture），而且
-**通過了**：兩邊用同一種錯的方式數，兩個錯的數字彼此相等。QF。
+沒有檢查的規則守不住：缺陷 M 移除了測試裡的逗號切割之後，它們又回來了，其中一處用 `awk -F','`
+去數 `TARGET_PACKAGES.csv` 的欄數，而且**通過了**——兩邊用同一種錯的方式數。QF。
 
 測試裡請用 `cell()`、`header_cell()` 或 `column()`；三者都經由 csv2 定址，都不切任何東西。
 
-**T301 涵蓋那條規則所列的四種形狀，而直到 2026-09-10 為止它只涵蓋三種。** 漏掉的是
-`${line%,*}`——改寫 `TARGET_PACKAGES.csv` 中 `status_notes` 的那個展開，也就是這棵樹存在的直接
-原因。它在測試套件裡有兩處，兩處都是偶然地正確。它被發現，是因為另一個 session 把**它的**守衛
-指向這裡；我自己的回報乾淨。QH。
+**T301 涵蓋那條規則所列的四種形狀**，包括 `${line%,*}`——改寫 `TARGET_PACKAGES.csv` 中
+`status_notes` 的那個展開，也就是這棵樹存在的直接原因。QH。
 
 **沒有被執行的那一半：文件。** `todo/known-defects.md` 在一些重現裡引用了逗號切割，而那些缺陷
 **本身就是關於逗號切割的**；沒有任何檢查能把它們與一次新寫的區分開。這裡講出來，是為了不讓任何
@@ -342,7 +311,7 @@ is not.
 
 ## Shell scripts here: `zstat`, never `stat(1)` / 這裡的 shell 腳本：用 `zstat`，不用 `stat(1)`
 
-A rule for this tree since 2026-08-26, and it was aimed at two real lines:
+The shape this rule forbids:
 
 ```zsh
 m=$(stat -c '%a' "$1")                        # GNU / busybox
@@ -364,31 +333,26 @@ print $(( h[mode] & 8#777 ))     # 8#777, NOT 0777
 
 **The mask is `8#777`.** zsh does not read a leading zero as octal, so
 `& 0777` is an AND with decimal 777: it returns 256 for a 0644 file -- a
-plausible number that is wrong. Found on the first command written while
-probing for this change.
+plausible number that is wrong.
 
 All four platforms load `zsh/stat`: macOS, WSL, the Windows MSYS zsh, and the
-aarch64 guest. The guest was **measured** on 2026-08-26; this tree had carried
-a comment claiming otherwise, inherited from the days when the guest had no
-`stat` applet either, and that sentence was copied forward into new comments
-and into a commit message whose whole subject was measuring before changing.
+aarch64 guest (measured, not assumed; an older comment claiming the guest could
+not was wrong).
 
 The full reasoning, with the reproduction, is at the top of
 [`test/test_csv2.zsh`](./test/test_csv2.zsh) beside `zstat_mode()`.
 
-自 2026-08-26 起是這棵樹的規則，而它針對的是兩行真實存在過的程式碼（見上）。
+這條規則禁止的形狀，見上方程式碼。
 
 **`stat(1)` 沒有可攜的介面。** BSD 與 GNU 都收 `-f`，意思卻相反，於是腳本得兩種都寫、再猜哪個
 答案是真的——而那個猜法是**看輸出**，那正是這個專案存在所要不信任的那種檢查。`zstat` 是 zsh 的
 內建指令，每個平台都一樣，而且回傳到陣列，不是一個還要有人去剖析的字串。
 
 **遮罩是 `8#777`。** zsh 不會把開頭的 0 當成八進位，因此 `& 0777` 是與十進位 777 做 AND——
-對一個 0644 的檔案會得到 256，一個看起來合理而錯誤的數字。這是在為那次修改做探測時、在寫下的
-第一個指令上發現的。
+對一個 0644 的檔案會得到 256，一個看起來合理而錯誤的數字。
 
-四個平台都載得進 `zsh/stat`：macOS、WSL、Windows 的 MSYS zsh，以及 aarch64 guest。guest 是
-2026-08-26 **實測**的；在那之前這棵樹帶著一句相反的註解，沿用自「它連 `stat` applet 都沒有」的
-年代，而那句話被抄進了新的註解，也抄進了一個「主旨正是『動手前先量』」的 commit message。
+四個平台都載得進 `zsh/stat`：macOS、WSL、Windows 的 MSYS zsh，以及 aarch64 guest（是實測的，
+不是推測；一句說 guest 載不進來的舊註解是錯的）。
 
 完整的推理與重現步驟，在 [`test/test_csv2.zsh`](./test/test_csv2.zsh) 頂端 `zstat_mode()` 旁邊。
 
@@ -447,9 +411,9 @@ because there is nothing to fork.
 ## Linear history / 線性歷史
 
 `develop` has no merge commits, and it is to stay that way (the user's
-decision, 2026-10-14). Four checkouts on four machines push to this one branch,
-so a single `git pull` without `--rebase` on any of them records a merge and
-the next push publishes it. In every checkout, once:
+decision). Four checkouts on four machines push to this one branch, so a
+single `git pull` without `--rebase` on any of them records a merge and the
+next push publishes it. In every checkout, once:
 
 ```zsh
 git config pull.rebase true     # git pull rebases instead of merging
@@ -461,7 +425,7 @@ merge. Do not force-push `develop` to "fix" a merge that already went out --
 ask the user. T324 fails when HEAD contains a merge commit; local config only
 reaches the machine it was set on, and the suite reaches every node.
 
-`develop` 沒有 merge commit，而且要維持如此（使用者決定，2026-10-14）。四台機器上的四份
+`develop` 沒有 merge commit，而且要維持如此（使用者的決定）。四台機器上的四份
 checkout 推向同一條分支，其中任何一台少了 `--rebase` 的一次 `git pull` 就會記下一個 merge，
 下一次 push 就把它發布出去。每一份 checkout 設定一次：
 

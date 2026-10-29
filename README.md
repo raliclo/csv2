@@ -38,21 +38,9 @@ the machine's Swift changes. The v0.1.5 aarch64 binary did not: it named its
 toolchain by version in its RPATH and stopped starting when that toolchain was
 replaced. The price is size, 57 to 59 MB unpacked instead of about 1 MB.
 
-**aarch64 Linux joined the published set in v0.1.1.** It was absent from v0.1.0
-not for want of testing — T47 compares twelve invocations byte for byte against
-macOS on every run — but because an archive built after that tag was cut would
-have reported a different version string from its three siblings. That is a
-property of `git describe`, which answers according to whether a tag existed
-when the build ran rather than according to the source; the four v0.1.1
-archives were all built at the tag.
-
-Until 2026-09-09 this paragraph gave a reason: that the image testing it has no
-zstd. That was false; it has `/usr/bin/zstd`. The file I read was Buildroot's own
-upstream example defconfig rather than the configuration this project feeds to
-Buildroot, which sets `BR2_PACKAGE_ZSTD=y` and says above it why. Every step of
-the reasoning after that was sound and inherited a false premise, which is a
-reminder worth more than the paragraph it replaced: ask the machine, not the file
-that describes it.
+**aarch64 Linux archives exist from v0.1.1 on**; v0.1.0 has none. The aarch64
+build is tested on every run — T47 compares twelve invocations byte for byte
+against macOS.
 
 With Homebrew — this repository is its own tap, so there is no second one:
 
@@ -81,12 +69,11 @@ so install the Swift 6.4.1 runtime — the directory
 installer from [swift.org](https://www.swift.org/install/windows/) creates and
 puts on `PATH`.
 
-A different runtime version may not be close enough, and the failure says
-nothing. Measured on 2026-10-12, when the machine that built v0.1.3 had its
-Swift 6.3.3 removed and only 6.4.0 left: the installed v0.1.3 printed nothing
-at all, and exited `0xC0000139` (entry point not found) under `cmd.exe` and
-`127` under bash and zsh — which reads like "command not found" for a file that
-is sitting right there. If `csv2 --version` prints nothing, check this before
+A different runtime version may not work, and the failure says nothing. A
+v0.1.3 built with Swift 6.3.3, on a machine with only 6.4.0, printed nothing at
+all and exited `0xC0000139` (entry point not found) under `cmd.exe` and `127`
+under bash and zsh — which reads like "command not found" for a file that is
+sitting right there. If `csv2 --version` prints nothing, check this before
 anything else:
 
 ```bat
@@ -96,12 +83,9 @@ where swiftCore.dll
 It should name a `Runtimes\6.4.1` directory. A machine with no Swift installed
 at all has not been tested; expect it not to start either.
 
-Until v0.1.5 this section said "a different runtime version is not close
-enough", from that one measurement across 6.3 → 6.4. On 2026-10-22 the same
-machine had 6.4.0 replaced by 6.4.1, and the v0.1.4 built with 6.4.0 kept
-running: `--version` and reading a CSV both exited 0. So one patch-level step
-has been seen to work and one minor-level step to fail; nothing else has been
-measured, and the safe choice is still the runtime that built the release.
+A different patch version has been seen to work — v0.1.4, built with 6.4.0,
+runs on 6.4.1 — and a different minor version to fail, as above. Nothing else
+has been measured, so the safe choice is the runtime that built the release.
 
 The runtime follows the release, not the latest Swift: v0.1.5 and v0.1.6 were
 built with 6.4.1, v0.1.4 with
@@ -135,7 +119,7 @@ They compose: `--uninstall` on its own looks only in the default location and
 exits 0 having removed nothing, so pair it with the same `--prefix`/`--dir` you
 installed with.
 
-**The default is Homebrew's `bin`** — the directory the paragraph above tells you
+**The default is Homebrew's `bin`** — the directory the paragraph below tells you
 to avoid for ssh-reachable scripts. `--dry-run` prints it. Installing elsewhere
 leaves any earlier binary on disk and replaces the startup block, so the old one
 stays and stops being found.
@@ -209,10 +193,7 @@ csv2 -contains MIT --filter -t -o matches.csv -i data.csv
 ```
 
 `-contains --json` emits one object per matching CELL, between the two metadata
-lines. This is the whole output for a three-record file, not an excerpt — until
-2026-09-07 this block showed the last line alone under a `$` prompt, with no
-ellipsis, which is the likeliest thing on this page to have produced a broken
-parser:
+lines. On a three-record file:
 
 ```text
 $ csv2 -contains busybox --json -i test/fixtures/TARGET_PACKAGES.csv
@@ -223,9 +204,6 @@ $ csv2 -contains busybox --json -i test/fixtures/TARGET_PACKAGES.csv
 ```
 
 The `…` are this page's, not the program's: five cells match, in three records.
-Until 2026-09-07 this block showed the final line ALONE under a `$` prompt with
-no ellipsis, which is the likeliest thing on this page to have produced a broken
-parser.
 
 **That record shape is not the one `-r --json` uses.** A cell hit carries
 `record`, `field`, `header_en` (and `header_zh` for a `.csv2`), `value` and
@@ -278,12 +256,7 @@ or reported — `--no-index`, `--headers`, `-debug` — are not companions and s
 work. It is a whole-file
 count and does nothing else, so combining it with a verb, an output shape or a
 destination is refused: the refusal lists exactly the flags that were typed.
-Until 2026-09-08 those flags were accepted and DISCARDED at exit 0 —
-`csv2 -count -update 1:1 X -i f.csv --in-place` printed a number and left the
-file byte-identical, and `-contains ZZZ -count` returned the file's total, so
-"how many records mention this" got a plausible answer to a different question.
-`--no-index`, `--headers` and `-debug` are not companions in this sense and
-still work.
+So `-contains ZZZ -count` is an error, not the file's total.
 
 **`-mid a,b` with `a` past the last record is an error**, and the message names
 the total. `b` past the last record is not: a window that starts inside the
@@ -298,17 +271,15 @@ Record numbers count data records, not physical lines.
 locating report shows `0` for a `.csv` header and `0a`/`0b` for a `.csv2`'s two
 rows — and no verb accepts one. `-get 0:1`, `--search-cell 0a:1` and
 `--search-row 0` are all refused. To search header rows, use
-`--include-headers`. Until 2026-09-07 this sentence gave the two spellings with
-no such warning, sitting between `-get r:c` and `--search-cell R:C`, which are
-both things that take addresses.
+`--include-headers`.
 
 `-contains` searches every column;
 use `--search-cell R:C`, `--search-row R`, or `--search-column C` to restrict
 the search to one cell, record, or column. These scope options are mutually
 exclusive with EACH OTHER and require `-contains`; each of them pairs with
 `--filter`, `-A`/`-B`/`-C`, `-rownum` and `--json` — but those four are not all
-compatible with EACH other: `-rownum --json` is refused, and so is `-rownum` on
-a locating report. On a `.csv2` a column name
+compatible with EACH other: `-rownum --json` is refused, and `-rownum` on a
+locating report is accepted and ignored. On a `.csv2` a column name
 must come from the ENGLISH header row.
 
 `--filter`, `-A`/`-B`/`-C` and `--normalize` also require `-contains`, and say
@@ -374,8 +345,7 @@ The meta line's `fields` is the width of the HEADER: 3 for a three-column CSV,
 and **0 whenever there is no header row** — a `.lines` file, or any file read
 with `--headers 0`. `0` does not mean the width is unfixed: a `.csv` read with
 `--headers 0` still pins it to record 1 and still refuses a ragged file. Use it
-to size rows only when it is non-zero. Until 2026-09-07 this said 0 meant "not
-fixed", which is false on exactly the run that reports it.
+to size rows only when it is non-zero.
 
 `--json-ascii` escapes non-ASCII characters, **and that is a framing guarantee,
 not a cosmetic one.** Plain `--json` emits U+0085, U+2028 and U+2029 as their
@@ -425,8 +395,6 @@ SIGPIPE with stderr empty, distinguishable from a failure, which is 1 with an
 error object. On a file small enough that everything fits in the pipe buffer,
 csv2 finishes before `head` closes and the status is 0. So handle 0 and 141 as
 "the consumer stopped early" and 1 as failure; do not treat 141 as guaranteed.
-Until 2026-09-08 this said it unconditionally, which is false on a three-record
-fixture — the size of file anyone verifies a claim on.
 
 **Under `--json` a truncated run IS structurally detectable**, unlike the CSV
 output described under Errors. A fault found part-way through leaves the record
@@ -450,11 +418,8 @@ which is what it is the default for. On a CSV input, where no original spacing
 exists to keep, it behaves as `compact`.
 
 **`--pretty` is `--md-style pretty`** — one setting with two spellings, giving
-byte-identical output and sharing one bound. Until 2026-09-07 this page called
-it "a different flag", which was the one sentence a reader would rely on when
-choosing between them. Giving both with different values is refused rather than
-resolved, because the result used to depend on which came last. Both need `-md`
-and are refused without it.
+byte-identical output and sharing one bound. Giving both with different values
+is refused rather than resolved. Both need `-md` and are refused without it.
 
 Alignment is by DISPLAY width, per column: each column is as wide as the widest
 of its header and its cells, with one space either side. Width is measured on
@@ -472,14 +437,8 @@ measuring the same thing.
 When a table is selected out of a document with `--md-table N`, the `line` on
 each `--json` record is the line in the DOCUMENT — the same number your editor
 shows — and `--physical`'s `@L` is that same number. A record on document line
-27 reports 27, however far down the file the table begins.
-
-Between 2026-09-06 and 09-07 this said the opposite: the number was relative to
-the table, and this page told you to add the table's offset yourself. That
-advice did not work — the `|---|` separator is a line in your document and not
-a line in the translated table, so the offset was +25 for data rows and +24 for
-the header, and the obvious implementation was off by one. The number is now
-the document's and there is nothing to add.
+27 reports 27, however far down the file the table begins. There is no table
+offset to add.
 
 `--physical` cannot be combined with `--json`; it adds to the address in the
 locating report, which `--json` does not produce. Use `--json`'s own `line`.
@@ -503,16 +462,12 @@ A claim about physical lines turns off the index seek for that one call, because
 seeking to a byte offset skips newlines without counting them. It costs a scan,
 and only on a decorated address.
 
-Until 2026-09-10 pasting one back was refused with a message pointing at the
-decoration. The refusal was correct and was not the best answer.
-
 Use `--en` or `--zh` to choose the header language in human-readable output.
 `--version`/`-V` prints the build version; `--help`/`-h` prints the complete
 option list.
 
-`-si` reads stdin and `-so` writes stdout. Neither LOADS the whole input into
-memory — until 2026-09-07 that sentence said "streams … into memory", which is a
-contradiction in terms, since streaming is what you do instead of loading. When
+`-si` reads stdin and `-so` writes stdout. Neither loads the whole input into
+memory. When
 stdin is used, `--headers` is required, because stdin has no extension to
 declare a format with.
 
@@ -530,13 +485,12 @@ csv2 -update 1:1 'X' -si --headers 1 -so < data.csv
 Reading from a pipe is always single-threaded, so `-contains` never takes the
 parallel path there whatever the thresholds allow, and `-debug` reports
 `file_bytes=0` — which makes the `read_bytes` against `file_bytes` comparison
-described under Indexes meaningless on a pipe. That comparison was written here
-on 2026-09-07 without the condition that made it true.
+described under Indexes meaningless on a pipe.
 
 **`--headers 0` reads the input line by line** — one field per line, bytes
 verbatim. That is the format a file with no `.csv`/`.csv2` suffix already has,
-and until now it could only be had by *having no suffix*, so neither stdin nor
-a prose `.md` could ask for it. What a declaring suffix refuses is DISAGREEMENT: `--headers 1`
+and this is how stdin or a prose `.md` asks for it. What a declaring suffix
+refuses is DISAGREEMENT: `--headers 1`
 on a `.csv2` and `--headers 2` on a `.csv` are both errors, while a `--headers`
 that agrees with the suffix is accepted and does nothing.
 
@@ -554,11 +508,7 @@ So on a `.csv` it removes the header row and nothing else. A ragged file read
 that way is still refused, naming record 1 rather than a header that does not
 exist.
 
-Two sentences here were false until 2026-09-07, four lines apart and
-contradicting each other: that `0` is refused whatever the suffix says, and that
-it is the one value a suffix cannot override. A correction on that date fixed
-the `--headers 1|2` claim in this same paragraph and left both standing. A `.md` read this way is
-prose, and can be edited and written back as prose — for documents that merely
+A `.md` read this way is prose, and can be edited and written back as prose — for documents that merely
 CONTAIN a table rather than being one.
 
 ## Errors
@@ -574,10 +524,6 @@ record at 20001 wrote 19,126 good records and then failed, and that truncated
 output reads back as a perfectly valid CSV of 19,125 records with no marker of
 any kind. `csv2 -r -i data.csv > out.csv` without testing `$?` is how you get a
 silently shortened file.
-
-Until 2026-09-07 this section said stdout remains empty "so failures can be
-handled safely in a pipeline", which contradicted the streaming guarantee four
-sections away. The promise was the false one.
 
 **csv2 stops at the FIRST fault.** A file with two bad records reports the
 first and says nothing about the second, so cleaning a colleague's file is one
@@ -600,18 +546,6 @@ branch.** These are the ones observed:
 | `invalid-input` | a value or address the file cannot satisfy, and some flag conflicts |
 | `conflicting-options` | other flag conflicts |
 
-Until 2026-09-08 this said "there are three codes", listing the first, fourth
-and fifth, one sentence before promising that `code` values are stable across
-versions — which is what makes a closed list load-bearing. A three-way switch
-with `default: unknown` falls through on any file with duplicate column names.
-The count was wrong rather than the codes; each individual entry has held.
-
-The removed sentence is described here rather than quoted: reproducing a
-withdrawn promise verbatim leaves it on the page for anyone skimming, and the
-case that pins its removal then catches itself on the quotation — which is how
-the first version of T295a failed. The Chinese page kept that promise one round
-longer than this one, which is PR.
-
 The split between `invalid-input` and `conflicting-options` follows where the
 check happens rather than a rule you can predict — `--physical --json` reports
 `invalid-input` while `-md --json` reports `conflicting-options`, and both are
@@ -625,7 +559,6 @@ flag conflict rather than as the range.
 **A failed edit leaves the input byte-identical.** `--in-place` writes a private
 temporary file and renames it, so there is no state in which the input is half
 written; `-append --in-place` is the documented exception, appending directly.
-That guarantee was previously only inferable from the exception.
 
 ```text
 csv2: vs-sqlite.csv2 declares 2 header row(s) by its suffix, but --headers says 1. The suffix declares the format; --headers is for input with no suffix to declare it. Drop --headers to read the file as it is. Renaming it instead makes the suffix agree with --headers, which is NOT the same thing: a header row then becomes data record 1, at rc=0, and nothing afterwards can tell it was one
@@ -644,19 +577,11 @@ two-column file is an ordinary field-count error that never mentions the `#`. A
 header starting with `#` is a legal column name — which is what makes `#id`
 legal, two sentences above.
 
-Two earlier versions of this paragraph were wrong in opposite directions. It
-said "at the top" until 2026-09-08, inviting the reader to assume a mid-file `#`
-was fine; the correction said it "fires wherever the line is", which claims more
-than the program keeps. The test written with that correction passed because its
-fixture happened to be a one-field line — a case that agreed with the code and
-not with the sentence it was there to defend.
 To read such a file as lines without touching it, pipe it in:
 `csv2 -si --headers 0 < FILE`. Reading it under a name with no `.csv`/`.csv2`
 suffix does the same, and removing the line makes it a CSV. Note that
 `--headers 0` on a file that HAS one of those suffixes means a headerless CSV,
-not lines: the suffix has already declared comma separation. A node reading the
-earlier message, which named only the rename, concluded the file could not be
-read at all.
+not lines: the suffix has already declared comma separation.
 
 ## Editing
 
@@ -676,9 +601,7 @@ Supported edit verbs are `-insert`, `-append`, `-delete`, `-update`, and
 `-add-column`, plus content-anchored `-update-where`. Several may be given in
 one invocation. All RECORD NUMBERS refer to the original input and every edit is
 applied in one pass — so `-insert 2 'NEW' -delete 4` deletes the record that was
-4th before the insert, not the one that is 4th after it. (This sentence said
-"all indexes" until 2026-09-07, in a page where "index" otherwise means the
-`.index` sidecar.)
+4th before the insert, not the one that is 4th after it.
 
 **`-delete a,b` deletes an inclusive RANGE**, the same reading as `-mid a,b`. To
 remove records that are not adjacent, repeat the flag:
@@ -689,8 +612,7 @@ csv2 -delete 2 -delete 4 -i data.csv --in-place # deletes 2 and 4, keeping 3
 ```
 
 Both forms exit 0 and print nothing, so the wrong one costs a record with no
-sign that anything unintended happened. Until 2026-09-07 only `-delete 4`
-appeared here, which left a reader with two records to remove choosing blind.
+sign that anything unintended happened.
 
 `-insert N` makes the new record number N; the record previously at N and
 everything after it shift down. It cannot address one past the end — use
@@ -722,10 +644,7 @@ answer rather than a surprise.
 **A column may be addressed by NAME anywhere a number is accepted** — `-update
 1:license`, `-delete -cell 1:license`, `-delete -col license`. Names and numbers
 both refer to the column as it is in the INPUT, so an address stays correct
-alongside `-delete -col` or `-add-column` in the same run. Until 2026-09-07 it
-did not: an address was resolved against the header AFTER the structural edit
-and applied to a record before it, which wrote to a neighbouring column at exit
-0 with nothing on either stream.
+alongside `-delete -col` or `-add-column` in the same run.
 
 `--in-place` writes through a private temporary file and rename, except for
 `-append`, which uses an append-only fast path. `-append` validates the input
@@ -797,16 +716,14 @@ column holding arbitrary bytes is readable with `-get` and not with `--json`.
 changed cell as `old -> new`, and writes no DATA file. It is not silent on disk
 if you also passed `-log`: the preview is appended there, including the new
 value, followed by a line reading `dry run: N change(s), wrote nothing`. That
-line is true of the data file and false of the file it is written in. Until
-2026-09-07 this page said "writes nothing" without qualification.
+line is true of the data file and false of the file it is written in.
 
 Other edit verbs are refused rather than returning empty output that could be
 mistaken for “no changes”. `--backup` with `--in-place` saves the original
 beside the input as `INPUT.bak` and refuses to overwrite an existing backup — so
 it works once per path, and a second backed-up edit needs the `.bak` moved
 aside first. A FAILED edit removes the backup it had just taken, since the
-input is unchanged and a leftover `.bak` would block every later use; before
-2026-09-08 one failure burned that single use permanently.
+input is unchanged and a leftover `.bak` would block every later use.
 
 **An edit cannot take `--json` at all**, so you cannot get an edit's OWN error
 as a JSON object: adding `--json` to an edit replaces whatever would have been
@@ -817,11 +734,6 @@ f.csv --in-place` emits exactly that. So a consumer can parse every refusal this
 tool produces; what it cannot do is learn from JSON why the EDIT would have
 failed, because the run never reached the edit.
 
-Until 2026-09-07 this paragraph promised the edit's own error here. The 09-07
-correction over-shot: it said an edit's refusal is "never a JSON error object"
-and the table below said it is "available only as text on stderr", which told a
-script author not to parse at all and cost them a working code path.
-
 An edit whose destination is Markdown MUST pass BOTH `-md` and `-t`, and
 neither is optional — `-t` is required for the same reason it is when reading,
 because a Markdown table has no shape without its header row. The examples in
@@ -830,9 +742,7 @@ Editing a `.md` file without it is refused, naming the suffix, and the file is
 left alone. With `--md-table N --in-place`, only the selected table is replaced;
 surrounding prose is carried across and all output line endings are LF.
 `--dry-run` works here as it does everywhere: it prints each changed cell and
-writes nothing. Until 2026-09-06 that last sentence was false — `--dry-run` with
-`-md` performed the write, and reported success with no output on either stream
-— which is why it is now stated rather than left to be assumed.
+writes nothing.
 
 ## Protection and audit logging
 
@@ -861,18 +771,15 @@ keyed that way is reproducible only on a machine holding that file, so prefer
 input twice gives different bytes; both decrypt.
 
 **`-t` is not needed for `-hash` or `-encrypt`** and changes nothing there — the
-examples above carry it, and did so alone until 2026-09-07 while a reader could
-reasonably conclude it was required. These verbs always write the header row,
+examples above carry it, but it is not required. These verbs always write the header row,
 because that is where the protection marker lives. `-md` editing genuinely does
 require `-t`; these do not.
 
 Protected columns are marked in the header: `name:hash`, `name:hmac:KEYID` for a
 keyed hash, and `name:enc:KEYID:SALT` for a ciphertext.
 
-The fourth field is a per-file **salt**, not a nonce. Until 2026-09-07 this page
-called it NONCE, which describes one nonce covering a whole column under
-ChaCha20-Poly1305 — catastrophic reuse, and a design csv2 does not have. The
-real AEAD nonces are per cell, inside each ciphertext; that is why the same
+The fourth field is a per-file **salt**, not a nonce: csv2 does not reuse one
+nonce across a column. The AEAD nonces are per cell, inside each ciphertext; that is why the same
 plaintext encrypts to different bytes in two rows of one column.
 
 The two `KEYID`s are not the same kind of thing:
@@ -892,11 +799,7 @@ plus 28 bytes with no padding, and it is stored **base64**, so a cell holds
 `4 * ceil((len + 28) / 3)` characters. Length is therefore visible in steps of
 three: plaintexts of 0, 1 and 2 bytes all store as 40 characters, so an empty
 cell is NOT distinguishable from a one- or two-byte one, and 3 and 4 bytes both
-store as 44. Until 2026-09-08 this paragraph said an empty cell WAS
-distinguishable — it erred conservatively, claiming more leakage than exists,
-but a reader padding values to hide an empty cell was acting on a false
-statement and a reader sizing a column could not compute the stored width at
-all, because base64 appeared nowhere on this page.
+store as 44.
 
 The column's own name, every other column, the record count and the row order
 are all in the clear. What does NOT leak is equality: two records
@@ -904,9 +807,7 @@ holding the same value encrypt to different bytes, which is the concrete
 advantage over `-hash`.
 
 `-encrypt`, `-decrypt` and `-hash` accept `--in-place`, and `--backup` applies to
-them. Until 2026-09-07 `--backup` was silently ignored there — exit 0, nothing on
-either stream, the plaintext overwritten and no `.bak` — on the one path where
-losing the original cannot be undone. Encrypting a column that is already
+them — the path where losing the original cannot be undone. Encrypting a column that is already
 encrypted is refused, and so is decrypting a column that was never encrypted or
 was hashed rather than encrypted; hashing is one-way, so there is nothing to
 return.
@@ -941,8 +842,7 @@ one line each, append-only, English only, and the file is created if absent:
 
 The first line is the invocation with the VALUE redacted; `--value-file` and
 `--value-stdin` are recorded as themselves, so the record says where the value
-came from. Until 2026-09-07 both were replaced by `<value>`, which made a
-`--value-stdin` run indistinguishable from a literal one.
+came from, and a `--value-stdin` run can be told from a literal one.
 
 **The log holds cleartext cell data, and it is created 0644.** That is the point
 of it — the second line above is what makes the record useful — but it means
@@ -981,9 +881,6 @@ csv2: 2026-09-08T01:17:16.212+08:00 DEBUG metrics: read_bytes=65536 file_bytes=7
 ```
 
 Every `-debug` line is prefixed, timestamped and levelled, and goes to stderr.
-Until 2026-09-08 this block showed the messages bare, which was a transcript
-that never happened — the same fault as the `-contains --json` example corrected
-on 2026-09-07, and it survived because the case pinning it matched a substring.
 
 `read_bytes` against `file_bytes` is the evidence that a window was seeked to
 rather than scanned for; a discarded index shows the whole file read.
@@ -991,8 +888,7 @@ rather than scanned for; a discarded index shows the whole file read.
 **Some verbs create a sidecar without being asked.** Above
 `CSV2_INDEX_MIN_BYTES`, `-tail` and any `-update … --in-place` write one beside
 the data, silently — `-r`, `-count`, `-head`, `-mid`, `-get` and `-contains` do
-not. Use `--no-index` to prevent it. Until 2026-09-07 this page mentioned
-non-creation for `-count` alone, which invited reading that as the general rule.
+not. Use `--no-index` to prevent it.
 
 **Editing maintains the index rather than invalidating it**, so a file under
 active editing keeps its sidecar useful. The exception is two concurrent
@@ -1000,9 +896,7 @@ active editing keeps its sidecar useful. The exception is two concurrent
 
 `--verify-index` checks the sidecar's own integrity — its checksum, header and
 shape — and exits non-zero when it is absent or invalid. It does **not** compare
-the index against the data, which is what its own failure text says and what
-this page said the opposite of until 2026-09-07 by calling it "a full
-validation". An unusable sidecar is left on disk unchanged; `--build-index`
+the index against the data, and its own failure text says so. An unusable sidecar is left on disk unchanged; `--build-index`
 replaces it.
 
 `--build-index` ignores `CSV2_INDEX_MIN_BYTES` — an explicit request beats the
@@ -1012,9 +906,8 @@ matters only for the two verbs above.
 
 `-contains` can use parallel search, and **only** `-contains` — a plain read is
 never parallel, whatever the file's size. Output is byte-identical to the
-single-threaded path. Until 2026-09-08 the two rows above were labelled "Full
-read", which invited a reader to expect that speedup from `-r`; they measure a
-search that scans the whole file.
+single-threaded path. The "Whole-file search" rows in the measurements below
+measure a search, not a plain read, so do not expect that speedup from `-r`.
 
 Everything below has to hold for the parallel path to run, and `-debug` names
 the first one that does not:
@@ -1023,7 +916,7 @@ the first one that does not:
 |---|---|
 | the verb is `-contains` | and not `--filter`, `-A`/`-B`/`-C`, or a `--search-*` scope — each of those forces one thread |
 | a named file, not stdin | the file has to be seekable |
-| `.csv` or `.csv2` | a suffix-less file and a `.md` are excluded; forcing them was a crash until 2026-09-08 |
+| `.csv` or `.csv2` | a suffix-less file and a `.md` are excluded |
 | a `.csv` needs an `.index` | one record per line has to be PROVEN, and only a built index proves it — so `--no-index` also turns parallelism off on a `.csv` |
 | at least `CSV2_PARALLEL_MIN_BYTES` | inclusive at the boundary |
 | more than one core | |
@@ -1107,31 +1000,25 @@ says so.
 | Small durable edit | 56,800 µs | 7,800 µs | 11,200 µs | 74,600 µs | 13,800 µs |
 | Full-file rewrite | 1,258,000 µs | 587,000 µs | 1,323,000 µs | 2,131,000 µs | 155,000 µs |
 
-**WSL2 has a column because it is a machine in this project's test loop, and
-until 2026-09-10 it did not have one.** That is how its measurement came to
-overwrite the guest's: `measure.zsh` named output files by `uname -s`, both
-nodes are Linux, and a run with nowhere of its own to go went somewhere else.
-The file is now named with the architecture, and the script refuses to write
-over a file whose recorded `host` names a different machine.
+**WSL2 and the guest are both Linux, so their output files are named by
+architecture**, and `measure.zsh` refuses to write over a file whose recorded
+`host` names a different machine.
 
 **The two macOS columns are the same machine, the same binary and the same
 minute.** Only the filesystem holding the corpus differs. The two read rows do
-not notice it — 2% — and the two write rows differ by 7.3× and 2.1×. Until
-2026-09-08 this table had one macOS column and never said where the corpus was,
-which made a storage effect look like a property of csv2.
+not notice it — 2% — and the two write rows differ by 7.3× and 2.1×, so the
+write rows measure the storage as much as they measure csv2.
 
 **The write rows move between runs; the read rows do not.** Across seven runs
 the sparse image gave 35,800–56,800 µs for the small edit and
 1,201,000–1,322,000 µs for the rewrite, the SSD 5,800–7,800 µs and
 587,000–619,000 µs. Both read rows stayed inside 2%. The small-edit ratio
-between the two media was 4.8× on 2026-09-08 and 7.3× on 2026-09-10 — the same
-two filesystems, a fortnight apart. A single write figure from either medium is
-worth about as much as its range says it is, and the range is wider than the
-first measurement suggested.
+between the two media was 4.8× in one run and 7.3× in another a fortnight
+later, on the same two filesystems. A single write figure from either medium is
+worth about as much as its range says it is.
 
 **The guest says the same thing on a different machine and a different
-filesystem.** The same source was measured there three times -- 2026-09-07 and
-twice on 2026-09-10 -- giving 9,000, 11,600 and 13,800 µs for the small edit
+filesystem.** The same source was measured there three times, giving 9,000, 11,600 and 13,800 µs for the small edit
 and 150,000-155,000 µs for the rewrite, while both read rows came back inside
 1,000 µs of each other every time. Two machines that share no hardware agree on
 which rows are stable, which is a stronger claim than either could make alone.
@@ -1139,7 +1026,7 @@ which rows are stable, which is a stronger claim than either could make alone.
 **The guest's parallel row is SLOWER than its single-threaded row, and that is
 the real result.** On a 2.48 MiB corpus the boundary-finding pass and the worker
 handoff cost more than four workers save: the harness reports `speedup 0.88x on
-4 workers`. It is a genuine parallel run — the harness now refuses to report a
+4 workers`. It is a genuine parallel run — the harness refuses to report a
 row that did not take the path the row is named after — and it is the honest
 answer to "should I parallelise a small file".
 
@@ -1166,9 +1053,8 @@ peak RSS are taken from the same run. The source is
 and every figure below is checked against it by the test suite.
 
 **A `.csv` needs an `.index` to be searched in parallel at all**, so the `.csv`
-rows below have one. The last row is the same file without it, and it is there
-because it is both the most useful tuning fact here and the evidence for what
-this table used to be.
+rows below have one. The last row is the same file without it, because that
+is the most useful tuning fact here.
 
 | Format | Index | `CSV2_PARALLEL_MAX_BYTES` | Elapsed | Throughput | Peak RSS |
 |---|---|---:|---:|---:|---:|
@@ -1178,19 +1064,13 @@ this table used to be.
 | `.csv2` | not needed | 8 MiB | 34.552 s | 36.1 MiB/s | 52.59 MiB |
 | `.csv` | **none — single-threaded** | — | 30.492 s | 40.9 MiB/s | **9.28 MiB** |
 
-**Until 2026-09-08 the two `.csv` rows of this table were that last row.** The
-harness never built the index, and setting `CSV2_PARALLEL_MIN_BYTES=1` did not
-help because the obstacle was never the size threshold. The published figures
-were 34.886 s at **9.28 MiB** — and the last row above, re-measured on
-2026-09-10 with today's code, is **9.28 MiB**. The old table's memory figure is
-the scan path's memory, to the second decimal, two weeks and one rewrite of the
-harness later. A table headed "parallel" was reporting the scan path's time and the scan
-path's memory for half its rows, and the `CSV2_PARALLEL_MAX_BYTES` column, whose
-whole purpose is to show what that knob costs, was measured where the knob
-cannot do anything: there are no chunks in flight on the single-threaded path.
-Anyone who sized a container from 9.28 MiB was sizing it for a scan.
+**Without its index a `.csv` is searched single-threaded**, whatever
+`CSV2_PARALLEL_MIN_BYTES` says, and its 9.28 MiB is the scan path's memory.
+`CSV2_PARALLEL_MAX_BYTES` does nothing there: there are no chunks in flight on
+the single-threaded path. Size a container from the parallel rows, not from
+that one.
 
-Two things the corrected table says that the old one could not:
+What the table says:
 
 - **Build the index.** 31.150 s to 9.636 s on the same file, same search.
 - **The cap costs time here and saves no memory.** 9.781 s to 39.601 s on the
@@ -1220,36 +1100,25 @@ host and binary — they are measuring different bottlenecks, and neither is
 
 ## When to stop using this
 
-Every row here was measured on 2026-09-06, not carried forward from an earlier
-list. Three entries that used to be on it are gone because the feature landed —
-the third was "counting without reading the file", which `-count` has answered
-since phase 8 while this table went on sending readers to a whole-file `--json`
-pass. It survived a re-measurement dated 2026-09-01 that this sentence claimed
-covered every row, which is the argument for re-running the rows rather than
-re-reading them.
+What csv2 does not offer, and what to do instead:
 
 | Not offered | What to do instead |
 |---|---|
 | column projection (`-cols`) | `csv2 -r --json -i f.csv \| jq -r 'select(.record) \| .fields.license'`. The `select(.record)` is not optional: without it the two meta lines arrive as `null`s in your column. Or `-get` per cell, with `csv2 -count -i f.csv` for the loop's upper bound. Both go through `--json`, which REFUSES a file holding non-UTF-8 bytes that `-get` reads fine |
 | an exact whole-cell search | `-contains` is a SUBSTRING match, so `-contains MIT --search-column license` also finds `MIT-0` and `NON-MIT` — scoping the column does not make the match exact. `-update-where` IS exact ("no data cell equals"), so both semantics exist and only one of them searches. For an exact count: `csv2 -r --json -i f.csv \| jq -r 'select(.record) \| select(.fields.license == "MIT") \| .record' \| wc -l` |
 | case-insensitive matching | nothing does — `-contains mit` finds no `MIT`, **and prints nothing at exit 0**, which is indistinguishable from "no such data". Fold the case yourself: `csv2 -r --json -i f.csv \| jq -r 'select(.record) as $r \| $r.fields\|to_entries[] \| select(.value\|ascii_downcase\|contains("mit")) \| "\\($r.record)\\t\\(.key)\\t\\(.value)"'` |
-| a search that ignores which column it is in | `-contains` matches a substring in EVERY column, so `-contains MIT` also finds `transMITter` — see the last example below. Use `--search-column license` to scope it, or `--search-row`/`--search-cell`. Until 2026-09-07 this row said scoping was not offered at all, and warned that counting would be "silently wrong", 260 lines below the section documenting the flag that fixes it |
+| a search that ignores which column it is in | `-contains` matches a substring in EVERY column, so `-contains MIT` also finds `transMITter` — see the last example below. Use `--search-column license` to scope it, or `--search-row`/`--search-cell` |
 | skipping `#` comment lines | nothing does, and deliberately: a `#` is data and `#id` is a legal column name, so skipping one would mean guessing which lines are data. The refusal names the `#` on any ONE-FIELD line, wherever it is — but the trigger is the field count, so `#comment,x` in a two-column file is data at exit 0. Read the file under a suffix-less name to get every line verbatim |
 | a header-only read | `csv2 -head 1 --json -i f.csv \| head -1 \| jq -r '.meta.header[]'` — the meta line carries `header`; no verb returns the names alone. On a `.lines` input there is no `header` key at all |
 | converting between `.csv` and `.csv2` | refused on purpose. To do it by hand, `.csv` → `.csv2`: `csv2 -r -t -i p.csv -o work` (the `-t` is required — without it the header row is dropped silently), then `csv2 -insert 2 '套件,版本,授權' -i work --in-place`, then **rename it**: `mv work out.csv2`. The rename is the step that converts; reading the suffix-less path back gives you `.lines`, which is what it already was. Reverse: `csv2 -r -t -i p.csv2 -o work`, `csv2 -delete 2 -i work --in-place`, `mv work out.csv`. csv2 will not invent a header row it was not given |
 | safe concurrent writers, EXCEPT append against append | serialise them yourself; two writers silently lose one edit — the file stays VALID, and the surviving version is whichever run renamed its temp file last, so the loss is a missing edit rather than damage you would notice. Two concurrent `-append --in-place` runs are the exception: both records land whole, and the one finishing SECOND warns it could not update the index |
 
-One thing this table used to say and no longer does: **editing a Markdown
-table** is supported, and it is in the examples below.
+**Editing a Markdown table** is supported; it is in the examples below.
 
-It also used to say that **telling refusals apart programmatically** is done
-with the `--json` error object, and that row was removed on 2026-09-07 on the
-grounds that an edit's refusal is "available only as text on stderr". That
-reason was wrong: an edit given `--json` emits one parseable object with
-`conflicting-options`. Every refusal this tool produces is machine-readable.
-What an edit cannot give you is the edit's OWN error as JSON, because `--json`
-is refused before the edit runs — a narrower and much less alarming fact than
-the row's removal implied.
+**Every refusal is machine-readable** under `--json`, an edit's included: an
+edit given `--json` emits one parseable object with `conflicting-options`. What
+an edit cannot give you is the edit's OWN error as JSON, because `--json` is
+refused before the edit runs.
 
 ## Examples
 
