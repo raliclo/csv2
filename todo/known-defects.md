@@ -14593,6 +14593,9 @@ $ printf 'caf\xe9,b\n1,2\n' > lh.csv; csv2 -r -t --json -i lh.csv; echo $?
 
 ### 審查回報、但主 session 尚未親手重現的（不列代號）
 
+**狀態：全部已處理。** 重現後分別記為 SD–SL（見上方各條）；錯誤時部分輸出較少的那一項記在下方「不修」。
+All handled: reproduced and recorded as SD–SL above; the partial-output item is under "not fixed" below.
+
 - 平行路徑退回單執行緒時，stdout 已送出的部分會再印一次（需要一份「說沒有內嵌換行、其實有」的過期索引才觸發）。
 - 建立索引期間檔案被換掉，索引以新檔的戳記存檔並被信任；`recordBeginsAt` 只檢查欄數。
 - `--pretty` 把只有零寬字元的字素算成寬 1；Markdown 讀取端接受 `\x+f` 與 `\<`；錯誤時平行路徑印出的部分輸出比單執行緒少。
@@ -14733,6 +14736,9 @@ README 寫「31.150 s to 9.636 s」，而上面的表格與 `verifications/measu
 9.781 s（有索引）；31.150、9.636 在量測檔裡找不到。**計畫**：改成量測檔裡的數字（中英兩版）。
 
 ### 只改註解或測試描述、不是程式缺陷的
+
+**狀態：已修（f08e4a4）。** Platform.swift、Support.swift、Parallel.swift 的錯置說明與孤立的 `@discardableResult` 已移正或移除；各測試的註解與描述已改成與程式相符。
+Fixed in f08e4a4 (Parallel.swift alongside the SD work).
 
 - `src/Platform.swift`：`// MARK: - Durability` 底下有一個孤立的 `@discardableResult`，實際套用在 `processID()` 上；幾段說明掛在
   錯的函式上（`writeAll` 的說明在 `ensureBinaryMode` 上、`fileKind(path:)` 的說明在 `enum FileKind` 上），`Parallel.swift` 與
