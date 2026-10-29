@@ -148,8 +148,6 @@ enum Platform {
     // MARK: - Durability / 落地
     // -----------------------------------------------------------------
 
-    @discardableResult
-
     // -----------------------------------------------------------------
     // MARK: - Process and terminal / 行程與終端機
     // -----------------------------------------------------------------
@@ -302,44 +300,6 @@ enum Platform {
         h.write(data)
     }
 
-    /// Write every byte, and when the reader has gone, stop the way a Unix
-    /// filter stops.
-    ///
-    /// `FileHandle.write` cannot be used for this. swift-corelibs-foundation
-    /// implements it with `try!`, so `EPIPE` is not an error to handle but a
-    /// fatal one: on Linux and Windows it dies of SIGILL, exit 132, with a
-    /// Swift backtrace on stderr under `| head`. Darwin's Foundation does not,
-    /// so testing on macOS alone hides it.
-    ///
-    /// A filter whose reader has left has nothing left to do and nothing to
-    /// say. On POSIX it dies of SIGPIPE, which is exit 141 and is what the
-    /// shell and every other tool in the pipeline expect. Windows has no
-    /// SIGPIPE, so 141 is produced directly -- the number is a convention
-    /// there rather than a signal, and using the same one keeps a script that
-    /// checks for it portable.
-    ///
-    /// 把每一個位元組寫出去；而當讀取端已經離開時，以「一個 Unix filter 該有的方式」停下來。
-    ///
-    /// 這裡不能用 `FileHandle.write`。swift-corelibs-foundation 用 `try!` 實作它，於是
-    /// `EPIPE` 不是一個「要處理的錯誤」而是一個「致命錯誤」：在 Linux 與 Windows 上會
-    /// 死於 SIGILL、結束狀態 132，並在 `| head` 時把 Swift backtrace 印到 stderr。
-    /// Darwin 的 Foundation 不會，所以只在 macOS 上測會看不出來。
-    ///
-    /// 一個讀取端已經離開的 filter，沒有事情要做，也沒有話要說。在 POSIX 上它死於 SIGPIPE，
-    /// 也就是結束狀態 141，那是 shell 與管線中其他每一個工具所預期的。Windows 沒有 SIGPIPE，
-    /// 因此直接產生 141——在那裡這個數字是一個約定而不是訊號，而沿用同一個數字，可以讓
-    /// 「會去檢查它」的腳本保持可攜。
-    ///
-    /// Takes a DESCRIPTOR, not a FileHandle, because Swift for Windows marks
-    /// `FileHandle.fileDescriptor` unavailable outright ("Cannot perform
-    /// non-owning handle to fd conversion"). Only the stdout sink needs this
-    /// path -- a file sink cannot meet a broken pipe -- and stdout is fd 1 in
-    /// the C runtime on every platform csv2 builds for, so nothing has to be
-    /// converted.
-    /// 接受的是「描述子」而不是 FileHandle，因為 Swift for Windows 直接把
-    /// `FileHandle.fileDescriptor` 標為不可用。只有 stdout 那個 sink 需要這條路徑——
-    /// 檔案 sink 不可能遇到管線斷掉——而 stdout 在 csv2 建置的每個平台上、於 C runtime 中
-    /// 都是 fd 1，因此沒有任何東西需要轉換。
     /// Windows' C runtime opens fd 1 and fd 2 in TEXT mode, where every `\n`
     /// written becomes `\r\n`. Foundation's `FileHandle.write` never met this
     /// because it writes through the Win32 handle and not the CRT descriptor;
@@ -357,7 +317,6 @@ enum Platform {
     ///
     /// 在寫出前以冪等方式設定。它守住 README 用一句話給出的那個承諾：輸出一律使用 `\n`，
     /// 在每一個平台上。再次呼叫 `_setmode`，比維護一份共享可變狀態更便宜也更安全。
-
     private static func ensureBinaryMode(_ fd: Int32) {
         #if canImport(ucrt)
         _ = _setmode(1, _O_BINARY)
@@ -379,6 +338,44 @@ enum Platform {
     /// SIGPIPE。其餘都**是**錯誤，交還給呼叫端——它知道那是哪一個檔案，說得出口。把兩者
     /// 一視同仁，「磁碟寫滿」就會長得跟 `| head` 一模一樣：以 141 結束、stderr 一片空白、
     /// 磁碟上留著寫到一半的檔案，而 141 正是 README 叫呼叫端不必理會的那個狀態。
+    ///
+    /// When the reader has gone, it stops the way a Unix filter stops.
+    ///
+    /// `FileHandle.write` cannot be used for this. swift-corelibs-foundation
+    /// implements it with `try!`, so `EPIPE` is not an error to handle but a
+    /// fatal one: on Linux and Windows it dies of SIGILL, exit 132, with a
+    /// Swift backtrace on stderr under `| head`. Darwin's Foundation does not,
+    /// so testing on macOS alone hides it.
+    ///
+    /// A filter whose reader has left has nothing left to do and nothing to
+    /// say. On POSIX it dies of SIGPIPE, which is exit 141 and is what the
+    /// shell and every other tool in the pipeline expect. Windows has no
+    /// SIGPIPE, so 141 is produced directly -- the number is a convention
+    /// there rather than a signal, and using the same one keeps a script that
+    /// checks for it portable.
+    ///
+    /// 當讀取端已經離開時，它以「一個 Unix filter 該有的方式」停下來。
+    ///
+    /// 這裡不能用 `FileHandle.write`。swift-corelibs-foundation 用 `try!` 實作它，於是
+    /// `EPIPE` 不是一個「要處理的錯誤」而是一個「致命錯誤」：在 Linux 與 Windows 上會
+    /// 死於 SIGILL、結束狀態 132，並在 `| head` 時把 Swift backtrace 印到 stderr。
+    /// Darwin 的 Foundation 不會，所以只在 macOS 上測會看不出來。
+    ///
+    /// 一個讀取端已經離開的 filter，沒有事情要做，也沒有話要說。在 POSIX 上它死於 SIGPIPE，
+    /// 也就是結束狀態 141，那是 shell 與管線中其他每一個工具所預期的。Windows 沒有 SIGPIPE，
+    /// 因此直接產生 141——在那裡這個數字是一個約定而不是訊號，而沿用同一個數字，可以讓
+    /// 「會去檢查它」的腳本保持可攜。
+    ///
+    /// Takes a DESCRIPTOR, not a FileHandle, because Swift for Windows marks
+    /// `FileHandle.fileDescriptor` unavailable outright ("Cannot perform
+    /// non-owning handle to fd conversion"). Only the stdout sink needs this
+    /// path -- a file sink cannot meet a broken pipe -- and stdout is fd 1 in
+    /// the C runtime on every platform csv2 builds for, so nothing has to be
+    /// converted.
+    /// 接受的是「描述子」而不是 FileHandle，因為 Swift for Windows 直接把
+    /// `FileHandle.fileDescriptor` 標為不可用。只有 stdout 那個 sink 需要這條路徑——
+    /// 檔案 sink 不可能遇到管線斷掉——而 stdout 在 csv2 建置的每個平台上、於 C runtime 中
+    /// 都是 fd 1，因此沒有任何東西需要轉換。
     @discardableResult
     static func writeAll(fd: Int32, _ bytes: [UInt8]) -> Int32 {
         if bytes.isEmpty { return 0 }
@@ -598,19 +595,8 @@ enum Platform {
         _ = writeAll(fd: 1, [UInt8](text.utf8))
     }
 
-    /// What kind of thing a path names, for the one question csv2 asks about
-    /// it: can a temp file be renamed onto this?
-    ///
-    /// Here rather than at the call site because `st_mode` is UInt16 on
-    /// Windows and Int32 elsewhere, and S_IFMT and friends differ in type with
-    /// it -- written at a call site, the check builds on macOS and Linux and
-    /// not on Windows. Windows has no FIFOs in the POSIX sense; `.other`
-    /// covers whatever it does have.
-    /// 一個路徑指的是什麼東西——只為了 csv2 對它問的那一個問題：暫存檔 rename 得上去嗎？
-    /// 放在這裡而不是呼叫端，因為 `st_mode` 在 Windows 上是 UInt16、其他平台是 Int32，
-    /// 而 S_IFMT 之類的常數型別也跟著不同——寫在呼叫端，這個檢查在 macOS 與 Linux 上
-    /// 編得過，在 Windows 上建不起來。Windows 沒有 POSIX 意義下的 FIFO；`.other` 涵蓋它
-    /// 實際會有的東西。
+    /// The answer `fileKind(path:)` gives.
+    /// `fileKind(path:)` 給出的答案。
     enum FileKind { case regular, directory, fifo, other }
 
     /// The append descriptor itself, for a caller that wants `writeAll`'s error
@@ -841,6 +827,19 @@ enum Platform {
         #endif
     }
 
+    /// What kind of thing a path names, for the one question csv2 asks about
+    /// it: can a temp file be renamed onto this?
+    ///
+    /// Here rather than at the call site because `st_mode` is UInt16 on
+    /// Windows and Int32 elsewhere, and S_IFMT and friends differ in type with
+    /// it -- written at a call site, the check builds on macOS and Linux and
+    /// not on Windows. Windows has no FIFOs in the POSIX sense; `.other`
+    /// covers whatever it does have.
+    /// 一個路徑指的是什麼東西——只為了 csv2 對它問的那一個問題：暫存檔 rename 得上去嗎？
+    /// 放在這裡而不是呼叫端，因為 `st_mode` 在 Windows 上是 UInt16、其他平台是 Int32，
+    /// 而 S_IFMT 之類的常數型別也跟著不同——寫在呼叫端，這個檢查在 macOS 與 Linux 上
+    /// 編得過，在 Windows 上建不起來。Windows 沒有 POSIX 意義下的 FIFO；`.other` 涵蓋它
+    /// 實際會有的東西。
     static func fileKind(path: String) -> FileKind? {
         #if canImport(ucrt)
         // Windows answers through the native API rather than the CRT's stat.

@@ -1099,7 +1099,7 @@ that one.
 
 What the table says:
 
-- **Build the index.** 31.150 s to 9.636 s on the same file, same search.
+- **Build the index.** 30.492 s to 9.781 s on the same file, same search.
 - **The cap costs time here and saves no memory.** 9.781 s to 39.601 s on the
   indexed `.csv`, and peak RSS barely moves. With every record matching, the
   peak is dominated by the output side rather than by chunks in flight, so

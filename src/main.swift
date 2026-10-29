@@ -2833,24 +2833,6 @@ func printHelp() {
 // MARK: - The logged invocation / 記入 log 的呼叫方式
 // ---------------------------------------------------------------------
 
-/// The command line is logged so that "who changed this file into that" can
-/// be answered later -- but the VALUES it carries are the data itself. A
-/// `-update 12:6 <secret>` logged verbatim writes that secret into a file
-/// nobody is guarding, which defeats redacting it everywhere else. So the
-/// flags and addresses are kept and the values are replaced.
-/// 呼叫方式記入 log，是為了日後能回答「這個檔案被誰改成這樣」——但它帶的「值」
-/// 就是資料本身。把 `-update 12:6 <秘密>` 原樣記下來，等於把那個秘密寫進一個
-/// 沒有人在保護的檔案，也就抵銷了其他地方的遮蔽。因此保留旗標與位址，把值換掉。
-///
-/// This function does NOT escape, deliberately. The line it returns is written
-/// through `Logger`, which escapes every message as it builds the line, so
-/// escaping here too would turn a newline into `\\n`, a value that no longer
-/// round-trips. Escaping belongs at exactly one point, where the line is
-/// built, because only that point covers messages nobody has written yet.
-/// 此處刻意「不」跳脫。它回傳的那一行是經由 `Logger` 寫出的，而 `Logger` 在建行時已經
-/// 把每一則訊息跳脫過；這裡再跳脫一次，會讓輸入中的換行變成 `\\n`——一個再也還原不回去
-/// 的值。跳脫只能發生在「一個」地方，也就是建行的那一點，因為只有它涵蓋得到「還沒有人
-/// 寫出來的訊息」。
 /// An argument as the log can carry it: escaped, and quoted when it contains
 /// anything that would make the line read as a different command. Without the
 /// quoting, `-i "my file.csv"` would be logged as `-i my file.csv` -- an audit
@@ -2864,6 +2846,28 @@ private func loggedArg(_ a: String) -> String {
     return "\"\(e.replacingOccurrences(of: "\"", with: "\"\""))\""
 }
 
+/// The command line is logged so that "who changed this file into that" can
+/// be answered later -- but the VALUES it carries are the data itself. A
+/// `-update 12:6 <secret>` logged verbatim writes that secret into a file
+/// nobody is guarding, which defeats redacting it everywhere else. So the
+/// flags and addresses are kept and the values are replaced.
+/// 呼叫方式記入 log，是為了日後能回答「這個檔案被誰改成這樣」——但它帶的「值」
+/// 就是資料本身。把 `-update 12:6 <秘密>` 原樣記下來，等於把那個秘密寫進一個
+/// 沒有人在保護的檔案，也就抵銷了其他地方的遮蔽。因此保留旗標與位址，把值換掉。
+///
+/// Each argument is escaped exactly once, here, by `loggedArg` through
+/// `reportEscape`: a backslash becomes `\\`, a newline `\n`, a tab `\t`,
+/// any other control character `\xNN`. `Logger` then runs `lineEscape` over the whole
+/// line, but that pass leaves backslashes alone and finds no control
+/// character left, so it changes nothing: `x\y` is logged as `x\\y`, not
+/// `x\\\\y`. Escaping the backslash here is what lets a reader tell a
+/// typed `\n` (logged `\\n`) from a real newline (logged `\n`);
+/// `lineEscape` alone would print both as `\n`.
+/// 每一個引數只跳脫一次，就在這裡：由 `loggedArg` 經 `reportEscape` 完成——反斜線變成
+/// `\\`、換行變成 `\n`、tab 變成 `\t`、其他控制字元變成 `\xNN`。`Logger` 之後會對整行再跑一次
+/// `lineEscape`，但那一趟不碰反斜線，也找不到剩下的控制字元，因此什麼都不會改：`x\y`
+/// 記成 `x\\y`，而不是 `x\\\\y`。在這裡跳脫反斜線，讀者才分得出「打進去的 `\n`」
+/// （記成 `\\n`）與「真正的換行」（記成 `\n`）；只靠 `lineEscape`，兩者都會印成 `\n`。
 func sanitizedCommandLine(_ argv: [String]) -> String {
     var out: [String] = []
     var i = 0

@@ -2261,10 +2261,11 @@ wait
 assert_eq "$small_during" "0" \
     "T61b and under 64 KiB nothing arrives until the run ends, which is why it can look like a hang / 而不足 64 KiB 時要到執行結束才有東西，這正是它看起來像卡住的原因"
 
-# The point of streaming is that memory does not track input size. T9 asserts
-# this for a file; this asserts the pipeline the README's example actually uses.
-# 串流的重點是記憶體不隨輸入大小成長。T9 對檔案斷言過這件事，這裡斷言的是 README 範例
-# 實際使用的那條管線。
+# Holding output back until the run ends must not lose any of it: every
+# record, including the one sent after the stall, reaches stdout. This checks
+# completeness only; memory growth is T9's to assert.
+# 把輸出留到執行結束才送出，不能因此丟掉任何一筆：每一筆，包括停頓之後才送進來的那一筆，
+# 都要到達 stdout。這裡只檢查完整性；記憶體是否成長由 T9 斷言。
 assert_eq "$(cat "$TMP/t61b.out" | wc -l | tr -d ' ')" "2001" \
     "T61c and the streamed output is complete: 2000 records plus the stalled one / 串流輸出是完整的：2000 筆加上停頓後那一筆"
 fi
@@ -5690,13 +5691,14 @@ echo
 echo "--- T117: both READMEs cite the same cases / 兩份 README 引用同一組案例 ---"
 
 # Set difference with zsh's own `${A:|B}`: no external tool, no temp file.
-# The guest's busybox has no `comm` applet, and before T137's
-# command-not-found guard its absence made T117a, T117b and T121h empty
-# comparisons that reported PASS without running. Keep this one
+# The guest's busybox has no `comm` applet. Without the suite's
+# command-not-found guard (`command_not_found_handler`, near the top of this
+# file) its absence makes T117a, T117b and T121h empty comparisons that
+# report PASS without running. Keep this one
 # implementation: a second one is where the next divergence goes.
 # 用 zsh 自己的 `${A:|B}` 做集合差集：不需要外部工具，也不需要暫存檔。guest 的 busybox 沒有
-# `comm` applet，而在 T137 的 command-not-found 守衛出現之前，它的缺席讓 T117a、T117b 與 T121h
-# 變成空的比較，沒有執行就回報 PASS。保持只有這一份實作：第二份就是下一次分歧發生的地方。
+# `comm` applet；少了整份測試的 command-not-found 守衛（本檔開頭附近的 `command_not_found_handler`），
+# 它的缺席會讓 T117a、T117b 與 T121h 變成空的比較，沒有執行就回報 PASS。保持只有這一份實作：第二份就是下一次分歧發生的地方。
 only_in_first() {   # first-list second-list
     local -a _a _b _d
     _a=(${(f)1}); _a=(${_a:#})
@@ -6184,9 +6186,14 @@ t126=$("$CSV2" -r -i "$TMP/t126.csv2" 2>&1 | head -1)
 assert_contains "$t126" "record 2:" \
     "T126a the number counts DATA records, not header rows / 那個號碼數的是資料紀錄，不是標頭列"
 
-# The address has to resolve, which is the whole reason the number matters.
-# 那個位址必須解得出來——那正是這個號碼要緊的全部原因。
-assert_succeeds "T126b and an address that far into the file resolves / 而那個位址在檔案裡解得出來" -- \
+# Record 2 is the unclosed one, and --truncate-partial discards it, so it
+# cannot be fetched. What this checks is the address just before it:
+# `-get 1:1` reaches record 1, the last complete record, which is where a
+# caller reading "record 2" goes to look.
+# 第 2 筆就是未閉合的那一筆，而 --truncate-partial 會丟掉它，所以它取不到。這裡檢查的是
+# 它前面那個位址：`-get 1:1` 取到第 1 筆，也就是最後一筆完整的紀錄——讀到「record 2」的
+# 呼叫端會去找的地方。
+assert_succeeds "T126b and record 1, the last complete one before it, resolves / 而它前面最後一筆完整的第 1 筆解得出來" -- \
     "$CSV2" -get 1:1 -i "$TMP/t126.csv2" --truncate-partial
 
 # ---------------------------------------------------------------------
@@ -6418,32 +6425,22 @@ fi
 # that, since the entry cites no case number: the same drift one level down,
 # a sentence missing rather than a section.
 #
-# The measure described for this is the byte length of each flag's
-# description, compared under LC_ALL=C so every platform's awk counts the same
-# thing. Chinese says the same in fewer characters and more bytes, so the
-# ratio sits near 1 (minimum 0.81, median 1.06 over 38 flags; the defective -t
-# entry would have been 0.25). Threshold 0.5: below anything real, far above
-# the failure.
+# This case checks less than that. It greps each public flag, as a whole
+# word, in README.md and in README.zh-TW.md, and fails if either file lacks
+# it. It does not measure how much each file says about a flag, so a
+# sentence missing from one entry, as in round 53, still passes here.
 #
 # T137 —— 兩份旗標表記載同樣的旗標。
 # 第 53 回合：中文的 -t 條目少了英文那句「它只作用於選取——一次編輯一定會寫出標頭列」。
 # T117 看不到它，因為那個條目沒有引用案例編號：同一種漂移往下一層，少的是一句而不是一節。
-# 為此描述的量法是每個旗標說明的位元組長度在兩份檔案間的比值，在 LC_ALL=C 下計算，讓每個
-# 平台的 awk 數的是同一種東西。中文用較少的字、較多的位元組講同一件事，所以比值接近 1（38 個
-# 旗標中最低 0.81、中位數 1.06；有缺陷的 -t 條目會是 0.25）。門檻 0.5：低於任何真實值，
-# 也遠高於那次失敗。
+#
+# 這個案例檢查的比那少。它在 README.md 與 README.zh-TW.md 裡以完整單字 grep 每一個公開
+# 旗標，任一份檔案缺了就失敗。它不衡量每份檔案對一個旗標說了多少，因此像第 53 回合那樣
+# 某個條目少了一句，在這裡仍會通過。
 # ---------------------------------------------------------------------
 echo
-echo "--- T137: the flag tables say the same amount / T137：兩份旗標表說的份量相同 ---"
+echo "--- T137: every flag appears in both READMEs / T137：每個旗標都出現在兩份 README 裡 ---"
 
-# Totals per flag NAME, not per entry: `-delete` has three entries (a[,b],
-# -cell, -col) in both files, and pairing them one by one would compare the
-# first English entry against the first Chinese one by position and report a
-# difference that is only the ordering. Summing is enough for what this checks
-# -- whether a language is carrying materially less text for a flag.
-# 以「旗標名稱」加總，而不是逐條目比對：`-delete` 在兩份檔案裡都有三個條目（a[,b]、
-# -cell、-col），逐條目配對會用位置去對，然後回報一個「只是順序不同」的差異。對這個
-# 檢查要問的事情——某一種語言在某個旗標上是不是承載了明顯較少的文字——加總就夠了。
 t137_flags=(r contains filter include-headers normalize A B C head tail mid t rownum physical a1 get i o si so in-place dry-run backup md pretty md-style md-table json json-ascii headers insert append delete cell col add-column update update-where value-file value-stdin truncate-partial hash encrypt decrypt keyfile yes log debug no-index build-index verify-index en zh)
 t137_missing=""
 for t137_flag in $t137_flags; do
@@ -6539,8 +6536,11 @@ assert_contains "$("$CSV2" -r -t -i "$TMP/t140_out.csv" | head -1)" "name:hash" 
 # 數字與名字的碰撞。
 print -r -- '2,1'  > "$TMP/t140n.csv"
 print -r -- 'X,Y' >> "$TMP/t140n.csv"
-# -get takes no -o (it writes one value, not a file), so it is run without one.
-# -get 不收 -o（它寫的是一個值，不是一個檔案），因此不帶 -o 執行。
+# The editing verbs write a file, so each runs with -o. -get is not in this
+# loop: it takes no -o (it writes one value, not a file) and is run on its
+# own below.
+# 會寫檔案的編輯動詞各自帶 -o 執行。-get 不在這個迴圈裡：它不收 -o（它寫的是一個值，
+# 不是一個檔案），因此在下面單獨執行。
 for _verb in "-hash 2" "-delete -col 2"; do
     _out=$("$CSV2" ${=_verb} -i "$TMP/t140n.csv" -o "$TMP/t140n_out.csv" 2>&1)
     _rc=$?
@@ -7525,9 +7525,9 @@ for _f in ${(f)_t154_public}; do
     grep -qE -- "--?$_f([^a-zA-Z0-9-]|\$)" "$ROOT/README.zh-TW.md" || _t154_doc="$_t154_doc zh:$_f"
 done
 if [[ -z ${_t154_doc// /} ]]; then
-    ok "T154e and every flag the parser knows is in both READMEs / 而解析器認得的每一個旗標，兩份 README 都有"
+    ok "T154e and every flag --help prints is in both READMEs / 而 --help 印出的每一個旗標，兩份 README 都有"
 else
-    bad "T154e a flag the parser knows is missing from a README:${_t154_doc} / 有旗標在某份 README 裡缺席"
+    bad "T154e a flag --help prints is missing from a README:${_t154_doc} / 有 --help 印出的旗標在某份 README 裡缺席"
 fi
 
 # ---------------------------------------------------------------------
@@ -10592,7 +10592,7 @@ if [[ $_t204_hit == 0 ]]; then
     skipt "T204 the stamp rejected the drifted fixture, so the seek never happened / 戳記拒絕了這份 fixture，於是那個 seek 根本沒發生"
     T204_SKIPPED=1
 else
-assert_eq "$(grep -c '^$' "$_t204")" "0" \
+    assert_eq "$(grep -c '^$' "$_t204")" "0" \
         "T204a the fixture has no blank line to complain about / 這份 fixture 裡沒有任何可供指控的空白行"
 
     _t204_got=$(CSV2_INDEX_MIN_BYTES=10 "$CSV2" -mid 1500,1500 -i "$_t204" 2>&1); _t204_rc=$?
@@ -14240,7 +14240,7 @@ fi
 printf 'x\n|---|---|\n' > "$TMP/t262md.csv"
 "$CSV2" -r -i "$TMP/t262md.csv" >/dev/null 2>"$TMP/t262md.err"
 _t262_en=$(LC_ALL=C sed -n '1p' "$TMP/t262md.err")
-if [[ $_t262_en == *'when it learned to read one'* ]]; then
+if [[ $_t262_en == *'Name it with a .md suffix and csv2 reads it as a table' ]]; then
     ok "T262e the refusal's English half ends in a complete clause / 那則拒絕的英文半段以一個完整的子句結束"
 else
     bad "T262e ends: [...${_t262_en: -46}] / 實得如上"
@@ -15755,11 +15755,11 @@ else
     # 依表格列出的順序：先格式、再 cap。無索引那一列在最後，而它正是「其他各列確實在平行路徑上」
     # 的證據——它的 RSS 只有其他列的五分之一。
     _t296_bad=()
-    # Field 3, not 2: the line is `csv elapsed_seconds: 9.636`, so $1 is the
+    # Field 3, not 2: the line is `csv elapsed_seconds: 9.781`, so $1 is the
     # format, $2 is the key with its colon, and $3 is the number. Taking $2
     # fails visibly with "the source says elapsed_seconds: s", because the
     # message prints what was extracted rather than comparing empty to empty.
-    # 第 3 欄，不是第 2 欄：那一行是 `csv elapsed_seconds: 9.636`，$1 是格式、$2 是帶冒號的鍵、
+    # 第 3 欄，不是第 2 欄：那一行是 `csv elapsed_seconds: 9.781`，$1 是格式、$2 是帶冒號的鍵、
     # $3 才是數值。取 $2 會明顯地失敗，訊息是「the source says elapsed_seconds: s」，因為訊息印出的是
     # 實際抓到的東西，而不是拿空的去比空的。
     _t296_num() {   # $1 = key prefix, $2 = which occurrence (1-based)

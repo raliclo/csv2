@@ -23,14 +23,6 @@ enum LogLevel: Int, Comparable {
     }
 }
 
-/// `-debug` and `-log` are deliberately two different things. `-debug` is for
-/// someone chasing a problem right now: high volume, format may change, thrown
-/// away when done. `-log` is for whoever later asks who changed this file:
-/// low volume, stable format, kept. Writing both to one place drowns the
-/// history in the debugging.
-/// `-debug` 與 `-log` 刻意是兩個不同的東西。`-debug` 給「現在正在查一個問題」
-/// 的人看：量大、格式可變、用完即棄。`-log` 給「日後要回頭查這個檔案被誰改成
-/// 這樣」的人看：量小、格式穩定、要保存。寫進同一個地方會讓歷史被除錯輸出淹沒。
 /// Read a numeric environment knob, or refuse.
 ///
 /// A plain `if let n = Int(v)` fails three different ways: a negative value
@@ -160,6 +152,15 @@ func reportEscape(_ s: String) -> String {
     return out
 }
 
+/// `-debug` and `-log` are deliberately two different things. `-debug` is for
+/// someone chasing a problem right now: high volume, format may change, thrown
+/// away when done. `-log` is for whoever later asks who changed this file:
+/// low volume, stable format, kept. Writing both to one place drowns the
+/// history in the debugging.
+/// `-debug` 與 `-log` 刻意是兩個不同的東西。`-debug` 給「現在正在查一個問題」
+/// 的人看：量大、格式可變、用完即棄。`-log` 給「日後要回頭查這個檔案被誰改成
+/// 這樣」的人看：量小、格式穩定、要保存。寫進同一個地方會讓歷史被除錯輸出淹沒。
+///
 /// The singleton is configured, used and closed by the CLI coordinator. The
 /// parallel workers return values to that coordinator and never call Logger
 /// themselves. `@unchecked Sendable` records that ownership boundary without
@@ -577,11 +578,6 @@ enum B64 {
 // ---------------------------------------------------------------------
 
 enum JSONOut {
-    /// Emoji go out as raw UTF-8: that is valid JSON and shorter than the
-    /// `😀` surrogate pair. Only the control characters JSON
-    /// actually requires are escaped.
-    /// emoji 以原始 UTF-8 寫出：那是合法的 JSON，也比 `😀` 的代理對短。
-    /// 只跳脫 JSON 真正要求的控制字元。
     /// Whether these bytes can go into JSON without being changed.
     ///
     /// JSON is defined over text, so bytes that are not valid UTF-8 cannot be
@@ -599,6 +595,14 @@ enum JSONOut {
         String(bytes: bytes, encoding: .utf8) != nil
     }
 
+    /// Without `asciiOnly`, emoji go out as raw UTF-8: that is valid JSON and
+    /// shorter than the surrogate-pair escape `\ud83d\ude00` for 😀. Only the
+    /// control characters JSON actually requires are escaped. With
+    /// `asciiOnly`, every scalar above U+007E is escaped as well, as a
+    /// surrogate pair when it lies above U+FFFF.
+    /// 沒有 `asciiOnly` 時，emoji 以原始 UTF-8 寫出：那是合法的 JSON，也比 😀 的代理對跳脫
+    /// `\ud83d\ude00` 短。只跳脫 JSON 真正要求的控制字元。有 `asciiOnly` 時，U+007E 以上的
+    /// 每一個 scalar 也都會被跳脫，超過 U+FFFF 的寫成代理對。
     static func string(_ bytes: [UInt8], asciiOnly: Bool) -> String {
         let s = String(bytes: bytes, encoding: .utf8) ?? String(decoding: bytes, as: UTF8.self)
         var out = "\""
