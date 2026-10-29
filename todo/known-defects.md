@@ -14701,7 +14701,7 @@ csv2: ... INFO  wrote 1 records, 2 fields, atomic rename OK
 
 寫到 stdout 時沒有 rename。**計畫**：只有真的做了 rename 才這樣說；寫到 stdout 時說寫到了 stdout。
 
-## SJ. 一則錯誤訊息的字串裡還帶著經過
+## SJ. 一則錯誤訊息的字串裡還帶著經過（2026-10-29 修正，T262e 改為釘住新句尾）
 
 `src/Core.swift` 的 `RecordParser.endRecord`，Markdown 分隔線那則錯誤訊息（中英兩版）寫著「until 2026-08-26 this sentence
 ended ...」。註解清理只動註解，所以它留下來了，而它會被印給使用者。**計畫**：改成只陳述現況的訊息。
@@ -14727,7 +14727,7 @@ NOT-FOUND
 `verifications/measure_parallel_rss.zsh` 以 `uname -s` 命名：guest（aarch64）與 WSL（x86_64）都寫進
 `measure_parallel_rss_output_linux.txt`，互相覆蓋。`measure.zsh` 已因同樣的問題（PF）加上架構。**計畫**：照 `measure.zsh` 的命名。
 
-## SM. README 的「Build the index」條列數字與表格不符
+## SM. README 的「Build the index」條列數字與表格不符（2026-10-29 修正）
 
 README 寫「31.150 s to 9.636 s」，而上面的表格與 `verifications/measure_parallel_rss_output.txt` 都是 30.492 s（無索引）與
 9.781 s（有索引）；31.150、9.636 在量測檔裡找不到。**計畫**：改成量測檔裡的數字（中英兩版）。
