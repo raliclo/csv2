@@ -10,24 +10,13 @@
 //  #if canImport(...)——正是移植腐化的方式：新增第三個平台就得找出每一處，
 //  而漏掉一處只會在那個平台上、幾個月後才變成建置錯誤。
 //
-//  STATUS (2026-08-19): all three branches are exercised. Darwin on macOS,
-//  Glibc on both the aarch64 Linux guest and x86_64 WSL2, and ucrt on Windows
-//  (MINGW64_NT-10.0-26200, Swift 6.3.3, x86_64-unknown-windows-msvc). The
-//  Windows suite passes with four skips, each one an environment limit that is
-//  named where it is skipped and recorded in todo/known-defects.md.
-//
-//  It had never been compiled until that day, and the first attempt producedd
-//  exactly two errors -- one name that Swift's WinSDK does not surface, and
-//  one property that does not exist there. Everything else in this file had
-//  been right for three days without anyone being able to say so.
-//
-//  狀態（2026-08-19）：三個分支都已被實際執行。Darwin 在 macOS 上，Glibc 在 aarch64
-//  Linux guest 與 x86_64 WSL2 上，ucrt 在 Windows 上（MINGW64_NT-10.0-26200、
-//  Swift 6.3.3、x86_64-unknown-windows-msvc）。Windows 的測試套件通過，有四個略過，
-//  每一個都是環境的限制，在略過處指名，並記在 todo/known-defects.md。
-//  在那一天之前它從未被編譯過，而第一次嘗試恰好produced 兩個錯誤——一個 Swift 的 WinSDK
-//  沒有呈現的名稱，以及一個在那裡並不存在的屬性。這個檔案裡其餘每一行，在那之前三天
-//  都是對的，只是沒有人能這樣說。
+//  All three branches are built and tested: Darwin on macOS, Glibc on aarch64
+//  Linux and x86_64 WSL2, ucrt on Windows (x86_64-unknown-windows-msvc). The
+//  Windows skips are environment limits, each named where it is skipped and
+//  recorded in todo/known-defects.md.
+//  三個分支都有建置與測試：Darwin 在 macOS，Glibc 在 aarch64 Linux 與 x86_64 WSL2，
+//  ucrt 在 Windows（x86_64-unknown-windows-msvc）。Windows 上的略過都是環境限制，
+//  各自在略過處指名，並記在 todo/known-defects.md。
 // =====================================================================
 
 import Foundation
@@ -47,32 +36,26 @@ enum Platform {
     // -----------------------------------------------------------------
 
     /// Runs `body` inside an autorelease pool where the platform has one, and
-    /// plain where it does not. It exists for one call site -- the read loop
-    /// -- and it is here rather than there because `autoreleasepool` DOES NOT
-    /// EXIST on Linux Swift: the first version of the fix put it beside the
-    /// call, passed on macOS, and failed the guest build with
-    /// `cannot find 'autoreleasepool' in scope`. That is precisely the rot
-    /// this file's header describes, caught by the cross-platform run instead
-    /// of by review.
+    /// plain where it does not. It serves one call site, the read loop, and
+    /// lives here because `autoreleasepool` does not exist on Linux Swift: at
+    /// the call site it builds on macOS and fails on Linux with
+    /// `cannot find 'autoreleasepool' in scope`.
     ///
     /// The pool is not decoration. `FileHandle.readData` returns Foundation
-    /// objects that, on Darwin, are released only when a pool drains -- with
-    /// none in the loop they accumulated for the whole run and peak RSS tracked
-    /// bytes read. Linux Foundation has no pools and manages `Data` by ARC, so
-    /// the leak was macOS-only and the plain branch is correct rather than a
-    /// stub waiting to be filled in.
+    /// objects that, on Darwin, are released only when a pool drains; without
+    /// one in the loop they accumulate for the whole run and peak RSS grows
+    /// with bytes read. Linux Foundation has no pools and manages `Data` by
+    /// ARC, so the plain branch is correct, not a stub.
     ///
     /// 在有 autorelease pool 的平台上把 `body` 包進一個 pool，沒有的平台就直接執行。
-    /// 它只為一個呼叫點存在——讀取迴圈——而它放在這裡而不是那裡，是因為
-    /// **`autoreleasepool` 在 Linux 的 Swift 上根本不存在**：這個修正的第一版把它寫在
-    /// 呼叫點旁邊，在 macOS 上通過，而 guest 建置以
-    /// `cannot find 'autoreleasepool' in scope` 失敗。那正是本檔案開頭所描述的那種腐化，
-    /// 而抓到它的是跨平台的那次執行，不是審閱。
+    /// 它只服務一個呼叫點（讀取迴圈），放在這裡是因為 `autoreleasepool` 在 Linux 的
+    /// Swift 上不存在：寫在呼叫點旁邊，macOS 能建置，Linux 則以
+    /// `cannot find 'autoreleasepool' in scope` 失敗。
     ///
-    /// 這個 pool 不是裝飾。`FileHandle.readData` 回傳的 Foundation 物件在 Darwin 上只有
-    /// 在 pool 排空時才會被釋放——迴圈裡一個都沒有，於是它們累積了整趟執行，peak RSS 正比於
-    /// 讀進來的位元組數。Linux 的 Foundation 沒有 pool、以 ARC 管理 `Data`，因此這個洩漏
-    /// 是 macOS 專屬的，而那個「直接執行」的分支是正確答案，不是一個待填的空殼。
+    /// 這個 pool 不是裝飾。`FileHandle.readData` 回傳的 Foundation 物件在 Darwin 上
+    /// 要等 pool 排空才會釋放；迴圈裡沒有 pool，它們會累積整趟執行，peak RSS 隨讀入的
+    /// 位元組數成長。Linux 的 Foundation 沒有 pool、以 ARC 管理 `Data`，所以直接執行的
+    /// 分支是正確的，不是空殼。
     static func drainingPool<T>(_ body: () throws -> T) rethrows -> T {
         #if canImport(Darwin)
         return try autoreleasepool(invoking: body)
@@ -165,34 +148,6 @@ enum Platform {
     // MARK: - Durability / 落地
     // -----------------------------------------------------------------
 
-    /// Force a file's data to the filesystem before it is renamed into place.
-    ///
-    /// rename(2) alone gives atomicity for CONCURRENT READERS -- a reader holds
-    /// either the old inode or the new one, never a half-written file. It does
-    /// NOT give durability across a crash: the rename can reach the disk while
-    /// the temp file's data blocks have not, leaving a file that exists, is
-    /// named correctly, and is empty or truncated.
-    ///
-    /// Those are two different guarantees and csv2's design conflated them. The
-    /// second is the one the plan leans on when it says this project's data
-    /// files are held up by "all-new or all-old", so it has to be real.
-    /// 在檔案被 rename 就位之前，強制把它的資料寫到檔案系統。
-    ///
-    /// 單靠 rename(2) 提供的是「並行讀者」的原子性——讀者持有的要嘛是舊 inode、
-    /// 要嘛是新的，絕不會是寫到一半的檔案。它「不」提供當機後的持久性：rename 可能
-    /// 已經落地，而暫存檔的資料區塊還沒有，留下一個存在、名字正確、但內容是空的或
-    /// 被截斷的檔案。
-    ///
-    /// 那是兩個不同的保證，而 csv2 的設計把它們混為一談。計畫說「這個專案的資料檔
-    /// 正是靠『要嘛全新、要嘛全舊』在支撐的」時，指的是第二個——所以它必須是真的。
-    ///
-    /// On Darwin plain fsync() only pushes data to the drive, which may still
-    /// hold it in a volatile write cache; F_FULLFSYNC is what actually flushes
-    /// that cache. Using the weaker one and calling it durable is the kind of
-    /// half-true claim this project exists to avoid.
-    /// 在 Darwin 上，單純的 fsync() 只把資料推給磁碟，而磁碟可能仍將它留在揮發性的
-    /// 寫入快取中；真正沖掉該快取的是 F_FULLFSYNC。用比較弱的那個、然後宣稱「已持久」，
-    /// 正是本專案要避免的那種半真陳述。
     @discardableResult
 
     // -----------------------------------------------------------------
@@ -245,14 +200,14 @@ enum Platform {
     ///
     /// The nanosecond field is where the three platforms disagree: Darwin has
     /// st_mtimespec, Linux has st_mtim, and Windows `_stat64` has only
-    /// whole-second st_mtime. Reporting 0 nanoseconds there is honest and
-    /// costs only resolution -- the index is a heuristic by design, and the
-    /// head/tail hashes carry the real weight.
+    /// whole-second st_mtime. Reporting 0 nanoseconds there costs only
+    /// resolution: the index is a heuristic by design, and the head/tail
+    /// hashes carry the real weight.
     /// 大小與修改時間，作為「索引是否仍描述其資料檔」的 O(1) 啟發式判斷。
     ///
     /// 奈秒欄位正是三個平台分歧之處：Darwin 是 st_mtimespec、Linux 是 st_mtim，
-    /// 而 Windows 的 `_stat64` 只有整秒的 st_mtime。在那裡回報 0 奈秒是誠實的，
-    /// 代價僅是解析度——索引本來就是啟發式的，真正的份量在前後段的雜湊上。
+    /// 而 Windows 的 `_stat64` 只有整秒的 st_mtime。在那裡回報 0 奈秒只犧牲解析度：
+    /// 索引本來就是啟發式的，真正的份量在前後段的雜湊上。
     static func fileIdentity(path: String) -> (size: UInt64, mtimeSec: Int64, mtimeNsec: Int64)? {
         #if canImport(ucrt)
         var st = _stat64()
@@ -275,35 +230,28 @@ enum Platform {
     /// `FileHandle(forWritingAtPath:)` followed by `seekToEndOfFile()` is not
     /// the same thing, and the difference is invisible with one process. The
     /// seek fixes an offset at open time; a second process that appends in
-    /// between leaves this one writing over what it wrote. Eight processes
-    /// each logging 25 operations to one file produced 98 entries of 200, none
-    /// of them malformed and every run exiting 0 -- silent loss, in the one
-    /// file whose entire value is that what happened is still there later.
+    /// between leaves this one writing over what it wrote. The loss is silent:
+    /// whole entries vanish, none malformed, every run exits 0.
     ///
     /// `O_APPEND` moves the seek-and-write into a single kernel operation, so
     /// concurrent writers cannot land on the same offset.
     ///
-    /// **Windows is weaker and this says so rather than pretending.** The CRT
-    /// implements `_O_APPEND` by seeking before each write, which closes the
-    /// window to almost nothing but does not make it atomic across processes.
-    /// The honest summary is: POSIX loses nothing, Windows loses far less than
-    /// it did, and neither is a reason to keep the seek-once behaviour.
+    /// On Windows the CRT's `_O_APPEND` only seeks before each write, which
+    /// narrows the window but is not atomic across processes; the Windows
+    /// branch therefore opens with FILE_APPEND_DATA instead (see below).
     ///
     /// 以「追加」開啟檔案，而追加發生在**核心**、在每一次寫入時，不是在開檔時發生一次。
     ///
     /// `FileHandle(forWritingAtPath:)` 之後接 `seekToEndOfFile()` 不是同一件事，而這個
     /// 差別在單一行程下看不出來。那個 seek 在開檔當下固定了一個位移；若第二個行程在中間
-    /// 追加，這個行程就會蓋掉對方寫的東西。八個行程各記錄 25 次操作到同一個檔案，200 筆
-    /// 只留下 98 筆，沒有任何一筆是壞的，而且每一次都以 0 結束——靜默的遺失，發生在那個
-    /// 「全部價值就是日後回頭查時東西還在」的檔案上。
+    /// 追加，這個行程就會蓋掉對方寫的東西。遺失是靜默的：整筆消失、沒有一筆是壞的、每次都
+    /// 以 0 結束。
     ///
     /// `O_APPEND` 把 seek 與 write 合成單一次核心操作，並行的寫入者因此不可能落在同一個
     /// 位移上。
     ///
-    /// **Windows 較弱，而此處說明而非假裝。** CRT 對 `_O_APPEND` 的實作是「每次寫入前先
-    /// seek」，那把窗口縮到極小，卻沒有讓它在跨行程之間成為不可分割的操作。誠實的說法是：
-    /// POSIX 不會遺失，Windows 遺失的比原本少得多，而兩者都不構成保留「開檔時 seek 一次」
-    /// 的理由。
+    /// Windows 上 CRT 的 `_O_APPEND` 只是在每次寫入前 seek，窗口變小，但跨行程並非
+    /// 不可分割；因此 Windows 分支改以 FILE_APPEND_DATA 開啟（見下）。
     static func openForAppend(path: String) -> FileHandle? {
         #if canImport(ucrt)
         // FILE_APPEND_DATA without FILE_WRITE_DATA is Windows' real atomic
@@ -313,20 +261,16 @@ enum Platform {
         // handed to a CRT descriptor so the rest of this file stays one code
         // path.
         //
-        // The weaker version -- open for writing and seek before every write,
-        // which is what the CRT does for _O_APPEND -- was here first, and it
-        // was not enough: six processes writing 120 entries to one log left
-        // 110. Whole entries, none torn. That is the same silent loss as the
-        // POSIX defect this replaced, just smaller.
+        // Seeking before every write (the CRT's _O_APPEND) is not enough: with
+        // several processes appending to one log, whole entries are still lost.
         //
         // FILE_APPEND_DATA（且不帶 FILE_WRITE_DATA）是 Windows 上真正的不可分割追加：
         // 由作業系統移到檔尾並寫入，合為一次操作，因此兩個行程不可能落在同一個位移上。
         // 以 CreateFileW 取得，因為 Swift for Windows 把 `_open` 標為不可用；再交給一個
         // CRT 描述子，讓這個檔案其餘部分維持單一條程式路徑。
         //
-        // 較弱的那個版本——以寫入開啟、每次寫入前 seek，也就是 CRT 對 _O_APPEND 的做法——
-        // 原本在這裡，而它不夠：六個行程寫 120 筆到同一個 log，只剩 110 筆。整筆整筆地少，
-        // 沒有一筆是壞的。那與它所取代的那個 POSIX 缺陷是同一種靜默遺失，只是小一些。
+        // 每次寫入前 seek（CRT 的 _O_APPEND）不夠：多個行程追加到同一個 log 時，
+        // 仍會整筆遺失。
         let handle: HANDLE = path.withCString(encodedAs: UTF16.self) { wpath in
             CreateFileW(wpath,
                         DWORD(FILE_APPEND_DATA),
@@ -348,24 +292,12 @@ enum Platform {
     }
 
     /// Write to a handle from `openForAppend`. The append property is held by
-    /// the operating system on every platform now, so this is a plain write.
-    ///
-    /// It was not always. This used to seek to the end before each write on
-    /// Windows, reproducing what the C runtime does for `_O_APPEND`, because
-    /// `_open` is unavailable there and O_APPEND looked out of reach. That
-    /// shrinks the window between deciding where the end is and writing there;
-    /// it does not close it, and the difference was measurable: six processes
-    /// writing 120 entries to one log left 110, whole entries, none torn. The
-    /// function survives as one line because the call sites should not have to
-    /// know which platform they are on.
-    /// 寫入由 `openForAppend` 取得的 handle。「追加」這個性質現在在每個平台上都由作業系統
-    /// 持有，因此這裡就是一次單純的寫入。
-    ///
-    /// 它並非一直如此。原本在 Windows 上會在每次寫入前 seek 到檔尾，重現 C runtime 對
-    /// `_O_APPEND` 的做法——因為那裡 `_open` 不可用，O_APPEND 看起來拿不到。那會縮小「判斷
-    /// 尾端在哪」與「寫到那裡」之間的窗口，但關不上它，而那個差別是量得到的：六個行程寫
-    /// 120 筆到同一個 log，只剩 110 筆，整筆整筆地少，沒有一筆是壞的。這個函式仍以一行的
-    /// 形式留著，因為呼叫端不該需要知道自己在哪個平台上。
+    /// the operating system on every platform, so this is a plain write. Do
+    /// not add a seek-to-end here: that narrows the race but does not close
+    /// it. The function stays so call sites need not know the platform.
+    /// 寫入由 `openForAppend` 取得的 handle。「追加」這個性質在每個平台上都由作業系統
+    /// 持有，因此這裡就是一次單純的寫入。不要在這裡加「先 seek 到檔尾」：那只縮小競爭
+    /// 窗口，關不上它。這個函式留著，是為了讓呼叫端不必知道自己在哪個平台上。
     static func appendWrite(_ h: FileHandle, _ data: Data) {
         h.write(data)
     }
@@ -375,10 +307,9 @@ enum Platform {
     ///
     /// `FileHandle.write` cannot be used for this. swift-corelibs-foundation
     /// implements it with `try!`, so `EPIPE` is not an error to handle but a
-    /// fatal one: on Linux and Windows csv2 died of SIGILL, exit 132, printing
-    /// a Swift backtrace to the stderr of whoever ran `| head`. Darwin's
-    /// Foundation does not do that, which is why the behaviour looked correct
-    /// for as long as it was only ever measured on macOS.
+    /// fatal one: on Linux and Windows it dies of SIGILL, exit 132, with a
+    /// Swift backtrace on stderr under `| head`. Darwin's Foundation does not,
+    /// so testing on macOS alone hides it.
     ///
     /// A filter whose reader has left has nothing left to do and nothing to
     /// say. On POSIX it dies of SIGPIPE, which is exit 141 and is what the
@@ -390,15 +321,15 @@ enum Platform {
     /// 把每一個位元組寫出去；而當讀取端已經離開時，以「一個 Unix filter 該有的方式」停下來。
     ///
     /// 這裡不能用 `FileHandle.write`。swift-corelibs-foundation 用 `try!` 實作它，於是
-    /// `EPIPE` 不是一個「要處理的錯誤」而是一個「致命錯誤」：csv2 在 Linux 與 Windows 上
-    /// 死於 SIGILL、結束狀態 132，並把一段 Swift backtrace 印進那個執行 `| head` 的人的
-    /// stderr。Darwin 的 Foundation 不是這個實作——而那正是「這個行為看起來一直是對的」的
-    /// 原因：它只在 macOS 上被量過。
+    /// `EPIPE` 不是一個「要處理的錯誤」而是一個「致命錯誤」：在 Linux 與 Windows 上會
+    /// 死於 SIGILL、結束狀態 132，並在 `| head` 時把 Swift backtrace 印到 stderr。
+    /// Darwin 的 Foundation 不會，所以只在 macOS 上測會看不出來。
     ///
     /// 一個讀取端已經離開的 filter，沒有事情要做，也沒有話要說。在 POSIX 上它死於 SIGPIPE，
     /// 也就是結束狀態 141，那是 shell 與管線中其他每一個工具所預期的。Windows 沒有 SIGPIPE，
     /// 因此直接產生 141——在那裡這個數字是一個約定而不是訊號，而沿用同一個數字，可以讓
     /// 「會去檢查它」的腳本保持可攜。
+    ///
     /// Takes a DESCRIPTOR, not a FileHandle, because Swift for Windows marks
     /// `FileHandle.fileDescriptor` unavailable outright ("Cannot perform
     /// non-owning handle to fd conversion"). Only the stdout sink needs this
@@ -412,9 +343,8 @@ enum Platform {
     /// Windows' C runtime opens fd 1 and fd 2 in TEXT mode, where every `\n`
     /// written becomes `\r\n`. Foundation's `FileHandle.write` never met this
     /// because it writes through the Win32 handle and not the CRT descriptor;
-    /// moving stdout onto `_write` walked straight into it, and 43 cases
-    /// failed with output that looked identical and was not -- `got 'zzz',
-    /// want 'zzz'`, differing by an invisible CR.
+    /// `_write` does meet it, and the symptom is output that differs from the
+    /// expected only by an invisible CR (`got 'zzz', want 'zzz'`).
     ///
     /// Set idempotently before a write. It restores the promise the README
     /// makes in one line: output always uses `\n`, on every platform. Calling
@@ -422,8 +352,8 @@ enum Platform {
     ///
     /// Windows 的 C runtime 以「文字模式」開啟 fd 1 與 fd 2，在那裡每一個寫出的 `\n` 都會
     /// 變成 `\r\n`。Foundation 的 `FileHandle.write` 從未遇到這件事，因為它寫的是 Win32
-    /// handle 而不是 CRT 描述子；把 stdout 改走 `_write` 就正面撞上了它，43 個案例因此失敗，
-    /// 而它們的輸出「看起來一模一樣」卻不相同——`got 'zzz', want 'zzz'`，差在一個看不見的 CR。
+    /// handle 而不是 CRT 描述子；`_write` 則會遇到，症狀是輸出與預期只差一個看不見的 CR
+    /// （`got 'zzz', want 'zzz'`）。
     ///
     /// 在寫出前以冪等方式設定。它守住 README 用一句話給出的那個承諾：輸出一律使用 `\n`，
     /// 在每一個平台上。再次呼叫 `_setmode`，比維護一份共享可變狀態更便宜也更安全。
@@ -441,16 +371,14 @@ enum Platform {
     /// EPIPE is the one failure that is not an error: the reader left, and a
     /// filter should die of SIGPIPE like every other one. Everything else IS an
     /// error and is handed back to the caller, who knows which file it was and
-    /// can say so. Treating them alike is how a full disk came to look exactly
-    /// like `| head`: ENOSPC raised SIGPIPE, csv2 exited 141 with nothing on
-    /// stderr and a half-written file on disk, and 141 is the status the README
-    /// tells callers to disregard.
+    /// can say so. Treating them alike makes a full disk look exactly like
+    /// `| head`: exit 141, nothing on stderr, a half-written file on disk, and
+    /// 141 is the status the README tells callers to disregard.
     /// 把每一個位元組寫出去，或回傳讓它停下來的 errno。0 表示全部寫完。
     /// EPIPE 是唯一「不算錯誤」的失敗：讀端走了，而一個 filter 應該像其他每一個那樣死於
     /// SIGPIPE。其餘都**是**錯誤，交還給呼叫端——它知道那是哪一個檔案，說得出口。把兩者
-    /// 一視同仁，正是「磁碟寫滿」長得跟 `| head` 一模一樣的原因：ENOSPC 引發了 SIGPIPE，
-    /// csv2 以 141 結束、stderr 上一個字也沒有、磁碟上留著寫到一半的檔案，而 141 正是
-    /// README 叫呼叫端不必理會的那個狀態。
+    /// 一視同仁，「磁碟寫滿」就會長得跟 `| head` 一模一樣：以 141 結束、stderr 一片空白、
+    /// 磁碟上留著寫到一半的檔案，而 141 正是 README 叫呼叫端不必理會的那個狀態。
     @discardableResult
     static func writeAll(fd: Int32, _ bytes: [UInt8]) -> Int32 {
         if bytes.isEmpty { return 0 }
@@ -500,18 +428,16 @@ enum Platform {
     /// Open a file for writing, truncating it. A descriptor, and nothing else.
     ///
     /// No FileHandle: wrapping a CRT descriptor in one and then calling
-    /// `synchronize()` killed csv2 on Windows with no message and no exit
-    /// status worth reading -- every `-o` and `--in-place` run, while `-so`
-    /// and reads were fine. FileHandle on Windows carries a HANDLE of its own
+    /// `synchronize()` kills csv2 on Windows with no message, on every `-o`
+    /// and `--in-place` run. FileHandle on Windows carries a HANDLE of its own
     /// and a descriptor it was handed is not the same thing. The temp file is
     /// opened, written, synced and closed through the descriptor on every
-    /// platform now, which is also one code path instead of two.
+    /// platform, which is also one code path instead of two.
     /// 以寫入開啟並截斷一個檔案。回傳一個描述子，沒有別的。
     /// 不用 FileHandle：把一個 CRT 描述子包進 FileHandle、再呼叫 `synchronize()`，會讓
-    /// csv2 在 Windows 上無聲死去——每一次 `-o` 與 `--in-place` 都是，而 `-so` 與讀取
-    /// 都正常。Windows 上的 FileHandle 自己帶著一個 HANDLE，而「別人交給它的描述子」
-    /// 不是同一個東西。暫存檔現在在每個平台上都以描述子開啟、寫入、同步與關閉，
-    /// 這同時也把兩條程式路徑併成一條。
+    /// csv2 在 Windows 上無聲死去，每一次 `-o` 與 `--in-place` 都是。Windows 上的
+    /// FileHandle 自己帶著一個 HANDLE，而「別人交給它的描述子」不是同一個東西。暫存檔在
+    /// 每個平台上都以描述子開啟、寫入、同步與關閉，這也讓兩條程式路徑併成一條。
     static func openForWrite(path: String) -> Int32? {
         #if canImport(ucrt)
         let h: HANDLE = path.withCString(encodedAs: UTF16.self) { wpath in
@@ -530,20 +456,16 @@ enum Platform {
         #else
         // 0600, not the umask's 0644. The temp file holds the whole contents of
         // the file being edited, and copyMode does not run until just before
-        // the rename -- so a 0600 source spent the entire write world-readable
-        // under a name anyone could open. Measured on a 15 MB file: the temp
-        // was -rw-r--r-- for the duration and -rw------- afterwards, and the
-        // README's "an edit does not change who can read it" was true only of
-        // the finished file.
+        // the rename -- with 0644 a 0600 source would sit world-readable for
+        // the whole write, and the README's "an edit does not change who can
+        // read it" would hold only for the finished file.
         //
         // Starting private and widening at the end is the right order: the
         // mode that matters during the write is the source's, and 0600 is
         // never wider than that.
         // 用 0600，不是 umask 的 0644。暫存檔裝的是「正在被編輯的那個檔案」的全部內容，而
-        // copyMode 要到 rename 之前才執行——因此一個 0600 的來源，在整個寫入期間都以一個
-        // 「任何人都開得了」的名字、對所有人可讀。15 MB 檔案上的實測：暫存檔在那段時間是
-        // -rw-r--r--，結束後才是 -rw-------，而 README 那句「一次編輯不會改變誰讀得到它」
-        // 只對「完成後的檔案」成立。
+        // copyMode 要到 rename 之前才執行——若用 0644，一個 0600 的來源在整個寫入期間都會
+        // 對所有人可讀，而 README 那句「一次編輯不會改變誰讀得到它」就只對完成後的檔案成立。
         // 先私有、最後再放寬，才是對的順序：寫入期間該生效的是來源的模式，而 0600 永遠不會
         // 比它更寬。
         let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
@@ -552,21 +474,44 @@ enum Platform {
         #endif
     }
 
+    /// Force a file's data to the filesystem before it is renamed into place.
+    ///
+    /// rename(2) alone gives atomicity for CONCURRENT READERS -- a reader holds
+    /// either the old inode or the new one, never a half-written file. It does
+    /// NOT give durability across a crash: the rename can reach the disk while
+    /// the temp file's data blocks have not, leaving a file that exists, is
+    /// named correctly, and is empty or truncated.
+    ///
+    /// Those are two different guarantees. The plan's "all-new or all-old"
+    /// promise for data files depends on the second, so it has to be real.
+    /// 在檔案被 rename 就位之前，強制把它的資料寫到檔案系統。
+    ///
+    /// 單靠 rename(2) 提供的是「並行讀者」的原子性——讀者持有的要嘛是舊 inode、
+    /// 要嘛是新的，絕不會是寫到一半的檔案。它「不」提供當機後的持久性：rename 可能
+    /// 已經落地，而暫存檔的資料區塊還沒有，留下一個存在、名字正確、但內容是空的或
+    /// 被截斷的檔案。
+    ///
+    /// 那是兩個不同的保證。計畫對資料檔「要嘛全新、要嘛全舊」的承諾仰賴的是第二個，
+    /// 所以它必須是真的。
+    ///
+    /// On Darwin plain fsync() only pushes data to the drive, which may still
+    /// hold it in a volatile write cache; F_FULLFSYNC is what actually flushes
+    /// that cache. With plain fsync() alone, "durable" would be only half true.
+    /// 在 Darwin 上，單純的 fsync() 只把資料推給磁碟，而磁碟可能仍將它留在揮發性的
+    /// 寫入快取中；真正沖掉該快取的是 F_FULLFSYNC。只用 fsync()，「已持久」就只對一半。
+    ///
     /// Flush a descriptor's data to the medium, not just to the OS cache.
     /// `_commit` is the CRT's fsync; F_FULLFSYNC is the only thing on Darwin
     /// that reaches the platter rather than the drive's own cache.
     ///
-    /// This replaced a version taking a FileHandle, which existed because
-    /// `FileHandle.fileDescriptor` is unavailable on Windows ("Cannot perform
-    /// non-owning handle to fd conversion") -- so the descriptor could not be
-    /// recovered from a handle and the difference had to live here rather than
-    /// in Core.swift. Found on the first Windows compile, 2026-08-19. The
-    /// answer now is the other direction: carry the descriptor and never make
-    /// a handle, which also avoids `synchronize()` on a handle wrapping a CRT
-    /// descriptor -- that combination killed every -o run on Windows silently.
+    /// Takes a descriptor, not a FileHandle: `FileHandle.fileDescriptor` is
+    /// unavailable on Windows, and `synchronize()` on a handle wrapping a CRT
+    /// descriptor kills every -o run there silently.
     /// 把一個描述子的資料送到儲存媒體，而不只是送進作業系統的快取。
     /// `_commit` 是 CRT 的 fsync；在 Darwin 上，只有 F_FULLFSYNC 會真正抵達碟片，
     /// 而不是停在磁碟自己的快取裡。
+    /// 接受描述子而不是 FileHandle：`FileHandle.fileDescriptor` 在 Windows 上不可用，
+    /// 而對包著 CRT 描述子的 handle 呼叫 `synchronize()`，會讓那裡每一次 -o 無聲死去。
     static func syncFD(_ fd: Int32) -> Bool {
         #if canImport(ucrt)
         return _commit(fd) == 0
@@ -592,10 +537,8 @@ enum Platform {
     ///
     /// Not `FileHandle.standardError.write`: that answers a failed write with
     /// an exception nobody catches, so `csv2 -get 9:9 -i f.csv 2>&-` -- an
-    /// ordinary thing for a script to do -- exited 134 while PRINTING THE
-    /// REFUSAL, turning an exit status of 1 into one the documentation does
-    /// not contain. Reporting an error is the last place that should be able
-    /// to fail this way.
+    /// ordinary thing for a script to do -- would exit 134 while printing the
+    /// refusal, instead of the documented 1.
     ///
     /// A departed reader still ends the process with SIGPIPE, inside
     /// writeAll: `csv2 -debug 2>&1 | head -1` is a pipeline, not a fault. Any
@@ -604,9 +547,8 @@ enum Platform {
     /// news.
     /// csv2 對 stderr 說的每一句話都走這裡。
     /// 不用 `FileHandle.standardError.write`：它對「寫入失敗」的回答是一個沒有人接的例外，
-    /// 因此 `csv2 -get 9:9 -i f.csv 2>&-`——腳本裡很平常的寫法——會在「印出那則拒絕」的
-    /// 當下以 134 結束，把一個本該是 1 的結束狀態，換成一個文件裡根本沒有的數字。
-    /// 「回報一個錯誤」是最不該以這種方式失敗的地方。
+    /// 因此 `csv2 -get 9:9 -i f.csv 2>&-`——腳本裡很平常的寫法——會在印出拒絕訊息時
+    /// 以 134 結束，而不是文件記載的 1。
     /// 讀端離開仍然會在 writeAll 裡以 SIGPIPE 結束行程：`csv2 -debug 2>&1 | head -1`
     /// 是一條管線，不是故障。其餘的失敗只表示 stderr 寫不出去，而那件事沒有別的話好說
     /// ——把消息帶出去的是呼叫端拿到的結束狀態。
@@ -616,16 +558,13 @@ enum Platform {
 
     /// The same for stdout, and it exists because `print()` is not equivalent
     /// here. On Windows `print()` goes through the CRT's TEXT-mode stdout,
-    /// which turns every `\n` into `\r\n` -- so `--dry-run`, `--version` and
-    /// `--help` were emitting CRLF while the data path emitted LF, in the same
-    /// program, on the same stream. "Output always uses LF as the end of line"
-    /// is the constraint phase 11 was given, and phase 11's own `--dry-run`
-    /// broke it. KT.
+    /// which turns every `\n` into `\r\n` -- `--dry-run`, `--version` and
+    /// `--help` would emit CRLF while the data path emits LF on the same
+    /// stream, breaking "output always uses LF as the end of line". KT.
     /// stdout 的同一件事，而它之所以存在，是因為 `print()` 在這裡並不等價。Windows 上的
-    /// `print()` 走的是 CRT 的**文字模式** stdout，那會把每一個 `\n` 換成 `\r\n`——於是
-    /// `--dry-run`、`--version` 與 `--help` 輸出的是 CRLF，而資料路徑輸出的是 LF，同一支程式、
-    /// 同一條流。「輸出永遠以 LF 作為行尾」是第 11 階段被給予的約束，而第 11 階段自己的
-    /// `--dry-run` 違反了它。KT。
+    /// `print()` 走的是 CRT 的**文字模式** stdout，那會把每一個 `\n` 換成 `\r\n`——
+    /// `--dry-run`、`--version` 與 `--help` 會輸出 CRLF，而資料路徑在同一條流上輸出 LF，
+    /// 違反「輸出永遠以 LF 作為行尾」。KT。
     static func writeStdout(_ text: String) {
         _ = writeAll(fd: 1, [UInt8](text.utf8))
     }
@@ -635,30 +574,26 @@ enum Platform {
     ///
     /// Here rather than at the call site because `st_mode` is UInt16 on
     /// Windows and Int32 elsewhere, and S_IFMT and friends differ in type with
-    /// it -- the check compiled on macOS and Linux and would not build at all
-    /// on Windows, which is the difference this file exists to absorb. Windows
-    /// has no FIFOs in the POSIX sense; `.other` covers whatever it does have.
+    /// it -- written at a call site, the check builds on macOS and Linux and
+    /// not on Windows. Windows has no FIFOs in the POSIX sense; `.other`
+    /// covers whatever it does have.
     /// 一個路徑指的是什麼東西——只為了 csv2 對它問的那一個問題：暫存檔 rename 得上去嗎？
     /// 放在這裡而不是呼叫端，因為 `st_mode` 在 Windows 上是 UInt16、其他平台是 Int32，
-    /// 而 S_IFMT 之類的常數型別也跟著不同——那個檢查在 macOS 與 Linux 上編得過，在 Windows
-    /// 上根本建不起來，而那正是本檔案存在要吸收的差異。Windows 沒有 POSIX 意義下的 FIFO；
-    /// `.other` 涵蓋它實際會有的東西。
+    /// 而 S_IFMT 之類的常數型別也跟著不同——寫在呼叫端，這個檢查在 macOS 與 Linux 上
+    /// 編得過，在 Windows 上建不起來。Windows 沒有 POSIX 意義下的 FIFO；`.other` 涵蓋它
+    /// 實際會有的東西。
     enum FileKind { case regular, directory, fifo, other }
 
     /// The append descriptor itself, for a caller that wants `writeAll`'s error
     /// handling rather than `FileHandle.write`'s `try!`.
     ///
     /// `FileHandle.fileDescriptor` cannot be used to get here: it is marked
-    /// UNAVAILABLE on Windows, and reaching for it broke the Windows build --
-    /// which the node then survived by keeping its old binary and running the
-    /// new tests against it, so the suite reported five failures that looked
-    /// like a defect in the metrics line and were a build that never ran.
+    /// unavailable on Windows, and using it breaks the Windows build.
     /// 追加用的描述子本身，給「想要 writeAll 的錯誤處理、而不是 FileHandle.write 的 try!」
     /// 的呼叫端。
     ///
     /// 不能用 `FileHandle.fileDescriptor` 來取得它：那在 Windows 上被標記為「不可用」，
-    /// 而伸手去拿它弄壞了 Windows 的建置——那台節點於是保留了舊的二進位檔、拿新的測試去跑它，
-    /// 於是測試回報了五個「看起來像 metrics 那一行有缺陷」的失敗，而真相是一次從未跑起來的建置。
+    /// 用了就會讓 Windows 建置失敗。
     static func openAppendFD(path: String) -> Int32? {
         #if canImport(ucrt)
         let handle: HANDLE = path.withCString(encodedAs: UTF16.self) { wpath in
@@ -682,47 +617,40 @@ enum Platform {
 
     /// Device and inode: the pair that says two names are ONE file, which a
     /// path comparison cannot. `-i x -o y` where the two are hard links to the
-    /// same inode passed every spelling check -- `./`, `../`, absolute,
-    /// symlink -- and then broke the link at rc=0, leaving the caller with one
+    /// same inode passes every spelling check -- `./`, `../`, absolute,
+    /// symlink -- and without this would break the link at rc=0, leaving one
     /// name holding the edit and the other holding what used to be shared.
     /// On Windows this goes through GetFileInformationByHandle rather than the
     /// CRT's stat(), which reports inode 0 for everything; nil there only on a
     /// filesystem that keeps no file index at all.
     /// 裝置號與 inode：這一對才說得出「兩個名字是同一個檔案」，而比對路徑說不出。
-    /// `-i x -o y` 在兩者是同一個 inode 的硬連結時，通過了每一種拼法的檢查——`./`、`../`、
-    /// 絕對路徑、symlink——然後以 rc=0 把那個連結斷開，留給呼叫端一個「有這次編輯」的名字，
+    /// `-i x -o y` 在兩者是同一個 inode 的硬連結時，會通過每一種拼法的檢查——`./`、`../`、
+    /// 絕對路徑、symlink——少了這個就會以 rc=0 把那個連結斷開，留下一個「有這次編輯」的名字，
     /// 和一個「還是原本共用內容」的名字。Windows 上改走 GetFileInformationByHandle，而不是
     /// CRT 的 stat()——後者對所有檔案都回報 inode 0；只有在「完全不保存 file index」的檔案系統上
     /// 才回傳 nil。
     static func fileNode(path: String) -> (dev: UInt64, ino: UInt64)? {
         #if canImport(ucrt)
-        // The CRT's stat() reports inode 0 for everything, which is why this
-        // returned nil for years -- but that is a limit of the CRT, not of
-        // Windows. GetFileInformationByHandle gives the real answer: a volume
-        // serial number and a 64-bit file index, which is exactly the pair
-        // this function is for. Measured on the Windows node 2026-08-26: `-o`
-        // onto a hard link of `-i` was accepted at rc=0 and silently broke the
-        // link, where macOS refuses it -- and the README states the guarantee
-        // with no Windows exception. JU.
+        // The CRT's stat() reports inode 0 for everything -- a limit of the
+        // CRT, not of Windows. GetFileInformationByHandle gives the real
+        // answer: a volume serial number and a 64-bit file index, exactly the
+        // pair this function is for. Without it, `-o` onto a hard link of `-i`
+        // is accepted at rc=0 and silently breaks the link, and the README
+        // states the guarantee with no Windows exception. JU.
         //
         // The return value is checked through the OUTPUT rather than the BOOL.
         // Swift imports Windows BOOL as WindowsBool, and how it may be tested
-        // in a condition has moved between toolchains; a zeroed struct after a
-        // failed call is unambiguous in every version, and this is the one
-        // platform whose build cannot be checked from here. That caution is
-        // not theoretical: `_O_APPEND` was written the same way, compiled
-        // nowhere, and the node ran an old binary against new tests for a day.
+        // in a condition has changed between toolchains; a zeroed struct after
+        // a failed call is unambiguous in every version, and this platform's
+        // build cannot be checked from the macOS host.
         //
-        // CRT 的 stat() 對每個檔案都回報 inode 0，那是這個函式多年來回傳 nil 的原因——但那是
-        // CRT 的限制，不是 Windows 的。GetFileInformationByHandle 給得出真正的答案：一個磁碟區
-        // 序號與一個 64 位元的 file index，正好就是這個函式要的那一對。2026-08-26 在 Windows
-        // 節點上實測：`-o` 指向 `-i` 的一個硬連結會以 rc=0 被接受並安靜地斷開那個連結，而 macOS
-        // 會拒絕它——且 README 陳述那條保證時沒有為 Windows 開例外。JU。
+        // CRT 的 stat() 對每個檔案都回報 inode 0——那是 CRT 的限制，不是 Windows 的。
+        // GetFileInformationByHandle 給得出真正的答案：一個磁碟區序號與一個 64 位元的
+        // file index，正好就是這個函式要的那一對。少了它，`-o` 指向 `-i` 的一個硬連結會以
+        // rc=0 被接受並安靜地斷開那個連結，而 README 陳述那條保證時沒有為 Windows 開例外。JU。
         // 回傳值是透過「輸出」而不是那個 BOOL 來檢查的。Swift 把 Windows 的 BOOL 匯入為
-        // WindowsBool，而「它在條件式裡可以怎麼被測試」在不同的工具鏈之間變動過；一個呼叫失敗後
-        // 保持全零的結構，在每一個版本裡都毫無歧義，而這是唯一一個「無法從這裡檢查建置」的平台。
-        // 那份謹慎不是空談：`_O_APPEND` 就是那樣寫的，哪裡都編不過，而那個節點拿舊的二進位檔跑了
-        // 一整天的新測試。
+        // WindowsBool，而它在條件式裡能怎麼測試，在不同工具鏈之間變動過；呼叫失敗後保持全零的
+        // 結構在每個版本裡都毫無歧義，而這個平台的建置無法在 macOS 主機上檢查。
         let handle: HANDLE = path.withCString(encodedAs: UTF16.self) { wpath in
             CreateFileW(wpath,
                         DWORD(FILE_READ_ATTRIBUTES),
@@ -738,13 +666,10 @@ enum Platform {
         _ = GetFileInformationByHandle(handle, &info)
         let ino = (UInt64(info.nFileIndexHigh) << 32) | UInt64(info.nFileIndexLow)
         // A file index of 0 is what a filesystem that does not keep one
-        // reports -- FAT, and some network redirectors. Saying "cannot tell"
-        // there is the same answer this function gave everywhere before, and
-        // it is the safe one: the caller falls back to comparing paths, which
-        // is what it did yesterday.
+        // reports -- FAT, and some network redirectors. "Cannot tell" is the
+        // safe answer there: the caller falls back to comparing paths.
         // file index 為 0，是「不保存 file index 的檔案系統」會回報的——FAT，以及某些網路
-        // redirector。在那裡回答「說不出來」，與這個函式先前在每個地方給的答案相同，而且是安全的
-        // 那一個：呼叫端會退回去比對路徑，那正是它昨天在做的事。
+        // redirector。在那裡回答「說不出來」是安全的：呼叫端會退回去比對路徑。
         guard ino != 0 else { return nil }
         return (UInt64(info.dwVolumeSerialNumber), ino)
         #else
@@ -753,17 +678,13 @@ enum Platform {
         // bitPattern, not UInt64(_:). `st_dev` is a SIGNED 32-bit dev_t on
         // Darwin and a device node's is negative: /dev/null reports -1, and
         // `UInt64(-1)` is a Swift trap -- SIGTRAP, exit 133, nothing on either
-        // stream. Introduced on 2026-08-21 by the hard-link fix, which turned
-        // `-o /dev/null` from the documented two-line refusal into a silent
-        // crash, on the very example the refusals table names. The identity is
-        // only ever compared for equality, so the bit pattern is the whole of
-        // what it needs to be.
+        // stream -- which would turn `-o /dev/null` from the documented refusal
+        // into a silent crash. The identity is only ever compared for equality,
+        // so the bit pattern is all it needs.
         // 用 bitPattern，不用 UInt64(_:)。Darwin 上的 `st_dev` 是「有號」的 32 位元 dev_t，
         // 而一個裝置節點的值是負的：/dev/null 回報 -1，而 `UInt64(-1)` 是一個 Swift trap
-        // ——SIGTRAP、exit 133、兩條輸出流上都沒有東西。這是 2026-08-21 那個「硬連結」修正
-        // 帶進來的，它把 `-o /dev/null` 從一條「有記載的兩行拒絕」變成一次無聲的當機，而那
-        // 正是拒絕表拿來當範例的那一個。這個身分只會被拿去比對相等，因此「位元樣式」就是
-        // 它需要的全部。
+        // ——SIGTRAP、exit 133、兩條輸出流上都沒有東西——會讓 `-o /dev/null` 從有記載的拒絕
+        // 變成無聲的當機。這個身分只會被拿去比對相等，因此位元樣式就是它需要的全部。
         return (UInt64(bitPattern: Int64(st.st_dev)), UInt64(st.st_ino))
         #endif
     }
@@ -783,68 +704,53 @@ enum Platform {
     /// `nil` if the path could be examined; otherwise the `errno` that stopped
     /// it.
     ///
-    /// `fileKind` answers nil for BOTH "there is nothing there" and "I was not
+    /// `fileKind` answers nil for BOTH "there is nothing there" and "not
     /// allowed to look", and a caller reading nil as the first says something
-    /// false whenever it was the second. `-o` did exactly that: every stat
-    /// failure came back as "the directory X does not exist", so a permission
-    /// error, an ELOOP, or a name too long all reported a missing directory --
-    /// on every platform, not just the one that made it visible.
-    ///
-    /// The errno was always there. Discarding it turned four different
-    /// situations into one sentence, and three of them were wrong.
+    /// false whenever it was the second: a permission error, an ELOOP, or a
+    /// name too long would all be reported as "the directory X does not
+    /// exist". The errno tells them apart.
     ///
     /// `nil` 代表那條路徑檢視得了；否則回傳「阻止了它」的那個 errno。
     ///
-    /// `fileKind` 對「那裡什麼都沒有」與「我不被允許去看」都回答 nil，而一個把 nil 讀成前者
-    /// 的呼叫端，在它其實是後者時說的就是一句假話。`-o` 正是如此：每一種 stat 失敗都回來成為
-    /// 「the directory X does not exist」，於是權限錯誤、ELOOP、名稱過長全都被回報成「目錄
-    /// 不存在」——在每一個平台上，不只在那個讓它現形的平台上。
-    ///
-    /// errno 一直都在。丟掉它，讓四種不同的處境變成同一句話，而其中三種是錯的。
+    /// `fileKind` 對「那裡什麼都沒有」與「不被允許去看」都回答 nil，而把 nil 讀成前者的
+    /// 呼叫端，在其實是後者時說的就是假話：權限錯誤、ELOOP、名稱過長都會被回報成
+    /// 「the directory X does not exist」。errno 才分得出它們。
     static func statFailure(_ path: String) -> Int32? {
         var st = stat()
         if stat(path, &st) == 0 { return nil }
         return errno
     }
 
-    /// The text of an errno, for a message that has to say what actually
-    /// stopped it rather than what usually stops things.
-    /// 一個 errno 的文字，供「必須說出真正阻止了它的東西、而不是通常會阻止東西的那個」的訊息使用。
     /// A path with its spelling normalised, for Windows.
     ///
-    /// Lives here rather than beside `resolved()` in main.swift for the plain
-    /// reason that main.swift does not import WinSDK -- which the first attempt
-    /// discovered as three `cannot find type 'DWORD' in scope` errors on the
-    /// node, after macOS had compiled the same file without complaint. A
-    /// conditional branch is only ever checked by the platform it is for.
+    /// Lives here rather than beside `resolved()` in main.swift because
+    /// main.swift does not import WinSDK; there the Windows branch fails with
+    /// `cannot find type 'DWORD' in scope` while macOS builds it without
+    /// complaint. A conditional branch is only ever checked by the platform it
+    /// is for.
     ///
-    /// Symlinks ARE followed, through GetFinalPathNameByHandleW.
-    ///
-    /// The first version used GetFullPathNameW alone and said in this comment
-    /// that following symlinks was unnecessary because `sameFile` asks the
-    /// filesystem for identity separately. That was wrong, and the Windows node
-    /// said so with SEVEN failures: `resolved()` also decides WHERE TO WRITE,
-    /// so an `--in-place` edit through a symlink replaced the link with a
-    /// regular file instead of writing to its target. Identity was never the
-    /// only caller.
-    ///
-    /// It is the round-100 lesson happening inside the round-100 fix: a
-    /// correction is written at the moment of highest confidence, and the
-    /// sentence justifying it claimed more than had been checked.
+    /// Symlinks ARE followed, through GetFinalPathNameByHandleW. Do not drop
+    /// back to GetFullPathNameW alone on the grounds that `sameFile` checks
+    /// identity separately: `resolved()` also decides WHERE TO WRITE, and an
+    /// `--in-place` edit through a symlink would replace the link with a
+    /// regular file instead of writing to its target.
     ///
     /// GetFinalPathNameByHandleW needs an open handle, so a path that does not
     /// exist yet -- every `-o` destination -- falls back to GetFullPathNameW,
-    /// which is right for it: there is no link to follow. QA. 
+    /// which is right for it: there is no link to follow. QA.
     ///
     /// 一個「拼法已正規化」的路徑，供 Windows 使用。
     ///
-    /// 放在這裡而不是放在 main.swift 的 `resolved()` 旁邊，理由很單純：main.swift 沒有
-    /// import WinSDK——而那是第一次嘗試時，在節點上以三個 `cannot find type 'DWORD' in scope`
-    /// 發現的，在 macOS 對同一個檔案毫無怨言地編譯完成之後。**一個條件分支，永遠只會被
-    /// 「它所服務的那個平台」檢查到。**
+    /// 放在這裡而不是放在 main.swift 的 `resolved()` 旁邊，因為 main.swift 沒有 import
+    /// WinSDK；放在那裡，Windows 分支會以 `cannot find type 'DWORD' in scope` 失敗，而
+    /// macOS 照樣編得過。**一個條件分支，永遠只會被它所服務的那個平台檢查到。**
     ///
-    /// GetFullPathNameW 不跟隨 symlink，而它不需要：呼叫端在這裡做的是拼法正規化，並另外向
-    /// 檔案系統詢問身分、以那個答案為準。QA。
+    /// symlink **會**被跟隨，經由 GetFinalPathNameByHandleW。不要以「`sameFile` 另外檢查
+    /// 身分」為由退回只用 GetFullPathNameW：`resolved()` 也決定「寫到哪裡」，透過 symlink
+    /// 的 `--in-place` 編輯會把連結換成一般檔案，而不是寫進它的目標。
+    ///
+    /// GetFinalPathNameByHandleW 需要一個開著的 handle，所以還不存在的路徑——每一個 `-o`
+    /// 目的地——退回 GetFullPathNameW，這對它是正確的：沒有連結需要跟隨。QA。
     static func normalisedPath(_ path: String) -> String {
         #if canImport(ucrt)
         // An existing path is resolved through a handle, which follows links.
@@ -896,11 +802,10 @@ enum Platform {
         // `written` excludes the terminating NUL, so the slice is the whole
         // path. `String(decodingCString:)` would read to the NUL and do the
         // same thing, but it is deprecated and this tree builds with
-        // -warnings-as-errors, which turned it into the THIRD Windows-only
-        // build failure of this one fix.
+        // -warnings-as-errors, so it fails the Windows build.
         // `written` 不含結尾的 NUL，因此這個切片就是整個路徑。`String(decodingCString:)` 會讀到
-        // NUL 為止、做同一件事，但它已被標為 deprecated，而這棵樹以 -warnings-as-errors 建置——
-        // 那讓它成為這**同一個修正**裡的第三個「只在 Windows 上出現」的建置失敗。
+        // NUL 為止、做同一件事，但它已被標為 deprecated，而這棵樹以 -warnings-as-errors 建置，
+        // 用了就會讓 Windows 建置失敗。
         return String(decoding: buf[0..<Int(written)], as: UTF16.self)
         #else
         return path
@@ -911,21 +816,10 @@ enum Platform {
         #if canImport(ucrt)
         // Windows answers through the native API rather than the CRT's stat.
         //
-        // `stat("NUL")` TRAPPED: `csv2 -o NUL` exited 132 -- SIGILL -- with an
-        // empty stderr, where macOS and Linux give the documented "not a
-        // regular file, use -so" refusal. The trap was bracketed to this
-        // function on 2026-09-08: `-o NUL -so` still reported the exclusivity
-        // refusal that precedes this call, and `-o nodir/NUL` died before the
-        // "directory does not exist" refusal that follows it, while
-        // `-o nodir/out.csv` reached that refusal normally. So the crash sat
-        // between them, and this is the only call in that window that depends
-        // on the name.
-        //
-        // A crash with an empty stderr is the failure this tool exists to
-        // refuse: it names neither the cause nor the way out, and 132 is
-        // indistinguishable in most scripts from being killed by a signal. The
-        // caller's intent -- discard the output -- is ordinary, and the page's
-        // answer to it (`-so`) is good; they just have to survive this first.
+        // `stat("NUL")` traps: `csv2 -o NUL` would exit 132 -- SIGILL -- with
+        // an empty stderr, where macOS and Linux give the documented "not a
+        // regular file, use -so" refusal. A crash with an empty stderr names
+        // neither the cause nor the way out.
         //
         // GetFileAttributesW answers for files and directories; a device has no
         // attributes and reports INVALID_FILE_ATTRIBUTES, so the type is asked
@@ -934,30 +828,24 @@ enum Platform {
         //
         // Windows 這一支改用原生 API 回答，而不是 CRT 的 stat。
         //
-        // `stat("NUL")` 會 **trap**：`csv2 -o NUL` 以 132（SIGILL）結束、stderr 全空，而 macOS 與
-        // Linux 上得到的是那則有記載的「不是一般檔案，請用 -so」拒絕。2026-09-08 把那次 trap 夾到了
-        // 這個函式：`-o NUL -so` 仍然回報了「在這個呼叫之前」的互斥拒絕，而 `-o nodir/NUL` 死在
-        // 「在這個呼叫之後」的「目錄不存在」拒絕之前——同時 `-o nodir/out.csv` 正常抵達了那則拒絕。
-        // 於是崩潰就落在兩者之間，而那個區間裡唯一與「名字」有關的呼叫就是這一個。
-        //
-        // 一個帶著空 stderr 的當機，正是這個工具存在要拒絕的那種失敗：它既沒說原因、也沒說出路，
-        // 而 132 在大多數腳本裡與「被訊號殺死」無法區分。呼叫端的意圖——把輸出丟掉——很平常，而
-        // 這一頁對它的答案（`-so`）也很好；他們只是得先活過這一關。
+        // `stat("NUL")` 會 **trap**：`csv2 -o NUL` 會以 132（SIGILL）結束、stderr 全空，而 macOS
+        // 與 Linux 上得到的是那則有記載的「不是一般檔案，請用 -so」拒絕。stderr 全空的當機既沒說
+        // 原因、也沒說出路。
         //
         // GetFileAttributesW 回答得了檔案與目錄；而一個裝置沒有屬性、會回報
         // INVALID_FILE_ATTRIBUTES，因此型別改以「不要求任何存取權」開啟的 handle 去問——那在一個
         // 「讀或寫都不會成功」的裝置上仍然開得起來。QA。
         // GetFileType on a handle, not GetFileAttributesW, because attributes
-        // answer "regular file" for `NUL`: the first version asked them first
-        // and so still called a device a regular file -- the crash was gone but
-        // the refusal was the temp-file one ("cannot create temporary file
-        // beside \\.\NUL"), not the documented "not a regular file ... Use
-        // -so". The handle is opened with NO access rights, which succeeds on a
+        // answer "regular file" for `NUL`: asking them first calls a device a
+        // regular file, and the refusal becomes the temp-file one ("cannot
+        // create temporary file beside \\.\NUL") instead of the documented
+        // "not a regular file ... Use -so". The handle is opened with NO access
+        // rights, which succeeds on a
         // device that a read or a write would not, and with BACKUP_SEMANTICS so
         // a directory opens too.
         // 用 handle 上的 GetFileType，而不是 GetFileAttributesW——因為屬性會把 `NUL` 回答成
-        // 「一般檔案」：第一版先問屬性，於是仍然把一個裝置當成一般檔案，當機是沒了，但那則拒絕
-        // 變成暫存檔那一則（「cannot create temporary file beside \\.\NUL」），而不是文件記載的
+        // 「一般檔案」：先問屬性就會把裝置當成一般檔案，拒絕訊息會變成暫存檔那一則
+        // （「cannot create temporary file beside \\.\NUL」），而不是文件記載的
         // 「不是一般檔案……請用 -so」。這個 handle 以「不要求任何存取權」開啟——那在一個讀或寫都
         // 不會成功的裝置上仍然開得起來——並帶上 BACKUP_SEMANTICS，讓目錄也開得起來。
         let h: HANDLE = path.withCString(encodedAs: UTF16.self) { wpath in
@@ -981,7 +869,7 @@ enum Platform {
         // 0o100000, 0o040000, 0o010000) and have been since V7 Unix, so
         // writing them costs nothing and removes a per-platform spelling.
         // 用數字而不是名字：在 Windows 上 `S_IFMT` 是有歧義的——CRT 同時提供它與 `_S_IFMT`
-        // ——而 Swift 拒絕替我們選。這些值在 csv2 建置的每一個平台上都相同（0o170000、
+        // ——而 Swift 拒絕代為選擇。這些值在 csv2 建置的每一個平台上都相同（0o170000、
         // 0o100000、0o040000、0o010000），而且從 V7 Unix 以來就是這樣，因此直接寫出來
         // 沒有任何代價，還少掉一組「每個平台各自拼寫」的名字。
         let fmt = UInt32(st.st_mode) & 0o170000
@@ -999,7 +887,7 @@ enum Platform {
     /// so the refusal can name the path the caller typed, rather than failing
     /// later with a path the shell produced -- `-o /dev/stdout` with stdout
     /// redirected to a file resolves to /dev/fd/1, whose DIRECTORY is /dev,
-    /// and the old failure read "cannot create temporary file beside
+    /// and the later failure would read "cannot create temporary file beside
     /// /dev/fd/1: No such file or directory": a false cause, a path never
     /// typed, and no way out.
     /// 這個目錄裡建得了新檔案嗎？那才是 `-o` 真正要問的問題——它會先在那裡寫一個暫存檔，
@@ -1007,7 +895,7 @@ enum Platform {
     /// Windows 用 `_access`、其他平台用 `access`，W_OK 兩邊都是 2。在這裡問，是為了讓那條
     /// 拒絕能指名「呼叫端打出來的路徑」，而不是稍後以一個 shell 產生的路徑失敗——
     /// `-o /dev/stdout` 在 stdout 被導向檔案時會解析成 /dev/fd/1，它的「目錄」是 /dev，
-    /// 而舊的失敗訊息是「cannot create temporary file beside /dev/fd/1: No such file or
+    /// 而稍後的失敗訊息會是「cannot create temporary file beside /dev/fd/1: No such file or
     /// directory」：錯的原因、沒打過的路徑、沒有出路。
     static func directoryAcceptsNewFiles(_ dir: String) -> Bool {
         let d = dir.isEmpty ? "." : dir
@@ -1019,8 +907,9 @@ enum Platform {
         #endif
     }
 
-    /// The system's text for an errno, as a message can print it.
-    /// 一個 errno 對應的系統文字，可直接印在訊息裡。
+    /// The system's text for an errno, so a message says what actually
+    /// stopped it rather than what usually stops things.
+    /// 一個 errno 對應的系統文字，讓訊息說出真正阻止了它的原因，而不是通常的那個。
     static func errorText(_ code: Int32) -> String {
         #if canImport(ucrt)
         // UCRT deprecates strerror because it returns shared storage. Use its
@@ -1064,15 +953,14 @@ enum Platform {
     /// run does not leave it beside the target.
     ///
     /// The README promises a failed in-place edit "leaves no temp file beside
-    /// it", and that was true only of the error paths: a SIGINT, SIGTERM or
-    /// SIGHUP part-way through a 32 MB edit left a hidden 4 MB file behind,
-    /// invisible to `ls` and never cleaned up. SIGKILL still can, and always
-    /// will -- it cannot be caught -- which is why the README now says so.
+    /// it". Without this, that holds only on the error paths: a signal
+    /// part-way through an edit leaves a hidden temp file that `ls` does not
+    /// show and nothing cleans up. SIGKILL cannot be caught and still leaves
+    /// one, as the README says.
     /// 在寫入期間記住一個暫存檔，好讓一次被中斷的執行不會把它留在目標旁邊。
-    /// README 承諾「失敗的就地編輯不會在旁邊留下暫存檔」，而那只在錯誤路徑上成立：一次
-    /// 32 MB 編輯進行到一半收到 SIGINT／SIGTERM／SIGHUP，會留下一個 4 MB 的隱藏檔，
-    /// `ls` 看不到，也沒有人會清掉。SIGKILL 仍然會、而且永遠會——它攔不下來——所以 README
-    /// 現在把這件事寫出來了。
+    /// README 承諾「失敗的就地編輯不會在旁邊留下暫存檔」。少了這個，那只在錯誤路徑上成立：
+    /// 編輯到一半收到訊號，會留下一個 `ls` 看不到、也沒有人會清掉的隱藏暫存檔。SIGKILL
+    /// 攔不下來，仍會留下一個，README 也這樣寫。
     static func rememberTemp(_ path: String) {
         forgetTemp()
         #if canImport(ucrt)
@@ -1086,19 +974,16 @@ enum Platform {
         #endif
         #if !canImport(ucrt)
         // Every catchable signal whose default action ends the process, not
-        // the three that came to mind. A round killed an edit with SIGXFSZ,
-        // SIGPIPE, SIGALRM and SIGUSR1 and got a 13 MB hidden temp file each
-        // time, against a README that names SIGKILL as the one that leaves
-        // one. SIGXFSZ is not exotic -- an `ulimit -f` or a filesystem quota
-        // produces it.
+        // just SIGINT/SIGTERM/SIGHUP: any of the others would leave the temp
+        // file, and the README names only SIGKILL as doing so. SIGXFSZ is not
+        // exotic -- an `ulimit -f` or a filesystem quota produces it.
         //
         // SIGPIPE is included and does not disturb readerHasGone(): that path
         // restores SIG_DFL before re-raising, so the handler runs at most once
         // and the process still dies of the signal.
-        // 每一個「可攔截、且預設動作是結束行程」的訊號，而不是當初想到的那三個。有一個回合
-        // 用 SIGXFSZ、SIGPIPE、SIGALRM、SIGUSR1 各殺了一次編輯，每次都留下一個 13 MB 的
-        // 隱藏暫存檔——而 README 寫的是「SIGKILL 是那個會留下暫存檔的」。SIGXFSZ 一點也不
-        // 罕見：一個 `ulimit -f` 或檔案系統配額就會產生它。
+        // 每一個「可攔截、且預設動作是結束行程」的訊號，而不只是 SIGINT／SIGTERM／SIGHUP：
+        // 其他任何一個都會留下暫存檔，而 README 只說 SIGKILL 會。SIGXFSZ 一點也不罕見：
+        // 一個 `ulimit -f` 或檔案系統配額就會產生它。
         // SIGPIPE 也在其中，且不會干擾 readerHasGone()：那條路徑會先還原 SIG_DFL 再重新
         // 引發，因此處理常式最多跑一次，而行程仍然死於那個訊號。
         for sig in [SIGINT, SIGTERM, SIGHUP, SIGQUIT, SIGXFSZ, SIGXCPU,
@@ -1144,9 +1029,9 @@ enum Platform {
     ///
     /// The temp-file-and-rename that makes a write atomic for readers also
     /// makes the result a NEW file, with the umask's mode rather than the
-    /// original's. A file at 0644 stayed 0644 only by coincidence; one at 0600
-    /// came back world-readable, and one at 0444 was rewritten at all, because
-    /// rename needs permission on the DIRECTORY and never looks at the file.
+    /// original's. Without this a 0600 file comes back world-readable, and a
+    /// 0444 one is rewritten at all, because rename needs permission on the
+    /// DIRECTORY and never looks at the file.
     ///
     /// Restoring the mode does not restore the read-only intent -- csv2 still
     /// rewrites a 0444 file -- but it stops an edit from quietly widening who
@@ -1155,9 +1040,8 @@ enum Platform {
     /// 把一個檔案的權限位元套到另一個檔案上。
     ///
     /// 讓寫入對讀者而言不可分割的那個「暫存檔 + rename」，同時也讓結果成為一個「新」檔案，
-    /// 帶的是 umask 的模式而不是原檔的。一個 0644 的檔案維持 0644 只是碰巧；一個 0600 的
-    /// 會變成全世界可讀，而一個 0444 的根本會被改寫——因為 rename 需要的是「目錄」的權限，
-    /// 它從來不看那個檔案。
+    /// 帶的是 umask 的模式而不是原檔的。少了這個，一個 0600 的檔案會變成全世界可讀，而一個
+    /// 0444 的根本會被改寫——因為 rename 需要的是「目錄」的權限，它從來不看那個檔案。
     ///
     /// 還原模式並不能還原「唯讀」這個意圖——csv2 仍然會改寫一個 0444 的檔案——但它能阻止
     /// 一次編輯悄悄放寬「誰讀得到它」，而那一半才是會把資料交給別人的那一半。
@@ -1176,12 +1060,11 @@ enum Platform {
     /// Peak resident set size in BYTES.
     ///
     /// Three different answers. Darwin's ru_maxrss is bytes; Linux's is
-    /// kilobytes -- the same struct field with two units, which is the kind of
-    /// difference that only shows up when the second platform runs it. Windows
-    /// has no getrusage at all and reports through GetProcessMemoryInfo.
+    /// kilobytes -- the same struct field with two units. Windows has no
+    /// getrusage at all and reports through GetProcessMemoryInfo.
     /// 峰值常駐記憶體，單位為「位元組」。
     /// 三個平台三種答案。Darwin 的 ru_maxrss 是位元組，Linux 的是 KB——同一個
-    /// 結構欄位、兩種單位，正是那種「只有第二個平台真的跑起來才會顯現」的差異。
+    /// 結構欄位、兩種單位。
     /// Windows 根本沒有 getrusage，改由 GetProcessMemoryInfo 回報。
     static func peakRSSBytes() -> Int {
         #if canImport(ucrt)
@@ -1190,17 +1073,13 @@ enum Platform {
         // K32GetProcessMemoryInfo, not GetProcessMemoryInfo. The two are the
         // same call; the difference is which DLL exports it. The psapi.h name
         // lives in psapi.dll and is NOT in the set Swift's WinSDK module
-        // surfaces, so it does not resolve -- `cannot find
-        // 'GetProcessMemoryInfo' in scope`, which was the ONE error in the
-        // whole source on the first Windows compile, 2026-08-19. The K32
-        // prefixed form has been exported from kernel32 since Windows 7 and
-        // does resolve. Measured on that machine: 9129984 bytes.
+        // surfaces, so it does not resolve (`cannot find
+        // 'GetProcessMemoryInfo' in scope`). The K32-prefixed form has been
+        // exported from kernel32 since Windows 7 and does resolve.
         // 用 K32GetProcessMemoryInfo，不是 GetProcessMemoryInfo。兩者是同一個呼叫，
         // 差別在於由哪個 DLL 匯出。psapi.h 的那個名字住在 psapi.dll，而它**不在** Swift 的
-        // WinSDK 模組所呈現的那一組裡，因此解析不到——`cannot find 'GetProcessMemoryInfo'
-        // in scope`，那是 2026-08-19 第一次 Windows 編譯時，整份原始碼裡唯一的錯誤。
-        // 帶 K32 前綴的那個自 Windows 7 起由 kernel32 匯出，解析得到。在該機器上實測：
-        // 9129984 bytes。
+        // WinSDK 模組所呈現的那一組裡，因此解析不到（`cannot find 'GetProcessMemoryInfo'
+        // in scope`）。帶 K32 前綴的那個自 Windows 7 起由 kernel32 匯出，解析得到。
         guard K32GetProcessMemoryInfo(GetCurrentProcess(), &counters, counters.cb) else { return 0 }
         return Int(counters.PeakWorkingSetSize)
         #else

@@ -82,10 +82,10 @@ struct Options {
     var markdown = false
     var pretty = false
     /// Default `preserve`: the only value that keeps a one-cell edit to a
-    /// one-cell diff. `compact` was the default until 2026-08-29 and stays
-    /// reachable by name; `--pretty` is the same thing as `--md-style pretty`.
-    /// 預設 `preserve`：唯一能讓「一格的編輯」維持成「一格的 diff」的值。`compact` 在
-    /// 2026-08-29 之前是預設，仍可指名使用；`--pretty` 與 `--md-style pretty` 是同一件事。
+    /// one-cell diff. `compact` stays reachable by name; `--pretty` is the same
+    /// thing as `--md-style pretty`.
+    /// 預設 `preserve`：唯一能讓「一格的編輯」維持成「一格的 diff」的值。`compact` 仍可
+    /// 指名使用；`--pretty` 與 `--md-style pretty` 是同一件事。
     var mdStyle = MDStyle.preserve
     var json = false
     var jsonASCII = false
@@ -97,29 +97,21 @@ struct Options {
     /// `--en`／`--zh` 給了幾個——那是那兩個 Bool 說不出來的：它們互相清除，因此「兩個都給」
     /// 看起來與「只給了後面那個」一模一樣。
     // Counted, not inferred from the state they leave behind -- the same
-    // reason `langFlags` exists. `--pretty` and `--md-style pretty` are the
-    // SAME setting, so each assignment overwrote the other and the last one on
-    // the command line won, silently: `--pretty --md-style compact` gave
-    // compact and the reverse order gave pretty, rc=0 with nothing on stderr.
-    // A wrapper appending a style to a user's flags flipped its own output. NN.
+    // reason `langFlags` exists. `--pretty` and `--md-style` set the SAME
+    // value, so without a count the last one on the command line wins
+    // silently and the result depends on flag order. NN.
     // 用**數**的，而不是從它們留下的狀態去推——與 `langFlags` 存在的理由相同。`--pretty` 與
-    // `--md-style pretty` 是**同一個**設定，因此兩次賦值互相覆寫、命令列上後面那個贏，而且是靜默的：
-    // `--pretty --md-style compact` 給出 compact，順序反過來給出 pretty，rc=0 而 stderr 什麼都沒有。
-    // 一支「在使用者旗標後面追加一個 style」的包裝腳本，會把自己的輸出翻面。NN。
+    // `--md-style` 設的是**同一個**值，不計數的話命令列上後面那個會靜默勝出，結果取決於旗標順序。NN。
     var sawPretty = 0
     var sawMdStyle = 0
     /// The style `--md-style` was actually given, kept because the FINAL state
     /// cannot answer the question. With `--md-style compact --pretty` the last
     /// assignment leaves `.pretty`, so a check written against `o.mdStyle`
-    /// catches one order and not the other -- which my first fix did, and my own
-    /// test caught only because it ran both orders. The comment beside
-    /// `langFlags` says this exactly: count the flags, not the state they leave
-    /// behind. I read it and then did half of it.
+    /// catches one flag order and not the other. Any test of this must run
+    /// both orders. NN.
     /// `--md-style` **實際被給定**的那個樣式，留著是因為**最終狀態**回答不了這個問題。
     /// `--md-style compact --pretty` 的最後一次賦值留下的是 `.pretty`，因此一個對著 `o.mdStyle`
-    /// 寫的檢查只抓得到一種順序——我的第一版修法就是這樣，而我自己的測試抓到它，只因為它跑了
-    /// **兩種**順序。`langFlags` 旁邊那段註解說的正是這件事：數旗標，不要數它們留下的狀態。
-    /// 我讀了它，然後只做了一半。
+    /// 寫的檢查只抓得到其中一種旗標順序。測這件事一定要兩種順序都跑。NN。
     var explicitStyle: MDStyle? = nil
     var langFlags = 0
     var sawEn = 0
@@ -185,40 +177,18 @@ func errorCode(_ message: String) -> String {
 /// 那樣被弄斷的（DT）。
 func resolved(_ path: String) -> String {
     #if canImport(ucrt)
-    // Windows normalises through GetFullPathNameW instead of Foundation's URL.
-    //
-    // `resolvingSymlinksInPath()` TRAPPED on a device name: `csv2 -o NUL` and
-    // `csv2 -log NUL` both exited 132 -- SIGILL -- with an empty stderr, where
-    // macOS and Linux give the documented refusal. Every observation fits this
-    // call and only this call: the `-o` vs `-i` identity comparison runs at the
-    // top of validate, BEFORE the "not a regular file" refusal and before the
-    // "directory does not exist" one, which is why `-o nodir/NUL` died while
-    // `-o nodir/out.csv` reached the second; `-log NUL` reaches the same
-    // comparison through refuseLogAliases, which runs before the log is opened,
-    // which is why `-log g.log` never created g.log; and `-i nosuch.csv -o NUL`
-    // died before the input was ever opened.
-    //
-    // An earlier fix rewrote `fileKind` for Windows on a bracketing that named
-    // the wrong function. That change is kept -- it classifies a device
-    // correctly, which is what makes the refusal below say the right thing --
-    // but it was not the crash.
+    // Windows normalises through GetFullPathNameW instead of Foundation's URL:
+    // `resolvingSymlinksInPath()` traps (SIGILL, empty stderr) on a device
+    // name such as NUL. This runs at the top of validate, before any refusal
+    // could explain the problem, so `-o NUL` and `-log NUL` must not reach it.
     //
     // GetFullPathNameW does not follow symlinks. It does not need to: this
     // function normalises spelling, and `sameFile` asks the filesystem for
     // identity separately and treats that as the authority. QA.
     //
-    // Windows 改以 GetFullPathNameW 正規化，而不是 Foundation 的 URL。
-    //
-    // `resolvingSymlinksInPath()` 在一個裝置名字上會 **trap**：`csv2 -o NUL` 與 `csv2 -log NUL`
-    // 都以 132（SIGILL）結束、stderr 全空，而 macOS 與 Linux 上得到的是那則有記載的拒絕。
-    // 每一項觀察都只指向這一個呼叫：`-o` 與 `-i` 的同一性比對在 validate 的前段，**早於**
-    // 「不是一般檔案」那則拒絕、也早於「目錄不存在」那則——那正是 `-o nodir/NUL` 死掉、而
-    // `-o nodir/out.csv` 抵達了後者的原因；`-log NUL` 經由 refuseLogAliases 走到同一個比對，
-    // 而它在 log 被開啟之前執行——那正是 `-log g.log` 從未建立 g.log 的原因；而
-    // `-i nosuch.csv -o NUL` 死在輸入被開啟之前。
-    //
-    // 先前有一次修正，依據一個「指錯函式」的夾擊結果改寫了 Windows 的 `fileKind`。那個改動留著
-    // ——它能正確分類一個裝置，而那正是底下那則拒絕說得出正確內容的原因——但它不是崩潰的成因。
+    // Windows 改以 GetFullPathNameW 正規化，而不是 Foundation 的 URL：
+    // `resolvingSymlinksInPath()` 遇到 NUL 這類裝置名字會 trap（SIGILL、stderr 全空）。這裡在
+    // validate 的最前段執行，早於任何能說明問題的拒絕，所以 `-o NUL`、`-log NUL` 不能走到它。
     //
     // GetFullPathNameW 不跟隨 symlink。它不需要：這個函式做的是「拼法正規化」，而 `sameFile`
     // 會另外向檔案系統詢問「身分」，並以那個答案為準。QA。
@@ -262,13 +232,10 @@ func sameFile(_ a: String, _ b: String) -> Bool {
 /// 主機名稱吞掉」咬過一次。
 /// Every flag this parser recognises, so a DATA argument can refuse to be one.
 ///
-/// `csv2 -update 1:1 -t -i f.csv --in-place` wrote the two characters `-t`
-/// into the cell, at rc=0. `-append --json` appended a record containing
-/// `--json`. That is this tool's founding failure -- exit zero, plausible
-/// garbage -- arriving through its own argument parser, and the README quotes
-/// multissh being bitten by an unknown option swallowed as a hostname as the
-/// reason unknown flags are always an error. The principle was there; it just
-/// stopped at UNKNOWN flags.
+/// Without this, `csv2 -update 1:1 -t -i f.csv --in-place` would store the two
+/// characters `-t` in the cell at rc=0 -- exit zero with plausible garbage,
+/// the failure this tool exists to prevent. The unknown-flag rule above covers
+/// flags csv2 does not know; this covers the ones it does.
 ///
 /// Known flags only, not "anything starting with a dash": `-update 1:2 -5`
 /// stores a negative number and must keep working. For a value that really is
@@ -279,10 +246,9 @@ func sameFile(_ a: String, _ b: String) -> Bool {
 ///
 /// 這個解析器認得的每一個旗標，好讓「資料」引數能拒絕自己變成其中之一。
 ///
-/// `csv2 -update 1:1 -t -i f.csv --in-place` 會把 `-t` 這兩個字元寫進儲存格，rc=0。
-/// 那正是這個工具的招牌失敗——以 0 結束、輸出看似合理的垃圾——而它是從自己的引數解析器
-/// 進來的；README 還引用了 multissh 被「未知選項被當成主機名吞掉」咬過的事，作為「未知旗標
-/// 一律視為錯誤」的理由。那條原則本來就在，只是停在「未知」旗標上。
+/// 沒有它的話，`csv2 -update 1:1 -t -i f.csv --in-place` 會在 rc=0 下把 `-t` 這兩個字元
+/// 存進儲存格——以 0 結束、輸出看似合理的垃圾，正是這個工具要防的那種失敗。上面那條
+/// 「未知旗標」規則管的是 csv2 不認得的旗標；這份清單管它認得的。
 ///
 /// 只擋「已知旗標」，而不是「所有以減號開頭的東西」：`-update 1:2 -5` 存的是一個負數，
 /// 必須繼續能用。若某個值真的就是一個旗標名，用 `--` 結束旗標解析：`-update 1:1 -- -t`。
@@ -345,29 +311,19 @@ let KNOWN_FLAGS: Set<String> = [
     "value-file",
     "value-stdin",
     "verify-index",
-    // Four names the parser answers to that this list did not carry: version
-    // with its single-letter alias, and the three context flags. A flag absent
-    // from here is written into the file as data instead of being refused --
-    // measured, an edit whose value was the version flag stored it as text at
-    // rc=0, while a read flag in the same position was refused.
-    //
-    // T121h compares this list against the parser's cases and could not see
-    // them: its pattern allowed only lowercase inside an alias, so a case line
-    // carrying a capital-letter alias matched nothing at all and was skipped
-    // whole. Both sides accept capitals now.
+    // The version flag with its single-letter alias, and the three context
+    // flags. A flag absent from here is stored as data instead of refused.
+    // T121h compares this list against the parser's cases; both sides must
+    // accept capital-letter aliases or those case lines are skipped.
     //
     // No flag names in quotes anywhere in this comment. The extraction reads
     // every quoted token between the brackets, so a comment quoting one adds a
-    // flag that does not exist -- which happened while writing this, and cost
-    // two runs to see.
-    // 這份清單先前沒有帶著、而解析器認得的四個名字：版本旗標與它的單字母別名，以及三個
-    // 上下文旗標。一個不在這裡的旗標，會被當成資料寫進檔案而不是被拒絕——實測：一次
-    // 「值就是版本旗標」的編輯，以 rc=0 把它當文字存了進去，而同一個位置的讀取旗標會被拒絕。
-    // T121h 拿這份清單去對解析器的 case，卻看不見它們：它的樣式在別名處只允許小寫，因此一行
-    // 帶著大寫別名的 case 完全不匹配、整行被跳過。現在兩邊都接受大寫。
+    // flag that does not exist.
+    // 版本旗標與它的單字母別名，以及三個上下文旗標。不在這裡的旗標會被當成資料存進去，
+    // 而不是被拒絕。T121h 拿這份清單去對解析器的 case；兩邊都必須接受大寫別名，否則那些
+    // case 行會被整行跳過。
     // 這段註解裡不放任何「加引號的旗標名稱」。抽取器會讀括號之間每一個帶引號的 token，
-    // 因此一段引用了旗標名的註解，會憑空多出一個不存在的旗標——寫這段時就發生了，花了兩次
-    // 執行才看出來。
+    // 因此一段引用了旗標名的註解，會憑空多出一個不存在的旗標。
     "version",
     "V",
     "A",
@@ -392,19 +348,17 @@ func parseArgs(_ argv: [String]) throws -> Options {
     var dataIsLiteral = false
     /// Flags already seen, for the ones that are not repeatable.
     ///
-    /// Given twice, they used to take the LAST silently. For most that is a
-    /// surprise; for `-hash` it discloses data: `-hash note -hash ver` hashed
-    /// `ver` and left `note` in plaintext, at rc=0, in a file whose whole
-    /// purpose was that `note` be masked. The README states the edit verbs are
-    /// repeatable and accumulate, which makes the unstated opposite rule for
-    /// everything else actively misleading.
+    /// Taking the last of two silently is a surprise for most flags; for
+    /// `-hash` it discloses data: `-hash note -hash ver` would hash `ver` and
+    /// leave `note` in plaintext at rc=0. The edit verbs are documented as
+    /// repeatable and accumulating, so every other flag refuses a repeat
+    /// rather than quietly behaving the opposite way.
     ///
     /// 已經出現過的旗標，供「不可重複」的那些使用。
     ///
-    /// 重複給出時，它們原本會靜默採用「最後一個」。對多數旗標那只是意外；對 `-hash` 則會
-    /// 洩漏資料：`-hash note -hash ver` 雜湊了 `ver`、把 `note` 留成明文，rc=0，而那個檔案
-    /// 存在的全部目的就是讓 `note` 被遮蔽。README 說「編輯動詞可重複、會累加」，這讓其餘
-    /// 旗標那條沒有被寫出來的相反規則，變得會主動誤導人。
+    /// 重複時靜默採用最後一個，對多數旗標只是意外；對 `-hash` 則會洩漏資料：
+    /// `-hash note -hash ver` 會雜湊 `ver`、把 `note` 留成明文，rc=0。編輯動詞有記載為可重複、
+    /// 會累加，因此其餘旗標一律拒絕重複，而不是悄悄地做相反的事。
     var seenFlags: Set<String> = []
     func once(_ name: String) throws {
         guard seenFlags.insert(name).inserted else {
@@ -417,7 +371,7 @@ func parseArgs(_ argv: [String]) throws -> Options {
     /// For an argument that carries DATA -- a value, a row literal, a search
     /// string. Those are the ones where Swift's lossy decode of argv changes
     /// what csv2 stores or compares, silently and at rc=0: `-update 1:2 $'A\xffB'`
-    /// wrote `A U+FFFD B`, which is the exact substitution T8 exists to prevent,
+    /// would store `A U+FFFD B`, the substitution T8 exists to prevent,
     /// arriving through the write path instead of the read path.
     ///
     /// Only these. A PATH may legitimately hold arbitrary bytes on Linux, and
@@ -427,7 +381,7 @@ func parseArgs(_ argv: [String]) throws -> Options {
     ///
     /// 給「帶資料」的參數用——一個值、一列 row literal、一個搜尋字串。那些正是
     /// 「Swift 對 argv 的有損解碼」會改變 csv2 所儲存或比對的東西的地方，而且是靜默的、
-    /// rc=0：`-update 1:2 $'A\xffB'` 存進去的是 `A U+FFFD B`，那正是 T8 存在所要防止的
+    /// rc=0：`-update 1:2 $'A\xffB'` 會存成 `A U+FFFD B`，那正是 T8 存在所要防止的
     /// 那個替代，只是它從「寫入」路徑而不是「讀取」路徑進來。
     /// 只有這些。**路徑**在 Linux 上本來就可以是任意位元組，為一個 csv2 並未犯下的錯誤去
     /// 拒絕它們，會弄壞一個今天可以正常運作的用法——csv2 把路徑交給檔案系統，並不把它當成
@@ -438,33 +392,19 @@ func parseArgs(_ argv: [String]) throws -> Options {
             throw usageError(
                 // "end flag parsing" overstates what `--` does here: it marks
                 // the NEXT argument as data and leaves later flags alone,
-                // which is what lets -i and -o follow the value. A round read
-                // the phrase, wrote it into the README as "everything after it
-                // is data", and the next round proved that false in one
-                // command.
+                // which is what lets -i and -o follow the value. Do not describe
+                // it as "everything after it is data".
                 // 「結束旗標解析」把 `--` 在這裡做的事說大了：它讓「下一個」引數成為資料，
-                // 而後面的旗標依然是旗標——那正是 -i、-o 可以接在值後面的原因。有一個回合
-                // 讀了這個說法、把它寫成 README 裡的「其後一律視為資料」，而下一個回合用
-                // 一個指令就證明那是錯的。
-                // "will not write a flag into your file" was written for the
-                // edit verbs and reused for every verb, so `-contains -r`
-                // answered a SEARCH with a sentence about writing. The refusal
-                // is right either way; what it is protecting differs, and the
-                // wording now says the part that is common to both.
-                // 「不會把一個旗標寫進你的檔案」是為編輯動詞寫的，卻被每一個動詞共用，
-                // 於是 `-contains -r` 用一句關於「寫入」的話去回答一次「搜尋」。兩種情況下
-                // 這條拒絕都是對的；不同的是它在保護什麼，而現在的措辭說的是兩者共通的那一半。
-                // The prescription used to be a whole command, `\(flag) -- \(v)`,
-                // and it was runnable only for the verbs that take ONE argument.
-                // `-update` takes r:c and then the value, so the address had
-                // already been consumed by the time this ran, and typing the
-                // suggestion back gave `-update: expected r:c, got "-append"`.
-                // It now shows where `--` goes rather than reconstructing a
-                // command it cannot see all of. Round 74, JC.
-                // 這個處方原本是一整個指令 `\(flag) -- \(v)`，而它只有在「吃一個引數」的動詞上
-                // 才跑得起來。`-update` 先吃 r:c、再吃值，因此走到這裡時那個位址早就被消耗掉了，
-                // 把建議照打回去會得到 `-update: expected r:c, got "-append"`。現在它指出 `--`
-                // 該放在哪裡，而不是去重建一個它看不全的指令。第 74 回合，JC。
+                // 而後面的旗標依然是旗標——那正是 -i、-o 可以接在值後面的原因。不要把它描述成
+                // 「其後一律視為資料」。
+                // Every verb shares this message, searches included, so it
+                // says nothing about writing.
+                // 每一個動詞（包括搜尋）共用這則訊息，因此它不提「寫入」。
+                // It shows where `--` goes rather than a whole command: a verb
+                // such as `-update` has already consumed its address by now,
+                // so a reconstructed command would be wrong. Round 74, JC.
+                // 它指出 `--` 該放在哪裡，而不是給一整個指令：像 `-update` 這樣的動詞走到這裡時
+                // 已經吃掉了位址，重建出來的指令會是錯的。第 74 回合，JC。
                 "\(flag) \(v): \(v) is a flag, and this position takes DATA. csv2 will not treat a flag as data. If the value really is \(v), put -- immediately BEFORE it, leaving everything else where it is: ... -- \(v) ...",
                 "\(flag) \(v)：\(v) 是一個旗標，而這個位置要的是「資料」。csv2 不會把一個旗標當成資料。若這個值真的就是 \(v)，請把 -- 放在它的「正前面」，其餘一切位置不變：... -- \(v) ...")
         }
@@ -537,13 +477,11 @@ func parseArgs(_ argv: [String]) throws -> Options {
         return n
     }
 
-    /// Counts are 1-based, like every index in this tool. `-head 0` and
-    /// `-head -1` quietly returned nothing, which reads as "the file is empty"
-    /// -- a wrong answer delivered as a successful one. They are typos, not
-    /// requests.
-    /// 計數是 1-based，與本工具所有索引一致。`-head 0` 與 `-head -1` 原本靜默回傳
-    /// 空結果，那讀起來像「檔案是空的」——一個以成功姿態送出的錯誤答案。它們是
-    /// 打錯字，不是請求。
+    /// Counts are 1-based, like every index in this tool. Accepting `-head 0`
+    /// would return nothing, which reads as "the file is empty" -- a wrong
+    /// answer delivered as a successful one. They are typos, not requests.
+    /// 計數是 1-based，與本工具所有索引一致。接受 `-head 0` 會回傳空結果，那讀起來像
+    /// 「檔案是空的」——一個以成功姿態送出的錯誤答案。它們是打錯字，不是請求。
     func positiveInt(_ flag: String, _ s: String) throws -> Int {
         let n = try intVal(flag, s)
         guard n >= 1 else {
@@ -567,19 +505,14 @@ func parseArgs(_ argv: [String]) throws -> Options {
     while i < argv.count {
         let arg = argv[i]
         guard arg.hasPrefix("-"), arg.count > 1 else {
-            // A pending modifier changes what this stray word MEANS. `csv2
-            // -col license -i f.csv` said `unexpected argument "license"` and
-            // never mentioned `-col` -- so the message accused the value while
-            // the mistake was the flag's context, and `-col` IS a real flag,
-            // just one that belongs to `-delete`. Every other wrong-flag
-            // message here names the flag. The dangling-modifier refusal below
-            // says exactly the right thing and could not be reached: a bare
-            // word after the modifier ends the parse first. OQ.
+            // A pending modifier changes what this stray word MEANS. For
+            // `csv2 -col license -i f.csv` the mistake is the modifier's
+            // position, not the value, so the message names `-col`. This must
+            // come first: a bare word after a modifier ends the parse before
+            // the dangling-modifier refusal can be reached. OQ.
             // 一個還沒依附的修飾符，會改變這個落單的字**代表什麼**。`csv2 -col license -i f.csv`
-            // 先前回答 `unexpected argument "license"`，從頭到尾沒提過 `-col`——於是那則訊息指控
-            // 的是「值」，而使用者打錯的是「旗標的位置」，何況 `-col` **是**一個真旗標，只是它
-            // 屬於 `-delete`。這裡其他每一則錯用旗標的訊息都會指名那個旗標。而底下那條「修飾符
-            // 找不到動詞」的拒絕說的正是對的話，卻永遠到不了：修飾符後面一個落單的字會先結束解析。OQ。
+            // 打錯的是修飾符的位置而不是值，所以訊息要指名 `-col`。這段必須先跑：修飾符後面一個
+            // 落單的字會先結束解析，「修飾符找不到動詞」那條拒絕根本到不了。OQ。
             if o.cellModifier || o.colModifier {
                 let which = o.cellModifier ? "-cell" : "-col"
                 throw usageError(
@@ -595,15 +528,14 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "contains":
             try once("-contains")
             let needle = try needData(arg)
-            // An empty search string matched every cell in the file. Refused
+            // An empty search string matches every cell in the file. Refused
             // for the reason an empty column list is refused: "search for
             // nothing" and "a variable that came out empty" cannot be told
             // apart, and one of them prints the whole file as a report of
-            // matches. `-r` is how you ask for every record, and the sibling
-            // refusal for -hash said so first.
+            // matches. `-r` is how you ask for every record.
             // 空的搜尋字串會匹配檔案裡的每一個儲存格。拒絕它的理由與「空的欄位清單」相同：
             // 「搜尋空字串」與「某個變數算成了空字串」無法區分，而其中一種會把整個檔案當成
-            // 「命中報告」印出來。要每一筆請用 `-r`，而 -hash 那條同輩的拒絕先說了這件事。
+            // 「命中報告」印出來。要每一筆請用 `-r`。
             if needle.isEmpty {
                 throw usageError(
                     "-contains was given an empty string, which matches every cell. Searching for nothing cannot be told from a variable that came out empty; use -r to read every record",
@@ -621,19 +553,15 @@ func parseArgs(_ argv: [String]) throws -> Options {
             try once("--search-row")
             o.searchScopeFlags += 1
             let rowArg = try need(arg)
-            // A header address here answered with the wrong CONCEPT: `0` gave
-            // "a count must be at least 1" and `0a` gave "not a number". A row
-            // address is not a count, and `--search-row 0` is precisely what a
-            // reader tries straight after reading that the locating report
-            // prints `0` for a header. The right message already exists in this
-            // binary -- `-get 0:1` and `--search-cell 0a:1` both reach it -- and
-            // two call sites did not, because it lives in the `r:c` parser and
-            // a row address is a single token. NT.
-            // 一個標頭位址在這裡得到的是**錯誤的概念**：`0` 回答「a count must be at least 1」、
-            // `0a` 回答「not a number」。一個列位址不是一個計數，而 `--search-row 0` 正是讀者在
-            // 讀到「定位報告為標頭印 `0`」之後下一步會打的東西。那則正確的訊息**已經在這個執行檔
-            // 裡**——`-get 0:1` 與 `--search-cell 0a:1` 都到得了它——而有兩個呼叫點到不了，因為它住在
-            // `r:c` 的解析器裡，而一個列位址只是單一個 token。NT。
+            // A header address is checked before positiveInt, which would
+            // answer with the wrong concept ("a count must be at least 1",
+            // "not a number"). A row address is not a count, and the locating
+            // report prints `0` for a header, so readers will try it. The
+            // `r:c` parser has its own copy of this check; a row address is a
+            // single token and never reaches it. NT.
+            // 標頭位址要在 positiveInt 之前檢查，否則得到的是錯誤的概念（「計數至少為 1」、
+            // 「不是數字」）。列位址不是計數，而定位報告為標頭印 `0`，讀者一定會去試它。
+            // `r:c` 解析器有自己的一份同樣檢查；列位址只是單一個 token，走不到那裡。NT。
             if ["0", "0a", "0b"].contains(rowArg) {
                 throw usageError(
                     "--search-row: \(rowArg) names a header row (the locating report prints 0 on a .csv and 0a/0b on a .csv2), and no verb can address one; use --include-headers to search them",
@@ -648,16 +576,12 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "include-headers": o.includeHeaders = true
         case "normalize": o.normalize = true
         // `contextGiven` rather than `after > 0 || before > 0`: the output SHAPE
-        // must not depend on the NUMBER. `-A 0` left the locating report in
-        // place while `-A 1` switched to records, so a script writing
-        // `-A "$N"` got one of two incompatible formats depending on a
-        // variable -- TAB-separated report against CSV, at rc=0, with nothing
-        // said. That is the mistake the README opens with, reached through a
-        // flag interaction.
+        // must not depend on the NUMBER. Otherwise a script writing `-A "$N"`
+        // gets a TAB-separated report when N is 0 and CSV records otherwise,
+        // at rc=0 with nothing said.
         // 用 `contextGiven`，而不是 `after > 0 || before > 0`：輸出的「形狀」不該取決於那個
-        // 「數字」。`-A 0` 會讓定位報告留著，而 `-A 1` 會切成紀錄形狀，於是一支寫
-        // `-A "$N"` 的腳本，會依一個變數拿到兩種不相容的格式——TAB 分隔的報告對上 CSV，
-        // rc=0，什麼也不說。那正是 README 開頭那個錯誤，只是經由一次旗標互動抵達。
+        // 「數字」。否則一支寫 `-A "$N"` 的腳本，在 N 為 0 時拿到 TAB 分隔的報告、其餘時候拿到
+        // CSV 紀錄，rc=0，什麼也不說。
         case "A": o.after = try nonNegativeInt(arg, try need(arg)); o.contextGiven = true
         case "B":
             o.before = try nonNegativeInt(arg, try need(arg))
@@ -699,50 +623,35 @@ func parseArgs(_ argv: [String]) throws -> Options {
         // Each clears the other so the LAST one wins -- which is what made
         // giving both a silent, order-dependent choice. The pair is refused in
         // validate(), and it can only see that both were given if the parse
-        // stops erasing the evidence: `langGiven` counts the flags, not the
+        // does not erase the evidence: `langFlags` counts the flags, not the
         // state they leave behind.
         // 兩者互相清除，於是「後面那個贏」——而那正是「兩個都給」變成一個安靜、且與順序有關的
         // 選擇的原因。這一對在 validate() 裡被拒絕，而它要看得見「兩個都給了」，解析就不能把
-        // 證據抹掉：`langGiven` 數的是旗標，不是它們留下的狀態。
+        // 證據抹掉：`langFlags` 數的是旗標，不是它們留下的狀態。
         case "zh": o.zh = true; o.enOnly = false; o.langFlags += 1; o.sawZh += 1
         case "en": o.enOnly = true; o.zh = false; o.langFlags += 1; o.sawEn += 1
         case "cell": o.cellModifier = true
         case "col": o.colModifier = true
         case "truncate-partial": o.truncatePartial = true
         // A modifier belongs to ONE verb and is cleared once that verb has
-        // consumed it. Leaving it set made it sticky: in
-        // `-delete -col b -delete 1` the second -delete inherited -col and
-        // removed COLUMN 1 while the record survived -- an output that is
-        // wrong in two ways at rc=0. `-cell` had the same defect and was only
-        // hidden by r:c shape validation rejecting a bare record number; -col
-        // accepts any column token, so nothing caught it.
+        // consumed it. Left set, it is sticky: in `-delete -col b -delete 1`
+        // the second -delete would inherit -col and remove COLUMN 1 instead of
+        // the record, at rc=0. -col accepts any column token, so no shape
+        // check would catch it.
         // 修飾詞屬於「一個」動詞，該動詞取用後即清除。留著不清會讓它變得黏著：
-        // 在 `-delete -col b -delete 1` 中，第二個 -delete 繼承了 -col，移除了
-        // 「第 1 欄」而那筆紀錄還在——一份在兩個方向上都錯、且 rc=0 的輸出。
-        // `-cell` 有同樣的缺陷，只是被 r:c 的形狀檢查擋下（純紀錄號會被拒），
-        // 而 -col 接受任何欄位標記，因此沒有東西攔得住。
+        // 在 `-delete -col b -delete 1` 中，第二個 -delete 會繼承 -col，刪掉「第 1 欄」
+        // 而不是那筆紀錄，rc=0。-col 接受任何欄位標記，沒有任何形狀檢查攔得住。
         case "insert":
             let at = try intVal(arg, try need(arg))
-            // The upper bound of the documented `1..N` was enforced and the
-            // lower was not. `-insert 0` and `-insert -1` exited 0 with the
-            // file byte-for-byte unchanged, nothing on stderr, and `-log`
-            // recording `wrote 2 records, 3 fields, atomic rename OK` -- an
-            // audit entry corroborating a write that never included the row.
-            // In a batch it dropped its own row and applied the others,
-            // producing a partial result at rc=0.
+            // The lower bound of the documented `1..N`. Without it,
+            // `-insert 0` exits 0 with the file unchanged while `-log` records
+            // a successful write, and in a batch it drops its own row and
+            // applies the others -- a partial result at rc=0. Every sibling
+            // verb refuses zero the same way.
             //
-            // Every sibling verb already refused zero: -delete, -head, -tail,
-            // -mid, -update. This one verb did not, and it is the one that
-            // WRITES.
-            //
-            // 文件寫的 `1..N`，上界有檢查，下界沒有。`-insert 0` 與 `-insert -1` 都以 0
-            // 結束，檔案逐位元未變、stderr 空無一物，而 `-log` 記著
-            // `wrote 2 records, 3 fields, atomic rename OK`——一筆替「從未包含那一列的寫入」
-            // 作證的稽核紀錄。在批次裡它會丟掉自己那一列、套用其餘的，產生一個部分完成的
-            // 結果，rc=0。
-            //
-            // 每一個同輩動詞早就拒絕 0 了：-delete、-head、-tail、-mid、-update。
-            // 只有這一個沒有——而它正是會「寫入」的那一個。
+            // 文件寫的 `1..N` 的下界。少了它，`-insert 0` 會以 0 結束、檔案未變，而 `-log`
+            // 卻記著一次成功的寫入；在批次裡它會丟掉自己那一列、套用其餘的——rc=0 的部分結果。
+            // 每一個同輩動詞都以同樣方式拒絕 0。
             guard at >= 1 else {
                 throw usageError(
                     "-insert \(at): a record number must be at least 1; records are numbered from 1, and -insert puts a row BEFORE record N",
@@ -750,16 +659,11 @@ func parseArgs(_ argv: [String]) throws -> Options {
             }
             let row = try needData(arg)
             if o.cellModifier {
-                // The names were `status_notes` and `license` -- two columns
-                // from this project's own fixture, printed at anyone whose
-                // file has neither. It read as a report about the file that
-                // was passed, and on a one-column file it named two columns
-                // that do not exist. An illustration has to be visibly an
-                // illustration when the message cannot see the file.
-                // 原本寫的是 `status_notes` 與 `license`——本專案自己 fixture 裡的兩個欄名，
-                // 卻被印給一個「兩個都沒有」的使用者看。它讀起來像是在描述「你傳進來的那個
-                // 檔案」，而在一個單欄檔案上，它指名了兩個不存在的欄位。當訊息看不到那個檔案時，
-                // 舉例就必須「看得出來是舉例」。
+                // The message cannot see the file, so it names no real columns:
+                // a column name would read as a report about the caller's file.
+                // An illustration has to be visibly an illustration.
+                // 這則訊息看不到檔案，所以不指名任何真實欄名：一個欄名讀起來會像是在描述呼叫端的
+                // 檔案。舉例就必須「看得出來是舉例」。
                 throw usageError(
                     "-insert -cell does not exist: inserting a cell mid-record pushes every later field one column along, so the value in column 5 would end up under the name of column 6, and so on to the end of the row. To add a column, every record and both header rows have to change together.",
                     "沒有 -insert -cell：在一列中間插入儲存格，會把該列後面的欄位全部往後推一格，於是原本第 5 欄的值會跑到第 6 欄的名字底下，並一路推到該列結尾。要新增一欄，必須每一列與兩列標頭一起改。")
@@ -816,14 +720,11 @@ func parseArgs(_ argv: [String]) throws -> Options {
             let addr = try need(arg)
             // A header address is well-formed -- the locating report emits it --
             // and is simply not one any verb can act on. parseCellAddress says
-            // so now, and says it identically for -get, -update and
-            // -delete -cell: this used to be explained here and nowhere else,
-            // so the same property had one account per verb and two of the
-            // three blamed the shape of an address the tool had printed itself.
+            // so, identically for -get, -update and -delete -cell; keep the
+            // explanation there rather than adding a per-verb one here.
             // 標頭位址是格式正確的——定位報告就會產生它——它只是不是任何動詞能作用的位址。
-            // 現在由 parseCellAddress 統一說明，而且 -get、-update、-delete -cell 說的
-            // 是同一句：這段解釋過去只存在於這裡，於是同一個性質有三種說法，其中兩種
-            // 怪罪的是「工具自己印出來的位址」的形狀。
+            // 由 parseCellAddress 統一說明，-get、-update、-delete -cell 說的是同一句；
+            // 說明留在那裡，不要在這裡另寫一份各動詞自己的版本。
             var getClaims: [LocationClaim] = []
             o.getCell = try parseCellAddress(addr, flag: arg, claims: &getClaims)
             if !getClaims.isEmpty, let g = o.getCell { o.locationClaim = (record: g.0, column: g.1, claims: getClaims, flag: arg) }
@@ -870,20 +771,13 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "build-index": o.buildIndex = true
         case "count": o.count = true
         case "version", "V":
-            // The build, not just the number. `csv2 0.1.0` has been the
-            // answer since the first commit, so it cannot tell two builds
-            // apart -- and this tree has paid for that twice: a scoop shim
-            // resolving to a year-old binary that reported the same string
-            // (NN, 2026-08-20), and an install that copied a 496,128-byte file
-            // instead of the 543,744-byte one just built, where both said
-            // `csv2 0.1.0` (2026-08-27). Those checks compare FILES now, which
-            // is right, and this makes the version string able to answer as
-            // well.
-            // 印出這次建置，不只是那個號碼。`csv2 0.1.0` 從第一個 commit 起就是這個答案，因此它
-            // 分不出兩個建置——而這棵樹為此付過兩次代價：一個 scoop shim 解析到一年前的二進位檔，
-            // 而它回報同一個字串（NN，2026-08-20）；以及一次安裝複製了 496,128 位元組的檔案而不是
-            // 剛建好的 543,744 位元組那個，兩者都說自己是 `csv2 0.1.0`（2026-08-27）。那些檢查現在
-            // 比對的是**檔案**，那是對的，而這一項讓版本字串也答得出來。
+            // The build, not just the number: two builds of one version report
+            // the same number, so a stale binary on PATH or a wrong file copied
+            // at install time cannot be told apart by it. Install checks
+            // compare files; this lets the version string answer too. NN.
+            // 印出這次建置，不只是那個號碼：同一版號的兩個建置回報的是同一個號碼，PATH 上的舊
+            // 執行檔、或安裝時複製錯的檔案，都無法靠它分辨。安裝檢查比對的是檔案；這一項讓版本
+            // 字串也答得出來。NN。
             Platform.writeStdout("csv2 \(CSV2_VERSION) (\(CSV2_BUILD))\n")
             exit(0)
         case "h", "help":
@@ -896,24 +790,15 @@ func parseArgs(_ argv: [String]) throws -> Options {
         }
         i += 1
     }
-    // A modifier left over at the end never found a verb to attach to. It used
-    // to be accepted and ignored: `csv2 -cell -r -i f.csv` exited 0, and
-    // `csv2 -insert 1 'z,z,z' -cell` exited 0 as well -- because the refusal
-    // for `-insert -cell` reads the modifier at the moment the verb is parsed,
-    // so writing `-cell` AFTER the two positional arguments walks straight
-    // past it. The refusal was positional, not semantic.
+    // A modifier left over at the end never found a verb to attach to.
+    // Ignoring it would be a swallowed option: a flag that changes nothing
+    // and says nothing. It is also what catches `-insert 1 'z,z,z' -cell`,
+    // because the `-insert -cell` refusal reads the modifier only at the
+    // moment the verb is parsed.
     //
-    // This is the "swallowed option" failure this project already has on
-    // record from multissh: a flag that changes nothing and says nothing, so
-    // the caller believes they asked for something they did not.
-    //
-    // 留到最後的修飾符，代表它從未找到可以依附的動詞。原本它會被接受並忽略：
-    // `csv2 -cell -r -i f.csv` 以 0 結束，而 `csv2 -insert 1 'z,z,z' -cell` 也是——因為
-    // 「-insert 不可與 -cell 併用」那個拒絕，是在「解析到該動詞的那一刻」去讀修飾符的，
-    // 於是把 `-cell` 寫在兩個位置參數之後就直接繞了過去。那個拒絕是位置性的，不是語意性的。
-    //
-    // 這正是本專案已經記錄過的、multissh 被咬過的那種「被吞掉的選項」：一個什麼都不改、
-    // 也什麼都不說的旗標，於是呼叫端以為自己要求了一件他其實沒有要求到的事。
+    // 留到最後的修飾符，代表它從未找到可以依附的動詞。忽略它就是一個「被吞掉的選項」：
+    // 什麼都不改、也什麼都不說的旗標。`-insert 1 'z,z,z' -cell` 也是靠這裡擋下的，因為
+    // 「-insert -cell」那條拒絕只在解析到該動詞的那一刻讀修飾符。
     if o.cellModifier || o.colModifier {
         let which = o.cellModifier ? "-cell" : "-col"
         throw usageError(
@@ -1020,58 +905,48 @@ func parseCellAddress(_ s0: String, flag: String,
                       claims: inout [LocationClaim]) throws -> (Int, String) {
     // The decoration rides on the COLUMN half: `1:1@L2` splits at the colon
     // into "1" and "1@L2". Stripping it here is what lets a printed address be
-    // pasted back, which is what the README promises and what the refusal
-    // further down had to apologise for.
+    // pasted back, which is what the README promises.
     // 裝飾掛在**欄**的那一半上：`1:1@L2` 在冒號處切開是 "1" 與 "1@L2"。在這裡把它剝掉，正是
-    // 「印出來的位址可以直接貼回去」得以成立的原因——那是 README 的承諾，也是底下那則拒絕
-    // 原本必須為之道歉的事。
+    // 「印出來的位址可以直接貼回去」得以成立的原因——那是 README 的承諾。
     // Strip REPEATEDLY. With both flags the printed form carries both
-    // decorations -- `3:1@L6 [A4]` -- and stripping once left `3:1@L6`, which
-    // then failed as a column name. The two flags are usable together and the
-    // README promises what they print composes, so half the promise was kept.
-    // **剝到沒有為止**。同時給兩個旗標時，印出來的形式帶著兩段裝飾——`3:1@L6 [A4]`——而只剝
-    // 一次會留下 `3:1@L6`，接著它會以「沒有這個欄名」失敗。那兩個旗標可以並用，而 README 承諾
-    // 它們印出來的東西可以直接接下去，於是那個承諾原本只兌現了一半。
+    // decorations -- `3:1@L6 [A4]` -- and stripping once leaves `3:1@L6`,
+    // which then fails as a column name.
+    // **剝到沒有為止**。同時給兩個旗標時，印出來的形式帶著兩段裝飾——`3:1@L6 [A4]`——只剝
+    // 一次會留下 `3:1@L6`，接著它會以「沒有這個欄名」失敗。
     var s = s0
     while let (bare, c) = parsedLocation(s) {
         s = bare
         claims.append(c)
     }
     // omittingEmptySubsequences: false, or "1:" splits into ONE part and every
-    // check below that asks for two is skipped -- which is how `-get 1:`
-    // reached "expected r:c" again after being given its own reason. Swift's
-    // default drops empty pieces, and the empty piece is the thing being
-    // diagnosed here.
+    // check below that asks for two is skipped and `-get 1:` falls through to
+    // "expected r:c". Swift's default drops empty pieces, and the empty piece
+    // is the thing being diagnosed here.
     // 要 omittingEmptySubsequences: false，否則 "1:" 只會切成「一段」，下面每一個「需要兩段」
-    // 的檢查都會被跳過——那正是 `-get 1:` 在有了自己的理由之後，又回到「需要 r:c」的原因。
-    // Swift 的預設會丟掉空的片段，而這裡要診斷的正是那個空片段。
+    // 的檢查都會被跳過，`-get 1:` 就掉回「需要 r:c」。Swift 的預設會丟掉空的片段，而這裡要
+    // 診斷的正是那個空片段。
     let parts = s.split(separator: ":", maxSplits: 1,
                         omittingEmptySubsequences: false).map(String.init)
     // A header address gets the reason, not "expected r:c". The form IS r:c --
     // the locating report printed it -- and answering a well-formed address
     // with a complaint about its shape sends the reader to check their quoting.
-    // -get has explained this properly for a while; -update and -delete -cell
-    // said "expected r:c" about their own tool's output, so one property had
-    // three accounts depending on which verb you asked.
+    // Every verb that takes r:c gets the same explanation from here.
     // 標頭位址要得到的是「理由」，不是「需要 r:c」。那個形式**就是** r:c——是定位報告印出來的
-    // ——而用「格式不對」去回答一個格式正確的位址，會把讀者送去檢查自己的引號。-get 早就講清楚了，
-    // 而 -update 與 -delete -cell 對著自家工具的輸出說「需要 r:c」：同一個性質，問哪個動詞就有
-    // 哪一種說法，總共三種。
+    // ——而用「格式不對」去回答一個格式正確的位址，會把讀者送去檢查自己的引號。每個吃 r:c 的
+    // 動詞都從這裡得到同一句說明。
     if parts.count == 2, ["0", "0a", "0b"].contains(parts[0]), !parts[1].isEmpty {
-        // "any verb, -get included" named -get inside a -update failure, which
-        // reads as a bug in the message rather than a fact about the tool.
-        // The fact is the same without the example.
-        // 「任何動詞，-get 也不行」會在一則 -update 的失敗裡點名 -get，那讀起來像是訊息本身
-        // 出了錯，而不是關於這個工具的一項事實。拿掉那個例子，事實不變。
+        // No verb is named as an example: this message is shared, and naming
+        // -get inside a -update failure reads as a bug in the message.
+        // 不舉任何動詞當例子：這則訊息是共用的，在 -update 的失敗裡點名 -get，讀起來像訊息
+        // 本身出了錯。
         throw usageError("\(flag): \(s) names a header cell (the locating report prints 0 on a .csv and 0a/0b on a .csv2), and no verb can address one. Records are numbered from 1",
                          "\(flag)：\(s) 指的是標頭儲存格（定位報告在 .csv 上印 0，在 .csv2 上印 0a／0b），而沒有任何動詞可以對它定址。紀錄從 1 開始編號")
     }
-    // An empty column part gets its own reason. `-get 1:` answered "expected
-    // r:c", which is a complaint about shape when the shape is right and one
-    // half is missing -- and a file really can have a column whose name is
-    // empty, which is addressable, by its number.
-    // 空的欄位部分有自己的理由。`-get 1:` 原本回答「需要 r:c」，那是在形狀正確、只是缺了
-    // 一半時去挑剔形狀——而一個檔案確實可以有一個「名字是空的」欄位，它定址得到，用欄號。
+    // An empty column part gets its own reason. For `-get 1:` the shape is
+    // right and one half is missing, so "expected r:c" would be wrong -- and
+    // a column whose name is empty is real and addressable by its number.
+    // 空的欄位部分有自己的理由。`-get 1:` 的形狀是對的、只是缺了一半，回答「需要 r:c」是錯的
+    // ——而「名字是空的」欄位確實存在，用欄號定址得到。
     if parts.count == 2, Int(parts[0]) != nil, parts[1].isEmpty {
         throw usageError("\(flag): \(s) names no column -- the part after the colon is empty. A column whose NAME is empty is addressed by its number, as in 1:2",
                          "\(flag)：\(s) 沒有指名任何欄位——冒號之後是空的。名字為空的欄位請用欄號定址，例如 1:2")
@@ -1089,47 +964,25 @@ func parseCellAddress(_ s0: String, flag: String,
 
 func validate(_ o: inout Options) throws {
     // Placed FIRST, before `--in-place` derives `o.output` from `o.input`
-    // further down: with the check at the end, `-count -update ... --in-place`
-    // reported `-o` among the discarded flags and the caller had never typed
-    // `-o`. That is OQ in miniature -- a message accusing a flag that is not on
-    // the command line -- introduced by the fix for OP an hour earlier.
-    // 放在最前面，在下方 `--in-place` 由 `o.input` 推導出 `o.output` 之前：這個檢查原本放在
-    // 函式結尾，於是 `-count -update … --in-place` 會把 `-o` 列進被丟棄的旗標裡，而呼叫端從來
-    // 沒有打過 `-o`。那正是 OQ 的縮影——一則指控「不在命令列上的旗標」的訊息——而它是 OP 的修法
-    // 在一小時前自己帶進來的。
-    // `-count` is dispatched FIRST and ignores everything beside it. Every
-    // companion below was accepted, discarded, and reported as success --
-    // including the five edit verbs: `csv2 -count -update 1:1 X -i f.csv
-    // --in-place` printed a number, exited 0, wrote nothing to stderr, and left
-    // the file byte-identical. `-o` was swallowed too, so the destination was
-    // never created. The search form is the one that reads as a wrong ANSWER
-    // rather than as nothing happening: `-contains ZZZ -count` returns the
-    // file's total, so someone asking "how many records mention this" gets a
-    // plausible number to a question they did not ask. OP.
-    //
-    // This page already refuses `-rownum --json`, `-md --json`, `--physical
-    // --json`, `-get --json`, two `--search-*` together and `--build-index
-    // --no-index`, and the edit path refuses `--dry-run` verbs in so many
-    // words -- "rather than returning empty output that looks like 'nothing
-    // would change'". `-count` was the one flag that neither refused nor
-    // honoured its companions, which is why the fix is a refusal and not a
-    // documentation line.
+    // further down: checked later, `-count -update ... --in-place` would list
+    // `-o` among the discarded flags though the caller never typed it -- a
+    // message accusing a flag that is not on the command line (OQ).
+    // 放在最前面，在下方 `--in-place` 由 `o.input` 推導出 `o.output` 之前：若晚一點檢查，
+    // `-count -update … --in-place` 會把 `-o` 列進被丟棄的旗標裡，而呼叫端從沒打過 `-o`
+    // ——一則指控「不在命令列上的旗標」的訊息（OQ）。
+    // `-count` is dispatched FIRST and ignores everything beside it, so every
+    // companion below would be accepted, discarded, and reported as success.
+    // The edit verbs would leave the file untouched at rc=0; `-contains ZZZ
+    // -count` would return the file's total, a plausible number to a question
+    // the caller did not ask. Hence a refusal, not a documentation line. OP.
     //
     // Named individually rather than as "other flags": the caller has to know
     // WHICH of the things they asked for did not happen, and a script that
     // built the command line from parts cannot see its own mistake otherwise.
     //
-    // `-count` 是分派鏈上的第一個，而它會忽略旁邊的一切。底下每一個同伴先前都是「被接受、被
-    // 丟棄、並回報成功」——包含五個編輯動詞：`csv2 -count -update 1:1 X -i f.csv --in-place`
-    // 印出一個數字、以 0 結束、stderr 什麼都沒有，而檔案逐位元未變。`-o` 也一樣被吞掉，於是
-    // 目的地根本沒有被建立。搜尋那一種形狀最像一個**錯誤的答案**而不是「什麼都沒發生」：
-    // `-contains ZZZ -count` 回傳的是整個檔案的筆數，於是問「有幾筆提到這個」的人，會拿到一個
-    // 看起來完全合理、卻回答了另一個問題的數字。OP。
-    //
-    // 這個程式早就拒絕 `-rownum --json`、`-md --json`、`--physical --json`、`-get --json`、
-    // 兩個 `--search-*` 併用與 `--build-index --no-index`，而編輯路徑拒絕 `--dry-run` 底下的
-    // 動詞時，理由白紙黑字寫著「而不是回傳一個看似『不會有任何變更』的空輸出」。`-count` 是
-    // 唯一一個既不拒絕、也不履行同伴的旗標——所以修法是一則拒絕，不是一行文件。
+    // `-count` 是分派鏈上的第一個，而它會忽略旁邊的一切，因此底下每一個同伴都會「被接受、
+    // 被丟棄、並回報成功」。編輯動詞會在 rc=0 下讓檔案原封不動；`-contains ZZZ -count` 會回傳
+    // 整個檔案的筆數——一個看起來合理、卻回答了另一個問題的數字。所以是拒絕，不是一行文件。OP。
     //
     // 逐一指名而非統稱「其他旗標」：呼叫端必須知道**哪一件**他要求的事沒有發生，否則一支由
     // 片段組出命令列的腳本，看不見自己的錯誤。
@@ -1189,16 +1042,13 @@ func validate(_ o: inout Options) throws {
     if o.output != nil && o.useStdout {
         throw usageError("-o and -so are mutually exclusive", "-o 與 -so 互斥")
     }
-    // `-o` and `--in-place` are as exclusive as `-o` and `-so`, and only the
-    // first pair was checked. Given both, `--in-place` was silently discarded:
-    // the named -o file was written, the in-place target was left
-    // byte-for-byte unchanged, and the log recorded the edit -- so a caller
-    // who asked for an in-place edit got rc=0, an audit entry, and an
-    // untouched file.
-    // `-o` 與 `--in-place` 的互斥程度，和 `-o` 與 `-so` 完全一樣，而只有前一對被檢查了。
-    // 兩者同時給出時，`--in-place` 會被靜默丟棄：-o 指名的檔案被寫出、就地編輯的目標逐位元
-    // 未變，而 log 記下了那次編輯——於是一個要求「就地編輯」的呼叫端，得到的是 rc=0、
-    // 一筆稽核紀錄，以及一個沒有被動過的檔案。
+    // `-o` and `--in-place` are as exclusive as `-o` and `-so`. Given both,
+    // `--in-place` would be silently discarded: the -o file written, the
+    // in-place target untouched, and the log recording the edit -- rc=0, an
+    // audit entry, and an unchanged file.
+    // `-o` 與 `--in-place` 的互斥程度，和 `-o` 與 `-so` 完全一樣。兩者同時給出時，
+    // `--in-place` 會被靜默丟棄：-o 的檔案被寫出、就地編輯的目標沒動，而 log 記下了那次編輯
+    // ——rc=0、一筆稽核紀錄，以及一個沒有被動過的檔案。
     if o.output != nil && o.inPlace {
         throw usageError("-o and --in-place are mutually exclusive: one names a destination and the other says the input IS the destination",
                          "-o 與 --in-place 互斥：一個指名了目的地，另一個說「輸入就是目的地」")
@@ -1212,49 +1062,30 @@ func validate(_ o: inout Options) throws {
     if o.useStdout && o.inPlace {
         throw usageError("-so and --in-place are mutually exclusive", "-so 與 --in-place 互斥")
     }
-    // `--build-index --no-index` was refused as contradictory and
-    // `--verify-index --no-index` was not: it read the sidecar `--no-index`
-    // forbids and reported `index OK`. One of the two had to move, and the
-    // refusal is the one that matches what --no-index says it means.
-    // `--build-index --no-index` 會被當成互相矛盾而拒絕，`--verify-index --no-index` 不會：
-    // 它讀了 `--no-index` 明令不讀的那個 sidecar，並回報 `index OK`。兩者必須有一個改變，
-    // 而「拒絕」才是符合 --no-index 自己所宣稱的意思的那一個。
-    // `--build-index` REPLACES the verb rather than joining it, so given both
-    // the index was built and the edit was silently dropped -- rc=0, and with
-    // `--in-place` nothing printed at all, while the caller believed a cell had
-    // changed. `--build-index --no-index` was already refused as
-    // contradictory; this pair is equally impossible and was not.
-    // `--build-index` 是「取代」動詞而不是「加在旁邊」，因此兩者同時給出時，索引被建立了、
-    // 而編輯被靜默丟棄——rc=0，搭配 `--in-place` 時甚至什麼都不印，而呼叫端以為某一格改了。
-    // `--build-index --no-index` 早就被當成矛盾拒絕；這一對同樣不可能兩全，卻沒有。
-    // A READ verb is dropped the same way an edit is, and that refusal covered
-    // only edits -- the same rule applied to half of where it holds, which is
-    // this project's most frequent defect and was mine to make here.
-    //
-    // `--build-index -contains X` exited 0 having searched nothing, which is
-    // indistinguishable from "found nothing"; the README documents that as
-    // rc=0 too. `--build-index -get 1:1` put `index built: 5 records ...` on
-    // stdout, so the README's own `val=$(csv2 -get ...)` recipe writes that
-    // sentence into a data cell, at rc=0.
-    //
-    // `-r` is excluded because it is also the default: refusing it would refuse
-    // the ordinary `csv2 --build-index -i f.csv`, which is the whole point of
-    // the flag. Nothing is dropped in that case -- there is no verb to drop.
-    // 讀取動詞被丟棄的方式與編輯完全相同，而那條拒絕只涵蓋了編輯——同一條規則只套用到它成立
-    // 之處的一半，那是本專案最常見的缺陷形狀，而這一次是我犯的。
-    // `--build-index -contains X` 以 0 結束、什麼也沒搜尋，那與「什麼也沒找到」無法區分，
-    // 而 README 記載後者同樣是 rc=0。`--build-index -get 1:1` 會把「index built: …」印到
-    // stdout，於是 README 自己那句 `val=$(csv2 -get …)` 會把那句話寫進一個資料儲存格，rc=0。
-    // `-r` 不列入，因為它同時也是預設值：拒絕它等於拒絕 `csv2 --build-index -i f.csv`
-    // 這個最平常的用法，而那正是這個旗標的用途。那種情況下沒有任何東西被丟棄——沒有動詞可丟。
+    // `--verify-index --no-index` is refused like `--build-index --no-index`:
+    // otherwise it reads the sidecar `--no-index` forbids and reports
+    // `index OK`.
+    // `--verify-index --no-index` 與 `--build-index --no-index` 一樣被拒絕：否則它會讀
+    // `--no-index` 明令不讀的那個 sidecar，並回報 `index OK`。
+    // `--build-index` and `--verify-index` REPLACE the verb rather than join
+    // it, so with an edit the edit is silently dropped at rc=0 -- with
+    // `--in-place` nothing prints at all, while the caller believes a cell
+    // changed.
+    // `--build-index` 與 `--verify-index` 是「取代」動詞而不是「加在旁邊」，因此搭配編輯時，
+    // 編輯會在 rc=0 下被靜默丟棄——搭配 `--in-place` 時甚至什麼都不印，而呼叫端以為某一格改了。
+    // A READ verb is dropped the same way. `--build-index -contains X` exits 0
+    // having searched nothing, indistinguishable from "found nothing", and
+    // `--build-index -get 1:1` prints `index built: ...` on stdout, which a
+    // `val=$(csv2 -get ...)` caller would store as data.
+    // 讀取動詞被丟棄的方式完全相同。`--build-index -contains X` 以 0 結束、什麼也沒搜尋，
+    // 與「什麼也沒找到」無法區分；`--build-index -get 1:1` 會把「index built: …」印到 stdout，
+    // 一個 `val=$(csv2 -get …)` 的呼叫端會把它當資料存起來。
     // `-r` counts when it was TYPED. It is also the default, so it cannot be
     // read off `o.read` alone -- but a caller who wrote it asked for output and
-    // got none, which is the same silent drop as any other verb. Round 61
-    // found the flags this list missed: -r, --json, -md, and the two
-    // administrative flags given together.
+    // got none, which is the same silent drop as any other verb. Round 61.
     // 只有「被打出來」的 `-r` 算數。它同時也是預設值，因此不能只看 `o.read`——但一個真的
     // 寫了它的呼叫端，要的是輸出、而拿到的是沒有輸出，那與其他任何動詞被靜默丟棄是同一件事。
-    // 第 61 回合找出了這份清單漏掉的那些：-r、--json、-md，以及那兩個管理用旗標同時給出。
+    // 第 61 回合。
     let selectionVerb: String? =
         o.contains != nil ? "-contains" :
         o.getCell != nil ? "-get" :
@@ -1283,21 +1114,18 @@ func validate(_ o: inout Options) throws {
     }
     // `-get` prints ONE cell. A transform's output depends on a marker in the
     // file's header -- the salt for `:enc:`, the fingerprint for `:hmac:` --
-    // and `-get` writes no header. So `-get -encrypt` emitted ciphertext with
-    // no salt anywhere: bytes nothing can ever decrypt, at rc=0. `-get`
-    // already refuses --json, --pretty, -t and -rownum as ignored flags, with
-    // a good message; the transforms were not on that list.
+    // and `-get` writes no header. So `-get -encrypt` would emit ciphertext
+    // with no salt anywhere: bytes nothing can ever decrypt, at rc=0.
     // `-get` 印的是「一格」。轉換的輸出依賴檔案標頭裡的標記——`:enc:` 的 salt、`:hmac:` 的
-    // 指紋——而 `-get` 不寫標頭。於是 `-get -encrypt` 吐出的是「salt 不存在於任何地方」的
-    // 密文：一段沒有任何東西還原得了的位元組，rc=0。`-get` 早就會拒絕 --json、--pretty、
-    // -t、-rownum 這些「會被忽略的旗標」，訊息也寫得很好；只是轉換不在那張清單上。
+    // 指紋——而 `-get` 不寫標頭。於是 `-get -encrypt` 會吐出「salt 不存在於任何地方」的
+    // 密文：一段沒有任何東西還原得了的位元組，rc=0。
     if o.getCell != nil, o.encryptCols != nil || o.hashCols != nil || o.decryptCols != nil {
         throw usageError("-get prints one cell and writes no header, so a transform's marker -- the salt for -encrypt, the fingerprint for -hash -- has nowhere to go; the output could never be read back",
                          "-get 印的是一格、不寫標頭，因此轉換的標記——-encrypt 的 salt、-hash 的指紋——沒有地方可放；那個輸出永遠讀不回來")
     }
-    // Its three siblings -- --a1, --physical, --filter -- all refuse without
-    // -contains. This one was ignored.
-    // 它的三個同輩——--a1、--physical、--filter——在沒有 -contains 時都會拒絕。只有這一個被忽略。
+    // Like its three siblings -- --a1, --physical, --filter -- it refuses
+    // without -contains rather than being ignored.
+    // 與它的三個同輩——--a1、--physical、--filter——一樣，沒有 -contains 時拒絕，而不是被忽略。
     if o.includeHeaders && o.contains == nil {
         throw usageError("--include-headers searches the header rows, so it needs -contains",
                          "--include-headers 是「連標頭列一起搜尋」，因此它需要 -contains")
@@ -1306,38 +1134,30 @@ func validate(_ o: inout Options) throws {
         throw usageError("--verify-index and --no-index contradict each other: verifying means reading the sidecar",
                          "--verify-index 與 --no-index 互相矛盾：驗證就是要讀那個 sidecar")
     }
-    // Documented as refused in two places -- the flag entry and the refusals
-    // table -- and refused in neither. It fired only when validation happened
-    // to fail, so a healthy file took the combination at rc=0 and an unhealthy
-    // one got a message about it; the flag's own entry says it plainly:
-    // "Refused with -append, which can only add bytes."
+    // Refused on the flags alone, before the file is read, as the README's
+    // flag entry and refusals table both promise.
     //
-    // The reason is worth stating where the refusal lives. --truncate-partial
+    // --truncate-partial
     // means "discard the incomplete final record". Appending cannot discard
     // anything -- it can only add bytes after what is already there -- so the
     // combination asks for two things that cannot both happen, and the file
     // that comes out keeps the incomplete record AND gains a complete one
     // after it.
     //
-    // 文件在兩個地方說它被拒絕——旗標條目與拒絕表——而兩處都沒有真的拒絕。它只在「驗證剛好
-    // 失敗」時才觸發，於是一個健康的檔案會以 rc=0 接受這個組合，不健康的才會拿到訊息；
-    // 而旗標自己的條目寫得很清楚：「與 -append 併用時被拒絕，後者只會增加位元組」。
+    // 只看旗標、在讀檔之前就拒絕，與 README 的旗標條目及拒絕表所承諾的一致。
     //
-    // 理由值得寫在「拒絕」發生的地方。--truncate-partial 的意思是「丟掉不完整的最後一筆」，
+    // --truncate-partial 的意思是「丟掉不完整的最後一筆」，
     // 而追加沒有辦法丟掉任何東西——它只能在既有內容之後加上位元組——因此這個組合要求的兩件事
     // 不可能同時成立，而產生出來的檔案會同時保留那筆不完整的、並在其後多出一筆完整的。
     if o.truncatePartial, o.edits.contains(where: { if case .append = $0 { return true }; return false }) {
         throw usageError(
-            // "the incomplete record" said there is one. This refusal fires on
-            // the flags alone, before the file is read, so it fires on
-            // complete files too and sent readers hunting for damage that was
-            // not there. The two flags are incompatible as a REQUEST -- one
-            // says drop the tail, the other can only add to it -- and that is
-            // true whatever the file turns out to be.
-            // 「那筆不完整的紀錄」等於說「有一筆」。這條拒絕只看旗標、在讀檔之前就觸發，
-            // 因此對完整的檔案也會觸發，於是讓讀者去找一個並不存在的損壞。這兩個旗標
-            // 作為一個「要求」就是不相容的——一個說丟掉尾巴，另一個只能往尾巴後面加——
-            // 而那句話不論檔案後來是什麼樣子都成立。
+            // The wording must not say "the incomplete record": this fires
+            // before the file is read, on complete files too, and that phrase
+            // sends readers hunting for damage that is not there. The two
+            // flags are incompatible as a REQUEST, whatever the file holds.
+            // 措辭不能說「那筆不完整的紀錄」：這條在讀檔之前就觸發，對完整的檔案也一樣，而那個
+            // 說法會讓讀者去找一個並不存在的損壞。這兩個旗標作為一個「要求」就是不相容的，
+            // 不論檔案內容為何。
             "--truncate-partial is refused with -append, whatever the file contains: one says discard an incomplete last record and the other can only add bytes after it, so the two cannot both be honoured in one run. If the file does have a torn tail, write a clean copy first (csv2 -r -t --truncate-partial -i FILE -o CLEAN) and append to that",
             "--truncate-partial 與 -append 併用會被拒絕，不論檔案內容為何：一個說「丟掉不完整的最後一筆」，另一個只能在它後面加上位元組，兩者無法在同一次執行中同時被滿足。若那個檔案確實有一條撕裂的尾巴，請先寫出一份乾淨的複本（csv2 -r -t --truncate-partial -i FILE -o CLEAN），再對那一份追加")
     }
@@ -1381,24 +1201,13 @@ func validate(_ o: inout Options) throws {
         throw usageError("-si needs --headers 0, 1 or 2: stdin has no extension to declare the format. 0 reads it as lines -- one field each, bytes verbatim",
                          "-si 需要 --headers 0、1 或 2：stdin 沒有可宣告格式的副檔名。0 表示把它當成一行行來讀——每行一個欄位，位元組原樣")
     }
-    // `--md-table` picks a table out of a Markdown document, and there are no
-    // tables to pick out of anything else. It was ACCEPTED and IGNORED on any
-    // other input at rc=0, while the README said twice that it is refused --
-    // so a reader who mistyped the input path got the whole file and no hint.
-    // Round 78, JX.
-    // `--md-table` 是從一份 Markdown 文件裡挑出一張表，而別的東西裡沒有表可挑。它先前在任何其他
-    // 輸入上都是「被接受並忽略」，rc=0，而 README 說了兩次它會被拒絕——於是一個把輸入路徑打錯的
-    // 讀者，會拿到整個檔案而且沒有任何提示。第 78 回合，JX。
-    // `-delete -col` on a file with no header row was a silent no-op at rc=0:
-    // the whole column-dropping block lives inside "when the header rows are
-    // complete", and with zero header rows it never runs. The refusal it would
-    // have reached -- "would remove all N columns; a file with no columns is
-    // not a CSV file" -- is exactly right for a one-column file, and could not
-    // be reached. A no-op that reports success is worse than either. Round 78.
-    // `-delete -col` 用在一個沒有標頭列的檔案上，是一次 rc=0 的靜默空操作：整個「丟掉欄位」的區塊
-    // 住在「標頭列讀完時」裡面，而零列標頭時它永遠不會執行。它本來會走到的那句拒絕——「會刪掉全部
-    // N 欄；一個沒有欄位的檔案不是 CSV 檔」——對一個只有一欄的檔案完全正確，卻走不到。一次「回報
-    // 成功的空操作」比兩者都糟。第 78 回合。
+    // `-delete -col` on a file with no header row would be a silent no-op at
+    // rc=0: the column-dropping block runs only once the header rows are
+    // complete, and with zero header rows it never runs, so the "would remove
+    // all N columns" refusal is never reached. Refused here instead. Round 78.
+    // `-delete -col` 用在沒有標頭列的檔案上，會是一次 rc=0 的靜默空操作：「丟掉欄位」的區塊
+    // 只在標頭列讀完時執行，零列標頭時永遠不會執行，於是「會刪掉全部 N 欄」那句拒絕走不到。
+    // 因此在這裡先拒絕。第 78 回合。
     if o.edits.contains(where: { if case .deleteColumn = $0 { return true }; return false }),
        let inp = o.input, o.headersOverride == nil, Format.from(path: inp) == nil {
         throw usageError(
@@ -1406,6 +1215,12 @@ func validate(_ o: inout Options) throws {
             "-delete -col 用在 \(inp) 上：一個沒有 .csv／.csv2 副檔名的檔案是一欄的行清單，刪掉它唯一的一欄會什麼都不剩。若它確實是 CSV，請以 --headers 1 讀它")
     }
 
+    // `--md-table` picks a table out of a Markdown document, and there are no
+    // tables to pick out of anything else. Ignoring it on other input would
+    // hand a reader who mistyped the path the whole file and no hint.
+    // Round 78, JX.
+    // `--md-table` 是從一份 Markdown 文件裡挑出一張表，而別的東西裡沒有表可挑。在其他輸入上
+    // 忽略它，會讓一個把路徑打錯的讀者拿到整個檔案、而且沒有任何提示。第 78 回合，JX。
     if o.mdTable != nil {
         let isMD = o.input?.lowercased().hasSuffix(".md") ?? false
         if !isMD {
@@ -1417,15 +1232,12 @@ func validate(_ o: inout Options) throws {
     // 0 is accepted and means something different in kind from 1 and 2: those
     // two argue about how many header rows a CSV has, while 0 says the file is
     // not being read as CSV at all -- one field per line, bytes verbatim. That
-    // is the `.lines` format, which until now was the only one that could not
-    // be ASKED for: it is declared by the ABSENCE of a suffix, and absence is
-    // not something a caller can supply. stdin has no suffix, so the format
-    // built for exactly that case was the one it could not name. Phase 12.
+    // is the `.lines` format, otherwise declared only by the ABSENCE of a
+    // suffix, which a caller cannot supply -- and stdin has no suffix. Phase 12.
     // 0 是被接受的，而且它與 1、2 在「種類」上就不同：那兩個在爭論「這個 CSV 有幾列標頭」，
     // 而 0 說的是「這個檔案根本不當 CSV 讀」——每行一個欄位，位元組原樣。那就是 `.lines` 格式，
-    // 而它在此之前是唯一一個**無法被指名**的格式：它靠「沒有副檔名」來宣告，而「沒有」不是呼叫端
-    // 給得出來的東西。stdin 沒有副檔名，於是那個「正是為這種情況而生」的格式，恰恰是它指名不了的
-    // 那一個。第 12 階段。
+    // 否則它只能靠「沒有副檔名」來宣告，而「沒有」不是呼叫端給得出來的——stdin 又沒有副檔名。
+    // 第 12 階段。
     if let h = o.headersOverride, h != 0 && h != 1 && h != 2 {
         throw usageError("--headers takes 0, 1 or 2. 0 means one field per line, bytes verbatim -- the format a file with no .csv/.csv2 suffix already has, now available to stdin and to a .md read as prose",
                          "--headers 只能是 0、1 或 2。0 表示每行一個欄位、位元組原樣——那是「沒有 .csv／.csv2 副檔名的檔案」本來就有的格式，現在 stdin 與「當成散文讀的 .md」也用得到")
@@ -1505,14 +1317,12 @@ func validate(_ o: inout Options) throws {
         // output is therefore meaningless with it, and accepting one silently
         // is worse than meaningless -- `-get 1:2 --json` is a natural thing to
         // type, because the README sends you to --json when a value's own
-        // newlines matter, and it used to return the plain value at rc=0 with
-        // the flag ignored. A flag the caller passed and the tool discarded is
+        // newlines matter. A flag the caller passed and the tool discarded is
         // this project's failure in miniature.
         // -get 只有一種輸出形狀：那個值。因此每一個「決定輸出形狀」的旗標對它都沒有意義，
         // 而「安靜地接受」比沒有意義更糟——`-get 1:2 --json` 是很自然會打出來的東西，因為
-        // README 在「值本身的換行有意義」時就是叫你去用 --json；而它先前會在 rc=0 下回傳
-        // 純粹的值，並把那個旗標丟掉。一個呼叫端給了、而工具丟棄了的旗標，正是本專案要
-        // 消滅的失敗的縮影。
+        // README 在「值本身的換行有意義」時就是叫你去用 --json。一個呼叫端給了、而工具丟棄了
+        // 的旗標，正是本專案要消滅的失敗的縮影。
         var shaping: [String] = []
         if o.json { shaping.append("--json") }
         if o.markdown { shaping.append("-md") }
@@ -1588,11 +1398,8 @@ func validate(_ o: inout Options) throws {
         // 就走紀錄形狀的輸出，與 grep 相同。
         o.filter = true
     }
-    // The destination is not the only OTHER file a run touches. This guard
-    // compared -i against -o and nothing else, and the document described that
-    // comparison in detail -- spellings, symlinks, (device, inode), a
-    // POSIX-only caveat -- while never saying which files it does not cover.
-    // Three of them destroy data at rc=0 with both streams empty:
+    // The destination is not the only OTHER file a run touches. Beyond -i
+    // against -o, three pairs destroy data at rc=0 with both streams empty:
     //
     //   -o naming the KEYFILE           the ciphertext is written over the only
     //                                   copy of the key that decrypts it, and
@@ -1603,15 +1410,13 @@ func validate(_ o: inout Options) throws {
     //                                   the file being read, which then fails
     //                                   its own field-count check for ever
     //
-    // Each is a run that "did what it was told". The remedy is the comparison
-    // that already exists, asked three more times.
+    // Each is a run that "did what it was told"; each is checked with the
+    // same sameFile comparison.
     //
-    // 目的地不是一次執行會碰到的唯一「另一個檔案」。這道守衛只比對 -i 與 -o，而文件把那次
-    // 比對描述得非常仔細——拼法、symlink、(device, inode)、僅限 POSIX 的但書——卻從未說出它
-    // 「沒有涵蓋」哪些檔案。其中三種會以 rc=0、兩條輸出流皆空的方式毀掉資料：`-o` 指向金鑰檔
-    // （密文蓋掉唯一能解開它的那把金鑰）、`-o` 指向 -log 檔（那次執行把自己的稽核軌跡改名蓋掉）、
-    // `-log` 指向輸入（呼叫紀錄被追加進正在被讀的那個檔案，於是它從此過不了自己的欄數檢查）。
-    // 補救方式，就是把那個已經存在的比對再問三次。
+    // 目的地不是一次執行會碰到的唯一「另一個檔案」。除了 -i 對 -o，還有三種組合會以 rc=0、
+    // 兩條輸出流皆空的方式毀掉資料：`-o` 指向金鑰檔（密文蓋掉唯一能解開它的那把金鑰）、
+    // `-o` 指向 -log 檔（那次執行把自己的稽核軌跡改名蓋掉）、`-log` 指向輸入（呼叫紀錄被追加進
+    // 正在被讀的那個檔案，於是它從此過不了自己的欄數檢查）。每一種都用同一個 sameFile 比對檢查。
     if let out = o.output, let kf = o.keyfile, sameFile(out, kf) {
         throw usageError(
             "-o \(out) is the keyfile; writing there destroys the only key that can decrypt what is being written",
@@ -1623,26 +1428,23 @@ func validate(_ o: inout Options) throws {
             "-keyfile \(kf) 就是輸入檔，而這次執行會就地編輯它；那把金鑰會被當成 CSV 重寫")
     }
     if let inp = o.input, let out = o.output, sameFile(inp, out), !o.inPlace {
-        // Compared after resolving, not as typed. `-o ./data.csv` and
-        // `-o link-to-data.csv` name the same file as `-i data.csv` and used to
-        // slip past this, which mattered because the two are NOT equivalent:
-        // only --in-place keeps a symlink and carries the original mode.
+        // Compared after resolving, not as typed: `-o ./data.csv` and
+        // `-o link-to-data.csv` name the same file as `-i data.csv`, and the
+        // two routes are NOT equivalent -- only --in-place keeps a symlink and
+        // carries the original mode.
         //
-        // The reason given here used to be "opening the output truncates it
-        // before the input has been read". That is not true of this program --
-        // -o writes a temp file and renames (T43e), so nothing is truncated and
-        // the data survives. A refusal that explains itself with a danger the
-        // code does not have teaches the reader something false about the tool.
-        // The real reason is that this is an in-place edit written the long way
-        // round, and the flag for it does more.
-        // 比較的是解析過的路徑，不是打出來的字串。`-o ./data.csv` 與
-        // `-o 指向 data 的連結` 都與 `-i data.csv` 是同一個檔案，過去都能繞過這條拒絕；
-        // 而那是有差別的：只有 --in-place 會保留 symlink 並帶過原本的模式。
+        // The reason is not truncation: -o writes a temp file and renames
+        // (T43e), so nothing is lost. A refusal that explains itself with a
+        // danger the code does not have teaches something false about the
+        // tool. This is an in-place edit written the long way round, and the
+        // flag for it does more.
+        // 比較的是解析過的路徑，不是打出來的字串：`-o ./data.csv` 與 `-o 指向 data 的連結`
+        // 都與 `-i data.csv` 是同一個檔案，而兩條路並不等價——只有 --in-place 會保留 symlink
+        // 並帶過原本的模式。
         //
-        // 這裡原本的理由是「開啟輸出會在輸入讀完前把它截斷」。那對這支程式不成立——
-        // -o 走的是暫存檔 + rename（T43e），沒有東西被截斷，資料也不會遺失。一條用
-        // 「程式並不存在的危險」來解釋自己的拒絕，會讓讀者學到關於這支工具的錯誤知識。
-        // 真正的理由是：這就是一次就地編輯，只是繞遠路寫，而那個旗標做的事更多。
+        // 理由不是「截斷」：-o 走的是暫存檔 + rename（T43e），不會遺失任何東西。一條用「程式
+        // 並不存在的危險」來解釋自己的拒絕，會讓讀者學到關於這支工具的錯誤知識。這就是一次
+        // 就地編輯，只是繞遠路寫，而那個旗標做的事更多。
         throw usageError("-i and -o name the same file; that is an in-place edit, so use --in-place, which also keeps a symlink pointing where it did and leaves the file's permissions as they were.",
                          "-i 與 -o 指向同一個檔案；那就是一次就地編輯，請用 --in-place——它還會讓 symlink 繼續指向原處，並保留該檔案原本的權限。")
     }
@@ -1652,18 +1454,14 @@ func validate(_ o: inout Options) throws {
         }
         // A SELECTION is not an edit, and --in-place is the edit destination.
         //
-        // `csv2 -head 1 -t -i f.csv --in-place` used to succeed: it wrote the
-        // selection back over the input, so a 22-record file became a
-        // 1-record file at rc=0, with nothing on either stream and -- because
-        // the outcome line belongs to the edit path -- nothing in the log
-        // either but the invocation. The README points an auditor at that
-        // line to ask whether a write landed, so the most destructive
-        // operation in the tool was also its least audited one.
+        // Allowed, `csv2 -head 1 -t -i f.csv --in-place` would write the
+        // selection back over the input -- a 22-record file becomes 1 record
+        // at rc=0, with nothing on either stream and no outcome line in the
+        // log, because that line belongs to the edit path.
         //
-        // What stood between a caller and that was `-t`, a flag about
-        // HEADERS: without it the write is refused because a headerless file
-        // would lie about its format. A safety property resting on a
-        // formatting flag is a property nobody chose.
+        // Without this guard the only thing in the way is `-t`, a flag about
+        // HEADERS. A safety property resting on a formatting flag is a
+        // property nobody chose.
         //
         // Refused rather than warned, because on this path a mistyped flag
         // and a deliberate crop produce the same bytes and the same rc. To
@@ -1672,28 +1470,23 @@ func validate(_ o: inout Options) throws {
         //
         // 選取不是編輯，而 --in-place 是「編輯」的目的地。
         //
-        // `csv2 -head 1 -t -i f.csv --in-place` 原本會成功：它把那個選取寫回輸入，於是一個
-        // 22 筆的檔案變成 1 筆，rc=0，兩條輸出流上什麼也沒有，而且——因為那行「結果」屬於
-        // 編輯路徑——log 裡除了「呼叫」之外也什麼都沒有。README 叫稽核者去看那一行來判斷
-        // 「這次寫入到底有沒有落地」，於是這個工具最具破壞性的操作，同時是它最少被稽核的。
+        // 若允許，`csv2 -head 1 -t -i f.csv --in-place` 會把選取寫回輸入——22 筆的檔案變成
+        // 1 筆，rc=0，兩條輸出流上什麼也沒有，log 裡也沒有那行「結果」，因為那一行屬於編輯路徑。
         //
-        // 擋在呼叫端與這件事之間的是 `-t`，一個關於「標頭」的旗標：沒有它，那次寫入會因為
-        // 「無標頭的檔案會對自己的格式說謊」而被拒絕。一個建立在格式旗標上的安全性質，
-        // 是沒有人選擇過的性質。
+        // 少了這道守衛，唯一擋在路上的是 `-t`，一個關於「標頭」的旗標。一個建立在格式旗標上的
+        // 安全性質，是沒有人選擇過的性質。
         //
         // 選擇拒絕而不是警告，因為在這條路徑上「打錯一個旗標」與「刻意裁切」產生的位元組
         // 與 rc 完全相同。要裁切一個檔案，請把選取寫到新檔案：那多一個指令，而它不會被
         // 誤打誤撞地做出來。
         // The test is "is a SELECTION present", not "is an edit verb absent".
         //
-        // Those are different predicates, and the first version of this guard
-        // used the second: `-head 1 -hash license -i f.csv --in-place` has an
-        // edit verb of a kind, so the guard did not fire, and it left one
-        // record of six at rc=0 with nothing on either stream -- the very
-        // failure this block was added to stop, one flag away from the command
-        // it does stop. `-encrypt`, `-decrypt` and `-hash` all reach it, and
-        // the `-decrypt` form destroys ciphertext and the header salt
-        // together, which this document says nobody can ever recover.
+        // Those are different predicates: `-head 1 -hash license -i f.csv
+        // --in-place` has a transform, which is an edit of a kind, and the
+        // second predicate would let it keep one record of six at rc=0.
+        // `-encrypt`, `-decrypt` and `-hash` all reach it, and the `-decrypt`
+        // form destroys ciphertext and the header salt together, beyond
+        // recovery.
         //
         // A transform with no selection is still allowed: `-r -hash col
         // --in-place` rewrites every record and discards none, which is what
@@ -1701,11 +1494,9 @@ func validate(_ o: inout Options) throws {
         //
         // 判斷的是「有沒有選取」，不是「有沒有編輯動詞」。
         //
-        // 那是兩個不同的謂詞，而這道守衛的第一版用的是後者：`-head 1 -hash license -i f.csv
-        // --in-place` 有一個「算是編輯」的動詞，於是守衛沒有觸發，六筆只剩一筆，rc=0，兩條
-        // 輸出流上什麼也沒有——正是這個區塊當初要擋下的那個失敗，而它離「確實被擋下的那個
-        // 指令」只差一個旗標。`-encrypt`、`-decrypt`、`-hash` 都到得了，而 `-decrypt` 那個
-        // 形式會把密文與檔頭裡的鹽一起銷毀，而本文件說那是任何人都再也救不回來的。
+        // 那是兩個不同的謂詞：`-head 1 -hash license -i f.csv --in-place` 帶著一個轉換，算是一種
+        // 編輯，用後者判斷會讓它在 rc=0 下六筆只剩一筆。`-encrypt`、`-decrypt`、`-hash` 都到得了，
+        // 而 `-decrypt` 那個形式會把密文與檔頭裡的鹽一起銷毀，再也救不回來。
         //
         // 「有轉換、沒有選取」仍然允許：`-r -hash col --in-place` 會重寫每一筆、不丟掉任何
         // 一筆，而那正是「就地保護」存在的用途。
@@ -1716,30 +1507,20 @@ func validate(_ o: inout Options) throws {
                      : o.mid != nil ? "-mid" : o.contains != nil ? "-contains" : nil
             // Two different true sentences. A selection DISCARDS what it did
             // not name; a bare `-r` names everything, so saying it discards
-            // records would be a message that is wrong about the command it
-            // is refusing -- and a refusal explaining itself with a danger the
-            // program does not have teaches the reader something false about
-            // the tool, which is the note already written beside the -i/-o
-            // refusal above.
+            // records would be wrong about the command being refused (see the
+            // note beside the -i/-o refusal above).
             // 兩句各自為真的話。一個「選取」會丟掉它沒有指名的東西；而單獨的 `-r` 指名了
-            // 全部，因此說它會丟掉紀錄，會是一則「對自己正在拒絕的那個指令說錯話」的訊息
-            // ——而一條用「程式並不存在的危險」來解釋自己的拒絕，會讓讀者學到關於這支工具的
-            // 錯誤知識，那正是上面 -i/-o 那條拒絕旁邊已經寫下的註記。
+            // 全部，因此說它會丟掉紀錄，就是對正在被拒絕的那個指令說錯話（見上面 -i/-o 那條
+            // 拒絕旁邊的註記）。
             if let v = verb {
-                // "would discard every record it does not name" was the
-                // reason, and it is not true of every run this refuses: `-mid
-                // ,` and `-head 99` on a short file name every record there
-                // is. A refusal whose stated reason is false of the command in
-                // front of it teaches the reader something false about the
-                // tool -- the note beside the -i/-o refusal above says the
-                // same thing. What IS true of all of them is the shape: a
+                // Not "would discard every record it does not name": `-mid ,`
+                // and `-head 99` on a short file name every record there is.
+                // What IS true of every run refused here is the shape: a
                 // selection is not an edit, and the count of records it names
                 // is not knowable before the file is read.
-                // 「會丟掉它沒有指名的每一筆」原本是那個理由，而它對這條拒絕所擋下的每一次
-                // 執行並不都成立：`-mid ,` 與短檔案上的 `-head 99` 指名了所有紀錄。一條
-                // 「理由對眼前這個指令為假」的拒絕，會讓讀者學到關於這個工具的錯誤知識——
-                // 上面 -i/-o 那條拒絕旁邊的註記說的正是同一件事。對它們全部都成立的是那個
-                // 形狀：選取不是編輯，而它指名幾筆，要讀完檔案才知道。
+                // 不說「會丟掉它沒有指名的每一筆」：`-mid ,` 與短檔案上的 `-head 99` 指名了所有紀錄。
+                // 對這裡擋下的每一次執行都成立的是那個形狀：選取不是編輯，而它指名幾筆，要讀完檔案
+                // 才知道。
                 throw usageError(
                     "\(v) selects records and --in-place writes an EDIT back to its input; a selection is not an edit. Whether this one would have discarded anything is not knowable before the file is read, which is why it is refused rather than measured. Write it to a new file instead: csv2 \(v) ... -t -i \(inp) -o NEW.csv",
                     "\(v) 是「選取」，而 --in-place 是把一次「編輯」寫回它的輸入；選取不是編輯。這一次究竟會不會丟掉東西，在讀完檔案之前是無從得知的——那正是它被「拒絕」而不是被「衡量」的理由。請改寫到新檔案：csv2 \(v) ... -t -i \(inp) -o NEW.csv")
@@ -1750,9 +1531,9 @@ func validate(_ o: inout Options) throws {
         }
         // Resolved through symlinks, because `--in-place` means "edit this
         // file" and a symlink is not the file. Writing to the link's own path
-        // made the temp-file-and-rename REPLACE the link with a regular file
-        // and leave the target byte-for-byte unchanged -- rc=0, the link gone,
-        // and the data the caller meant to edit untouched.
+        // would make the temp-file-and-rename REPLACE the link with a regular
+        // file and leave the target unchanged -- rc=0, the link gone, and the
+        // data the caller meant to edit untouched.
         //
         // Only the OUTPUT is resolved. The input keeps the path the caller
         // typed, so messages name the file they asked about rather than one
@@ -1772,12 +1553,10 @@ func validate(_ o: inout Options) throws {
     // temp+rename too, so writing to a symlink's own path REPLACES the link
     // with a regular file and leaves the target byte-for-byte unchanged, at
     // rc=0 -- the shell's `>` follows the link and writes through it, which is
-    // what a caller has every reason to expect. DP settled this for --in-place
-    // and this is where the same sentence also applies.
+    // what a caller has every reason to expect. DP.
     // 同一條規則的另一半。`-o` 也是以暫存檔 + rename 抵達目的地，因此寫到一個 symlink
     // 自身的路徑上，會把連結換成一般檔案，而目標檔逐位元未變、rc=0——shell 的 `>` 是
-    // 跟著連結走、寫進目標的，而呼叫端完全有理由那樣預期。DP 為 --in-place 定下了這件事，
-    // 而這裡是同一句話同樣成立的地方。
+    // 跟著連結走、寫進目標的，而呼叫端完全有理由那樣預期。DP。
     // An empty -o is a variable that came out empty, and it resolves to the
     // current directory: the temp file then lands in the PARENT of where the
     // caller meant to write, and the failure arrives as a raw rename errno
@@ -1794,21 +1573,19 @@ func validate(_ o: inout Options) throws {
         // Before resolving, because this message has to name the path the
         // caller typed. `-o` writes a temp file beside the destination and
         // renames it, which needs a directory entry that can be replaced --
-        // a device, a FIFO or a directory cannot. The README has documented
-        // this refusal ("Use -so") since before it existed: what actually
-        // happened was "cannot create temporary file beside /dev/fd/1", a
-        // failure that names neither the cause nor the way out, and a path the
-        // caller never typed.
+        // a device, a FIFO or a directory cannot. Without this the failure
+        // would be "cannot create temporary file beside /dev/fd/1": no cause,
+        // no way out, and a path the caller never typed. The README documents
+        // this refusal ("Use -so").
         // 在解析之前做，因為這則訊息必須指名「呼叫端打出來的那個路徑」。`-o` 是在目的地旁邊
         // 寫暫存檔再 rename，那需要一個「可以被取代的目錄項目」——裝置、FIFO 或目錄都不是。
-        // README 從這條拒絕存在之前就寫著它（「請改用 -so」）：實際會發生的是「無法在
-        // /dev/fd/1 旁建立暫存檔」，那既沒說原因、也沒說出路，而且指的是一個呼叫端從來沒有
-        // 打過的路徑。
+        // 少了這一段，失敗會是「無法在 /dev/fd/1 旁建立暫存檔」：沒說原因、沒說出路，而且指的是
+        // 一個呼叫端從來沒有打過的路徑。README 記載了這條拒絕（「請改用 -so」）。
         if let k = Platform.fileKind(path: out), k != .regular {
             let kind = k == .directory ? "a directory" : k == .fifo ? "a FIFO" : "not a regular file"
-            // The Chinese read "是不是一般檔案" -- "is is not a regular file" --
-            // because the sentence supplies 是 and this arm supplied it again.
-            // 中文原本讀成「是不是一般檔案」，因為句子已經給了「是」，而這一支又給了一次。
+            // The Chinese sentence already supplies 是, so these phrases must
+            // not start with it, or it reads "是不是一般檔案".
+            // 中文句子已經給了「是」，所以這些片語不能再以它開頭，否則會讀成「是不是一般檔案」。
             let kindZh = k == .directory ? "一個目錄" : k == .fifo ? "一個 FIFO" : "一個裝置或其他非一般檔案"
             throw usageError(
                 "-o \(out) is \(kind); -o writes a temp file beside the destination and renames it, which needs a regular file. Use -so to write to a stream",
@@ -1817,13 +1594,12 @@ func validate(_ o: inout Options) throws {
         // The directory has to accept a new file, because that is where the
         // temp file goes. Checked before resolving so the message names what
         // was typed: `-o /dev/stdout` with stdout redirected to a file
-        // resolves to /dev/fd/1, and the failure that used to come out of the
-        // sink named /dev/fd/1 -- a path the caller never wrote -- with "No
-        // such file or directory" as the cause, which was not the cause.
+        // resolves to /dev/fd/1, and a failure from the sink would name that
+        // path -- one the caller never wrote -- with a misleading errno.
         // 那個目錄必須容得下一個新檔案，因為暫存檔就寫在那裡。在解析之前檢查，好讓訊息
         // 指名「打出來的那個路徑」：`-o /dev/stdout` 在 stdout 被導向檔案時會解析成
-        // /dev/fd/1，而原本由 sink 拋出的失敗指的就是 /dev/fd/1——一個呼叫端從未寫過的路徑
-        // ——並以「No such file or directory」作為原因，而那並不是原因。
+        // /dev/fd/1，而由 sink 拋出的失敗會指名那個路徑——一個呼叫端從未寫過的——並附上
+        // 一個誤導人的 errno。
         let dir = (out as NSString).deletingLastPathComponent
         let dirName = dir.isEmpty ? "." : dir
         if !Platform.directoryAcceptsNewFiles(dir) {
@@ -1833,30 +1609,22 @@ func validate(_ o: inout Options) throws {
             // 「目錄不存在」與「目錄不可寫」需要不同的句子：「請用 -so」是 /dev 的答案，
             // 拿來回答一個打錯的路徑則毫無意義。
             // And a third: a directory that could not be EXAMINED is neither
-            // of those. It used to be folded into "does not exist" because
-            // fileKind answers nil for every stat failure alike -- so a
-            // permission error on a parent, or a symlink loop, was reported as
-            // a missing directory. The path may be sitting right there.
-            // 還有第三種：一個**檢視不了**的目錄，兩者都不是。它先前被併進「不存在」，因為
-            // fileKind 對每一種 stat 失敗一律回答 nil——於是父目錄的權限錯誤、或一個 symlink
-            // 迴圈，都被回報成「目錄不存在」。那條路徑可能就好端端地在那裡。
+            // of those. fileKind answers nil for every stat failure alike, so
+            // the errno is asked for separately; a permission error on a
+            // parent, or a symlink loop, is not a missing directory.
+            // 還有第三種：一個**檢視不了**的目錄，兩者都不是。fileKind 對每一種 stat 失敗一律回答
+            // nil，所以另外取 errno；父目錄的權限錯誤、或一個 symlink 迴圈，都不是「目錄不存在」。
             if let e = Platform.statFailure(dirName) {
                 if e == ENOENT {
                     throw usageError("-o \(out): the directory \(dirName) does not exist",
                                      "-o \(out)：目錄 \(dirName) 不存在")
                 }
-                // Platform.errorText, which already existed and already had
-                // a Windows branch compiled by six other callers. A duplicate
-                // `errnoText` was added here on 2026-09-03 and broke the
-                // Windows build on its second line -- `String(cString:)` taking
-                // an ARRAY is the deprecated overload, while the pointer form
-                // the rest of this tree uses is not. Entry 3 of mistakes.md for
-                // the tenth time, and this one duplicated a whole function.
-                // 用 Platform.errorText——它本來就存在，而且它的 Windows 分支已被另外六個呼叫點
-                // 編譯過。2026-09-03 這裡加了一個重複的 `errnoText`，並在它的第二行弄壞了
-                // Windows 建置——吃**陣列**的 `String(cString:)` 才是被廢棄的那個 overload，
-                // 而這棵樹其他地方用的指標形式不是。mistakes.md 第 3 條的第十次，而這一次
-                // 重複的是一整個函式。
+                // Platform.errorText, not a local errno helper: its Windows
+                // branch is already compiled by other callers, and
+                // `String(cString:)` on an ARRAY is the deprecated overload
+                // that breaks the Windows build.
+                // 用 Platform.errorText，不要另寫一個 errno 小函式：它的 Windows 分支已被其他呼叫點
+                // 編譯過，而吃**陣列**的 `String(cString:)` 是被廢棄的 overload，會弄壞 Windows 建置。
                 let why = Platform.errorText(e)
                 throw usageError(
                     "-o \(out): the directory \(dirName) cannot be examined: \(why)",
@@ -1875,9 +1643,9 @@ func validate(_ o: inout Options) throws {
         // recoverable and destroyed. The per-file salt and the key fingerprint
         // live ONLY in the header marker (`col:enc:<fp>:<salt>`), and the salt
         // is fresh on every run -- so ciphertext emitted without its header can
-        // never be decrypted by anyone, including the person who wrote it.
-        // Previously `-encrypt license -head 1` produced exactly that, at rc=0,
-        // with no warning.
+        // never be decrypted by anyone, including the person who wrote it --
+        // `-encrypt license -head 1` without a header would produce exactly
+        // that, at rc=0.
         //
         // Forcing the header rather than refusing: for a transform there is no
         // second reading. A headerless encrypted fragment has no use to refuse
@@ -1887,33 +1655,28 @@ func validate(_ o: inout Options) throws {
         // 對 -encrypt 而言這不是方便，而是「還原得回來」與「毀了」的差別。每檔的
         // salt 與金鑰指紋只存在於標頭標記中（`col:enc:<指紋>:<salt>`），而 salt
         // 每次執行都重新產生——因此不帶標頭寫出的密文，任何人都無法解密，包括寫
-        // 它的人自己。先前 `-encrypt license -head 1` 產生的正是那個，rc=0，
-        // 而且沒有任何警告。
+        // 它的人自己——不帶標頭的 `-encrypt license -head 1` 產生的正是那個，rc=0。
         //
         // 選擇「強制」而非「拒絕」：對轉換而言沒有第二種合理讀法。一個不帶標頭的
         // 加密片段，沒有任何值得為它保留的用途。
         o.withHeader = true
     }
 
-    // --- Defect 2: --headers overrode the suffix with no cross-check.
+    // --- Defect 2: --headers must agree with the suffix.
     //
-    // `--headers 1` on a .csv2 file made csv2 report
-    // `{"format":"csv2","headers":1}` -- a self-contradiction, since a .csv2
-    // has two header rows by definition -- and read 22 records as 23, promoting
-    // the Chinese title row to data. An edit written back then deleted the
-    // wrong record and produced a structurally valid file with one header row
-    // missing.
+    // `--headers 1` on a .csv2 file would promote the Chinese title row to
+    // data -- a .csv2 has two header rows by definition -- and an edit
+    // written back would delete the wrong record and leave a structurally
+    // valid file with one header row missing.
     //
     // The suffix DECLARES the format; --headers exists for input that has no
     // suffix to declare it. When both speak and disagree, one of them is wrong
     // and csv2 cannot tell which -- so it refuses, the same way
     // `--build-index --no-index` is refused for contradicting itself.
-    // 缺陷 2：--headers 會覆蓋副檔名，且不做交叉檢查。
+    // 缺陷 2：--headers 必須與副檔名一致。
     //
-    // 對 .csv2 檔案給 `--headers 1`，csv2 會回報
-    // `{"format":"csv2","headers":1}`——那是自相矛盾，因為 .csv2 依定義就有兩列
-    // 標頭——並把 22 筆讀成 23 筆，將中文標題列升格為資料。據此寫回的編輯會刪錯
-    // 紀錄，並產生一個「結構合法但少了一列標頭」的檔案。
+    // 對 .csv2 檔案給 `--headers 1`，會把中文標題列升格為資料——.csv2 依定義就有兩列
+    // 標頭——而據此寫回的編輯會刪錯紀錄，留下一個「結構合法但少了一列標頭」的檔案。
     //
     // 副檔名「宣告」格式；--headers 的存在是為了「沒有副檔名可宣告」的輸入。當兩者
     // 都發言且互相牴觸時，其中一個是錯的而 csv2 分不出是哪一個——因此拒絕，與
@@ -1931,57 +1694,46 @@ func validate(_ o: inout Options) throws {
     if let h = o.headersOverride, h != 0, let inp = o.input, let fmt = Format.from(path: inp) {
         if h != fmt.headerRows {
             throw usageError(
-                // Two remedies were offered as equals and they are not.
-                // Dropping --headers reads the file as it is. RENAMING makes
-                // the suffix agree with --headers, and a `.csv2` renamed to
-                // `.csv` then has its second header row read as data record 1
-                // -- at rc=0, output that looks entirely plausible, and one
-                // record more than the file has. A blind round followed the
-                // rename because the message recommended it, and only caught
-                // it by diffing record counts afterwards.
-                // 兩條建議被並列成等價的，而它們不是。拿掉 --headers 是照檔案原本的樣子讀它；
+                // The two remedies are not equals, and the message must not
+                // present them as such. Dropping --headers reads the file as it
+                // is. RENAMING makes the suffix agree with --headers, and a
+                // `.csv2` renamed to `.csv` then has its second header row read
+                // as data record 1 -- at rc=0, with plausible output.
+                // 兩條補救並不等價，訊息不能把它們並列。拿掉 --headers 是照檔案原本的樣子讀它；
                 // 「改檔名」是讓副檔名去遷就 --headers，而一個 `.csv2` 改名成 `.csv` 之後，
-                // 它的第二列標頭會被當成第 1 筆資料——rc=0、輸出看起來完全合理、而紀錄數比
-                // 檔案實際多一筆。一個盲測回合照著這條建議去改檔名，事後靠比對紀錄數才發現。
+                // 它的第二列標頭會被當成第 1 筆資料——rc=0、輸出看起來完全合理。
                 "\(inp) declares \(fmt.headerRows) header row(s) by its suffix, but --headers says \(h). The suffix declares the format; --headers is for input with no suffix to declare it. Drop --headers to read the file as it is. Renaming it instead makes the suffix agree with --headers, which is NOT the same thing: a header row then becomes data record 1, at rc=0, and nothing afterwards can tell it was one",
                 "\(inp) 的副檔名宣告了 \(fmt.headerRows) 列標頭，但 --headers 說 \(h) 列。副檔名宣告格式，--headers 是給「沒有副檔名可宣告」的輸入用的。請拿掉 --headers，照這個檔案原本的樣子讀它。改檔名是讓副檔名去遷就 --headers，那不是同一件事：一列標頭會因此變成第 1 筆資料，rc=0，而事後沒有任何東西看得出它曾經是標頭")
         }
     }
 
-    // --- Defect 3: .csv -> .csv2 silently lost a record.
+    // --- Defect 3: header rows written must match the output suffix.
     //
-    // `-r -t -i a.csv -o conv.csv2` wrote ONE header row into a path whose
-    // suffix promises two. Reading it back took the first data record as the
-    // second header row: 21 records became 20, and busybox became a column
-    // title. The existing guard only asked whether -t was given, never whether
-    // the header rows being written match what the output suffix declares.
+    // `-r -t -i a.csv -o conv.csv2` would write ONE header row into a path
+    // whose suffix promises two. Reading it back takes the first data record
+    // as the second header row and the file comes back a record short.
+    // Asking only whether -t was given does not catch this.
     //
     // csv2 cannot convert between them on its own: going from one header row to
     // two means inventing a row of Traditional Chinese titles, and inventing
     // data is the one thing this tool must never do.
-    // 缺陷 3：.csv → .csv2 會靜默少一筆資料。
+    // 缺陷 3：寫出的標頭列數必須符合輸出副檔名。
     //
-    // `-r -t -i a.csv -o conv.csv2` 把「一列」標頭寫進一個副檔名承諾「兩列」的路徑。
-    // 讀回時第一筆資料被當成第二列標頭：21 筆變成 20 筆，busybox 變成了欄位標題。
-    // 原本的守衛只問「有沒有給 -t」，從未問「正在寫出的標頭列數是否符合輸出副檔名
-    // 所宣告的」。
+    // `-r -t -i a.csv -o conv.csv2` 會把「一列」標頭寫進一個副檔名承諾「兩列」的路徑。
+    // 讀回時第一筆資料被當成第二列標頭，檔案少一筆。只問「有沒有給 -t」抓不到這件事。
     //
     // csv2 無法自行轉換：從一列標頭變成兩列，意味著要「發明」一列繁體中文標題，
     // 而發明資料正是這支工具絕不能做的事。
-    // Writing CSV bytes to a `.md` produced a file csv2 refuses to read, at
-    // rc=0. The mirror of this -- `-md -o x.csv2` -- has been refused since
-    // long before Markdown could be read; this direction never had a guard,
-    // and only became reachable when `.md` started declaring a format.
-    // 把 CSV 的位元組寫進一個 `.md`，會產生一個 csv2 自己拒讀的檔案，而且 rc=0。它的鏡像
-    // ——`-md -o x.csv2`——早在 Markdown 還讀不回來之前就已經被拒絕；這個方向從來沒有守衛，
-    // 而它是在 `.md` 開始宣告一種格式之後才變得走得到。
+    // Writing CSV bytes to a `.md` would produce a file csv2 refuses to read,
+    // at rc=0. This is the mirror of the `-md -o x.csv2` refusal.
+    // 把 CSV 的位元組寫進一個 `.md`，會產生一個 csv2 自己拒讀的檔案，而且 rc=0。這是
+    // `-md -o x.csv2` 那條拒絕的鏡像。
     // `--headers 0` is exempt: the run did not parse the input as CSV and does
     // not write CSV -- it writes back the lines it was given, bytes verbatim.
-    // Refusing here would have left phase 12 able to READ a prose `.md` and
-    // never write one, which solves nothing for the case it was asked for.
+    // Refusing here would leave phase 12 able to READ a prose `.md` and never
+    // write one.
     // `--headers 0` 是例外：這次執行並沒有把輸入當 CSV 解析，也不會寫出 CSV——它寫回去的是它
-    // 拿到的那些行，位元組原樣。在這裡拒絕，會讓第 12 階段變成「讀得了散文 `.md`、卻永遠寫不出
-    // 一份」，而那對它被要求的那個情況等於什麼也沒解決。
+    // 拿到的那些行，位元組原樣。在這裡拒絕，會讓第 12 階段「讀得了散文 `.md`、卻永遠寫不出一份」。
     if let out = o.output, out.lowercased().hasSuffix(".md"), !o.markdown,
        o.headersOverride != 0 {
         throw usageError(
@@ -1990,36 +1742,19 @@ func validate(_ o: inout Options) throws {
     }
     // A `.md` DESTINATION is excluded: how many header rows it will hold is
     // decided by `-md` and by the input, not by the suffix, so comparing it
-    // against a header count is comparing against nothing. Defaulting it to
-    // `.lines` -- zero rows -- refused `-md -i one.csv -o out.md`, which is
-    // the ordinary way to render a table to a file and had worked all along.
-    // Caught by re-running the case the new guard was supposed to leave alone.
+    // against a header count is comparing against nothing. Treating it as
+    // `.lines` -- zero rows -- would refuse `-md -i one.csv -o out.md`, the
+    // ordinary way to render a table to a file.
     // 一個 `.md` **目的地**被排除在外：它會裝幾列標頭是由 `-md` 與輸入決定的，不是由副檔名決定，
-    // 因此拿它去和一個標頭列數比較，是在跟「沒有東西」比較。把它預設成 `.lines`（零列）會讓
-    // `-md -i one.csv -o out.md` 被拒絕，而那是「把一張表算繪到檔案」最普通的寫法，一直都可用。
-    // 這是靠「重跑一次那個新守衛本來就不該碰的案例」抓到的。
-    // A destination that is not a regular file declares nothing. `/dev/stdout`
-    // has no suffix, so treating "no suffix" as "zero header rows" made this
-    // guard fire on it and refuse with the wrong REASON -- the right refusal
-    // ("-o needs a regular file; use -so") was waiting one step later and
-    // never got to speak. macOS reached that one first and the guest did not,
-    // so the whole thing showed up only in the guest, on a case macOS skips.
-    // Round 78's own lesson, one commit later and by my own hand.
-    // 一個不是一般檔案的目的地，什麼也沒宣告。`/dev/stdout` 沒有副檔名，於是把「沒有副檔名」當成
-    // 「零列標頭」，會讓這道守衛對它觸發，並以**錯的理由**拒絕——而對的那句拒絕（「-o 需要一般
-    // 檔案，請用 -so」）就等在後面一步，卻永遠說不到話。macOS 先走到那一句而 guest 沒有，於是整件
-    // 事只在 guest 上、而且是在一個 macOS 會跳過的案例上現形。第 78 回合自己的教訓，晚一個 commit，
-    // 而且是我自己犯的。
-    // The OUTPUT side is back to "only when the suffix declares a format", and
-    // the input side is not. That asymmetry is the whole correction.
+    // 因此拿它去和一個標頭列數比較，是在跟「沒有東西」比較。把它當成 `.lines`（零列）會讓
+    // `-md -i one.csv -o out.md` 被拒絕，而那是「把一張表算繪到檔案」最普通的寫法。
+    // The OUTPUT side is compared only when its suffix declares a format; the
+    // input side always is. That asymmetry is deliberate.
     //
-    // Treating a suffix-less DESTINATION as zero header rows refused
-    // `-o /dev/stdout`, and the judgement I reached for -- "skip when it is
-    // not a regular file" -- is the exact wrong answer T145e was written to
-    // catch: with stdout redirected to a file, /dev/stdout resolves to
-    // /dev/fd/1, which IS a regular file. That test's own comment says so, and
-    // it has said so since round 55. It caught me anyway, on the platform
-    // where stdout is a file and not a pipe.
+    // Treating a suffix-less DESTINATION as zero header rows would refuse
+    // `-o /dev/stdout`, with the wrong reason. "Skip when it is not a regular
+    // file" does not fix that: with stdout redirected to a file, /dev/stdout
+    // resolves to /dev/fd/1, which IS a regular file (T145e).
     //
     // There is no way to tell `-o plain` (a data file the caller named) from
     // `-o /dev/stdout` (a stream) by looking at the path, so the guard must
@@ -2030,13 +1765,10 @@ func validate(_ o: inout Options) throws {
     // interpretation of the name differs, which is the caller's choice and is
     // documented rather than refused.
     //
-    // **輸出**那一側回到「只有在副檔名宣告了格式時才比較」，而輸入那一側不回去。那個不對稱正是
-    // 這次更正的全部。
-    // 把一個沒有副檔名的**目的地**當成零列標頭，會拒絕掉 `-o /dev/stdout`；而我伸手去拿的那個
-    // 判準——「不是一般檔案就跳過」——正是 T145e 當初被寫出來要抓的那個錯誤答案：當 stdout 被
-    // 重導向到一個檔案時，/dev/stdout 解析成 /dev/fd/1，而它**是**一般檔案。那個測試自己的註解
-    // 就這樣寫著，而且從第 55 回合起就這樣寫著。它照樣抓到了我——在「stdout 是檔案而不是管線」的
-    // 那個平台上。
+    // **輸出**那一側只有在副檔名宣告了格式時才比較；輸入那一側一律比較。這個不對稱是刻意的。
+    // 把一個沒有副檔名的**目的地**當成零列標頭，會以錯的理由拒絕 `-o /dev/stdout`。「不是一般
+    // 檔案就跳過」也解決不了：當 stdout 被重導向到一個檔案時，/dev/stdout 解析成 /dev/fd/1，
+    // 而它**是**一般檔案（T145e）。
     // 從路徑看不出 `-o plain`（呼叫端指名的一個資料檔）與 `-o /dev/stdout`（一條串流）的差別，
     // 因此這道守衛不該去試。它仍然抓得住的是「會**遺失資料**」的那一個：零列標頭寫進 `.csv`，
     // 第一行變成標頭、讀回來少一筆。把一個有標頭的檔案寫到一個沒有副檔名的名字，什麼也不會遺失
@@ -2045,45 +1777,25 @@ func validate(_ o: inout Options) throws {
     if let out = o.output, !(o.input?.lowercased().hasSuffix(".md") ?? false),
        !out.lowercased().hasSuffix(".md"),
        Format.from(path: out) != nil {
-        // The OUTPUT side needed the same correction: a destination with no
-        // suffix declares zero header rows, and `Format.from` returning nil
-        // meant this whole block was skipped for it.
-        // **輸出**那一側需要同樣的更正：一個沒有副檔名的目的地宣告的是零列標頭，而
-        // `Format.from` 回傳 nil 使得整個區塊對它直接跳過。
         let outFmt = Format.from(path: out)!
         // A `.md` input is skipped HERE and checked in openInput instead. This
         // guard runs at parse time, before any file is opened, and how many
         // header rows a Markdown table has is a property of its first line --
-        // it cannot be known from the name. Answering 1 by default said "the
-        // input has 1 header row(s)" about a table rendered from a .csv2 that
-        // has two, which is a false sentence in the one place a reader is
-        // being told what their file is.
+        // it cannot be known from the name. A default of 1 would be false for
+        // a table rendered from a .csv2, which has two.
         // `.md` 輸入在**這裡**跳過，改在 openInput 檢查。這道守衛在解析參數時執行，那時任何檔案都
-        // 還沒被開啟，而「一張 Markdown 表有幾列標頭」是它第一行的性質——從名字看不出來。預設回答
-        // 1，會對一張「從有兩列標頭的 .csv2 算繪出來」的表說「輸入有 1 列標頭」，而那是一句假話，
-        // 出現在「正要告訴讀者他的檔案是什麼」的那一個地方。
+        // 還沒被開啟，而「一張 Markdown 表有幾列標頭」是它第一行的性質——從名字看不出來。預設成 1，
+        // 對一張「從有兩列標頭的 .csv2 算繪出來」的表就是假的。
         let inRows: Int
         if let inp = o.input, let inFmt = Format.from(path: inp) {
             inRows = o.headersOverride ?? inFmt.headerRows
         } else {
             // A path with no .csv/.csv2 suffix is `.lines`: ZERO header rows,
-            // not one. Defaulting to 1 here made this guard compare 1 against
-            // a `.csv`'s 1, agree, and let the write through -- so csv2 wrote
-            // files csv2 itself could not read back:
-            //
-            //   0 rows into a .csv   the first line became a header and the
-            //                        read came back one record short, rc=0
-            //   1 row into no suffix the header became a record and `records`
-            //                        went 1 -> 2, rc=0
-            //
-            // The README describes that damage as what happens when somebody
-            // renames a file by hand, and says csv2 will not produce it. It
-            // did. Round 78, JV.
-            // 一個沒有 .csv/.csv2 副檔名的路徑是 `.lines`：**零**列標頭，不是一列。這裡預設成 1，
-            // 會讓這道守衛拿 1 去比一個 `.csv` 的 1、判定相符、放行那次寫入——於是 csv2 寫出了
-            // csv2 自己讀不回來的檔案：0 列寫進 .csv，第一行變成標頭、讀回來少一筆，rc=0；
-            // 1 列寫進無副檔名，標頭變成紀錄、`records` 從 1 變 2，rc=0。README 把那種損害描述成
-            // 「有人手動改名一個檔案」的後果，並說 csv2 自己不會製造它。它製造了。第 78 回合，JV。
+            // not one. A default of 1 would agree with a `.csv` destination
+            // and let through a write whose first line becomes a header on
+            // read-back, one record short at rc=0. Round 78, JV.
+            // 一個沒有 .csv/.csv2 副檔名的路徑是 `.lines`：**零**列標頭，不是一列。預設成 1 會與
+            // `.csv` 目的地相符，放行一次「讀回時第一行變成標頭、少一筆、rc=0」的寫入。第 78 回合，JV。
             inRows = o.headersOverride ?? 0
         }
         if inRows != outFmt.headerRows {
@@ -2094,17 +1806,14 @@ func validate(_ o: inout Options) throws {
     }
     if (o.physical || o.a1) && (o.contains == nil || o.filter || o.markdown || o.json) {
         // Both add a part to an ADDRESS, and the locating report is the only
-        // output that prints one. Everywhere else they were accepted and did
+        // output that prints one. Anywhere else, accepting them would do
         // nothing, which is indistinguishable from "this flag is not working".
         // 兩者都是在「位址」上附加資訊，而唯一會印出位址的輸出就是定位報告。
-        // 在其他地方它們會被接受卻毫無作用，那與「這個旗標壞了」無從分辨。
-        // One flag or two, and the sentence has to read correctly either way.
-        // Sharing a plural verb made `--a1 add to the address`, which reads as
-        // though one flag were several -- a small thing that tells the reader
-        // the message was assembled rather than written.
-        // 一個旗標或兩個，這句話兩種情況都必須讀得通。共用一個複數動詞會造出
-        // 「--a1 add to the address」，讀起來像是一個旗標卻用了複數——小事，但它會告訴讀者
-        // 這句話是「拼出來的」，不是「寫出來的」。
+        // 在其他地方接受它們卻毫無作用，那與「這個旗標壞了」無從分辨。
+        // One flag or two, and the sentence has to read correctly either way:
+        // a shared plural verb would give `--a1 add to the address`.
+        // 一個旗標或兩個，這句話兩種情況都必須讀得通：共用一個複數動詞會造出
+        // 「--a1 add to the address」。
         let flags = [o.physical ? "--physical" : nil, o.a1 ? "--a1" : nil].compactMap { $0 }
         let which = flags.joined(separator: " and ")
         let verb = flags.count > 1 ? "add" : "adds"
@@ -2113,31 +1822,12 @@ func validate(_ o: inout Options) throws {
             "\(which) \(verb) to the address in the locating report, so \(need) -contains without --filter, -md or --json",
             "\(which) 是附加在定位報告的位址上的，因此需要搭配 -contains，且不能同時給 --filter、-md 或 --json")
     }
-    // -rownum adds a COLUMN, and --json names its fields rather than counting
-    // them, so there is nowhere in a JSON object for a generated position to
-    // go. It was accepted and dropped: no rownum key, `fields` unchanged,
-    // rc=0. That is the same silence `--a1` and `--physical` are refused for
-    // three lines up, and the same one `-get` refuses -rownum for BY NAME --
-    // with the explicit reason that it would be ignored.
-    // -rownum 加的是一個「欄」，而 --json 是替欄位命名而不是數位置，因此一個「生成的位置」
-    // 在 JSON 物件裡無處可去。它原本會被接受然後丟掉：沒有 rownum 鍵、fields 不變、rc=0。
-    // 那與三行之上 `--a1`、`--physical` 被拒絕的沉默是同一種，也與 `-get` 明文以「它會被
-    // 忽略」為由拒絕 -rownum 的那一種相同。
-    // --en and --zh choose which header row names the columns, so giving both
-    // is a request with two answers. The last one silently won, order-
-    // dependent, at rc=0 -- and this tool refuses `--headers 1 --headers 2`
-    // with a message arguing that taking the last one silently is how
-    // `-hash note -hash ver` leaves note in plaintext. Same hazard, and it was
-    // handled two different ways.
-    // --en 與 --zh 決定的是「由哪一列標頭來命名欄位」，因此兩個都給等於一個有兩個答案的要求。
-    // 原本是「後面那個安靜地贏」，與順序有關，rc=0——而這個工具拒絕 `--headers 1 --headers 2`
-    // 時所給的理由，正是「安靜地取最後一個，就是 `-hash note -hash ver` 把 note 留在明文的
-    // 那條路」。同一類危險，卻用了兩種不同的處理方式。
-    // Both given, and disagreeing. Refused rather than resolved, which is what
-    // this tool does with `--build-index --no-index` and with `--zh --en`: a
-    // contradiction is the caller's to settle, and picking one silently is how
-    // the same command line produces two different files. NN.
-    // 兩個都給了，而且不一致。**拒絕**而不是替他決定——這正是這支工具對
+    // `--pretty` and `--md-style` both given, and disagreeing. Refused rather
+    // than resolved, which is what this tool does with `--build-index
+    // --no-index` and with `--zh --en`: a contradiction is the caller's to
+    // settle, and picking one silently is how the same command line produces
+    // two different files. NN.
+    // `--pretty` 與 `--md-style` 兩個都給了，而且不一致。**拒絕**而不是替他決定——這正是這支工具對
     // `--build-index --no-index` 與 `--zh --en` 的做法：一個矛盾該由呼叫端解決，而靜默地挑一個，
     // 正是「同一行指令產生兩個不同檔案」的由來。NN。
     if o.sawPretty > 0, let given = o.explicitStyle, given != .pretty {
@@ -2145,11 +1835,11 @@ func validate(_ o: inout Options) throws {
             "--pretty is --md-style pretty, so giving it with --md-style \(given.rawValue) contradicts itself; the result depended on which came last",
             "--pretty 就是 --md-style pretty，因此把它與 --md-style \(given.rawValue) 一起給是自相矛盾；先前的結果取決於哪一個排在後面")
     }
-    // Silent no-ops, in a tool that names every other one. `--filter`,
-    // `-A`/`-B`/`-C` and `--normalize` are all refused without `-contains` and
-    // the README says so; these two did nothing and said nothing. NO.
-    // 靜默的無操作，而這支工具會指名其他每一個。`--filter`、`-A`／`-B`／`-C` 與 `--normalize`
-    // 在沒有 `-contains` 時全部被拒絕、README 也這樣寫；而這兩個什麼都沒做、也什麼都沒說。NO。
+    // Without -md these two would be silent no-ops. They are refused the way
+    // `--filter`, `-A`/`-B`/`-C` and `--normalize` are refused without
+    // `-contains`. NO.
+    // 沒有 -md 時，這兩個會是靜默的無操作。它們被拒絕的方式，與 `--filter`、`-A`／`-B`／`-C`、
+    // `--normalize` 在沒有 `-contains` 時被拒絕的方式相同。NO。
     if !o.markdown && o.sawPretty > 0 {
         throw usageError("--pretty shapes -md output, so it needs -md",
                          "--pretty 塑形的是 -md 的輸出，因此它需要 -md")
@@ -2158,6 +1848,11 @@ func validate(_ o: inout Options) throws {
         throw usageError("--md-style shapes -md output, so it needs -md",
                          "--md-style 塑形的是 -md 的輸出，因此它需要 -md")
     }
+    // --en and --zh choose which header row names the columns, so giving both
+    // is a request with two answers; taking the last silently would make the
+    // result depend on flag order.
+    // --en 與 --zh 決定的是「由哪一列標頭來命名欄位」，因此兩個都給等於一個有兩個答案的要求；
+    // 靜默地取最後一個，會讓結果取決於旗標順序。
     if o.langFlags > 1 {
         // Two different flags and the same flag twice are different mistakes,
         // and the message has to be true of the one in front of it -- the same
@@ -2172,9 +1867,14 @@ func validate(_ o: inout Options) throws {
         throw usageError("\(f) is given more than once; a repeated flag is refused rather than taken once, because the second one may have been meant to change something",
                          "\(f) 給了不只一次；重複的旗標會被拒絕而不是「只取一次」，因為第二個很可能是想改變什麼")
     }
-    // NOT refused on a locating report, though round 92 asked for it and the
-    // asymmetry it named is real: `--json` rejects `-rownum` while the report
-    // accepts it in silence.
+    // -rownum adds a COLUMN, and --json names its fields rather than counting
+    // them, so there is nowhere in a JSON object for a generated position to
+    // go; accepting it would drop it silently.
+    // -rownum 加的是一個「欄」，而 --json 是替欄位命名而不是數位置，因此一個「生成的位置」
+    // 在 JSON 物件裡無處可去；接受它就等於靜默丟掉它。
+    //
+    // NOT refused on a locating report, though the asymmetry is real:
+    // `--json` rejects `-rownum` while the report accepts it in silence.
     //
     // T15 is why. `-rownum` is output-side ONLY -- it must not shift addressing
     // and must not be searchable -- and T15a/T15b assert exactly that by running
@@ -2190,8 +1890,7 @@ func validate(_ o: inout Options) throws {
     //
     // The asymmetry is therefore documented rather than removed. NS.
     //
-    // 在定位報告上**不**拒絕，儘管第 92 回合要求了，而它指出的那個不對稱是真的：`--json` 拒絕
-    // `-rownum`，而報告靜默地接受。
+    // 在定位報告上**不**拒絕，儘管那個不對稱是真的：`--json` 拒絕 `-rownum`，而報告靜默地接受。
     //
     // 理由是 T15。`-rownum` **只**作用在輸出側——它必須不改變定址、也必須不可被搜尋——而 T15a／T15b
     // 正是以「跑 `-contains -rownum` 並檢查位址沒有移動」來斷言這件事。拒絕這一對，等於拿掉了那個
@@ -2210,15 +1909,12 @@ func validate(_ o: inout Options) throws {
     if o.contains == nil && o.filter && o.edits.isEmpty {
         throw usageError("--filter needs -contains", "--filter 需要搭配 -contains")
     }
-    // --normalize decides how a SEARCH compares, and nothing else reads it.
-    // Without -contains it was accepted and did nothing, while its two
-    // neighbours in the same section -- --filter and --include-headers --
-    // are both refused for exactly that. The rule this project keeps
-    // rediscovering is that a flag the caller passed and the tool discarded is
-    // indistinguishable from a flag that does not work.
-    // --normalize 決定的是一次「搜尋」怎麼比較，沒有別的東西會讀它。沒有 -contains 時它會被
-    // 接受然後什麼也不做，而同一節裡它的兩個鄰居——--filter 與 --include-headers——都正是為此
-    // 被拒絕。這個專案一再重新發現的那條規則是：一個呼叫端給了、而工具丟棄了的旗標，與一個
+    // --normalize decides how a SEARCH compares, and nothing else reads it,
+    // so without -contains it is refused like --filter and --include-headers.
+    // A flag the caller passed and the tool discarded is indistinguishable
+    // from a flag that does not work.
+    // --normalize 決定的是一次「搜尋」怎麼比較，沒有別的東西會讀它，因此沒有 -contains 時，它與
+    // --filter、--include-headers 一樣被拒絕。一個呼叫端給了、而工具丟棄了的旗標，與一個
     // 「壞掉的旗標」無從分辨。
     if o.normalize && o.contains == nil {
         throw usageError("--normalize decides how -contains compares, so it needs -contains; storage is never normalised",
@@ -2252,45 +1948,28 @@ func validate(_ o: inout Options) throws {
         }
     }
     // An output SHAPE with an edit verb. An edit writes CSV -- that is what it
-    // is for -- so --json and -md were accepted, ignored and exited 0, while
-    // --a1 in the same position was refused and -md without -t on an edit was
-    // refused for a different reason entirely. Three flags on one axis, three
-    // behaviours.
+    // is for -- so --json and -md would otherwise be accepted and ignored at
+    // rc=0.
     //
     // Refusing rather than honouring: writing a Markdown table to a .csv path
     // would produce a file this tool then refuses to read, which is the
     // failure the format rules exist to prevent.
-    // 一個「輸出形狀」旗標與一個編輯動詞併用。編輯寫出的是 CSV——那正是它的用途——因此
-    // --json 與 -md 被接受、被忽略、以 0 結束，而同一個位置的 --a1 會被拒絕，`-md` 少了 -t
-    // 又會因為完全不同的理由被拒絕。同一個軸上的三個旗標，三種行為。
+    // 一個「輸出形狀」旗標與一個編輯動詞併用。編輯寫出的是 CSV——那正是它的用途——否則
+    // --json 與 -md 會在 rc=0 下被接受、被忽略。
     // 選擇「拒絕」而不是「照做」：把一張 Markdown 表格寫進 .csv 路徑，會產生一個這支工具
     // 隨後拒絕讀取的檔案，而那正是格式規則要防止的失敗。
     if !o.edits.isEmpty || o.encryptCols != nil || o.decryptCols != nil || o.hashCols != nil {
         let shape = o.json ? "--json" : (o.markdown ? "-md" : nil)
-        // Relaxing this to allow `-md` into a `.md` destination was tried on
-        // 2026-08-29 and REVERTED the same hour. The refusal is only half the
-        // work: the edit path writes bytes through FieldEncoder directly, so
-        // with the guard gone the run accepted `-md`, reported success, and
-        // wrote CSV into a file named `.md`. A refusal replaced by a wrong
-        // answer is worse than the refusal -- and it was found only because
-        // the output was looked at rather than the exit status.
-        //
-        // Making it real means giving the edit path a MarkdownEmitter and
-        // deciding what an index means for a `.md` destination. That is phase
-        // 11 item 2a, with `--md-table N --in-place` behind it, and it is why
-        // `--md-style preserve` alone cannot help the editing case yet: the
-        // documented two-run workaround reads a `.csv` in its second run and
-        // has no layout to keep.
-        // 把這道拒絕放寬成「允許 `-md` 寫進 `.md` 目的地」，在 2026-08-29 試過，並在同一個小時內
-        // **撤回**。那道拒絕只是工作的一半：編輯路徑是直接透過 FieldEncoder 寫位元組的，因此守衛
-        // 一拿掉，那次執行就接受了 `-md`、回報成功、然後把 CSV 寫進一個叫 `.md` 的檔案。一道被
-        // 錯誤答案取代的拒絕，比那道拒絕更糟——而它之所以被發現，只是因為有人去看了輸出，
-        // 而不是去看結束狀態。
-        //
-        // 要讓它成真，得給編輯路徑一個 MarkdownEmitter，並決定「一個 `.md` 目的地的索引」是什麼
-        // 意思。那是第 11 階段的 2a，後面還跟著 `--md-table N --in-place`；那也正是
-        // `--md-style preserve` 目前幫不上編輯情境的原因：文件記載的那個兩趟做法，第二趟讀的是
-        // 一個 `.csv`，沒有任何排版可以保留。
+        // `-md` with an edit is allowed only when the destination is `.md`;
+        // the edit path then renders through MarkdownEmitter (phase 11, 2a).
+        // Widening this exception needs that rendering for the new case
+        // first: the plain edit path writes CSV bytes through FieldEncoder,
+        // so without it the run would report success and write CSV into a
+        // file named `.md`.
+        // 編輯搭配 `-md`，只在目的地是 `.md` 時允許；此時編輯路徑會透過 MarkdownEmitter 算繪
+        // （第 11 階段，2a）。要放寬這個例外，得先替新情況補上那段算繪：一般的編輯路徑是透過
+        // FieldEncoder 寫 CSV 位元組的，少了它，那次執行會回報成功、然後把 CSV 寫進一個叫 `.md`
+        // 的檔案。
         if o.markdown, let destination = o.output ?? o.input,
            destination.lowercased().hasSuffix(".md") {
             // Markdown edits are rendered through MarkdownEmitter after the
@@ -2367,17 +2046,16 @@ func resolveColumn(_ token: String, header: Record) throws -> Int {
     if let n = Int(token) {
         // A number that is ALSO a column name is a guess waiting to happen.
         // The file `2,1` has a column named "2" at position 1 and one named
-        // "1" at position 2; `-hash 2` took position 2 and hashed the column
-        // called "1", at rc=0 with nothing on stderr. The caller asked for a
-        // name they can see in the header and got a different column.
+        // "1" at position 2; taking position 2 for `-hash 2` would hash the
+        // column called "1", at rc=0 -- not the name the caller can see.
         //
-        // Refused for the same reason two columns with one name are refused,
-        // decided on 2026-08-18: picking one for you would be a guess. The way
-        // out is the same shape as that one -- say which you mean.
+        // Refused for the same reason two columns with one name are refused:
+        // picking one for you would be a guess. The way out is the same --
+        // say which you mean.
         // 一個「同時也是欄名」的數字，是一次等著發生的猜測。檔案 `2,1` 的第 1 欄名叫 "2"、
-        // 第 2 欄名叫 "1"；`-hash 2` 取的是位置 2，於是雜湊了名為 "1" 的那一欄，rc=0、
-        // stderr 空白。呼叫端要的是他在標頭裡看得到的那個名字，拿到的是另一欄。
-        // 拒絕的理由與「兩個欄位同名」那一條相同（2026-08-18 定案）：替你挑一個等於猜測。
+        // 第 2 欄名叫 "1"；`-hash 2` 若取位置 2，就會雜湊名為 "1" 的那一欄，rc=0——而不是呼叫端
+        // 在標頭裡看得到的那個名字。
+        // 拒絕的理由與「兩個欄位同名」那一條相同：替你挑一個等於猜測。出路也相同——說清楚指的是哪個。
         var named: [Int] = []
         for (i, f) in header.fields.enumerated() where baseName(headerName(f)) == token {
             named.append(i)
@@ -2398,11 +2076,9 @@ func resolveColumn(_ token: String, header: Record) throws -> Int {
     // Collect every match rather than returning the first.
     //
     // A file may legitimately carry two columns with the same name -- CSV does
-    // not forbid it and spreadsheets produce it -- and `-update 1:note X` used
-    // to edit whichever came first, at rc=0, with nothing said. The caller
-    // asked to change `note` and got one of two, chosen by position. That is
-    // the incident this project was built after, reproduced by the tool meant
-    // to prevent it.
+    // not forbid it and spreadsheets produce it -- and returning the first
+    // would make `-update 1:note X` edit one of two, chosen by position, at
+    // rc=0 with nothing said.
     //
     // Comparison is by Swift's String ==, which is CANONICAL EQUIVALENCE: an
     // NFC `café` and an NFD `café` are the same name here, even though they are
@@ -2412,10 +2088,8 @@ func resolveColumn(_ token: String, header: Record) throws -> Int {
     // ambiguity matter more, not less.
     //
     // 收集「每一個」匹配，而不是回傳第一個。
-    // 一個檔案可以合法地帶有兩個同名欄位——CSV 並未禁止，而試算表就會產生——而
-    // `-update 1:note X` 先前會編輯位置在前的那一個，rc=0，什麼也不說。呼叫端要求修改
-    // `note`，拿到的是兩者之一，由位置決定。那正是本專案因之而生的那起事故，被那支
-    // 本該防止它的工具重現了一次。
+    // 一個檔案可以合法地帶有兩個同名欄位——CSV 並未禁止，而試算表就會產生——而回傳第一個，
+    // 會讓 `-update 1:note X` 改到兩者之一、由位置決定，rc=0，什麼也不說。
     // 比較用的是 Swift 的 String ==，也就是「正規等價」：NFC 的 café 與 NFD 的 café 在此
     // 是同一個名字，儘管位元組不同。對「名字」而言那是對的——對每一個讀到它的人來說，
     // 那就是同一個名字——但這也意味著兩個欄位可以在 hex dump 裡看起來不同卻相撞，
@@ -2434,17 +2108,15 @@ func resolveColumn(_ token: String, header: Record) throws -> Int {
     // Before blaming the column: the caller may have pasted an address exactly
     // as --physical or --a1 printed it. `1:1@L2` splits into record 1 and
     // column "1@L2", and "no column named 1@L2" sends the reader looking for a
-    // column that was never the problem. The README promises the printed
-    // notation composes; under those two flags it does not, and the least this
-    // can do is say which part to drop.
+    // column that was never the problem, so the message says which part to
+    // drop.
     //
     // Checked by stripping and re-resolving, not by pattern alone: a column
     // really can be called "id [primary]", and telling someone their own
     // column name is a decoration would be the same wrong answer in reverse.
     // 在怪罪欄位之前：呼叫端可能是把 --physical 或 --a1 印出來的位址原封不動貼了回來。
     // `1:1@L2` 會切成第 1 筆與欄位「1@L2」，而「沒有名為 1@L2 的欄位」會把讀者送去找一個
-    // 從來就不是問題所在的欄位。README 承諾「印出來的寫法可以直接接下去」，在那兩個旗標下
-    // 它做不到，而這裡至少能說出「該拿掉哪一段」。
+    // 從來就不是問題所在的欄位，所以訊息會說出「該拿掉哪一段」。
     // 判斷方式是「拿掉之後再解析一次」，不是只看樣子：一個欄位真的可以叫做「id [primary]」，
     // 而把別人的欄名說成裝飾，是同一個錯誤的反面。
     if let bare = strippedLocation(token),
@@ -2455,38 +2127,29 @@ func resolveColumn(_ token: String, header: Record) throws -> Int {
             "「\(token)」是 --physical 或 --a1 印出來的位址形式；結尾那段位置資訊不屬於位址本身。欄位請用「\(bare)」，並注意只有單純的 r:c 形式可以直接接下去")
     }
     // Each name in quotes, because a name can contain the separator this list
-    // uses. A file whose first column is called `a,b` produced
+    // uses. A file whose first column is called `a,b` would otherwise give
     //   the columns are: a,b, c
     // which reads as three columns and is not parseable by a human or a
     // script. The quotes cost nothing on ordinary names and are the only thing
     // that makes the awkward ones legible.
     // 每個名字都加引號，因為名字裡可以含有「這份清單用來分隔的那個字元」。第一欄叫做
-    // `a,b` 的檔案原本會印出「the columns are: a,b, c」——讀起來像三欄，人與腳本都解析不了。
+    // `a,b` 的檔案否則會印出「the columns are: a,b, c」——讀起來像三欄，人與腳本都解析不了。
     // 對一般的名字加引號沒有任何代價，而它是讓那些尷尬的名字可讀的唯一辦法。
     // Both the name asked for and the names on offer go through the VALUE
     // escaper, not just the whole-line one. The difference is the backslash:
     // the line escape deliberately leaves it alone so that a message teaching
-    // `\n` still reads as `\n`, and the consequence here was that a column
-    // literally named `na\nme` and one containing a newline produced
-    // byte-identical error lines -- while the INFO line recording the same
-    // invocation told them apart. Applying the README's own unescape recipe to
-    // either gave a name with a real newline in it, inventing a character for
-    // the one that never had it, at rc=0 on the reading side.
+    // `\n` still reads as `\n`. With only the line escape, a column literally
+    // named `na\nme` and one containing a newline would give byte-identical
+    // error lines, and unescaping either would invent a newline.
     // 「被詢問的那個名字」與「檔案提供的那些名字」都走「值」的跳脫，而不只是整行的那一個。
-    // 差別在反斜線：整行的跳脫刻意放過它，好讓一則在教 `\n` 的訊息仍然讀作 `\n`，而它在
-    // 這裡的後果是——一個字面叫做 `na\nme` 的欄位，與一個名字裡含換行的欄位，產生的錯誤行
-    // 逐位元組相同，而同一次執行的 INFO 行分得出來。把 README 自己那份解碼步驟套到任何一則
-    // 上，得到的都是一個帶著真換行的名字：替那個從來沒有換行的名字發明了一個字元，rc=0。
-    // The list of names is bounded. It was every column, in full, so a file
-    // whose first column name is 50,000 characters long put a 50 KB line on
-    // stderr -- on the line carrying the diagnosis, in a message whose
-    // documented example is `no column named "caf<U+FFFD>"`. The locating
-    // report cuts a value at 200 characters for this exact reason and says so;
-    // a diagnostic listing what IS available had no such rule.
-    // 那份名字清單有上界。原本是「每一欄、完整印出」，於是一個「第一欄名字有 50,000 個字元」
-    // 的檔案，會在 stderr 上放一行 50 KB——就放在承載診斷的那一行上，而這則訊息在文件裡的
-    // 範例是 `no column named "caf<U+FFFD>"`。定位報告正是為了同一個理由把值切在 200 個字元，
-    // 而且說了出來；一個「列出有哪些可用」的診斷卻沒有這條規則。
+    // 差別在反斜線：整行的跳脫刻意放過它，好讓一則在教 `\n` 的訊息仍然讀作 `\n`。只用整行跳脫
+    // 的話，一個字面叫做 `na\nme` 的欄位與一個名字裡含換行的欄位，錯誤行會逐位元組相同，而解碼
+    // 任何一則都會發明出一個換行。
+    // The list of names is bounded, for the reason the locating report cuts a
+    // value at 200 characters: a 50,000-character column name would otherwise
+    // put a 50 KB line on stderr, on the line carrying the diagnosis.
+    // 那份名字清單有上界，理由與定位報告把值切在 200 個字元相同：否則一個 50,000 字元的欄名，
+    // 會在 stderr 上放一行 50 KB——就放在承載診斷的那一行上。
     func shortName(_ n: String) -> String {
         guard n.count > 60 else { return n }
         return String(n.prefix(60)) + "…[+\(n.count - 60) more chars]"
@@ -2606,29 +2269,22 @@ func strippedLocation(_ token: String) -> String? {
 
 /// `allMeansMarked` is true only for `-decrypt`, which is the only verb the
 /// README gives the `all` keyword to: "COLS may be `all` to take every marked
-/// column". The implementation gave it to every verb, so `-hash all` on a file
-/// with no encrypted columns selected NOTHING and exited 0 having done nothing
-/// -- the same silent no-op an empty column list used to be, reached by
-/// another road. It also made a column genuinely named `all` unaddressable.
+/// column". For any other verb `all` is a column name: treating it as "every
+/// marked column" would make `-hash all` on a file with no encrypted columns
+/// select nothing at rc=0, and would make a column named `all` unaddressable.
 /// `allMeansMarked` 只在 `-decrypt` 時為真——README 只把 `all` 這個關鍵字給了它:
-/// 「COLS 可以是 `all`，代表每一個被標記的欄位」。而實作把它給了每一個動詞，於是
-/// `-hash all` 在一個沒有加密欄位的檔案上什麼也沒選中、以 0 結束、什麼也沒做——那正是
-/// 「空欄位清單」曾經的那個靜默無操作，只是換了一條路走回來。它同時也讓一個真的叫做
-/// `all` 的欄位無法被定址。
+/// 「COLS 可以是 `all`，代表每一個被標記的欄位」。對其他動詞，`all` 就是一個欄名：把它當成
+/// 「每一個被標記的欄位」，會讓 `-hash all` 在沒有加密欄位的檔案上什麼也沒選中、rc=0，
+/// 也會讓一個真的叫做 `all` 的欄位無法被定址。
 func resolveColumnList(_ spec: String, header: Record, allMeansMarked: Bool = false) throws -> [Int] {
-    // An empty COLS is a refusal, not "protect nothing". `-hash ""` used to
-    // exit 0 having done nothing at all: output byte-identical to the input, no
-    // marker in the header, nothing on stderr -- while a WRONG column name was
-    // refused by name. A script whose $COLS came out empty wrote an
-    // unprotected file and every check this README offers reported success.
-    // The tool's first requirement is that anything it cannot do must fail
-    // loudly rather than quietly emit a half-correct file, and an empty
-    // selection is the smallest possible version of exactly that.
-    // 空的 COLS 是一次拒絕，不是「保護零個欄位」。`-hash ""` 原本會以 0 結束、什麼也沒做：
-    // 輸出與輸入逐位元相同、標頭沒有標記、stderr 空白——而一個「錯的」欄名卻會被指名拒絕。
-    // 一支 $COLS 算成空字串的腳本，寫出來的是一個未受保護的檔案，而 README 提供的每一種
-    // 檢查都會回報成功。這支工具的第一條要求就是「做不到的事要大聲失敗，而不是安靜地產出
-    // 一個半對的檔案」，而一個空的選取，正是那件事最小的版本。
+    // An empty COLS is a refusal, not "protect nothing". Accepted, a script
+    // whose $COLS came out empty would write an unprotected file at rc=0 with
+    // nothing on stderr, and every check the README offers would report
+    // success. Anything the tool cannot do must fail loudly rather than
+    // quietly emit a half-correct file.
+    // 空的 COLS 是一次拒絕，不是「保護零個欄位」。若接受它，一支 $COLS 算成空字串的腳本會在
+    // rc=0、stderr 空白下寫出一個未受保護的檔案，而 README 提供的每一種檢查都會回報成功。
+    // 做不到的事要大聲失敗，而不是安靜地產出一個半對的檔案。
     if spec.split(separator: ",").allSatisfy({ $0.trimmingCharacters(in: .whitespaces).isEmpty }) {
         throw fault("no columns named: the column list is empty. Naming no columns cannot be distinguished from a variable that came out empty, so it is refused rather than treated as \"none\"",
                     "沒有指名任何欄位：欄位清單是空的。「一個欄位都不指」與「某個變數算成了空字串」無法區分，因此拒絕，而不是當成「零個」")
@@ -2663,12 +2319,11 @@ struct InputPlan {
     var describedPath: String
     /// Present only when the input was a Markdown table. `--md-style preserve`
     /// reads it to write an unedited row back as the exact line it arrived on.
-    /// Carried here rather than in a global because Swift 6 refuses mutable
-    /// global state outright -- and it was right to: this belongs to ONE input,
-    /// and openInput is where an input's facts are already assembled.
+    /// Carried here rather than in a global: Swift 6 refuses mutable global
+    /// state, and this belongs to ONE input, whose facts openInput assembles.
     /// 只有在輸入是一張 Markdown 表時才存在。`--md-style preserve` 讀它，好把一個沒被編輯過的列
-    /// 原封不動地寫回成它送達時的那一行。放在這裡而不是全域，是因為 Swift 6 直接拒絕可變的全域
-    /// 狀態——而它拒對了：這東西屬於**某一個**輸入，而 openInput 正是那個輸入的事實被組起來的地方。
+    /// 原封不動地寫回成它送達時的那一行。放在這裡而不是全域：Swift 6 拒絕可變的全域狀態，而這東西
+    /// 屬於**某一個**輸入，那個輸入的事實正是在 openInput 組起來的。
     var mdLayout: MarkdownLayout? = nil
     /// Added to a parsed record's line to get the line in the DOCUMENT, and 0
     /// for every input that is not a Markdown table -- where the two are the
@@ -2694,8 +2349,7 @@ func refuseLogAliases(_ o: Options) throws {
             "-o \(out) is the -log file; the run would rename its own audit trail away",
             "-o \(out) 就是 -log 檔；那次執行會把自己的稽核軌跡改名蓋掉")
     }
-    // The pair the first version of this function did not ask about, and the
-    // worst of the six.
+    // The worst of the pairs.
     //
     // `-log` naming the KEYFILE appends the invocation line to the key before
     // the key is derived. The run encrypts with "the original bytes plus one
@@ -2705,7 +2359,7 @@ func refuseLogAliases(_ o: Options) throws {
     // Neither decrypts. Exit 0, nothing on either stream, and `-log` is the
     // flag a careful operator adds when doing something irreversible.
     //
-    // 這是這個函式的第一版沒有問到的那一對，也是六對裡最糟的。
+    // 這是這幾對裡最糟的一對。
     //
     // `-log` 指向「金鑰檔」時，呼叫紀錄會在金鑰被推導之前被追加到那把金鑰上。於是那次執行
     // 用「原本的位元組加上一行 log」去加密——那個值只存在了幾毫秒，而且從來沒有以那個樣子被
@@ -2722,31 +2376,30 @@ func refuseLogAliases(_ o: Options) throws {
 func openInput(_ o: Options) throws -> InputPlan {
     if o.useStdin {
         let h = o.headersOverride ?? 1
-        // 0 is the line-oriented format, which stdin could not name before:
-        // it is declared by the absence of a suffix, and stdin has no name to
-        // be absent from. Phase 12.
-        // 0 是那個「逐行」的格式，而 stdin 在此之前指名不到它：它靠「沒有副檔名」宣告，
-        // 而 stdin 連一個「可以沒有副檔名」的名字都沒有。第 12 階段。
+        // 0 is the line-oriented format. It is otherwise declared by the
+        // absence of a suffix, and stdin has no name to be absent from.
+        // Phase 12.
+        // 0 是那個「逐行」的格式。否則它只能靠「沒有副檔名」宣告，而 stdin 連一個「可以沒有
+        // 副檔名」的名字都沒有。第 12 階段。
         return InputPlan(format: h == 0 ? .lines : (h == 2 ? .csv2 : .csv), headerRows: h,
                          source: ByteSource(stdin: 1 << 16), describedPath: "<stdin>")
     }
     let path = o.input!
     // A Markdown table, translated into canonical .csv2 before the parser
-    // sees it. Phase 8a: `-md` could write one and nothing could read one.
+    // sees it, so what `-md` writes can be read back. Phase 8a.
     // The header-row count comes back from the translation because it is
     // RECOVERABLE -- `-md` joins a .csv2's two titles with an unescaped
     // `<br>` -- so this needs no --headers and cannot be told a wrong one.
-    // 一張 Markdown 表，在解析器看到它之前先翻譯成標準的 `.csv2`。第 8a 階段：`-md` 寫得出一張，
-    // 而沒有任何東西讀得回一張。標頭列數由那次翻譯回傳，因為它是**還原得出來**的——`-md` 用一個
+    // 一張 Markdown 表，在解析器看到它之前先翻譯成標準的 `.csv2`，好讓 `-md` 寫出的東西讀得回來。
+    // 第 8a 階段。標頭列數由那次翻譯回傳，因為它是**還原得出來**的——`-md` 用一個
     // 未跳脫的 `<br>` 把 .csv2 的兩個標題接起來——因此這裡不需要 --headers，也不可能被告知一個
     // 錯的值。
-    // `--headers 0` on a `.md` means "read this as prose, line by line" -- the
-    // case a user hit trying to edit a document whose suffix says "table". It
-    // is handled BEFORE the Markdown translation, because the whole point is
-    // not to translate. Phase 12.
-    // 對一個 `.md` 給 `--headers 0`，意思是「把它當散文、逐行讀」——那正是一位使用者在試圖編輯
-    // 一份「副檔名說它是表」的文件時撞到的情況。它排在 Markdown 翻譯**之前**處理，因為重點就是
-    // 不要翻譯。第 12 階段。
+    // `--headers 0` on a `.md` means "read this as prose, line by line", for
+    // editing a document whose suffix says "table". It is handled BEFORE the
+    // Markdown translation, because the whole point is not to translate.
+    // Phase 12.
+    // 對一個 `.md` 給 `--headers 0`，意思是「把它當散文、逐行讀」，用來編輯一份「副檔名說它是表」
+    // 的文件。它排在 Markdown 翻譯**之前**處理，因為重點就是不要翻譯。第 12 階段。
     if path.lowercased().hasSuffix(".md"), o.headersOverride == 0 {
         return InputPlan(format: .lines, headerRows: 0,
                          source: try ByteSource(path: path), describedPath: path)
@@ -2775,36 +2428,23 @@ func openInput(_ o: Options) throws -> InputPlan {
     }
     guard let fmt = Format.from(path: path) else {
         // No suffix: one column, no header rows, the line's bytes verbatim.
-        // Phase 8b. `--headers` still overrides, because a file called
-        // `data` that IS a CSV was readable that way before this and still
-        // has to be -- the new default must not take a working use away.
+        // Phase 8b. `--headers` still overrides, so a file called `data` that
+        // IS a CSV stays readable as one.
         // 沒有副檔名：一欄、沒有標頭列、那一行的位元組原樣。第 8b 階段。`--headers` 仍然可以覆蓋，
-        // 因為一個叫 `data`、而且**確實是** CSV 的檔案，在這之前就是這樣讀的，現在也必須還能這樣讀
-        // ——新的預設不可以把一個本來可用的用法拿走。
-        // `h == 0` is `.lines`, and leaving it out of this ternary is LJ.
+        // 好讓一個叫 `data`、而且**確實是** CSV 的檔案，仍然能當 CSV 讀。
+        // `h == 0` is `.lines`; leaving it out of this ternary is LJ.
         //
         // A file with no declaring suffix ALREADY reads line by line, so
-        // `--headers 0` on one should be a no-op -- which is what `--help`
-        // promises: "the line-oriented format ... which until now could only
-        // be had by having no suffix", and "the one value a declaring suffix
-        // does NOT override". Instead 0 fell through to `.csv`, the first line
-        // decided the field count, and any later line holding a comma failed
-        // with a message that was perfectly true about a parse that should
-        // never have happened.
+        // `--headers 0` on one must be a no-op, as `--help` promises. Falling
+        // through to `.csv` would let the first line decide the field count
+        // and fail on any later line holding a comma. The stdin and `.md`
+        // routes above map 0 to `.lines` too; keep all three alike.
         //
-        // The correct expression is about fifty lines above, on the stdin
-        // path, and has been since phase 12 added `--headers 0`. That phase
-        // updated the `.md` route and the stdin route and not this one.
+        // `h == 0` 是 `.lines`；把它漏在這個三元之外就是 LJ。
         //
-        // `h == 0` 是 `.lines`，而把它漏在這個三元之外就是 LJ。
-        //
-        // 一個沒有宣告性後綴的檔案**本來就**逐行讀，因此對它指定 `--headers 0` 應該是**無操作**
-        // ——那正是 `--help` 承諾的：「the line-oriented format……在此之前只能靠『沒有副檔名』
-        // 取得」，以及「唯一一個會宣告的副檔名蓋不過去的值」。而實際上 0 落進了 `.csv`，第一行
-        // 決定了欄數，之後任何含逗號的一行都會失敗——訊息對「那個本不該發生的解析」而言完全正確。
-        //
-        // 正確的寫法就在上方約五十行的 stdin 那條路上，而且從第 12 階段加入 `--headers 0` 起
-        // 就在那裡。那個階段改了 `.md` 那條路與 stdin 那條路，**沒有改這一條**。
+        // 一個沒有宣告性後綴的檔案**本來就**逐行讀，因此對它指定 `--headers 0` 必須是**無操作**，
+        // 正如 `--help` 所承諾。若落進 `.csv`，第一行會決定欄數，之後任何含逗號的一行都會失敗。
+        // 上方 stdin 與 `.md` 兩條路也把 0 對應到 `.lines`；三處要保持一致。
         if let h = o.headersOverride {
             return InputPlan(format: h == 0 ? .lines : (h == 2 ? .csv2 : .csv),
                              headerRows: h,
@@ -2840,47 +2480,38 @@ func checkTornAppend(path: String, format: Format, truncatePartial: Bool) throws
     }
 }
 
-/// Reads the existing file and applies the SAME check the rewrite path applies.
-/// It runs only when the file does not end in a newline, which is the only
-/// state in which the tail can be a partial record -- so a file that ends
-/// properly, which is nearly all of them, still costs the fast path nothing.
+/// Reads the existing file and applies the SAME check the rewrite path applies,
+/// on every fast-path append (see the call site in Run.swift for why a file
+/// ending in a newline is checked too).
 ///
-/// It exists because `-append --in-place` validated nothing for a `.csv` and
-/// said rc=0 twice over. A file ending `zlib,1.3` where the header has three
-/// columns took the append and produced a file csv2 itself then refused to
-/// read, while THE SAME INPUT through `-o` was correctly refused -- one verb,
-/// one input, opposite outcomes, and the difference documented only as a
-/// big-O note. A file ending inside an unclosed quote absorbed the appended
-/// record into that field, so a write that reported success had not happened.
-/// Round 37 of the README-only blind testing, defects X and Y.
+/// Without it, `-append --in-place` on a `.csv` ending `zlib,1.3` where the
+/// header has three columns would produce a file csv2 then refuses to read,
+/// while the same input through `-o` is refused; and a file ending inside an
+/// unclosed quote would absorb the appended record into that field. Round 37,
+/// defects X and Y.
 ///
-/// Cheaper checks were considered and are not sound. Reading back a bounded
-/// window and parsing the tail after the last newline cannot tell a partial
-/// record from a complete one that contains an embedded newline: both look
-/// like a fragment, and the answer depends on the quote state at the start of
-/// the record, which is only knowable by parsing from the front. Paying O(n)
-/// on the one case that can be wrong beats being wrong quietly.
+/// Cheaper checks are not sound. Reading back a bounded window and parsing
+/// the tail after the last newline cannot tell a partial record from a
+/// complete one that contains an embedded newline: the answer depends on the
+/// quote state at the start of the record, which is only knowable by parsing
+/// from the front. Paying O(n) beats being wrong quietly.
 ///
-/// 讀取既有檔案，並套用「重寫路徑所套用的同一份檢查」。它只在檔案未以換行結尾時執行，
-/// 而那是唯一「結尾可能是半筆」的狀態——因此一個正常結尾的檔案（幾乎全部都是）不必為
-/// 快路徑多付任何成本。
-/// 它之所以存在，是因為 `-append --in-place` 對 `.csv` 完全不驗證，而且以 rc=0 錯了兩次。
-/// 一個以 `zlib,1.3` 結尾、而標頭有三欄的檔案，會照樣接受追加並產生一個 csv2 自己拒讀的
-/// 檔案，而**同一份輸入**走 `-o` 會被正確拒絕——同一個動詞、同一份輸入、相反的結果，而兩者的
-/// 差別只被寫成一個 O(1) 的括號註記。一個結束在未閉合引號裡的檔案，會把追加的那一筆吸進那個
-/// 欄位，於是一次回報成功的寫入其實沒有發生。README-only 盲測第 37 回合，編號 X 與 Y。
-/// 更便宜的檢查考慮過，而且不成立：讀回一段有界的視窗、解析最後一個換行之後的部分，分不出
-/// 「半筆」與「一筆含內嵌換行的完整紀錄」——兩者看起來都是碎片，而答案取決於該紀錄開頭處的
-/// 引號狀態，那只有從檔案前面解析才知道。在唯一可能出錯的那個情況上付 O(n)，好過安靜地弄錯。
+/// 讀取既有檔案，並套用「重寫路徑所套用的同一份檢查」，每一次走快路徑的追加都會執行
+/// （以換行結尾的檔案為何也要檢查，見 Run.swift 的呼叫處）。
+/// 少了它，對一個以 `zlib,1.3` 結尾、而標頭有三欄的 `.csv` 做 `-append --in-place`，會產生
+/// 一個 csv2 自己拒讀的檔案，而同一份輸入走 `-o` 會被拒絕；一個結束在未閉合引號裡的檔案，
+/// 則會把追加的那一筆吸進那個欄位。第 37 回合，缺陷 X 與 Y。
+/// 更便宜的檢查不成立：讀回一段有界的視窗、解析最後一個換行之後的部分，分不出「半筆」與
+/// 「一筆含內嵌換行的完整紀錄」——答案取決於該紀錄開頭處的引號狀態，那只有從檔案前面解析
+/// 才知道。付 O(n)，好過安靜地弄錯。
 /// Returns the number of line feeds in the file, which the append fast path
 /// needs to know which physical line the appended record starts on. Counting
 /// them here is free: this function already reads every byte.
 ///
 /// `builder`, when given, is filled in from the same pass. The scan happens
 /// either way -- see the long comment at the call site -- so an index costs
-/// one grid entry per 256 records on top of it, and the alternative was the
-/// only write path in the tool that left a file it had just read from end to
-/// end without a sidecar.
+/// one grid entry per 256 records on top of it; otherwise this would be the
+/// only write path that reads a whole file and leaves no sidecar.
 ///
 /// 回傳檔案裡的換行數，追加快路徑需要它來決定被追加的紀錄從哪一個實體行開始。在這裡數
 /// 是免費的：這個函式本來就會讀過每一個位元組。
@@ -2913,8 +2544,8 @@ func validateBeforeAppend(path: String, format: Format, headerRows: Int,
         do {
             // With no header row the first RECORD sets the width, the same
             // way the select and edit paths do. Without it, `-append` on a
-            // suffix-less file compared every record against a header that
-            // does not exist and refused the file it was about to append to.
+            // suffix-less file would compare every record against a header
+            // that does not exist and refuse the file it is appending to.
             // 沒有標頭列時，由第一筆**紀錄**決定寬度，與選取與編輯那兩條路徑相同。少了它，
             // 對一個沒有副檔名的檔案下 `-append`，會拿每一筆去和一個不存在的標頭比較，
             // 並拒絕掉它正要追加的那個檔案。
@@ -2966,10 +2597,9 @@ func validateBeforeAppend(path: String, format: Format, headerRows: Int,
 
 /// `headerRows` decides what the message calls the source of `expected`.
 ///
-/// With `--headers 0` there is no header, and record 1 is data -- but the
-/// message said "but the header has 3" anyway, naming a thing the same run had
-/// declared does not exist. A reader told to compare against a header they did
-/// not write goes looking for a file that is not there. NC.
+/// With `--headers 0` there is no header, and record 1 is data, so the
+/// message must not say "but the header has 3": that names a thing the same
+/// run declared does not exist. NC.
 ///
 /// A default of 1 keeps the seven other call sites unchanged, because every one
 /// of them is on a path where a header exists; only the reading path can carry
@@ -2977,25 +2607,23 @@ func validateBeforeAppend(path: String, format: Format, headerRows: Int,
 ///
 /// `headerRows` 決定這則訊息把 `expected` 的來源叫作什麼。
 ///
-/// 在 `--headers 0` 之下沒有標頭，而第 1 筆是**資料**——但那則訊息照樣說「but the header has 3」，
-/// 指名了一個同一次執行剛剛宣告「不存在」的東西。一個被要求去對照「一列他沒有寫過的標頭」的讀者，
-/// 會去找一個並不存在的東西。NC。
+/// 在 `--headers 0` 之下沒有標頭，而第 1 筆是**資料**，因此訊息不能說「but the header has 3」：
+/// 那指名了一個同一次執行剛剛宣告「不存在」的東西。NC。
 ///
 /// 預設值 1 讓其餘七個呼叫點不必改動，因為它們每一個都在「標頭存在」的路徑上；只有讀取那條路
 /// 帶得了零。
 func checkFieldCount(_ r: Record, expected: Int, what: String, headerRows: Int = 1) throws {
     guard r.count == expected else {
-        // Never pad. This is the check `artifacts.csv` was missing on the day
-        // a commit string got written into the built_utc column with nothing
-        // reporting anything.
-        // 絕不補空。這正是 `artifacts.csv` 被寫壞那天缺少的檢查——一個 commit
-        // 字串被寫進 built_utc 欄位，沒有任何東西報錯。
-        // A blank line is the common case and produced a message about field
-        // counts, which is true and unhelpful: a reader looking at "record 2
+        // Never pad. Without this check a value lands in the wrong column
+        // (a commit string in a timestamp column) and nothing reports it.
+        // 絕不補空。少了這道檢查，值會落進錯的欄位（一個 commit 字串跑進時間戳欄位），
+        // 而沒有任何東西報錯。
+        // A blank line is the common case, and a message about field counts
+        // would be true and unhelpful: a reader looking at "record 2
         // (line 3) has 1 fields but the header has 2" goes hunting for a
         // missing comma. A file that merely ends with an extra newline lands
         // here too, and that is what most people will have.
-        // 空白行是最常見的情況，而它得到的是一則關於欄數的訊息——那句話是對的，也幫不上忙：
+        // 空白行是最常見的情況，而一則關於欄數的訊息會是對的、卻幫不上忙：
         // 一個看著「第 2 筆（第 3 行）有 1 欄，標頭有 2 欄」的讀者，會去找一個少掉的逗號。
         // 一個「只是多了一個結尾換行」的檔案也會落在這裡，而多數人手上的正是那種。
         if r.count == 1, r.fields.first?.value.isEmpty == true {
@@ -3192,23 +2820,20 @@ func printHelp() {
 ///
 /// This function does NOT escape, deliberately. The line it returns is written
 /// through `Logger`, which escapes every message as it builds the line, so
-/// escaping here too produced `\\n` where the input had a newline -- a value
-/// that no longer round-trips, arrived at by two fixes each of which was right
-/// on its own. Escaping belongs at exactly one point, and that point is where
-/// the line is built, because it is the only one that covers messages nobody
-/// has written yet.
+/// escaping here too would turn a newline into `\\n`, a value that no longer
+/// round-trips. Escaping belongs at exactly one point, where the line is
+/// built, because only that point covers messages nobody has written yet.
 /// 此處刻意「不」跳脫。它回傳的那一行是經由 `Logger` 寫出的，而 `Logger` 在建行時已經
 /// 把每一則訊息跳脫過；這裡再跳脫一次，會讓輸入中的換行變成 `\\n`——一個再也還原不回去
-/// 的值，而它來自兩個各自都正確的修正。跳脫只能發生在「一個」地方，而那個地方是建行的
-/// 那一點，因為只有它涵蓋得到「還沒有人寫出來的訊息」。
+/// 的值。跳脫只能發生在「一個」地方，也就是建行的那一點，因為只有它涵蓋得到「還沒有人
+/// 寫出來的訊息」。
 /// An argument as the log can carry it: escaped, and quoted when it contains
 /// anything that would make the line read as a different command. Without the
-/// quoting, `-i "my file.csv"` logged as `-i my file.csv` -- an audit entry
-/// naming a command nobody ran, and one that a reader would take as two
-/// arguments.
+/// quoting, `-i "my file.csv"` would be logged as `-i my file.csv` -- an audit
+/// entry naming a command nobody ran, read as two arguments.
 /// 一個「log 載得動」的引數：經過跳脫，並在它含有「會讓這一行讀成另一個指令」的東西時加上
 /// 引號。少了這一步，`-i "my file.csv"` 會記成 `-i my file.csv`——一則指名了「沒有人執行過的
-/// 指令」的稽核紀錄，而讀者會把它讀成兩個引數。
+/// 指令」的稽核紀錄，讀起來是兩個引數。
 private func loggedArg(_ a: String) -> String {
     let e = reportEscape(a)
     guard e.isEmpty || e.contains(" ") || e.contains("\"") || e.contains("\t") else { return e }
@@ -3228,14 +2853,11 @@ func sanitizedCommandLine(_ argv: [String]) -> String {
             // ...unless the value did not come from the command line at all.
             //
             // `--value-file` and `--value-stdin` stand WHERE a value would
-            // stand, and replacing them with `<value>` recorded a run that did
-            // not happen: the flag vanished, and `--value-file`'s path fell
-            // through to the default branch and was emitted as a bare token, so
-            // the line read as `-update ADDR <value> /path/to/file` -- not the
-            // command that ran, and not even the same shape. `--value-stdin`
-            // was worse: it vanished with nothing after it, making that record
-            // byte-identical to a literal-value update, so the trail could not
-            // say where the value came from. LY.
+            // stand, and replacing them with `<value>` would record a run that
+            // did not happen: `--value-file`'s path would be emitted as a bare
+            // token after `<value>`, and `--value-stdin` would leave a line
+            // identical to a literal-value update, so the trail could not say
+            // where the value came from. LY.
             //
             // The exception is by NAME, not by "looks like a flag". A literal
             // value may legitimately begin with `-` (`-update 1:2 -5`), and
@@ -3245,10 +2867,9 @@ func sanitizedCommandLine(_ argv: [String]) -> String {
             // ……除非那個值根本不是從命令列來的。
             //
             // `--value-file` 與 `--value-stdin` 站的正是「值」會站的位置，而把它們換成 `<value>`，
-            // 記下的是一次**沒有發生過**的執行：旗標消失了，而 `--value-file` 的路徑落進 default
-            // 分支、以裸 token 印出來，於是那一行讀起來是 `-update ADDR <value> /path/to/file`
-            // ——既不是跑過的那個指令，連形狀都不是。`--value-stdin` 更糟：它消失後後面什麼都沒有，
-            // 使那筆紀錄與「用字面值更新」逐字相同，於是那份軌跡說不出「值從哪裡來」。LY。
+            // 記下的會是一次**沒有發生過**的執行：`--value-file` 的路徑會以裸 token 印在 `<value>`
+            // 後面，而 `--value-stdin` 會留下一行與「用字面值更新」完全相同的紀錄，於是那份軌跡說不出
+            // 「值從哪裡來」。LY。
             //
             // 這個例外是**依名字**，不是依「看起來像旗標」。一個字面值合法地可以用 `-` 開頭
             //（`-update 1:2 -5`），而把任何以 dash 開頭的 token 當成旗標，會把它明文印出來
@@ -3295,13 +2916,11 @@ func main() -> Int32 {
         // Before openLog, not in validate(). The log is opened first so that a
         // refusal reaches the audit trail -- which means a refusal ABOUT the
         // log has already been appended to whatever the log names by the time
-        // validate() runs. Checked in validate() first, `-log` naming the
-        // input left the input with an ERROR line appended: the message was
-        // right, the file was still damaged, and the damage was the message.
+        // validate() runs: with `-log` naming the input, the refusal itself
+        // would append an ERROR line to the input.
         // 放在 openLog 之前，而不是放在 validate() 裡。log 之所以先被開啟，是為了讓「拒絕」
         // 也能進到稽核軌跡——而那表示：等到 validate() 執行時，一則「關於 log 本身」的拒絕
-        // 已經被追加進 log 所指的那個檔案了。先寫在 validate() 裡時，`-log` 指向輸入會讓那個
-        // 輸入多出一行 ERROR：訊息是對的，檔案照樣被弄壞了，而弄壞它的正是那則訊息。
+        // 已經被追加進 log 所指的那個檔案了：`-log` 指向輸入時，那則拒絕本身就會讓輸入多出一行 ERROR。
         try refuseLogAliases(o)
         if let p = o.logPath { Logger.shared.openLog(path: p) }
         // Before validate(&o), because a bad knob is not a usage error about
@@ -3348,12 +2967,12 @@ func main() -> Int32 {
         // 而是在數個月後才被發現——如果還有機會被發現的話。
         // Escaped for the same reason the log line is, and for a promise of
         // its own: errors on stderr are documented as EXACTLY two lines,
-        // English then Chinese. A message interpolating a column name that
-        // contained a newline produced four, and a script reading the pair
-        // took the injected line for part of the error.
+        // English then Chinese. Unescaped, a column name containing a newline
+        // would make four lines, and a script reading the pair would take the
+        // injected line for part of the error.
         // 與 log 那一行同理，而且它自己還有一個承諾：stderr 上的錯誤在文件裡是「恰好兩行」，
-        // 英文在前中文在後。一則插入了含換行欄名的訊息會產生四行，而依「兩行」去讀的腳本
-        // 會把被注入的那一行當成錯誤訊息的一部分。
+        // 英文在前中文在後。不跳脫的話，一個含換行的欄名會讓它變成四行，而依「兩行」去讀的
+        // 腳本會把被注入的那一行當成錯誤訊息的一部分。
         let wantsJSON = CommandLine.arguments.dropFirst().contains {
             let f = normalizeFlag($0)
             return f == "json" || f == "json-ascii"
@@ -3368,12 +2987,12 @@ func main() -> Int32 {
                 "csv2: \(lineEscape(e.message))\ncsv2：\(lineEscape(e.messageZh))\n")
         }
         // Recorded in the -log FILE, not echoed to stderr again. ERROR is above
-        // the default WARN threshold, so routing it through Logger printed the
-        // same failure a third time, with a timestamp, even when no -log was
-        // asked for. A script capturing stderr got the message twice.
+        // the default WARN threshold, so routing it through Logger would print
+        // the same failure again, with a timestamp, even when no -log was
+        // asked for, and a script capturing stderr would get it twice.
         // 只記入 -log 指定的檔案，不再往 stderr 回顯一次。ERROR 高於預設的 WARN
-        // 門檻，因此走 Logger 會把同一個失敗第三次印出來、還帶時間戳，即使根本
-        // 沒有要求 -log。捕捉 stderr 的腳本會拿到重複的訊息。
+        // 門檻，因此走 Logger 會把同一個失敗再印一次、還帶時間戳，即使根本沒有要求
+        // -log，而捕捉 stderr 的腳本會拿到重複的訊息。
         Logger.shared.logToFileOnly(.error, e.message)
         Logger.shared.close()
         return 1

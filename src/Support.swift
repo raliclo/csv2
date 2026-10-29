@@ -33,39 +33,24 @@ enum LogLevel: Int, Comparable {
 /// 這樣」的人看：量小、格式穩定、要保存。寫進同一個地方會讓歷史被除錯輸出淹沒。
 /// Read a numeric environment knob, or refuse.
 ///
-/// Every knob used to be read as `if let n = Int(v)`, sometimes with `n > 0`
-/// and sometimes without, and the three ways that went wrong were all
-/// different:
+/// A plain `if let n = Int(v)` fails three different ways: a negative value
+/// can trap (exit 133, nothing on either stream), be accepted and reported
+/// back as a limit of -1, or an unparseable value like `16MiB` is ignored and
+/// -debug prints the default under the variable's own name, which reads as
+/// confirmation.
 ///
-///   CSV2_PARALLEL_MIN_BYTES=-1     SIGTRAP, exit 133, nothing on either
-///                                  stream -- a failure that looks like
-///                                  nothing at all
-///   CSV2_MAX_BUFFER_RECORDS=-1     accepted, then reported back as
-///                                  "exceeds the buffered-record limit (-1)"
-///   CSV2_PARALLEL_MIN_BYTES=16MiB  silently ignored, and -debug then printed
-///                                  the DEFAULT under the variable's own name
-///
-/// The third is the one that hides. Someone who sets 16MiB sees
-/// `under CSV2_PARALLEL_MIN_BYTES (16777216)` and reads it as confirmation;
-/// the number agrees by coincidence. Set 8MiB and the same line still says
-/// 16777216.
-///
-/// "Do not silently repair malformed input" is this project's own rule, and an
-/// environment variable is input. A bad value is refused by name, with the
-/// value quoted back, before any work starts.
+/// An environment variable is input, and malformed input is not silently
+/// repaired: a bad value is refused by name, quoted back, before any work
+/// starts.
 ///
 /// 讀取一個數值型的環境旋鈕，否則拒絕。
 ///
-/// 原本每個旋鈕都是 `if let n = Int(v)`，有的加了 `n > 0`、有的沒有，而它們出錯的三種方式
-/// 各不相同：負數會 SIGTRAP、以 133 結束、兩個串流都空無一物；有的接受負數再把它回報成
-/// 「超過上限 (-1)」；而無法解析的值會被靜默忽略，`-debug` 接著用那個變數自己的名字印出
-/// 「預設值」。
+/// 單純的 `if let n = Int(v)` 有三種出錯方式：負數可能直接 trap（以 133 結束、兩個串流都
+/// 沒有輸出），或被接受後回報成「上限 -1」；而 `16MiB` 這類無法解析的值會被忽略，`-debug`
+/// 再用該變數自己的名字印出預設值，看起來就像確認。
 ///
-/// 第三種最會藏。設了 16MiB 的人看到 `under CSV2_PARALLEL_MIN_BYTES (16777216)`，會把它讀成
-/// 確認——而那個數字只是碰巧相等。若他設的是 8MiB，同一行仍然印 16777216。
-///
-/// 「不要靜默修復格式錯誤的輸入」是本專案自己的規則，而環境變數就是輸入。壞的值會被指名
-/// 拒絕、把值原樣引述回去，而且發生在任何工作開始之前。
+/// 環境變數就是輸入，而格式錯誤的輸入不做靜默修復：壞的值會被指名拒絕、原樣引述，
+/// 且在任何工作開始之前。
 func envInt(_ name: String, default def: Int, min lower: Int = 1) throws -> Int {
     guard let raw = ProcessInfo.processInfo.environment[name], !raw.isEmpty else { return def }
     guard let n = Int(raw) else {
@@ -83,19 +68,16 @@ func envInt(_ name: String, default def: Int, min lower: Int = 1) throws -> Int 
 
 /// Every numeric knob, checked once, before any work starts.
 ///
-/// The readers themselves are non-throwing computed properties scattered
-/// across four files, and threading `throws` through all of them would put the
-/// check in four places that each have to remember it -- the shape of defect
-/// this tree keeps finding. One pass here means a bad value is refused before
-/// a single byte is read, and the readers below can go on assuming what they
-/// already assumed.
+/// The readers are non-throwing computed properties in four files; threading
+/// `throws` through them would put the check in four places that each have to
+/// remember it. One pass here refuses a bad value before a byte is read, and
+/// the readers can assume the value is valid.
 ///
 /// 每一個數值旗標，在任何工作開始之前檢查一次。
 ///
-/// 那些讀取點本身是散在四個檔案裡、不會 throw 的計算屬性，而把 `throws` 穿過它們全部，
-/// 等於把這個檢查放進四個「各自都必須記得」的地方——那正是這棵樹一再找到的缺陷形狀。
-/// 在這裡走一遍，壞的值就會在讀進任何一個位元組之前被拒絕，而下面那些讀取點可以繼續
-/// 假設它們本來就在假設的事。
+/// 讀取點是散在四個檔案裡、不會 throw 的計算屬性；把 `throws` 穿過它們，等於把檢查放進
+/// 四個各自都得記得的地方。在這裡檢查一次，壞的值在讀進任何位元組之前就被拒絕，讀取點
+/// 則可以假設值是有效的。
 func validateEnvironment() throws {
     _ = try envInt("CSV2_PARALLEL_MIN_BYTES", default: 0, min: 0)
     _ = try envInt("CSV2_PARALLEL_CHUNK_BYTES", default: 1, min: 1)
@@ -105,13 +87,11 @@ func validateEnvironment() throws {
     _ = try envInt("CSV2_INDEX_MIN_BYTES", default: 0, min: 0)
 }
 
-// lineEscape 與 reportEscape 原本定義在 Ops.swift。它們的呼叫者是 Core.swift、Logger（就在
-// 下方）與 main.swift；Ops.swift 自己一次也沒用到 lineEscape。放在這裡才與呼叫者同層，
-// 也讓解析與編碼那一層可以在不帶進 CLI 操作層的情況下單獨編譯。
-// lineEscape and reportEscape were defined in Ops.swift. Their callers are Core.swift, the
-// Logger just below, and main.swift; Ops.swift never called lineEscape at all. Here they sit
-// beside their callers, and the parsing and encoding layer can compile without dragging in
-// the CLI operation layer.
+// lineEscape and reportEscape live here, not in Ops.swift: their callers are Core.swift, the
+// Logger below, and main.swift, and keeping them here lets the parsing and encoding layer
+// compile without the CLI operation layer.
+// lineEscape 與 reportEscape 放在這裡而非 Ops.swift：呼叫者是 Core.swift、下方的 Logger 與
+// main.swift，放在這裡也讓解析與編碼層可以不帶進 CLI 操作層而單獨編譯。
 
 func lineEscape(_ s: String) -> String {
     var out = ""
@@ -119,24 +99,13 @@ func lineEscape(_ s: String) -> String {
     // Unicode SCALARS, not Characters. A Swift `Character` is a grapheme
     // cluster and CRLF is ONE of them, so a `case "\n"` / `case "\r"` switch
     // over Characters matches neither half of a `\r\n` pair and lets it
-    // through intact. A bare LF was escaped correctly; `\r\n` walked straight
-    // out, opening a second line in the log whose entire content -- timestamp
-    // included -- came from the input, reachable from a plain `-contains` with
-    // no write access to anything.
-    //
-    // The README warns about this exact property of the language for
-    // `--pretty`: "grapheme clusters with emoji presentation applied, NOT a
-    // per-code-point lookup". Same fact, few hundred lines away, and the
-    // escaper walked into it.
+    // through intact, opening a second log line whose whole content, timestamp
+    // included, comes from the input -- reachable from a plain `-contains`.
     //
     // 用 Unicode「純量」，不是 Character。Swift 的 `Character` 是 grapheme cluster，而 CRLF
-    // 就是其中「一個」，因此以 Character 去 switch 的 `case "\n"` / `case "\r"` 對一個
-    // `\r\n` 兩半都不匹配，讓它原樣通過。單獨的 LF 被正確跳脫；`\r\n` 直接走了出去，在
-    // log 裡開出第二行，而那一行的全部內容——連同時間戳——都來自輸入，且只需要一次普通的
-    // `-contains`，完全不需要對任何東西有寫入權限。
-    //
-    // README 就在 `--pretty` 那一節警告過這個語言性質：「grapheme cluster 加上 emoji
-    // presentation，不是逐 code point 查表」。同一件事，相隔幾百行，而跳脫器撞了上去。
+    // 就是其中「一個」，因此以 Character 去 switch 的 `case "\n"` / `case "\r"` 對 `\r\n`
+    // 兩半都不匹配而讓它原樣通過，在 log 裡開出第二行，整行內容連同時間戳都來自輸入——
+    // 一次普通的 `-contains` 就能觸發。
     for u in s.unicodeScalars {
         switch u {
         case "\n": out += "\\n"
@@ -156,15 +125,12 @@ func reportEscape(_ s: String) -> String {
     var out = ""
     out.reserveCapacity(s.count)
     // Scalars, for the reason spelled out on lineEscape above: CRLF is a
-    // single Character and a Character switch lets it through. Here that broke
-    // "one line per matching cell" -- one hit printed two lines, so `cut -f1`
-    // returned a fragment of prose where an address belongs. That is the
-    // failure this function was written to prevent, in the interface this tool
-    // recommends for scripts.
-    // 用純量，理由與上面 lineEscape 的註解相同：CRLF 是單一個 Character，而以 Character
-    // 去 switch 會讓它通過。在這裡，那打破的是「每個命中的儲存格一行」——一個命中印出了
-    // 兩行，於是 `cut -f1` 在該是位址的地方回傳一段散文碎片。那正是這個函式當初被寫出來
-    // 所要防止的失敗，而且發生在這個工具推薦給腳本使用的那個介面上。
+    // single Character and a Character switch lets it through. Here that would
+    // break "one line per matching cell", the shape scripts depend on: one hit
+    // would print two lines.
+    // 用純量，理由與上面 lineEscape 的註解相同：CRLF 是單一個 Character，以 Character
+    // 去 switch 會讓它通過。在這裡那會打破腳本所依賴的「每個命中的儲存格一行」——
+    // 一個命中會印成兩行。
     for u in s.unicodeScalars {
         switch u {
         case "\\": out += "\\\\"
@@ -175,8 +141,7 @@ func reportEscape(_ s: String) -> String {
             // Every other C0 control, and DEL, as \\xNN. The report is written to a
             // terminal, and ESC is not text there: a value can start a colour
             // sequence, move the cursor, or erase the line it is being printed on --
-            // including the address printed before it. A round put an ESC-[-3-1-m in
-            // a cell and the report handed it to the terminal unchanged.
+            // including the address printed before it.
             // The three that already have names keep their short forms. This does not
             // make the third column reversible -- the README says it is a display form
             // and not for feeding back -- it makes it one that cannot rewrite what the
@@ -233,19 +198,14 @@ final class Logger: @unchecked Sendable {
     /// Append, never truncate: overwriting defeats the only purpose the file
     /// has, which is being read later.
     ///
-    /// This used to open for writing and `seekToEndOfFile()`, which is that
-    /// intention expressed as a seek that happens ONCE. With one process the
-    /// two are indistinguishable. With two they are not: the second writer
-    /// lands on the offset the first recorded at open and overwrites it.
-    /// Eight processes each logging 25 operations left 98 entries of 200 --
-    /// none malformed, every run exiting 0. `Platform.openForAppend` puts the
-    /// append in the kernel, where a concurrent writer cannot be raced.
+    /// Opening for write and calling `seekToEndOfFile()` seeks only once, so
+    /// concurrent processes overwrite each other's entries at rc=0.
+    /// `Platform.openForAppend` puts the append in the kernel, where a
+    /// concurrent writer cannot be raced.
     /// 一律追加，絕不覆寫：覆寫會讓這個檔案唯一的用途（日後回頭查）失效。
-    /// 原本的寫法是「以寫入開啟後 seekToEndOfFile()」——也就是把上面那個意圖表達成一次
-    /// 「只發生一次」的 seek。單一行程下兩者無法區分；兩個行程下就不是了：後來的寫入者會
-    /// 落在前一個在開檔時記下的位移上並蓋掉它。八個行程各記錄 25 次操作，200 筆只剩 98 筆
-    /// ——沒有一筆是壞的，每一次都以 0 結束。`Platform.openForAppend` 把追加交給核心，
-    /// 並行的寫入者在那裡搶不到同一個位移。
+    /// 「以寫入開啟後 seekToEndOfFile()」只 seek 一次，多個行程並行時會互相蓋掉紀錄，
+    /// 且都以 0 結束。`Platform.openForAppend` 把追加交給核心，並行的寫入者在那裡搶不到
+    /// 同一個位移。
     func openLog(path: String) {
         logPath = path
         if let h = Platform.openForAppend(path: path) {
@@ -263,22 +223,16 @@ final class Logger: @unchecked Sendable {
         // failure.
         // 寫 log 失敗不得使操作失敗。反過來的設計會讓一個純粹的觀測功能
         // 變成一個新的失敗來源。
-        // Written through the ordinary WARN path rather than hand-assembled.
-        // This was the one message in the tool that matched none of the three
-        // documented shapes: one line carrying BOTH languages joined by " / ",
-        // no timestamp, no LEVEL token, and a lowercase "warning:" where every
-        // other diagnostic says WARN. A script written to the documented
-        // grammar mis-parses it -- and because it accompanies an rc=0 run,
-        // mis-parsing it means missing it entirely.
+        // Same shape as every other WARN, so a script parsing the documented
+        // grammar does not miss it; it accompanies an rc=0 run, so a
+        // mis-parse means missing it entirely.
         //
         // It cannot go through `Logger.warn` directly: that writes to the log
         // file too, and the log file is precisely what has just failed. So the
         // line is built in the same shape and sent only to stderr.
         //
-        // 改走一般的 WARN 形狀，而不是手工拼出來。這是整個工具裡唯一一則三種已記載形狀都不
-        // 符合的訊息：一行同時帶著兩種語言、以 " / " 相連、沒有時間戳、沒有層級記號，而且用
-        // 小寫的 "warning:"，而其他每一則診斷都寫 WARN。照文件的文法寫的腳本會剖析錯它——
-        // 而由於它伴隨的是一次 rc=0 的執行，剖析錯就等於完全錯過它。
+        // 與其他每一則 WARN 同形狀，照文件文法剖析的腳本才不會漏掉它；它伴隨的是 rc=0 的
+        // 執行，剖析錯就等於完全錯過。
         //
         // 它不能直接走 `Logger.warn`：那會同時寫進 log 檔，而剛剛失敗的正是那個 log 檔。
         // 因此這一行以相同的形狀組出來，只送到 stderr。
@@ -287,39 +241,26 @@ final class Logger: @unchecked Sendable {
     }
 
     /// `message` is an @autoclosure, and the level test happens BEFORE anything
-    /// is built. It used to compose the timestamp and the whole line first and
-    /// decide afterwards, while the caller had already paid for its own
-    /// interpolation -- so a TRACE line on a run with the default WARN
-    /// threshold cost two string constructions per record and produced no
-    /// output at all. On a 2,000,000-record stream that was measurable as peak
-    /// RSS: 123 MB, against 15.9 MB for the same bytes in 100,000 records.
-    /// Discovered on 2026-08-19 while chasing the streaming memory claim; the
-    /// per-RECORD shape is what identified it, since the same byte volume in
-    /// fewer records did not grow.
-    /// `message` 是 @autoclosure，而層級判斷發生在「建構任何東西之前」。原本的寫法是
-    /// 先組出時間戳與整行、之後才判斷，而呼叫端在此之前早已付過自己那次字串插值——因此
-    /// 在預設 WARN 門檻下，一行 TRACE 每筆要付兩次字串建構，而且完全不產生輸出。
-    /// 在 2,000,000 筆的串流上這是量得到的：peak RSS 123 MB，而同樣的位元組量分成
-    /// 100,000 筆時是 15.9 MB。2026-08-19 追查串流記憶體宣稱時發現；認出它的是那個
-    /// 「隨紀錄數而非隨位元組數」的形狀。
+    /// is built. Building the line first and deciding afterwards makes a
+    /// suppressed TRACE line cost two string constructions per record; on a
+    /// 2,000,000-record stream that shows up as peak RSS growing with the
+    /// record count.
+    /// `message` 是 @autoclosure，而層級判斷發生在「建構任何東西之前」。若先組出整行再
+    /// 判斷，一行被抑制的 TRACE 每筆仍要付兩次字串建構；在 2,000,000 筆的串流上，這會
+    /// 表現為 peak RSS 隨紀錄數增長。
     func log(_ level: LogLevel, _ message: @autoclosure () -> String) {
         let belongsInFile = level >= .info || threshold <= .debug
         let wantsFile = belongsInFile && (logHandle != nil || logPath != nil)
         if !wantsFile && level < threshold { return }
         // One entry is one line, and the message is escaped to keep it that
-        // way. The rule was already documented and already applied to logged
-        // VALUES; it was not applied here, so any message interpolating input
-        // -- a column name, a path, a field -- could open a second line in the
-        // log whose whole content, timestamp included, came from that input.
-        // Escaping at the point the line is built covers every message that
-        // exists and every one added later, which is the difference that
-        // matters: the two call sites this defect reached were both cases of
-        // a rule that had to be remembered separately in each place.
-        // 一筆是一行，而訊息會被跳脫以維持這一點。這條規則本來就寫在文件裡，也已經套用在
-        // 記入 log 的「值」上；只是沒有套到這裡，於是任何把輸入插進去的訊息——欄名、路徑、
-        // 欄位——都可能在 log 中開出第二行，而那一行的全部內容連同時間戳都來自那個輸入。
-        // 在「建行」這一點跳脫，涵蓋的是現在與日後的每一則訊息，而那正是關鍵差別：這個
-        // 缺陷所到過的兩個呼叫點，都是「一條規則必須在每個地方各被記得一次」的例子。
+        // way: any message interpolating input -- a column name, a path, a
+        // field -- could otherwise open a second log line whose whole content,
+        // timestamp included, came from that input. Escaping where the line is
+        // built covers every message, including ones added later, instead of a
+        // rule each call site has to remember.
+        // 一筆是一行，而訊息會被跳脫以維持這一點：否則任何插入輸入的訊息——欄名、路徑、
+        // 欄位——都可能在 log 中開出第二行，整行內容連同時間戳都來自那個輸入。在「建行」
+        // 這一點跳脫，涵蓋現在與日後的每一則訊息，而不是一條每個呼叫點都得各自記得的規則。
         let line = "\(Logger.timestamp()) \(level.label) \(lineEscape(message()))\n"
         // The log FILE is an operation record: what was done, to what, with
         // what result. DEBUG and TRACE are for someone chasing a problem right
@@ -343,24 +284,17 @@ final class Logger: @unchecked Sendable {
             // 在其中插入時間戳就是損毀。
             //
             // A WARNING is a message to the person running the command, and it
-            // is written the way every other one is: `csv2: <text>`. It used to
-            // carry the timestamp and the level, because the file's line and
-            // stderr's line were the same string -- so `--truncate-partial` on a
-            // run with no `-log` printed `csv2: 2026-09-08T01:14:06.597+08:00
-            // WARN  ...`, an audit-log entry from a log that was never opened,
-            // while `-add-column`'s warning two files away printed plainly. Two
-            // warnings, one program, two shapes. OA.
+            // is written the way every other one is: `csv2: <text>`, without
+            // the log file's timestamp and level, so all warnings share one
+            // shape whether or not -log was given. OA.
             //
             // DEBUG and TRACE keep the timestamp: they exist for someone
             // watching a run happen, where the ordering and the gaps are the
             // information.
             //
             // 一則**警告**是說給「正在下這個指令的人」聽的，因此它的寫法與其他每一則相同：
-            // `csv2: <文字>`。它先前帶著時間戳與等級，因為檔案那一行與 stderr 那一行**是同一個
-            // 字串**——於是一次沒有給 `-log` 的 `--truncate-partial` 印出了
-            // `csv2: 2026-09-08T01:14:06.597+08:00 WARN  ...`，一筆來自「從未被開啟的 log」的稽核
-            // 紀錄；而兩個檔案之外的 `-add-column` 警告卻印得乾乾淨淨。同一支程式、兩則警告、
-            // 兩種形狀。OA。
+            // `csv2: <文字>`，不帶 log 檔那一行的時間戳與等級，於是不論有沒有給 -log，所有
+            // 警告都是同一種形狀。OA。
             //
             // DEBUG 與 TRACE 保留時間戳：它們是給「正在看一次執行發生」的人用的，而那裡
             // 順序與間隔本身就是資訊。
@@ -392,49 +326,33 @@ final class Logger: @unchecked Sendable {
     /// 屬於加密或雜湊欄位的值絕不出現在 log 中。否則對受保護欄位的 `-update`
     /// 會把明文寫進一個沒有人在保護的檔案。
     /// NOT truncated, and NOT escaped here. The escaping is load-bearing --
-    /// the log is one entry per line, and writing a value with quotes and
-    /// nothing else let a newline inside it open a new line whose entire
-    /// content the value chose, a forged entry with an attacker-picked
-    /// timestamp at rc=0 -- but it now happens once, where the log line is
-    /// built, so it also covers the invocation and every message. Escaping
-    /// again here produced `\\n` for a newline: a value that no longer
-    /// round-trips, arrived at by two fixes each of which was right alone.
-    /// The 40-character truncation never prevented the forgery, it only
-    /// shortened the forged line, which is why lifting the limit had to wait
-    /// for the escaping: otherwise the forgery would have gone from truncated
-    /// to complete.
-    /// **不截斷**，而且此處**不跳脫**。跳脫是承重的那一半——log 是一行一筆，而只把值加上
-    /// 引號、別的什麼都不做，會讓值裡的一個換行開啟新的一行，那一行的全部內容由值決定，
-    /// 是一筆時間戳由攻擊者挑選、以 rc=0 落進稽核軌跡的偽造紀錄——但它現在只發生一次，
-    /// 在建構 log 行的地方，因此同時涵蓋了「呼叫」與每一則訊息。在這裡再跳脫一次會讓換行
-    /// 變成 `\\n`：一個再也還原不回去的值，而它來自兩個各自都正確的修正。40 字元的截斷
-    /// 從來擋不住那個偽造，它只是把偽造的那一行剪短——這正是「解除上限」必須等「跳脫」先做
-    /// 的原因：否則偽造會從被剪斷變成完整。
+    /// the log is one entry per line, and an unescaped newline in a value
+    /// would forge a whole entry, timestamp included, at rc=0 -- but it
+    /// happens once, where the log line is built. Escaping again here would
+    /// turn a newline into `\\n`, a value that no longer round-trips.
+    /// Truncation never prevented the forgery, only shortened it, so there is
+    /// no limit as long as the escaping stays in `log`.
+    /// **不截斷**，而且此處**不跳脫**。跳脫是承重的——log 是一行一筆，值裡未跳脫的換行
+    /// 會以 rc=0 偽造出一整筆紀錄，連時間戳都由值決定——但跳脫只在建構 log 行的地方做一次。
+    /// 在這裡再跳脫會讓換行變成 `\\n`，值就還原不回去了。截斷從來擋不住偽造，只是把它
+    /// 剪短，因此只要跳脫留在 `log` 裡，就不設長度上限。
     /// A `"` inside the value is doubled, because `"` is what delimits the
-    /// value. Without that, `-update` with `INNOCENT" -> "ALSO INNOCENT` wrote
-    /// `update 1:note: "third record" -> "INNOCENT" -> "ALSO INNOCENT"` -- one
-    /// line, one entry, correct data on disk, and no parser can recover which
-    /// half is old and which is new. Whole-line forgery was already blocked;
-    /// this is forgery of an entry's CONTENT, inside an otherwise legitimate
-    /// entry.
+    /// value. Without that, `-update` with `INNOCENT" -> "ALSO INNOCENT`
+    /// writes `update 1:note: "third record" -> "INNOCENT" -> "ALSO INNOCENT"`
+    /// -- one entry whose old and new halves no parser can separate.
     ///
-    /// Doubling rather than backslashing, for two reasons. It is the
-    /// convention `.csv2` and RFC 4180 already use, so a reader who knows the
-    /// format needs nothing new. And it carries no backslash, so the
-    /// whole-line escape in `log` leaves it untouched -- a `\"` would have had
-    /// its backslash doubled on the way out, which is the two-layer escaping
-    /// that made the first attempt at this wrong.
+    /// Doubling rather than backslashing: it is the convention `.csv2` and
+    /// RFC 4180 already use, and it carries no backslash, so the whole-line
+    /// escape in `log` leaves it untouched -- a `\"` would have its backslash
+    /// doubled on the way out.
     ///
     /// 值裡的 `"` 會被寫成兩個，因為 `"` 正是用來界定這個值的字元。沒有這一步，
     /// 對 `INNOCENT" -> "ALSO INNOCENT` 做 `-update` 會寫出
-    /// `update 1:note: "third record" -> "INNOCENT" -> "ALSO INNOCENT"`——一行、一筆、
-    /// 磁碟上的資料也正確，而沒有任何剖析器分得出哪一半是舊值、哪一半是新值。整行的偽造
-    /// 早已擋掉；這是在一筆本身合法的紀錄「內部」偽造它的內容。
+    /// `update 1:note: "third record" -> "INNOCENT" -> "ALSO INNOCENT"`——一筆紀錄，
+    /// 而沒有任何剖析器分得出哪一半是舊值、哪一半是新值。
     ///
-    /// 用「加倍」而非「反斜線」，有兩個理由：那是 `.csv2` 與 RFC 4180 已經在用的慣例，
-    /// 看得懂這個格式的人不必再學一套；而且它不含反斜線，因此 `log` 裡那道整行跳脫完全
-    /// 不會碰它——若寫成 `\"`，它的反斜線會在輸出時被加倍，那正是這件事第一次做錯時的
-    /// 那種兩層跳脫。
+    /// 用「加倍」而非「反斜線」：那是 `.csv2` 與 RFC 4180 已經在用的慣例；而且它不含反斜線，
+    /// `log` 裡那道整行跳脫不會碰它——若寫成 `\"`，它的反斜線會在輸出時被加倍。
     /// A column NAME as a log entry can carry it: escaped and quoted the same
     /// way a value is. `delete record 1: a,b="1"` -- a real name with a comma
     /// in it -- reads as three fields and cannot be parsed back; the file
@@ -512,12 +430,8 @@ enum KeySource {
     /// would make a file made with a weak key permanently unreadable --
     /// losing data for a security reason, which is the worse trade.
     ///
-    /// What prompted it: a keyfile of ZERO bytes was refused and a keyfile of
-    /// ONE byte was accepted, silently, at rc=0. The whole column came back in
-    /// 98 tries. Someone had already decided a keyfile must have content; the
-    /// missing decision was how much. A blind-test subject put it exactly:
-    /// this tool's silence at 1 byte is indistinguishable from its silence at
-    /// 32.
+    /// Without a floor, a one-byte keyfile is accepted silently and the column
+    /// it protects is recovered in at most 256 tries.
     ///
     /// `forCreating` 決定「弱金鑰要不要被拒絕」，而那個不對稱正是整個設計。
     ///
@@ -525,9 +439,7 @@ enum KeySource {
     /// 該堅持的時刻。`-decrypt` 面對的是「已經存在的檔案」，在那裡套用同一個下限，會讓一份
     /// 用弱金鑰做出來的檔案再也讀不回來——**以安全為由造成資料無法取回，那是更糟的交換。**
     ///
-    /// 起因：0 bytes 的金鑰檔會被拒絕，而 1 byte 的被靜默接受，rc=0。整欄在 98 次內被復原。
-    /// 有人早已決定「金鑰檔必須有內容」，缺的是「多少」。一位盲測受測者說得最準：這個工具
-    /// 在 1 byte 時的沉默，與它在 32 bytes 時的沉默無法區分。
+    /// 沒有下限時，1 byte 的金鑰檔會被靜默接受，它保護的整欄在 256 次以內就能被復原。
     static func loadKeyMaterial(path: String?, assumeYes: Bool,
                                 forCreating: Bool = false) throws -> (bytes: [UInt8], path: String) {
         let p = path ?? defaultPath
@@ -539,14 +451,12 @@ enum KeySource {
             }
             throw fault("keyfile not found: \(p)", "找不到金鑰檔：\(p)")
         }
-        // Three different situations answered with one sentence, before this:
-        // a directory, an unreadable file and an empty file all reported
-        // "empty or unreadable". Pointing -keyfile at a DIRECTORY is an easy
-        // slip -- the key lives in one -- and being told it might be empty
-        // sends the reader to look inside a file that is not a file.
-        // 這裡原本用同一句話回答三種不同的情況：目錄、讀不到的檔案、空檔案，全都說「為空或
-        // 無法讀取」。把 -keyfile 指到一個「目錄」是很容易發生的失手——金鑰就住在某個目錄裡
-        // ——而被告知「它可能是空的」，會把讀者送去檢查一個根本不是檔案的東西的內容。
+        // A directory, an unreadable file and an empty file each get their own
+        // message. Pointing -keyfile at a DIRECTORY is an easy slip -- the key
+        // lives in one -- and "empty or unreadable" would send the reader to
+        // look inside something that is not a file.
+        // 目錄、讀不到的檔案、空檔案各有各的訊息。把 -keyfile 指到「目錄」是很容易的失手——
+        // 金鑰就住在某個目錄裡——而一句「為空或無法讀取」會把讀者送去檢查一個根本不是檔案的東西。
         var isDir: ObjCBool = false
         _ = FileManager.default.fileExists(atPath: p, isDirectory: &isDir)
         if isDir.boolValue {
@@ -563,22 +473,17 @@ enum KeySource {
         let bytes = [UInt8](d)
 
         // A key of one byte repeated is guessed on the first attempt whatever
-        // its length, so the length floor did not describe what it was for. 16
-        // NUL bytes -- what an all-zero file of the right size gives you, and
-        // what a truncated or never-written key file looks like -- was
-        // accepted, while 15 random bytes, some 10^36 times stronger, was
-        // refused. The stated reason is "a key this short is searched
-        // exhaustively": this file is searched in one guess.
+        // its length, so the length floor alone would accept 16 NUL bytes --
+        // what a truncated or never-written key file looks like -- while
+        // refusing 15 random bytes that are far stronger.
         //
         // Only the shapes that are certainly not keys are refused. csv2 does
         // not estimate entropy -- that is a judgement, and a judgement that
         // refuses a caller's real key is worse than one that accepts a poor
         // one -- but a file with one distinct byte in it is not a judgement.
-        // 一把「同一個位元組重複而成」的金鑰，不論多長都會在第一次嘗試就被猜中，因此那個
-        // 長度下限並沒有描述它存在的目的。16 個 NUL——一個「大小剛好、內容全零」的檔案會給你的
-        // 東西，也是一個被截斷或從未被寫入的金鑰檔的樣子——會被接受；而 15 個隨機位元組，
-        // 大約強上 10^36 倍，卻被拒絕。那條拒絕自陳的理由是「這麼短的金鑰會被窮舉」：
-        // 而這個檔案一次就被猜中。
+        // 一把「同一個位元組重複而成」的金鑰，不論多長都會在第一次嘗試就被猜中，因此光靠長度
+        // 下限會接受 16 個 NUL——被截斷或從未寫入的金鑰檔就是這個樣子——卻拒絕強得多的
+        // 15 個隨機位元組。
         //
         // 只拒絕「確定不是金鑰」的形狀。csv2 不估算熵——那是一種判斷，而一個「把呼叫端真正的
         // 金鑰擋下來」的判斷，比一個「接受了一把差金鑰」的判斷更糟——但「整個檔案只有一種
@@ -739,39 +644,28 @@ enum MarkdownOut {
     /// report already gives: `-md` is a RENDERING, read by a person, and a
     /// control character is not text on a terminal.
     ///
-    /// It passed them through until 2026-08-22, and the attack is small: a
-    /// licence column holding `GPL-3.0<BS><BS><BS><BS><BS><BS><BS>MIT` renders
-    /// as `MIT` on any terminal that moves the cursor for a backspace, at rc=0,
-    /// with `-get` still returning the real bytes. An auditor running the
-    /// command this document calls "for reading" reads the wrong licence. No
-    /// pipes are needed, so the `\|` escape never fires; `--pretty` happens to
-    /// catch that particular payload because it counts the backspaces in the
-    /// column width and the row goes visibly short, but that is an accident of
-    /// alignment and not a defence.
+    /// Unescaped, a licence column holding
+    /// `GPL-3.0<BS><BS><BS><BS><BS><BS><BS>MIT` renders as `MIT` on any
+    /// terminal that moves the cursor for a backspace, at rc=0, while `-get`
+    /// returns the real bytes. `--pretty` only happens to expose that payload
+    /// through column width, which is alignment, not a defence.
     ///
     /// 控制字元也要跳脫，寫成 `\xNN`，理由與定位報告已經給過的相同：`-md` 是一種「算繪」，
     /// 給人讀的，而控制字元在終端機上不是文字。
     ///
-    /// 它到 2026-08-22 之前都原樣放行，而攻擊很小：一個授權欄位存著
-    /// `GPL-3.0<BS><BS><BS><BS><BS><BS><BS>MIT`，在任何「退格會移動游標」的終端機上算繪成
-    /// `MIT`，rc=0，而 `-get` 仍然交還真正的位元組。一個執行「這份文件稱為『給人讀』的那個
-    /// 指令」的稽核者，讀到的是錯的授權。這個 payload 不需要任何 `|`，因此 `\|` 那道跳脫
-    /// 從未觸發；`--pretty` 剛好擋得住這一種，因為它把那些退格算進了欄寬、那一列會明顯變短
-    /// ——但那是對齊的意外，不是一道防線。
+    /// 不跳脫的話，一個存著 `GPL-3.0<BS><BS><BS><BS><BS><BS><BS>MIT` 的授權欄位，在任何
+    /// 「退格會移動游標」的終端機上會算繪成 `MIT`，rc=0，而 `-get` 交還的仍是真正的位元組。
+    /// `--pretty` 只是碰巧因欄寬而讓這個 payload 露餡，那是對齊的意外，不是防線。
     static func cell(_ bytes: [UInt8]) -> String {
         var s = String(bytes: bytes, encoding: .utf8) ?? String(decoding: bytes, as: UTF8.self)
         s = s.replacingOccurrences(of: "\\", with: "\\\\")
         s = s.replacingOccurrences(of: "|", with: "\\|")
         // A literal `<br>` in a VALUE, escaped before the newlines become one.
         //
-        // `<br>` did three jobs in this output and only two of them were
-        // distinguishable: it joins the two header rows, it stands for an
-        // embedded newline, and a value that literally contained `<br>` went
-        // through untouched. So `two\nlines` and `lit<br>eral` rendered as the
-        // same kind of thing, and nothing could tell them apart afterwards.
-        // That was a loss on the WRITE side, present before anything tried to
-        // read this format back -- which is why phase 8a says the write side
-        // has to settle it first.
+        // `<br>` joins the two header rows and stands for an embedded newline,
+        // so a value that literally contains `<br>` must be escaped or
+        // `two\nlines` and `lit<br>eral` render identically and cannot be told
+        // apart when read back (phase 8a).
         //
         // The order is the whole trick: backslashes are already doubled by the
         // line above, so the backslash introduced here cannot be mistaken for
@@ -779,33 +673,24 @@ enum MarkdownOut {
         // only thing left that produces an UNESCAPED `<br>`.
         //
         // 值裡的字面 `<br>`，在換行變成 `<br>` 之前先跳脫。
-        // `<br>` 在這份輸出裡做三件事，而其中只有兩件分得出來：它接起兩列標頭、它代表一個內嵌
-        // 換行，而一個「值裡本來就有 `<br>`」的儲存格會原樣通過。於是 `two\nlines` 與
-        // `lit<br>eral` 算繪成同一種東西，事後沒有任何東西分得出它們。那是「寫出去」那一側的
-        // 損失，在任何人試著把這個格式讀回來之前就存在——而那正是第 8a 階段說「寫出去那一側必須
-        // 先定案」的原因。
+        // `<br>` 用來接起兩列標頭、也代表內嵌換行，因此值裡字面的 `<br>` 必須跳脫，否則
+        // `two\nlines` 與 `lit<br>eral` 會算繪成同一個樣子，讀回來時分不出來（第 8a 階段）。
         // 順序就是全部的訣竅：上一行已經把反斜線加倍了，因此這裡引入的那個反斜線不會被誤認為
         // 資料裡本來就有的；而下面那幾行換行替換，是唯一還會產生「未跳脫的 `<br>`」的東西。
         s = s.replacingOccurrences(of: "<br>", with: "\\<br>")
         // Only LF becomes `<br>`. A CR is a control byte and goes through the
         // loop below as `\x0D`, which is what this function's own documented
         // rule says -- "a TAB as \t, everything else below 0x20 and DEL as
-        // \xNN" -- and which TAB and DEL already obeyed while CR did not.
+        // \xNN".
         //
-        // Round 78 measured the consequence: a cell holding `a\rb` rendered
-        // `a<br>b` and read back as `a\nb`. One byte changed, rc=0, nothing
-        // said, in the round trip this README calls byte-identical. A CRLF was
-        // worse and the round did not reach it: both bytes became one `<br>`
-        // and came back as a single LF, so the pair could not survive either.
-        // Writing CR as `\x0D` makes a CRLF `\x0D<br>`, which does.
+        // Turning CR into `<br>` too would read `a\rb` back as `a\nb`, and a
+        // CRLF as a single LF, breaking the byte-identical round trip. Writing
+        // CR as `\x0D` makes a CRLF `\x0D<br>`, which survives. Round 78.
         //
         // 只有 LF 會變成 `<br>`。CR 是一個控制位元組，會走下面那個迴圈成為 `\x0D`——那正是這個
-        // 函式自己那條有記載的規則所說的（「TAB 是 \t，其餘 0x20 以下與 DEL 是 \xNN」），而 TAB
-        // 與 DEL 一直遵守著它，只有 CR 沒有。
-        // 第 78 回合量到了後果：一個存著 `a\rb` 的儲存格算繪成 `a<br>b`，讀回來是 `a\nb`。一個
-        // 位元組被改掉、rc=0、什麼都沒說，而那正是這份 README 稱為「逐位元相同」的那趟往返。
-        // CRLF 更糟，而那個回合沒有走到：兩個位元組變成一個 `<br>`，回來時是單一個 LF，於是那一對
-        // 同樣活不下來。把 CR 寫成 `\x0D`，CRLF 就成了 `\x0D<br>`，而那是活得下來的。
+        // 函式自己那條有記載的規則所說的（「TAB 是 \t，其餘 0x20 以下與 DEL 是 \xNN」）。
+        // 若 CR 也變成 `<br>`，`a\rb` 讀回來會是 `a\nb`、CRLF 會變成單一個 LF，打破逐位元相同的
+        // 往返。把 CR 寫成 `\x0D`，CRLF 就成了 `\x0D<br>`，可以完整還原。第 78 回合。
         s = s.replacingOccurrences(of: "\n", with: "<br>")
         var out = ""
         out.reserveCapacity(s.count)
@@ -860,11 +745,11 @@ enum MarkdownOut {
 /// Reported under `-debug` so the streaming guarantees can be ASSERTED rather
 /// than asserted-by-comment. "It is written as a ring buffer" is not evidence
 /// that memory stays bounded, and "it stops early" is not evidence that no
-/// bytes past record b were read. Both were skipped cases until these numbers
-/// existed.
+/// bytes past record b were read; without these numbers both tests could only
+/// SKIP.
 /// 在 `-debug` 下回報，讓串流保證可以被「斷言」而不是「以註解宣稱」。
 /// 「它是以環狀緩衝寫的」不構成記憶體有上界的證據，「它會提前停止」也不構成
-/// 「沒有讀取 b 之後任何位元組」的證據。在這些數字存在之前，兩者都只能是 SKIP。
+/// 「沒有讀取 b 之後任何位元組」的證據；沒有這些數字，兩項測試都只能 SKIP。
 enum Metrics {
     /// Peak resident set size in bytes. ru_maxrss is BYTES on Darwin and
     /// KILOBYTES on Linux -- the same field with two units, which is exactly

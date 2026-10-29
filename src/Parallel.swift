@@ -118,33 +118,24 @@ func workerCount() -> Int {
 /// 副本——那是拿記憶體上界去換速度，而在一台只有 2–4 GiB 的機器上，那是錯的交換。
 /// Returns the reason parallelism was declined, or nil when it can run.
 ///
-/// A REASON rather than a bare false, because "did the parallel path run?"
-/// cannot be answered from outside the process otherwise. The acceptance
-/// condition for parallelism is that its output is byte-identical to
-/// single-threaded, and the environment knobs exist so that condition can be
-/// tested on a small file -- but a test that compares two runs proves nothing
-/// if both silently took the same path, and identical output is exactly what
-/// that looks like. Reported through -debug so the difference is observable.
-/// Found on 2026-08-18 by a reader who set the knobs, got byte-identical
-/// output, and correctly refused to call it a pass.
+/// A reason rather than a bare false, because otherwise "did the parallel path
+/// run?" cannot be answered from outside the process. The acceptance condition
+/// is byte-identical output, and a comparison of two runs proves nothing if
+/// both silently took the same path. Reported through -debug so the difference
+/// is observable.
 ///
 /// 回傳「拒絕平行化的理由」，能夠平行時回傳 nil。
-/// 是「理由」而不是單純的 false，因為否則「平行路徑到底有沒有跑」從行程外面無法回答。
-/// 平行化的驗收條件是「輸出與單執行緒逐位元相同」，而那些環境變數的存在，正是為了讓這個
-/// 條件能在小檔案上被測試——但若兩次執行其實都走了同一條路，比對兩者什麼也證明不了，
-/// 而「輸出相同」看起來就正是那個樣子。透過 -debug 回報，使這個差別可被觀察。
-/// 2026-08-18 由一位讀者發現：他設了那些旋鈕、得到逐位元相同的輸出，並且正確地拒絕
-/// 把那稱為通過。
+/// 回傳理由而非單純的 false，否則從行程外無法得知平行路徑到底有沒有跑。驗收條件是
+/// 輸出逐位元相同，而若兩次執行其實走了同一條路，比對兩者什麼也證明不了。透過 -debug
+/// 回報，讓這個差別可被觀察。
 func parallelDeclineReason(_ o: Options, format: Format) -> String? {
     if o.contains == nil { return "not a search; parallelism applies to -contains only" }
     if o.searchScope != nil { return "a scoped search" }
-    // Context BEFORE filter: `-A`/`-B`/`-C` imply `--filter` internally, so
-    // asking about filter first reported `--filter` to someone who never typed
-    // it. A decline reason is read as "this is what you did"; naming a flag the
-    // caller did not pass sends them to look for it. OJ.
-    // 上下文放在 filter **之前**：`-A`／`-B`／`-C` 在內部隱含了 `--filter`，因此先問 filter，會對一個
-    // 從未打過它的人回報 `--filter`。一則婉拒理由會被讀成「你做了這件事」；指名一個呼叫端沒有給過的
-    // 旗標，只會讓他去找一個不存在的東西。OJ。
+    // Context BEFORE filter: `-A`/`-B`/`-C` imply `--filter` internally, and a
+    // decline reason is read as "this is what you did"; naming a flag the
+    // caller never passed sends them to look for it. OJ.
+    // 上下文放在 filter **之前**：`-A`／`-B`／`-C` 在內部隱含 `--filter`，而婉拒理由會被讀成
+    // 「你做了這件事」；指名呼叫端沒給過的旗標，只會讓人去找一個不存在的東西。OJ。
     if o.after != 0 || o.before != 0 { return "-A/-B/-C" }
     if o.filter { return "--filter" }
     if o.markdown { return "-md" }
@@ -163,64 +154,43 @@ func parallelDeclineReason(_ o: Options, format: Format) -> String? {
     // 時才被信任。
     if format == .csv2 { return nil }
     // Only .csv and .csv2 have a record structure this path knows how to split.
-    // `.lines` and `.md` fell through to the `.csv` branch below, where an index
-    // saying "no embedded newlines" -- trivially true of a line-mode file -- let
-    // them in, and the path then ran on bytes it was not built for:
+    // `.lines` and `.md` must be declined explicitly: otherwise they reach the
+    // `.csv` branch below, where an index saying "no embedded newlines" (trivially
+    // true of a line-mode file) lets them in, and this path runs on bytes it was
+    // not built for -- `.lines` traps (SIGTRAP, exit 133, no output) and `.md`
+    // is parsed as raw CSV. `--build-index` accepts both, so both are reachable
+    // through documented commands. OF, OG.
     //
-    //   .lines  SIGTRAP, exit 133, empty stdout, empty stderr, 3/3
-    //   .md     the raw table parsed as CSV, refused with a message telling the
-    //           caller to rename the file to the suffix it already has
+    // The `.md` case is the same shape as LL: a second reader that does not know
+    // a `.md` must be translated first.
     //
-    // Both were reachable entirely through documented commands, because
-    // `--build-index` accepts these files and reports success. The header of
-    // this file says the acceptance condition is the point; it had two formats
-    // it never named, and silence about a format is not the same as excluding
-    // it. OF, OG.
+    // 只有 .csv 與 .csv2 具備這條路徑知道怎麼切分的紀錄結構。`.lines` 與 `.md` 必須在此明確
+    // 拒絕：否則它們會落進底下 `.csv` 那一支，而說「沒有內嵌換行」的索引（對逐行模式的檔案
+    // 自明成立）會放它們進來，這條路徑便在不是為它而建的位元組上執行——`.lines` 會 SIGTRAP
+    // （rc=133、沒有輸出），`.md` 會被當成原始 CSV 解析。`--build-index` 接受這兩種檔案，
+    // 所以兩者都能經由文件記載的指令觸發。OF、OG。
     //
-    // The `.md` half is LL one layer over: that was `-update-where`'s pre-scan
-    // opening the raw file instead of going back through openInput, and this is
-    // the parallel path doing the same. Twice now, the thing that breaks is a
-    // second reader that does not know a `.md` must be translated first.
-    //
-    // 只有 .csv 與 .csv2 具備這條路徑知道怎麼切分的紀錄結構。`.lines` 與 `.md` 原本會落進底下
-    // `.csv` 那一支，而一個說「沒有內嵌換行」的索引——那對逐行模式的檔案是自明地成立的——就把它們
-    // 放了進去，接著這條路徑便在它並非為之而建的位元組上跑起來：
-    //
-    //   .lines  SIGTRAP，rc=133，stdout 空、stderr 空，三次全中
-    //   .md     原始表格被當成 CSV 解析，並以一則「請把檔案改名成它已經有的副檔名」的訊息拒絕
-    //
-    // 兩者都完全走得通**被記載的指令**，因為 `--build-index` 接受這些檔案並回報成功。
-    // 這個檔案的標頭寫著「接受條件才是重點」；而它有兩種格式從未被指名，
-    // **對一個格式保持沉默，與把它排除在外，不是同一件事。** OF、OG。
-    //
-    // `.md` 那一半是 LL 高一層：那一次是 `-update-where` 的預掃描直接開原始檔、沒有再走一次
-    // openInput，而這一次是平行路徑做了同樣的事。**兩次了，壞掉的都是「第二個讀取者不知道 .md
-    // 必須先被翻譯」。**
+    // `.md` 這一種與 LL 同型：第二個讀取者不知道 `.md` 必須先被翻譯。
     if format == .lines {
         return "a suffix-less file is read line by line, and this path splits CSV records"
     }
     // Tested on the SUFFIX, not on `format`, because `Format` has no `.md`: a
     // Markdown input is translated into `.csv` or `.csv2` before any reader
-    // sees it, so by the time this function runs the format says `csv` while
-    // `o.input` still names the `.md`. That gap is exactly how the parallel
-    // path came to read the raw table.
-    // 判斷的是**副檔名**，不是 `format`——因為 `Format` 裡沒有 `.md`：一個 Markdown 輸入在任何讀取器
-    // 看到它之前，就已經被翻譯成 `.csv` 或 `.csv2`，因此執行到這個函式時，format 說的是 `csv`，
-    // 而 `o.input` 指的仍是那個 `.md`。**那道縫，正是平行路徑讀到原始表格的由來。**
+    // sees it, so here the format says `csv` while `o.input` still names the
+    // `.md`.
+    // 判斷的是**副檔名**而非 `format`，因為 `Format` 裡沒有 `.md`：Markdown 輸入在任何讀取器
+    // 看到之前就已翻譯成 `.csv` 或 `.csv2`，所以在這裡 format 說的是 `csv`，而 `o.input`
+    // 指的仍是那個 `.md`。
     if path.lowercased().hasSuffix(".md") {
         return "a .md is translated to records before it is read, and this path reads bytes"
     }
-    // --no-index says "never read or write a sidecar", and this was the one
-    // place that read one anyway. It did not print, return or write anything
-    // from the index -- it only let the index decide which path ran -- which
-    // is exactly why nothing caught it: the flag's effect was invisible except
-    // in the record numbers. It also meant the documented escape hatch did not
-    // escape. Anyone reaching for --no-index because they suspect the sidecar
-    // got the sidecar's answer.
-    // --no-index 的意思是「絕不讀寫 sidecar」，而這裡是唯一仍然去讀的地方。它不曾從索引
-    // 取出任何東西來印、來回傳或來寫入——它只是讓索引決定走哪一條路——而那正是沒有東西
-    // 抓到它的原因：那個旗標的作用除了紀錄號之外看不見。它同時也讓那條寫在文件裡的逃生口
-    // 逃不掉：因為懷疑 sidecar 而伸手去拿 --no-index 的人，拿到的還是 sidecar 的答案。
+    // --no-index means "never read or write a sidecar", and that includes
+    // letting a sidecar decide which path runs. Its effect would otherwise be
+    // invisible except in the record numbers, and the documented escape hatch
+    // for a suspect sidecar would still return the sidecar's answer.
+    // --no-index 的意思是「絕不讀寫 sidecar」，也包括不讓 sidecar 決定走哪一條路。否則它的
+    // 作用除了紀錄號之外看不見，而文件裡那條「懷疑 sidecar 時用的逃生口」拿到的仍是 sidecar
+    // 的答案。
     if o.noIndex { return "--no-index, and a .csv needs an index to prove one record per line" }
     // No logging HERE: this is a pure query, asked more than once per run, so
     // anything it prints prints twice. What load itself says about discarding a
@@ -242,34 +212,22 @@ func parallelDeclineReason(_ o: Options, format: Format) -> String? {
         // 它就是正確答案。
         return ".csv whose index records a record spanning lines; a record number is not a line number here"
     }
-    // Three different situations used to end here with one message, and the
-    // message asserted there was no index while a sidecar sat beside the data.
-    // It then told the reader to --build-index, which is what they had just
-    // done. A blind-test subject lost several minutes to it and said so.
+    // Three situations, three messages, because the remedy differs: build an
+    // index, rebuild the one that is there, or nothing (the file genuinely
+    // spans lines -- handled above). Name the sidecar when one exists: "no
+    // index" beside a file called `x.csv.index` makes the reader doubt what
+    // they can see, and sends them to --build-index again.
     //
-    // The three are separated now because the remedy differs: build one,
-    // rebuild the one that is there, or nothing (the file genuinely spans
-    // lines -- handled above). Naming the sidecar matters more than the
-    // wording: "no index" beside a file called `x.csv.index` is the kind of
-    // statement that makes someone doubt what they can see.
-    //
-    // 原本三種不同的情況都走到這裡、印出同一句話，而那句話宣稱「沒有索引」——當時 sidecar
-    // 就躺在資料旁邊。它接著叫人去 --build-index，而那正是對方剛剛做過的事。一位盲測受測者
-    // 為此損失了好幾分鐘，並且寫了下來。
-    //
-    // 現在三者分開，因為解法不同：建立一個、重建已經在那裡的那一個、或什麼都不必做（檔案
-    // 真的跨行——在上面處理）。指名那個 sidecar 比措辭更要緊：在一個叫做 `x.csv.index` 的
-    // 檔案旁邊說「沒有索引」，是那種會讓人懷疑自己眼睛的說法。
+    // 三種情況、三則訊息，因為解法不同：建立索引、重建已經存在的那一個、或什麼都不必做
+    // （檔案真的跨行——上面已處理）。有 sidecar 時要指名它：在 `x.csv.index` 旁邊說「沒有
+    // 索引」，會讓讀者懷疑自己的眼睛，並再跑一次 --build-index。
     let sidecar = CSVIndex.path(for: path)
     if FileManager.default.fileExists(atPath: sidecar) {
-        // The reason goes IN the message. It used to say "run with -debug to
-        // see why", which is advice for someone who is not running with
-        // -debug -- and this line is only visible to someone who is. The
-        // reader was told to do the thing they were already doing, while the
-        // answer sat one line above at INFO.
-        // 理由寫「進」訊息裡。原本寫的是「用 -debug 看原因」，那是給「沒有在用 -debug 的人」
-        // 的建議——而這一行只有正在用 -debug 的人看得到。讀者被叫去做他已經在做的事，
-        // 而答案就在上一行的 INFO 裡。
+        // The reason goes IN the message. This line is only visible under
+        // -debug, so "run with -debug to see why" would tell the reader to do
+        // what they are already doing.
+        // 理由寫「進」訊息裡。這一行只在 -debug 下看得到，因此「用 -debug 看原因」等於叫讀者
+        // 去做他已經在做的事。
         let why = CSVIndex.lastDiscardReason?.en ?? "reason not recorded"
         return ".csv whose index \(sidecar) was discarded (\(why)); --build-index replaces it"
     }
@@ -315,32 +273,21 @@ private final class ParallelBatchResults: @unchecked Sendable {
 
     /// LE. "First" means first IN THE FILE, not first to arrive.
     ///
-    /// This kept whichever error a worker happened to store first, and the
-    /// workers run concurrently -- so which of two true statements the user
-    /// saw was decided by thread scheduling. On the T118 fixture, a raw
-    /// newline inside a quoted cell, the run said "record 1 (line 3): a raw
-    /// newline inside a cell" 1185 times out of 1200 and "record 2 (line 4)
-    /// has 1 fields but the header has 2" the other 15, the second being what
-    /// a chunk that began mid-record saw rather than what is wrong with the
-    /// file. A user following it to line 4 finds an ordinary row.
-    ///
-    /// Ordering by chunk index makes it deterministic AND correct: the
-    /// single-threaded path reports the earliest problem in the file, and the
-    /// lowest chunk index is that same problem. Within a batch, index order is
-    /// file order; batches run one after another and an error in an earlier
-    /// batch throws before the next begins.
+    /// Workers run concurrently, so keeping whichever error was stored first
+    /// lets thread scheduling choose which of two true statements the user
+    /// sees -- and a later chunk that began mid-record can report a field-count
+    /// error on an ordinary row (T118). Ordering by chunk index makes it
+    /// deterministic and matches the single-threaded path, which reports the
+    /// earliest problem in the file. Within a batch, index order is file order;
+    /// batches run in sequence and an earlier batch's error throws before the
+    /// next begins.
     ///
     /// LE。「第一個」指的是**檔案裡的第一個**，不是最先到達的那一個。
     ///
-    /// 這裡原本留住「哪一個 worker 剛好先存進來」的錯誤，而 worker 是並行的——於是使用者
-    /// 看到兩句都為真的話裡的哪一句，由執行緒排程決定。在 T118 那個 fixture（引號欄位裡的
-    /// 裸換行）上，1200 次中有 1185 次說「record 1 (line 3)：儲存格裡有裸換行」，另外 15 次
-    /// 說「record 2 (line 4) 有 1 欄，而標頭有 2 欄」——後者是「一個從記錄中間開始的區塊」
-    /// 看到的東西，不是那個檔案真正的毛病。使用者照著它去找第 4 行，會看到一列完全正常的資料。
-    ///
-    /// 依區塊索引排序，讓它同時是決定性的**且**正確的：單執行緒路徑回報的是檔案裡最早的那個
-    /// 問題，而索引最小的區塊裝的正是同一個問題。在一批之內，索引順序就是檔案順序；而各批依序
-    /// 執行，前一批的錯誤會在下一批開始之前就拋出。
+    /// worker 是並行的，若留住「最先存進來」的錯誤，使用者看到兩句都為真的話裡的哪一句，
+    /// 就由執行緒排程決定——而從紀錄中間開始的後段區塊，可能對一列正常資料回報欄數錯誤
+    /// （T118）。依區塊索引排序讓結果具決定性，並與單執行緒路徑一致：它回報的是檔案裡最早的
+    /// 問題。一批之內，索引順序就是檔案順序；各批依序執行，前一批的錯誤會在下一批開始前拋出。
     func store(error: Error, at index: Int) {
         lock.lock()
         if firstError == nil || index < firstErrorIndex {
@@ -404,33 +351,16 @@ private func planChunks(path: String, from headEnd: UInt64, size: UInt64) throws
         var remaining = Int(spans[i].end - spans[i].start)
         // The pool is the point, not the read. This loop walks the WHOLE file
         // -- it is how each chunk learns its first record number -- and on
-        // Darwin every `Data` returned here survived until the process exited,
-        // so peak RSS came to about one byte per byte of input. 615 MB in,
-        // 608 MB resident, while the single-threaded path over the same file
-        // stayed at 9.5 MB.
+        // Darwin every `Data` returned here otherwise survives until the
+        // process exits, so peak RSS grows to about the input size (608 MB
+        // resident for a 615 MB file, against 9.5 MB single-threaded). Same
+        // defect as ByteSource.next and the worker read loop below; see
+        // Platform.drainingPool.
         //
-        // The measurement that found it: forcing the batch size down to 1, so
-        // that exactly one chunk is in flight at a time, changed peak RSS by
-        // half a percent (637 MB against 640 MB). Nothing that scales with
-        // work IN FLIGHT can behave like that, which ruled out the workers and
-        // left the one loop that touches every byte outside a pool.
-        //
-        // Third occurrence of the same defect: ByteSource.next carries the
-        // same comment, and the parallel worker's read loop needed the same
-        // fix an hour earlier. See Platform.drainingPool.
-        //
-        // 重點是那個 pool，不是那次讀取。這個迴圈會走過「整個檔案」——每個區塊就是靠它
-        // 知道自己第一筆的編號——而在 Darwin 上，這裡回傳的每一個 `Data` 都活到行程結束，
-        // 於是峰值 RSS 大約是「輸入每一個位元組對應一個位元組」。讀進 615 MB，常駐 608 MB，
-        // 而同一個檔案在單執行緒路徑上是 9.5 MB。
-        //
-        // 找到它的那次量測：把批次大小強制降到 1，也就是同時只有一個區塊在飛，峰值 RSS 只
-        // 變動了百分之零點五（637 MB 對 640 MB）。任何隨「同時在飛的工作量」而變的東西都
-        // 不可能是這種行為——這排除了工作者，只剩下那個「在 pool 之外走過每一個位元組」的
-        // 迴圈。
-        //
-        // 這是同一個缺陷的第三次出現：`ByteSource.next` 帶著同一段註解，而平行工作者的讀取
-        // 迴圈在一小時前才需要同樣的修正。見 Platform.drainingPool。
+        // 重點是那個 pool，不是那次讀取。這個迴圈會走過「整個檔案」——每個區塊靠它得知自己
+        // 第一筆的編號——而在 Darwin 上，少了 pool，這裡回傳的每一個 `Data` 都會活到行程結束，
+        // 峰值 RSS 便接近輸入大小（615 MB 的檔案常駐 608 MB，單執行緒只有 9.5 MB）。與
+        // `ByteSource.next` 及下方工作者讀取迴圈是同一個缺陷；見 Platform.drainingPool。
         var count = 0
         while remaining > 0 {
             let n = Platform.drainingPool { () -> Int in
@@ -465,16 +395,13 @@ func runParallelSearch(_ o: Options) throws {
         throw fault("cannot stat \(path)", "無法取得 \(path) 的狀態")
     }
 
-    // Every path that DECLINES the index names it and says why; the path that
-    // TRUSTS it said nothing at all. The asymmetry ran the wrong way: by the
-    // size+mtime stamp's own limits a trusted index can be stale, so this is
-    // the only branch that can be silently wrong -- and it was the only one
-    // leaving no trace. An operator reading -debug could see why a sidecar was
-    // rejected but never that one had been believed, nor which file it was.
-    // 每一條「拒絕」索引的路徑都會指名它並說明理由；而「採信」它的那條什麼都不說。
-    // 這個不對稱正好反了：依 size+mtime 戳記自身的限制，被採信的索引可能是過期的，
-    // 因此這是唯一可能靜默給出錯誤答案的分支——卻也是唯一不留痕跡的。讀 -debug 的人
-    // 看得到 sidecar 為何被拒，卻看不到它被信了、信的是哪一個檔案。
+    // The path that TRUSTS the index says so, as every declining path does.
+    // Within the size+mtime stamp's limits a trusted index can be stale, so this
+    // is the one branch that can be silently wrong, and -debug must show which
+    // sidecar was believed.
+    // 「採信」索引的路徑也要說出來，就像每一條拒絕的路徑一樣。在 size+mtime 戳記的限制下，
+    // 被採信的索引可能已過期，因此這是唯一可能靜默出錯的分支，-debug 必須顯示信的是哪一個
+    // sidecar。
     if plan.format != .csv2, let idx = CSVIndex.load(dataPath: path), idx.noEmbeddedNewlines {
         Logger.shared.debug(
             "parallel: trusting index \(CSVIndex.path(for: path)), which declares "
@@ -508,11 +435,11 @@ func runParallelSearch(_ o: Options) throws {
     // The physical line the data starts on is NOT headerRows + 1: a header
     // cell may hold a quoted newline. The index's one-record-per-line proof
     // covers the data, not the header, so the header's own line feeds are
-    // counted here. Using headerRows put every reported line too early by the
-    // header's extra lines, while the record numbers stayed right. RI.
+    // counted here; using headerRows shifts every reported line early while
+    // the record numbers stay right. RI.
     // 資料起始的實體行號**不是** headerRows + 1：標頭儲存格可以含引號內的換行。索引那份「每筆
-    // 紀錄一行」的證明涵蓋的是資料，不是標頭，所以標頭自己的換行在這裡數。用 headerRows 會讓每一個
-    // 回報的行號早了「標頭多出的行數」，而紀錄號仍然正確。RI。
+    // 紀錄一行」的證明涵蓋的是資料而非標頭，所以標頭自己的換行在這裡數；若用 headerRows，每個
+    // 回報的行號都會提早，而紀錄號仍然正確。RI。
     var headerLFs = 0
     if headEnd > 0, let hh = FileHandle(forReadingAtPath: path) {
         defer { try? hh.close() }
@@ -583,12 +510,11 @@ func runParallelSearch(_ o: Options) throws {
         let batch = max(1, min(workerCount(), cap / max(perChunk, 1)))
         if batch < workerCount() && !throttled {
             throttled = true
-            // Said once, and said with the numbers, because a run that is
-            // slower than the machine could be has to be explainable. The
-            // alternative -- silently using fewer workers -- is the shape of
-            // defect this project keeps finding.
-            // 只說一次，而且帶著數字，因為一次「比機器能力慢」的執行必須是可以被解釋的。
-            // 另一種做法——安靜地少用幾個工作者——正是本專案一再找到的那種缺陷形狀。
+            // Said once, with the numbers, so a run slower than the machine
+            // could manage is explainable rather than silently using fewer
+            // workers.
+            // 只說一次，並帶著數字，讓一次「比機器能力慢」的執行可以被解釋，而不是安靜地
+            // 少用幾個工作者。
             Logger.shared.debug(
                 "parallel: holding \(batch) chunk(s) in flight instead of \(workerCount()); "
                 + "the last batch held about \(perChunk) bytes per chunk and "
@@ -673,9 +599,6 @@ func runParallelSearch(_ o: Options) throws {
         if let e = batchResult.error { throw e }
         let fragments = batchResult.fragments
         let counts = batchResult.counts
-        // Written in chunk order, which is what makes the output identical to
-        // the single-threaded run.
-        // 按區塊順序寫出，這正是輸出能與單執行緒完全相同的原因。
         // What this batch actually held, which decides the next one. Measured
         // before the fragments are written and released, because afterwards
         // there is nothing left to measure.
@@ -683,6 +606,9 @@ func runParallelSearch(_ o: Options) throws {
         // 因為之後就沒有東西可以量了。
         perChunk = max(1, fragments.reduce(0) { $0 + $1.count } / max(batchCount, 1))
 
+        // Written in chunk order, which is what makes the output identical to
+        // the single-threaded run.
+        // 按區塊順序寫出，這正是輸出能與單執行緒完全相同的原因。
         for k in 0..<batchCount {
             outSink.write(fragments[k])
             matched += counts[k]
@@ -698,21 +624,17 @@ func runParallelSearch(_ o: Options) throws {
     try outSink.close()
     aborted = false
     Logger.shared.debug("parallel: \(totalRecords) records, \(matched) matched")
-    // The metrics line belongs to every path, not to the one that happens to
-    // end in runSelect. -debug is documented as "diagnostics to stderr,
-    // including a metrics: line", and this path emitted none -- so
-    // peak_rss_bytes was unavailable on exactly the runs where someone would
-    // want it, since parallelism is what a large file gets. Round 38, EE.
+    // The metrics line belongs to every path, not only the one that ends in
+    // runSelect: -debug is documented to include a `metrics:` line, and large
+    // files, where peak_rss_bytes matters most, are exactly the ones that take
+    // this path. Round 38, EE.
     //
-    // read_bytes is the file size here rather than a counter: the parallel
-    // pass reads every chunk, so those are the same number, and reporting a
-    // counter that could only ever equal the size would invite the reader to
-    // believe it might not.
-    // metrics 那一行屬於「每一條路徑」，不屬於「剛好在 runSelect 收尾的那一條」。-debug 的
-    // 文件寫的是「診斷輸出到 stderr，包含一行 metrics」，而這條路徑一行都沒有——於是
-    // peak_rss_bytes 恰好在「有人會想看它」的那些執行上取不到，因為大檔案拿到的正是平行。
-    // 第 38 回合，EE。
-    // 此處的 read_bytes 直接用檔案大小而不是計數器：平行那一遍會讀過每一個區塊，因此兩者
-    // 是同一個數字；而回報一個「永遠只會等於檔案大小」的計數器，反而會讓讀者以為它可能不等於。
+    // read_bytes is the file size rather than a counter: the parallel pass
+    // reads every chunk, so the two are always equal, and a counter would
+    // suggest they might not be.
+    // metrics 那一行屬於「每一條路徑」，不只是在 runSelect 收尾的那一條：-debug 的文件寫明會
+    // 有一行 `metrics:`，而最需要 peak_rss_bytes 的大檔案，走的正是這條路徑。第 38 回合，EE。
+    // 此處的 read_bytes 直接用檔案大小而非計數器：平行那一遍會讀過每一個區塊，兩者永遠相等；
+    // 用計數器反而會暗示它們可能不相等。
     Metrics.report(bytesRead: Int(st.size), fileSize: Int(st.size))
 }

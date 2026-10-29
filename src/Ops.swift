@@ -148,17 +148,16 @@ final class CSVEmitter: RecordEmitter {
         }
         // preserveRaw is per FIELD -- a field with no raw bytes falls back to
         // its value -- so adding a rownum column does not stop the other
-        // columns being written as they arrived. Turning it off wholesale made
-        // `-r -rownum` quote differently from `-r` on the same file: `"   "`
-        // came out as `   `, one flag away, with no reason a reader could see.
+        // columns being written as they arrived. Turning it off wholesale would
+        // make `-r -rownum` quote differently from `-r` on the same file.
         // preserveRaw 是「逐欄位」的——沒有原樣位元組的欄位會退回它的值——因此多一個 rownum
-        // 欄，不會讓其他欄位失去「照原樣寫出」。整體關掉它的結果是 `-r -rownum` 與 `-r` 對
-        // 同一個檔案給出不同的引號：`"   "` 變成 `   `，只差一個旗標，而讀者看不出任何理由。
+        // 欄，不會讓其他欄位失去「照原樣寫出」。整體關掉它，`-r -rownum` 與 `-r` 對同一個檔案
+        // 就會給出不同的引號。
         sink.write(FieldEncoder.encodeRecord(rec, format: ctx.format,
                                              preserveRaw: ctx.preserveRaw))
     }
 
-    /// grep prints `--` between non-adjacent blocks and so do we. It is
+    /// grep prints `--` between non-adjacent blocks and so does csv2. It is
     /// documented as a separator rather than data, because a downstream
     /// script that treats it as a record gets one bogus row per block.
     /// grep 在不相鄰的區塊之間印 `--`，此處照做。它在說明中被標示為分隔線而
@@ -168,81 +167,48 @@ final class CSVEmitter: RecordEmitter {
     func end(_ ctx: EmitContext, records: Int, matched: Int) throws {}
 }
 
-/// The report is TAB-separated, one line per matching cell, and a value is
-/// arbitrary CSV content -- so a cell containing a TAB or a newline would break
-/// the very format the report promises. It did: three matching cells produced
-/// four lines, `cut -f1` returned a fragment of prose where an address belongs,
-/// and csv2 exited 0. That is this project's signature failure -- a plausible
-/// but wrong result reported as success -- happening in the tool's own
-/// recommended script interface, on quoted prose, which is the column type that
-/// caused the incident csv2 was built after.
-/// 報告以 TAB 分隔、每個命中的儲存格一行，而「值」是任意的 CSV 內容——因此含有 TAB
-/// 或換行的儲存格會破壞報告自己承諾的格式。它確實破壞了：三個命中的儲存格產生四行、
-/// `cut -f1` 在該是位址的地方回傳一段散文，而 csv2 以 0 結束。那正是本專案的招牌
-/// 失敗——看似合理但錯誤的結果以成功回報——而且發生在工具自己推薦的腳本介面上，
-/// 就在「帶引號的散文」這個當初引發事故的欄位型別上。
-///
-/// Escaped with the SAME backslash convention `.csv2` already uses, plus `\t`
-/// because TAB is this format's own delimiter. Reusing the convention rather
-/// than inventing one means a reader who knows the file format already knows
-/// how to read the report.
-/// 以 `.csv2` 既有的反斜線慣例跳脫，另加 `\t`——因為 TAB 是這個格式自己的分隔符。
-/// 沿用既有慣例而非發明新的，讓看得懂檔案格式的人不必再學一套就能讀報告。
-/// Escapes what would end a line -- a newline or a carriage return -- and
-/// every other C0 control character and DEL, as `\xNN`.
-///
-/// This is the whole-message escape, and it is deliberately narrower than
-/// `reportEscape`. One choke point protects line integrity -- an entry can
-/// never be forged by opening a second line, and no future message has to
-/// remember -- but a choke point cannot tell an author's PROSE from an
-/// interpolated VALUE, and those two need opposite treatment.
-///
-/// Escaping everything there was tried, on 2026-08-20, and it broke the
-/// messages that teach escaping:
-///
-///     README:  undefined escape sequence \q; .csv2 defines only \n, \r and \\
-///     printed: undefined escape sequence \\q; .csv2 defines only \\n, \\r and \\\\
-///
-/// A reader who followed the message wrote a literal backslash-n into a
-/// `.csv2` cell and got rc=0 with the wrong value. Backslashes in prose are
-/// the author's; backslashes in a value are data. So the value sites escape
-/// fully -- `redact`, the logged invocation, and a message quoting input back
-/// -- and the BACKSLASH is still not touched here.
-///
-/// The CONTROL CHARACTERS are, and that half of "escape everything" was thrown
-/// out with the half that was wrong. csv2's own prose contains no ESC, no BEL,
-/// no TAB: every control character in a message arrived from data. Leaving
-/// them raw put live terminal control on stderr from an input the caller may
-/// not have chosen -- `no column named "<ESC>[2K…"` erases the line it is
-/// printed on, which is the hazard this file already argues for escaping the
-/// locating report, one screen away. The line count held throughout; the rule
-/// did not.
-///
-/// 那個「全部都跳脫」的決定,被丟掉的不只是錯的那一半。csv2 自己的散文裡沒有 ESC、沒有 BEL、
-/// 沒有 TAB:訊息裡的每一個控制字元都來自資料。放它們原樣通過,等於把「活的」終端機控制序列
-/// 送上 stderr,而那個輸入未必是呼叫端挑的——`no column named "<ESC>[2K…"` 會擦掉它正被印出的
-/// 那一行,而這正是本檔案在一個螢幕之外、為「定位報告要跳脫」所給的同一個理由。行數的承諾
-/// 一直守著,規則沒有。
-/// 只跳脫「會結束一行」的東西：換行與歸位字元。
-///
-/// 這是「整則訊息」的跳脫，而它刻意比 `reportEscape` 窄。單一的關卡守住「一筆一行」——
-/// 一筆紀錄永遠無法靠開出第二行來偽造，而日後的訊息也不必記得任何事——但一個關卡分不出
-/// 「作者寫的散文」與「插進去的值」，而那兩者需要的處理正好相反。
-///
-/// 「全部都跳脫」試過了，是 2026-08-20，而它弄壞了那些「教你怎麼跳脫」的訊息：照著訊息寫的
-/// 人會把一個字面的反斜線 n 寫進 `.csv2` 儲存格，rc=0，而值是錯的。散文裡的反斜線屬於作者；
-/// 值裡面的反斜線是資料。因此「值」的那些地方做完整跳脫——`redact` 與記入 log 的呼叫——
-/// 而這裡只處理那兩個會破壞格式的字元。
-
+// reportEscape and lineEscape are defined in Support.swift; this is why they
+// differ.
+// 以下說明定義在 Support.swift 的 reportEscape 與 lineEscape 為何不同。
+//
+// reportEscape: the locating report is TAB-separated, one line per matching
+// cell, and a value is arbitrary CSV content, so a raw TAB or newline in a
+// cell breaks the format: more lines than hits, and `cut -f1` returning prose
+// where an address belongs, at rc=0. It uses the backslash convention `.csv2`
+// already uses, plus `\t` because TAB is the report's own delimiter, so a
+// reader who knows the file format can already read the report.
+// reportEscape：定位報告以 TAB 分隔、每個命中的儲存格一行，而值是任意的 CSV 內容，因此儲存格
+// 裡原樣的 TAB 或換行會破壞格式：行數比命中多，`cut -f1` 在該是位址的地方回傳一段散文，rc=0。
+// 它沿用 `.csv2` 既有的反斜線慣例，另加 `\t`——因為 TAB 是報告自己的分隔符——讓看得懂檔案格式
+// 的人不必再學一套就能讀報告。
+//
+// lineEscape: the whole-message escape, deliberately narrower. It escapes
+// what would end a line (newline, CR), TAB, and every other C0 control
+// character and DEL as `\xNN`, so no entry can be forged by opening a second
+// line and no future message has to remember to. It does NOT touch the
+// backslash: one choke point cannot tell an author's prose from an
+// interpolated value, and escaping prose breaks the messages that teach
+// escaping (`\q` would print as `\\q`, and a reader following it writes the
+// wrong value at rc=0). The value sites -- `redact`, the logged invocation,
+// and a message quoting input back -- escape fully. Control characters ARE
+// escaped because csv2's own prose contains none: every one in a message came
+// from data, and raw they are live terminal control on stderr
+// (`<ESC>[2K` erases the line it is printed on).
+// lineEscape：整則訊息的跳脫，刻意比 reportEscape 窄。它跳脫會結束一行的東西（換行、歸位字元）、
+// TAB，以及其餘每一個 C0 控制字元與 DEL（寫成 `\xNN`），讓任何一筆都無法靠開出第二行來偽造，
+// 日後的訊息也不必記得要做。它**不**動反斜線：單一關卡分不出作者寫的散文與插進去的值，而跳脫
+// 散文會弄壞那些「教你怎麼跳脫」的訊息（`\q` 會印成 `\\q`，照著寫的人會在 rc=0 下寫進錯的值）。
+// 「值」的那些地方——`redact`、記入 log 的呼叫、把輸入引述回來的訊息——做完整跳脫。控制字元
+// **要**跳脫，因為 csv2 自己的散文裡一個都沒有：訊息裡的每一個都來自資料，原樣送上 stderr 就是
+// 活的終端機控制序列（`<ESC>[2K` 會擦掉它被印出的那一行）。
 
 /// `-get r:c` prints ONE cell's value and nothing else -- no quoting, no
 /// delimiter, no header, no address. The value as it was stored, decoded.
 ///
 /// Not CSV, deliberately. A one-cell CSV row would need quoting whenever the
-/// value contained a comma, and the caller would then have to decode it: the
-/// exact detour that made reading a known address require --json plus a
-/// selection plus an external parser. What a caller wants from an address is
-/// the value.
+/// value contained a comma, and the caller would then have to decode it with
+/// --json plus a selection plus an external parser. What a caller wants from
+/// an address is the value.
 ///
 /// A trailing newline, so `$(csv2 -get ...)` behaves like every other command
 /// substitution -- the shell strips it. A value containing newlines comes back
@@ -252,9 +218,8 @@ final class CSVEmitter: RecordEmitter {
 ///
 /// `-get r:c` 只印出「一格」的值，別的什麼都不印——沒有引號、沒有分隔符、沒有標頭、
 /// 沒有位址。就是儲存時的值，解碼後。
-/// 刻意不是 CSV。只有一格的 CSV 列，在值含逗號時仍需加引號，於是呼叫端還得再解碼一次
-/// ——那正是「讀取一個已知位址」原本得繞道 --json 加選取加外部解析器的那條彎路。
-/// 呼叫端要的是「值」。
+/// 刻意不是 CSV。只有一格的 CSV 列，在值含逗號時仍需加引號，於是呼叫端還得用 --json 加選取
+/// 加外部解析器再解碼一次。呼叫端要的是「值」。
 /// 結尾帶一個換行，讓 `$(csv2 -get ...)` 的行為與其他命令替換一致（shell 會去掉它）。
 /// 值本身含換行時就照樣帶著換行回來，不做任何跳脫——跳脫就是一種格式，而這裡刻意不是。
 /// 若你需要一個「自身換行有意義」的值，--json 才是能明確承載它的形狀。
@@ -267,16 +232,11 @@ final class CellEmitter: RecordEmitter {
     func begin(_ ctx: EmitContext) throws {}
 
     func emit(_ r: Record, matches: [Int], ctx: EmitContext) throws {
-        // A NUMBER needs no header. This refused every `-get r:c` on a file
-        // with no header row -- including `1:1` on a suffix-less file, where
-        // the column can only ever be 1. The message was written when every
-        // file had a header and a name was the interesting case; it stayed
-        // true of names and became false of numbers the moment zero-header
-        // files existed. Phase 8b.
-        // 一個「數字」不需要標頭。這裡原本會拒絕「對沒有標頭列的檔案」下的每一次 `-get r:c`
-        // ——包括對一個沒有副檔名的檔案下 `1:1`，而那種檔案的欄位號永遠只可能是 1。這則訊息是在
-        // 「每個檔案都有標頭」的年代寫的，那時「名稱」才是有意思的情況；它對名稱一直為真，而在
-        // 「零標頭列的檔案」存在的那一刻，它對數字就成了假的。第 8b 階段。
+        // A NUMBER needs no header, so a file with no header row (a
+        // suffix-less file, say) can still be addressed as `1:1`. Only a NAME
+        // needs one. Phase 8b.
+        // 「數字」不需要標頭，因此沒有標頭列的檔案（例如沒有副檔名的檔案）仍然可以用 `1:1`
+        // 定址。只有「名稱」需要標頭。第 8b 階段。
         let c: Int
         if let header = ctx.headers.first {
             c = try resolveColumn(column, header: header)
@@ -341,36 +301,18 @@ final class ReportEmitter: RecordEmitter {
             // The A1 row is the record number plus the header rows above it,
             // which is the row a spreadsheet puts the record on.
             //
-            // This used to be the PHYSICAL line, defended by an argument that
-            // was half right: the record number ALONE would print [A1] for a
-            // cell any spreadsheet calls A3, and [E0] for a header, and A1
-            // notation has no row 0. Both true -- but the answer to that is to
-            // add the header rows, not to switch to the line. With one record
-            // per line the two are equal, so every example in the README and
-            // every fixture in this repo agreed with both readings and could
-            // not tell them apart.
-            //
-            // They differ exactly once: a record spanning lines still occupies
-            // ONE spreadsheet row, because the quoted newline stays inside the
-            // cell. Record 3 of a one-header `.csv` whose earlier records span
-            // six lines is row 4; the physical line is 10. csv2 printed [B10],
-            // at rc=0, with nothing marking it. And that case is the only one
-            // where `--a1` offers anything `--physical` does not -- everywhere
-            // else it was `--physical` in another notation.
+            // Not the PHYSICAL line. The two are equal with one record per
+            // line, but a record spanning lines still occupies ONE spreadsheet
+            // row, because the quoted newline stays inside the cell -- and that
+            // case is the only one where `--a1` offers anything `--physical`
+            // does not. Not the record number alone either: A1 has no row 0,
+            // and the header rows sit above the data.
             //
             // A1 的列號取「紀錄號 + 其上方的標頭列數」，那才是試算表放這筆紀錄的那一列。
             //
-            // 原本取的是「物理行號」，並附有一段對了一半的論證：光用紀錄號，確實會讓一個
-            // 任何試算表都叫作 A3 的儲存格印成 [A1]、讓標頭印成 [E0]，而 A1 記法沒有第 0 列。
-            // 兩者都對——但對它們的解法是「加上標頭列數」，不是「改用行號」。一筆一行時兩者
-            // 相等，於是 README 的每一個範例與本 repo 的每一份 fixture 都同時符合兩種讀法，
-            // 分辨不出差別。
-            //
-            // 它們只在一種情況下不同：跨行的紀錄在試算表裡仍然只佔「一列」，因為引號內的換行
-            // 留在儲存格內。一個一列標頭的 `.csv`，若前面幾筆各佔六行，第 3 筆是第 4 列，而
-            // 物理行號是 10。csv2 印的是 [B10]，rc=0，沒有任何標記。而那個情況正是 `--a1`
-            // 唯一比 `--physical` 多給出一點東西的場合——在其他每一處，它只是換一種寫法的
-            // `--physical`。
+            // 不是「物理行號」。一筆一行時兩者相等，但跨行的紀錄在試算表裡仍然只佔「一列」，因為
+            // 引號內的換行留在儲存格內——而那正是 `--a1` 唯一比 `--physical` 多給出東西的情況。
+            // 也不是單用紀錄號：A1 記法沒有第 0 列，而標頭列在資料上方。
             if ctx.a1 {
                 let a1Row = r.headerRow.map { $0 + 1 } ?? (r.number + ctx.headers.count)
                 addr += " [\(a1Column(idx))\(a1Row)]"
@@ -406,15 +348,8 @@ final class JSONEmitter: RecordEmitter {
         // duplicate key: syntactically permitted by RFC 8259, which leaves the
         // interpretation unspecified, and collapsed by every parser anybody
         // actually uses -- Python's json and JavaScript's JSON.parse both keep
-        // the last and discard the first. csv2's own bytes contain both values;
-        // the reader's parser destroys one before the reader ever sees it.
-        //
-        // That is worse than the duplicate-name bug fixed alongside it. There,
-        // an address picked a column silently. Here a value is DESTROYED
-        // silently, and it is unrecoverable from the parsed object by any
-        // means, so "fields is keyed by column name, which is the way to pull
-        // one column out without counting" is not merely ambiguous for such a
-        // file -- it is false.
+        // the last and discard the first. The reader's parser destroys one
+        // value before the reader ever sees it, unrecoverably.
         //
         // Refused, the same way an ambiguous address is refused, and pointing
         // at the shapes that can carry it. The report shape is unaffected: it
@@ -424,11 +359,8 @@ final class JSONEmitter: RecordEmitter {
         // 一筆紀錄的物件以「欄名」作為 `fields` 的鍵，而一個 JSON 物件無法在同一個鍵下
         // 放兩個值。照樣輸出的結果是重複鍵：RFC 8259 在語法上允許（它把「如何解讀」列為
         // 未定義），而實際上每一個有人在用的解析器都會把它收合——Python 的 json 與
-        // JavaScript 的 JSON.parse 都留下最後一個、丟掉第一個。csv2 自己的位元組裡兩個值
-        // 都在；是讀者的解析器在讀者看到之前就毀掉了其中一個。
-        // 那比與它一同修正的「同名欄位」缺陷更糟。那裡是一個位址靜默地挑了一欄；這裡是一個值
-        // 被靜默地「毀掉」，而且從解析後的物件裡再也無法以任何方式取回。因此「fields 以欄名
-        // 為鍵，那是不必數欄位就能取出某一欄的方法」對這種檔案而言不只是有歧義——它是假的。
+        // JavaScript 的 JSON.parse 都留下最後一個、丟掉第一個。讀者的解析器會在讀者看到之前
+        // 就毀掉其中一個值，而且無法取回。
         // 因此拒絕，方式與拒絕一個有歧義的位址相同，並指出承載得了它的那些形狀。報告形狀
         // 不受影響：它每個命中輸出 record、field、header_en 與 value，因此兩個同名欄位是
         // 兩行，而不是一個被丟掉的鍵。
@@ -473,14 +405,10 @@ final class JSONEmitter: RecordEmitter {
         let prot = protected.isEmpty ? "" : ",\"protected\":{" + protected.joined(separator: ",") + "}"
         // The second header row, on the one format that has one.
         //
-        // A record object keys `fields` by the FIRST header row, so on a
-        // `.csv2` the second row had no way out through --json at all: not per
-        // record, not on this line, and `--zh` changed nothing and said nothing
-        // (rc=0, silently). The document promised otherwise -- "`--json` always
-        // carries both names, because a consumer that wanted one of them can
-        // pick, and one that wanted the other cannot invent it" -- and that was
-        // true only of the locating report, which emits header_en and header_zh
-        // per hit. Round 77, JN.
+        // A record object keys `fields` by the FIRST header row, so without
+        // this the second row of a `.csv2` has no way out through --json.
+        // `--json` carries both names: a consumer that wants one can pick, and
+        // one that wants the other cannot invent it. Round 77, JN.
         //
         // It goes on the meta line rather than into every record: the names do
         // not vary by record, and repeating them 450,000 times to carry three
@@ -490,49 +418,28 @@ final class JSONEmitter: RecordEmitter {
         // hold, and refusing a file for that would be a new refusal invented to
         // serve a serialisation choice.
         //
-        // `.csv` is untouched: it has one header row, and the `fields` keys are
-        // already it.
+        // `.csv` gets no `header_zh`: it has one header row.
         //
         // 第二列標頭，寫在唯一有第二列的那個格式上。
-        // 一筆紀錄的物件是以「第一列標頭」為鍵的，因此在 `.csv2` 上，第二列根本沒有任何出口
-        // 經由 --json 出來：不在每一筆裡、不在這一行上，而 `--zh` 什麼也沒改變、什麼也沒說
-        // （rc=0，安靜）。文件承諾的是另一回事——「`--json` 一律帶著兩個名字，因為只想要其中
-        // 一個的消費端可以自己挑，而想要另一個的那個沒辦法自己發明」——而那只對定位報告為真，
-        // 它每個命中都輸出 header_en 與 header_zh。第 77 回合，JN。
+        // 一筆紀錄的物件是以「第一列標頭」為鍵的，因此少了這一項，`.csv2` 的第二列就沒有任何
+        // 出口經由 --json 出來。`--json` 帶著兩個名字：只想要其中一個的消費端可以自己挑，而想要
+        // 另一個的沒辦法自己發明。第 77 回合，JN。
         // 它放在 meta 行而不是每一筆裡：那些名字不隨紀錄變化，為了三個字串重複 45 萬次，正是
         // 這個工具在別處會拒絕的那種輸出。用「陣列」而不是物件，因為第二列是按位置的——它可以
         // 合法地重複同一個名字，而那恰好是物件裝不下的；為了一個序列化的選擇去發明一條新的拒絕，
         // 不成立。
-        // `.csv` 不受影響：它只有一列標頭，而 `fields` 的鍵已經就是它。
-        // LI. The ENGLISH header, positionally, and it was missing.
+        // `.csv` 沒有 `header_zh`：它只有一列標頭。
         //
-        // The reasoning above -- "a .csv is unaffected: the keys of `fields`
-        // already are it" -- is true of the NAMES and false of the ORDER. A
-        // JSON object's keys have no defined order, so a consumer that decodes
-        // a record into a dictionary loses it, and the emitted text happening
-        // to be in file order is not something a consumer may rely on.
+        // The ENGLISH header, positionally, for every format. The keys of
+        // `fields` carry the names but not the ORDER: a JSON object's keys
+        // have no defined order, so a consumer that decodes a record into a
+        // dictionary loses it (and draws columns alphabetically). With
+        // `header_zh` positional and this one missing, a consumer could get
+        // the Chinese order and not the English. LI.
         //
-        // The asymmetry that made it visible: `header_zh` IS positional, so a
-        // .csv2 consumer could obtain the Chinese order and not the English
-        // one, and the README said the array was there "so consumers can use
-        // either header row". Either was not available.
-        //
-        // Found by csv2view, which fell back to sorting the keys and drew the
-        // columns alphabetically instead of in file order -- silently, at
-        // rc=0, on a file nobody would think to check.
-        //
-        // LI。**英文標頭，依位置**，而它先前不在裡面。
-        //
-        // 上面那段理由——「`.csv` 不受影響：`fields` 的鍵已經就是它」——對**名字**成立，對**順序**
-        // 不成立。JSON 物件的鍵沒有定義順序，因此一個把紀錄解成字典的消費者會失去它；而輸出的
-        // 文字碰巧是檔案順序，並不是消費者可以依賴的東西。
-        //
-        // 讓它現形的是那個不對稱：`header_zh` **是**位置性的，於是 .csv2 的消費者拿得到中文順序、
-        // 拿不到英文順序，而 README 說那個陣列在那裡是「so consumers can use either header row」。
-        // 「either」並不成立。
-        //
-        // 由 csv2view 發現：它退回「取鍵排序」，於是把欄位依字母序而不是檔案序畫出來——安靜地、
-        // 在 rc=0 之下、在一個沒有人會想到要檢查的檔案上。
+        // **英文標頭，依位置**，每種格式都有。`fields` 的鍵帶著名字，卻不帶**順序**：JSON 物件的
+        // 鍵沒有定義順序，因此把紀錄解成字典的消費者會失去它（於是依字母序畫出欄位）。若
+        // `header_zh` 是位置性的而這一項不在，消費者就拿得到中文順序、拿不到英文順序。LI。
         var en = ""
         if let first = ctx.headers.first {
             let names = first.fields.map {
@@ -553,14 +460,11 @@ final class JSONEmitter: RecordEmitter {
     /// Refused rather than substituted. JSON is text, so a byte sequence that
     /// is not valid UTF-8 cannot be carried: Swift's decoder puts U+FFFD in
     /// its place and the line stays valid JSON, which is data loss that looks
-    /// exactly like success -- in the shape this README recommends when the
-    /// value is the thing that matters. `-get` hands back the bytes and the
-    /// locating report says `<non-UTF-8: 63 61 66 e9>`; only --json was
-    /// quietly lying.
+    /// exactly like success. `-get` hands back the bytes and the locating
+    /// report says `<non-UTF-8: 63 61 66 e9>`.
     /// 拒絕，而不是替換。JSON 是文字，因此一段不是合法 UTF-8 的位元組載不進去：Swift 的
     /// 解碼器會放一個 U+FFFD 進去，而那一行仍然是合法的 JSON——那是一種「看起來與成功完全
-    /// 相同」的資料遺失，而且發生在「值本身才是重點」時 README 推薦的那個形狀上。`-get`
-    /// 交還的是位元組、定位報告會寫 `<non-UTF-8: 63 61 66 e9>`；只有 --json 在安靜地說謊。
+    /// 相同」的資料遺失。`-get` 交還的是位元組，定位報告會寫 `<non-UTF-8: 63 61 66 e9>`。
     private func carry(_ bytes: [UInt8], record: Int, field: Int) throws -> String {
         guard JSONOut.canCarry(bytes) else {
             throw fault(
@@ -575,17 +479,11 @@ final class JSONEmitter: RecordEmitter {
         if reportMode {
             for idx in matches {
                 var parts = ["\"record\":\(r.number)", "\"field\":\(idx + 1)"]
-                // Which header row, when the hit IS in a header row. The
-                // locating report says `0a` and `0b`, and the whole stated
-                // reason for those two labels is that a hit in the English
-                // title row and one in the Chinese title row are
-                // distinguishable -- while `--json`, the shape meant for
-                // programs, gave `"record":0` for both and left only the
-                // physical line to tell them apart.
-                // 命中「就在標頭列裡」時，是哪一列。定位報告寫的是 `0a` 與 `0b`，而那兩個
-                // 標籤存在的全部理由，就是「英文標題列的命中」與「中文標題列的命中」分得出來
-                // ——而 `--json`（給程式看的那個形狀）對兩者都給 `"record":0`，只留下實體行號
-                // 可以分辨。
+                // Which header row, when the hit IS in a header row: the same
+                // `0a` / `0b` the locating report uses, because `"record":0`
+                // alone cannot tell the English title row from the Chinese one.
+                // 命中「就在標頭列裡」時，是哪一列：與定位報告相同的 `0a` / `0b`，因為光是
+                // `"record":0` 分不出英文標題列與中文標題列。
                 if let hr = r.headerRow {
                     let label = (ctx.headers.count > 1) ? (hr == 0 ? "0a" : "0b") : "0"
                     parts.append("\"header_row\":\"\(label)\"")
@@ -605,11 +503,9 @@ final class JSONEmitter: RecordEmitter {
         var parts = ["\"record\":\(r.number)", "\"line\":\(r.line + ctx.mdLineOffset)"]
         // Only when context is on. Without it every emitted record matched, so
         // the key would be constant true on every line -- noise that a consumer
-        // has to read and can never learn anything from, and a change to output
-        // that is already documented and tested.
+        // has to read and can never learn anything from.
         // 只在有上下文時加。沒有上下文時，送出的每一筆都是命中，這個鍵會在每一行都是
-        // 固定的 true——那是消費端必須讀、卻永遠學不到東西的雜訊，也會更動一份已經被
-        // 記載且被測試的輸出。
+        // 固定的 true——那是消費端必須讀、卻永遠學不到東西的雜訊。
         if ctx.contextActive {
             parts.append("\"match\":\(matches.isEmpty ? "false" : "true")")
         }
@@ -672,31 +568,21 @@ final class MarkdownEmitter: RecordEmitter {
     func begin(_ ctx: EmitContext) throws {
         var names: [String] = []
         // The generated column follows the same rule as every other one: `--zh`
-        // gives the Chinese name, `--en` the English, neither joins both. It
-        // was hard-coded to the joined form, so `--en` and `--zh` -- documented
-        // as giving "one clean row instead" -- could not clean the one cell
-        // csv2 itself had invented, and a ONE-header `.csv` got a `<br>` cell
-        // beside plain ones, in a table whose join is explained by the data
-        // having two header rows.
+        // gives the Chinese name, `--en` the English, neither joins both -- and
+        // a ONE-header `.csv` never joins, since its other cells are plain.
         // 這個「生成的」欄位遵守與其他每一欄相同的規則：`--zh` 給中文、`--en` 給英文，都不給
-        // 才合併。它原本被寫死成合併的樣子，於是 `--en` 與 `--zh`——文件說它們「會給你乾淨的
-        // 一列」——唯獨清不掉 csv2 自己發明的那一格；而一份「只有一列標頭」的 `.csv`，會在一張
-        // 「以『資料有兩列標頭』來解釋合併」的表格裡，得到一個與其他純文字格並排的 `<br>` 格。
+        // 才合併——而「只有一列標頭」的 `.csv` 永遠不合併，因為它其他的格都是純文字。
         if ctx.rownum {
             names.append(ctx.zh ? "列號"
                        : ctx.enOnly || (ctx.headers.count < 2) ? "rownum"
                        : "rownum<br>列號")
         }
-        // A file with no header row has no table shape, and `-md needs -t` --
-        // the refusal that says exactly this -- did not fire because `-t` WAS
-        // given. The result was `||` for the header and `||` for the
-        // separator: a document csv2 then refuses to read, produced at rc=0.
-        // The guard existed and its sentence was right; it was keyed on the
-        // flag rather than on the thing the flag is a proxy for. Round 78, JX.
-        // 一個沒有標頭列的檔案沒有「表」的形狀，而 `-md needs -t`——那句正好在講這件事的拒絕
-        // ——沒有觸發，因為 `-t` **有給**。結果是標頭 `||`、分隔列 `||`：一份 csv2 自己拒讀的文件，
-        // 而且 rc=0。那個守衛存在、它的句子也是對的；它綁的是那個旗標，而不是那個旗標所代表的東西。
-        // 第 78 回合，JX。
+        // A file with no header row has no table shape. Keyed on the header
+        // itself, not on `-t`: with `-t` given and no header, the output would
+        // be `||` and `||`, a document csv2 refuses to read, at rc=0. Round 78,
+        // JX.
+        // 一個沒有標頭列的檔案沒有「表」的形狀。這裡判斷的是標頭本身，而不是 `-t`：給了 `-t`
+        // 卻沒有標頭時，輸出會是 `||` 與 `||`——一份 csv2 自己拒讀的文件，而且 rc=0。第 78 回合，JX。
         guard let hdr = ctx.headers.first, hdr.count > 0 else {
             throw fault(
                 "-md needs a header row to name the columns, and this file has none. A file with no suffix is one column of lines; give it a destination with a .csv or .csv2 suffix first, or pass --headers 1 to read it as CSV",
@@ -712,10 +598,7 @@ final class MarkdownEmitter: RecordEmitter {
             if ctx.headers.count > 1 && i < ctx.headers[1].count {
                 let zh = MarkdownOut.cell(ctx.headers[1].fields[i].value)
                 // --zh Chinese only, --en English only, neither merges both.
-                // `--en` used to be indistinguishable from giving no flag at
-                // all, which made it look implemented when it was not.
-                // --zh 只取中文、--en 只取英文，都不給則兩者合併。`--en` 原本與
-                // 「完全不給旗標」逐位元相同，讓它看起來已實作，其實沒有。
+                // --zh 只取中文、--en 只取英文，都不給則兩者合併。
                 names.append(ctx.zh ? zh : (ctx.enOnly ? en : "\(en)<br>\(zh)"))
             } else {
                 names.append(en)
@@ -794,25 +677,13 @@ final class MarkdownEmitter: RecordEmitter {
                 widths[i] = max(widths[i], DisplayWidth.of(c))
             }
         }
-        // Report the widths. This is the one number csv2 computes that it had no
-        // way of telling anyone -- -debug already gives read_bytes, file_bytes,
-        // peak_rss_bytes, fields and records, and the README names DISPLAY
-        // WIDTH as the fourth number and the whole point of --pretty, while
-        // offering no way to observe it.
+        // Report the widths under -debug. Display width is the whole point of
+        // --pretty, and without this a reader checking the alignment has to
+        // reimplement the measurement -- and when the reimplementation is
+        // wrong, the tool is what looks wrong. Round 40.
         //
-        // Round 40's reader had to build the instrument himself to check the
-        // alignment, got it wrong twice, and nearly filed two defect reports
-        // against correct code. A tool that claims a property and hands you no
-        // way to measure it turns verification into "reimplement it and
-        // compare" -- and when the reimplementation is the thing that is wrong,
-        // the tool is what looks wrong.
-        //
-        // 把欄寬報出來。這是 csv2 會算、卻沒有辦法告訴任何人的那一個數字——-debug 早就給了
-        // read_bytes、file_bytes、peak_rss_bytes、fields 與 records，而 README 指名
-        // 「顯示寬度」是第四個數字、也是 --pretty 的全部意義，卻不提供任何觀察它的方法。
-        // 第 40 回合的讀者為了檢查對齊，只好自己造量測工具，造錯了兩次，差點對正確的程式碼
-        // 提出兩份缺陷報告。一個宣稱了某個性質、卻不給你量它的工具，會把「驗證」變成
-        // 「重新實作一次再比對」——而當出錯的是那個重新實作時，看起來錯的會是這支工具。
+        // 在 -debug 下把欄寬報出來。顯示寬度是 --pretty 的全部意義；少了這一行，想檢查對齊的
+        // 讀者只能自己重新實作量測——而當出錯的是那個重新實作時，看起來錯的會是這支工具。第 40 回合。
         Logger.shared.debug("pretty: column display widths \(widths) (columns, not bytes or characters)")
 
         func line(_ cells: [String]) -> String {
@@ -919,32 +790,19 @@ func applyTransform(_ t: CellTransform, to record: inout Record, header: Record)
                 // The AEAD tag is what SHA-256 could never give: a tampered
                 // cell FAILS instead of quietly decrypting to something wrong.
                 //
-                // What it cannot give is WHICH thing was wrong. This message
-                // used to say "the cell was modified after it was encrypted",
-                // and a blind-test subject got it by editing the HEADER --
-                // rewriting the stored fingerprint to the one their wrong key
-                // derives, which defeats the O(1) pre-check and leaves the tag
-                // to do the work. The real cause there was a wrong key, and
-                // the message named a cell that nobody had touched.
-                //
-                // Three causes produce this identically and the tag cannot
-                // separate them, so all three are named. The record number is
-                // where the failure was DETECTED, which is worth saying
-                // plainly, because this project's error-location table
-                // promises that `record N` is where the fault is -- and for
-                // this one message that promise cannot be kept.
+                // What it cannot give is WHICH thing was wrong: a wrong key, an
+                // altered cell, and an altered header (a stored fingerprint
+                // rewritten to match a wrong key defeats the O(1) pre-check)
+                // fail identically, so all three are named. The record number
+                // is where the failure was DETECTED, said plainly, because
+                // elsewhere `record N` promises to be where the fault is.
                 //
                 // AEAD 的認證標籤帶來 SHA-256 給不了的性質：被竄改的儲存格會失敗，而不是
                 // 安靜地還原出錯誤的內容。
                 //
-                // 它給不了的是「錯的是哪一個」。這則訊息原本寫「該儲存格在加密之後被修改過」，
-                // 而一位盲測受測者是靠改「標頭」得到它的——把存起來的指紋改寫成他那把錯金鑰
-                // 會導出的值，於是 O(1) 預檢被繞過，剩下標籤去做事。那裡真正的成因是「金鑰
-                // 不對」，而訊息指名了一個沒有人碰過的儲存格。
-                //
-                // 有三種成因會產生一模一樣的結果，而標籤分不出它們，因此三個都寫出來。
-                // 紀錄編號是「偵測到失敗的位置」，這一點值得明講，因為本專案那張「錯誤位置」
-                // 的表承諾 `record N` 就是出問題的地方——而這一則訊息守不住那個承諾。
+                // 它給不了的是「錯的是哪一個」：金鑰不對、儲存格被改、標頭被改（把存起來的指紋
+                // 改寫成錯金鑰導出的值，就能繞過 O(1) 預檢）三者失敗的樣子一模一樣，因此三個都寫出來。
+                // 紀錄編號是「偵測到失敗的位置」，這一點要明講，因為在別處 `record N` 承諾的是出問題的地方。
                 throw fault(
                     "authentication failed at record \(record.number), column \(names[n]) -- that is where it was DETECTED, not necessarily where the fault is. Any of three produce this and the tag cannot tell them apart: the key is not the one this column was encrypted with, the cell was altered after encryption, or the column's header was altered. Check the header first if you have a key you believe in",
                     "認證失敗，位置在第 \(record.number) 筆、欄位 \(names[n])——那是「偵測到」的地方，未必是出問題的地方。有三種情況會產生一模一樣的結果，而認證標籤分辨不出來：金鑰不是當初加密這一欄所用的那一把、儲存格在加密後被改動、或該欄的標頭被改動。若你確信手上的金鑰是對的，請先檢查標頭")
@@ -965,13 +823,11 @@ func applyTransform(_ t: CellTransform, to record: inout Record, header: Record)
             // Unkeyed SHA-256 masks a value only as well as its value space is
             // large. `license`, `status`, `category` -- the columns people
             // reach for masking on -- have a handful of possible values, so a
-            // dictionary recovers them in seconds. A blind review of this tool
-            // recovered 3 of 21 licences from the hashed file alone. With a key
-            // the same determinism survives and the dictionary does not.
+            // dictionary recovers them in seconds. With a key the same
+            // determinism survives and the dictionary does not.
             // 無金鑰的 SHA-256，其遮蔽效果只取決於值空間有多大。`license`、
             // `status`、`category`——正是人們會拿來遮蔽的那些欄位——可能的值只有
-            // 少數幾個，一份字典幾秒鐘就能還原。一次盲測僅憑雜湊後的檔案就還原了
-            // 21 個 license 中的 3 個。給了金鑰，確定性仍在，而字典不再管用。
+            // 少數幾個，一份字典幾秒鐘就能還原。給了金鑰，確定性仍在，而字典不再管用。
             let digest = key.map { HMACSHA256.authenticate(record.fields[c].value, key: $0) }
                 ?? SHA256.hash(record.fields[c].value)
             record.fields[c].set([UInt8](digest.map { String(format: "%02x", $0) }.joined().utf8))
@@ -982,34 +838,26 @@ func applyTransform(_ t: CellTransform, to record: inout Record, header: Record)
 /// Any column the FILE says is protected joins the redaction set, whatever this
 /// run is doing.
 ///
-/// Before 2026-08-18 the set was populated only by buildTransform, from the
-/// columns being transformed right now. So `-hash secret` redacted `secret` in
-/// its own log, and `-update 1:secret NEW` on the resulting file -- a header
-/// reading `secret:hmac:d6c8da42`, the file declaring in writing that the
-/// column is sensitive -- wrote NEW to the log in the clear. The run that put
-/// the value in was protected; the run that changed it was not.
+/// Taking the set only from the columns being transformed right now is not
+/// enough: `-update 1:secret NEW` on a file whose header reads
+/// `secret:hmac:d6c8da42` would write NEW to the log in the clear.
 ///
 /// The header is the file's own statement about which columns hold secrets. It
 /// outlives any single invocation, and it is the only thing that can be right
 /// about a file the caller did not create.
 ///
 /// 任何「檔案自己說它受保護」的欄位都會進入遮蔽集合，不論這次執行在做什麼。
-/// 2026-08-18 之前，這個集合只由 buildTransform 依「本次要轉換的欄位」填入。於是
-/// `-hash secret` 會在它自己的 log 裡遮蔽 secret，而對其產物執行 `-update 1:secret NEW`
-/// ——那個檔案的標頭寫著 `secret:hmac:d6c8da42`，是這個檔案白紙黑字宣告該欄位敏感——卻會把
-/// NEW 明文寫進 log。放進那個值的那次執行受保護，改動它的那次執行不受保護。
+/// 只依「本次要轉換的欄位」填入這個集合是不夠的：對標頭寫著 `secret:hmac:d6c8da42` 的檔案
+/// 執行 `-update 1:secret NEW`，會把 NEW 明文寫進 log。
 /// 標頭是檔案自己對「哪些欄位存放秘密」的陳述。它比任何單次呼叫都活得久，而且它是唯一
 /// 可能對「一個不是呼叫者建立的檔案」說得準的東西。
 /// One predicate for "the file's own header says this column holds a
 /// transformed value". Two things depend on it and they must not drift: what
-/// the log redacts, and what an edit is refused on. They were separate before
-/// 2026-08-19, and the gap between them was a defect -- redaction covered the
-/// column while editing did not, so a value the log declined to print was
-/// written into a column it destroyed.
+/// the log redacts, and what an edit is refused on. If they differ, a value
+/// the log declines to print can be written into a column it destroys.
 /// 「檔案自己的標頭說這一欄存放的是轉換過的值」——只有一個謂詞。有兩件事依賴它，而它們
-/// 不能各走各的：log 要遮蔽什麼，以及編輯要在什麼上面被拒絕。2026-08-19 之前這兩者是
-/// 分開的，而它們之間的落差就是一個缺陷——遮蔽涵蓋了那一欄而編輯沒有，於是一個 log 拒絕
-/// 印出來的值，被寫進了一個它會摧毀的欄位。
+/// 不能各走各的：log 要遮蔽什麼，以及編輯要在什麼上面被拒絕。兩者若不同，一個 log 拒絕
+/// 印出來的值，就可能被寫進一個它會摧毀的欄位。
 func headerDeclaresProtected(_ name: String) -> Bool {
     EncMarker.parse(name) != nil
         || name.hasSuffix(":hash")
@@ -1060,13 +908,10 @@ func rawCellWriteRefusal(targets: [String], anyEncrypted: Bool) -> CSV2Error {
 /// because the caller did not aim at the protected column -- the row simply
 /// has a field for it, and there is no value they could have supplied that
 /// would be right, since the transform needs the key the header only
-/// fingerprints. Found by extending defect W: the first fix covered -update
-/// and -delete -cell, and -append walked straight past it into the same
-/// destruction at rc=0.
+/// fingerprints. Defect W.
 /// 把一整列原始資料寫進這樣的檔案。與「單格」分開，因為呼叫者並不是瞄準那個受保護欄位——
 /// 那一列只是剛好有它的一欄，而且**沒有任何他們給得出的值會是對的**，因為那個轉換需要金鑰，
-/// 而標頭裡只有金鑰的指紋。這是延伸缺陷 W 時發現的：第一版的修正只涵蓋 -update 與
-/// -delete -cell，而 -append 直接繞過它、以 rc=0 造成同樣的破壞。
+/// 而標頭裡只有金鑰的指紋。缺陷 W。
 func rawRowWriteRefusal(verbs: [String], columns: [String], anyEncrypted: Bool) -> CSV2Error {
     let what = anyEncrypted ? "encrypted" : "hashed"
     let whatZh = anyEncrypted ? "加密" : "雜湊"
@@ -1132,31 +977,17 @@ func buildTransform(_ o: Options, headers: [Record]) throws -> CellTransform {
     }
     if let spec = o.hashCols {
         let cols = try resolveColumnList(spec, header: header)
-        // Each of these guards used to look for ITS OWN marker only: -hash
-        // refused an already-hashed column, -encrypt refused an
-        // already-encrypted one, and neither looked at the other's.
+        // Each guard checks BOTH markers, not only its own. `-hash` on an
+        // `:enc:` column is the worst thing this tool could do: it hashes the
+        // CIPHERTEXT one way and overwrites the `:enc:` marker, salt and all,
+        // at rc=0, and the correct key afterwards gets `no encrypted columns
+        // found`. The README promises that re-masking an already-marked column
+        // is refused rather than layered, in both directions.
         //
-        // `-hash` on an `:enc:` column was therefore accepted, and it is the
-        // worst thing this tool can do. It hashes the CIPHERTEXT one way and
-        // overwrites the `:enc:` marker -- taking the salt with it -- at rc=0,
-        // printing nothing, with an audit entry saying it hashed a column. The
-        // correct key afterwards gets `no encrypted columns found`. One
-        // well-formed command, and the data is gone.
-        //
-        // The README already promised this was refused: "re-masking an
-        // already-marked column is refused rather than layered". The promise
-        // was kept for one direction out of two.
-        //
-        // 這兩個守衛原本各自「只看自己那一種標記」：-hash 拒絕已雜湊的欄位、-encrypt 拒絕
-        // 已加密的欄位，而兩者都不看對方的。
-        //
-        // 於是對 `:enc:` 欄位下 `-hash` 是被接受的——而那是這個工具做得出來最糟的一件事。
-        // 它把「密文」單向雜湊掉，並覆寫 `:enc:` 標記、連同 salt 一起帶走，rc=0、不印任何
-        // 東西，而稽核紀錄說它雜湊了一個欄位。事後拿正確的金鑰去解，得到的是
-        // `no encrypted columns found`。一個格式完全正確的指令，資料就沒了。
-        //
-        // README 早就承諾過它會被拒絕：「對一個已經標記過的欄位再次遮蔽會被拒絕，而不是
-        // 疊加。」那個承諾，兩個方向裡守住了一個。
+        // 每個守衛都檢查**兩種**標記，不只自己那一種。對 `:enc:` 欄位下 `-hash` 是這個工具做得出來
+        // 最糟的一件事：它把「密文」單向雜湊掉，並連同 salt 覆寫 `:enc:` 標記，rc=0，事後拿正確的
+        // 金鑰去解只得到 `no encrypted columns found`。README 承諾對已標記的欄位再次遮蔽會被拒絕
+        // 而不是疊加，兩個方向都是。
         for c in cols {
             let name = headerName(header.fields[c])
             if EncMarker.parse(name) != nil {
@@ -1185,14 +1016,11 @@ func buildTransform(_ o: Options, headers: [Record]) throws -> CellTransform {
             Logger.shared.info("hashing columns \(cols.map { baseName(headerName(header.fields[$0])) }.joined(separator: ",")) with a key from \(material.path) (fingerprint \(fp))")
             return .hash(columns: cols, key: key, fingerprint: fp)
         }
-        // The unkeyed path said nothing at all. -encrypt names its columns and
-        // so does the keyed hash; the one that is irreversible AND
-        // dictionary-attackable logged neither the columns nor the fact that
-        // no key was used. The audit trail was weakest where the operation is
-        // hardest to undo.
-        // 無金鑰那條路先前什麼也不說。-encrypt 會列出它的欄位，有金鑰的雜湊也會；而那個
-        // 「不可逆、又可用字典攻破」的組合，既沒有記下欄位，也沒有記下「沒有用金鑰」。
-        // 稽核軌跡最弱的地方，正是那個最難還原的操作。
+        // Logged like -encrypt and the keyed hash: the unkeyed hash is
+        // irreversible AND dictionary-attackable, so the audit trail must name
+        // the columns and say no key was used.
+        // 與 -encrypt 及有金鑰的雜湊一樣要記下來：無金鑰的雜湊不可逆、又可用字典攻破，
+        // 因此稽核軌跡必須列出欄位，並說明沒有用金鑰。
         Logger.shared.info("hashing columns \(cols.map { baseName(headerName(header.fields[$0])) }.joined(separator: ",")) with NO key (unsalted SHA-256)")
         return .hash(columns: cols, key: nil, fingerprint: nil)
     }
@@ -1260,16 +1088,12 @@ func buildTransform(_ o: Options, headers: [Record]) throws -> CellTransform {
         }
         let names = cols.map { baseName(headerName(header.fields[$0])) }
         Logger.shared.redactedColumns = Set(names)
-        // -encrypt and -hash both log which key they used; -decrypt did not, so
-        // the audit trail recorded every locking and no unlocking. In an audit
-        // that is the wrong way round: encrypting puts data away, decrypting
-        // takes it out, and "who opened this column, with which key" is the
-        // line somebody comes looking for. The README's log table promised the
-        // fingerprint without excepting -decrypt. Round 40, defect UU.
-        // -encrypt 與 -hash 都會記錄自己用了哪一把金鑰，-decrypt 不會——於是稽核軌跡記下了
-        // 每一次上鎖、沒有記下任何一次開鎖。就稽核而言那是反的：加密是把資料收起來，解密是
-        // 把它拿出來，而「誰用哪一把金鑰把這一欄打開了」正是日後有人會來找的那一行。
-        // README 的 log 表承諾了指紋，並未為 -decrypt 開例外。第 40 回合，缺陷 UU。
+        // Logged like -encrypt and -hash: decrypting takes data out, and "who
+        // opened this column, with which key" is the line somebody comes
+        // looking for. The README's log table promises the fingerprint for
+        // -decrypt too. Round 40, defect UU.
+        // 與 -encrypt、-hash 一樣要記錄：解密是把資料拿出來，而「誰用哪一把金鑰把這一欄打開了」
+        // 正是日後有人會來找的那一行。README 的 log 表也為 -decrypt 承諾了指紋。第 40 回合，缺陷 UU。
         Logger.shared.info("decrypting columns \(names.joined(separator: ",")) with key \(material.path) (fingerprint \(fp))")
         return .decrypt(columns: cols, key: key, names: names)
     }
@@ -1299,20 +1123,15 @@ func parseRowLiteral(_ text: String, format: Format, expected: Int, what: String
     try parser.finish()
     guard var r = out else {
         // In `.lines` a line with nothing on it IS a record: one empty field.
-        // The parser emits nothing for empty input, and reading that as "empty
-        // row" turned a parser detail into a rule -- one csv2 had already
-        // disagreed with twice in the same format. It reads such a line back
-        // fine (`para one\n\npara two\n` round-trips whole), and `-update
-        // 1:1 ''` makes one happily. Only -insert/-append refused, so a prose
-        // document could be edited except for the blank lines that separate
-        // its paragraphs -- which is what a user hit. KX, and the third time
-        // a CSV rule reached a file that never claimed to be CSV (KC, KU).
+        // The parser emits nothing for empty input, but that is a parser
+        // detail, not a rule: csv2 reads such a line back (`para one\n\npara
+        // two\n` round-trips whole) and `-update 1:1 ''` makes one, so
+        // -insert/-append must accept it too, or the blank lines between a
+        // prose document's paragraphs cannot be edited. KX (see also KC, KU).
         // 在 `.lines` 裡，一行什麼都沒有**就是**一筆紀錄：一個空欄位。解析器對空輸入不吐出任何
-        // 東西，而把那讀成「空的一列」，是把一個解析器的細節變成了一條規則——一條 csv2 自己在
-        // 同一個格式裡已經反對過兩次的規則。它讀得回這樣的一行（`para one\n\npara two\n` 完整
-        // 往返），`-update 1:1 ''` 也做得出一個。只有 -insert／-append 拒絕，於是一份散文文件
-        // 除了「分隔段落的那些空行」以外都編輯得了——而那正是一位使用者撞到的。KX，也是「CSV 的
-        // 規則伸進一個從未自稱是 CSV 的檔案」的第三次（KC、KU）。
+        // 東西，但那是解析器的細節，不是規則：csv2 讀得回這樣的一行（`para one\n\npara two\n` 完整
+        // 往返），`-update 1:1 ''` 也做得出一個，因此 -insert／-append 也必須接受它，否則散文文件
+        // 裡分隔段落的空行就無法編輯。KX（另見 KC、KU）。
         if format == .lines {
             var blank = Record(fields: [Field(value: [])], offset: 0, line: 0)
             blank.number = 0
@@ -1327,25 +1146,16 @@ func parseRowLiteral(_ text: String, format: Format, expected: Int, what: String
     try checkFieldCount(r, expected: expected, what: what)
     // A supplied row has no RAW to preserve. It was typed on a command line,
     // not read out of a file, so the bytes it arrived as carry no provenance
-    // worth keeping -- and keeping them is what stopped csv2's own quoting
-    // rule from applying to it.
-    //
-    // `-append 'r2, leading'` wrote ` leading` UNQUOTED, while
-    // `-update 1:2 ' leading'` quoted the identical value, because the edit
-    // path writes with preserveRaw and an inserted row went out through it
-    // with its literal bytes attached. csv2 reads its own output back
-    // correctly either way; the spreadsheets and "several parsers" the
-    // quoting rule exists for do not, and the README states that rule as
-    // covering "a value you supply".
+    // worth keeping -- and keeping them would stop csv2's own quoting rule
+    // from applying to it. The edit path writes with preserveRaw, so
+    // `-append 'r2, leading'` would write ` leading` unquoted while
+    // `-update 1:2 ' leading'` quotes it; the README states the quoting rule
+    // as covering "a value you supply".
     //
     // 一列「被交進來的」紀錄沒有 RAW 可以保留。它是在命令列上打出來的，不是從檔案裡讀出來的，
-    // 因此它抵達時的那些位元組沒有值得保留的來歷——而「保留它們」正是讓 csv2 自己的加引號規則
-    // 對它失效的原因。
-    //
-    // `-append 'r2, leading'` 寫出的 ` leading` 沒有引號，而 `-update 1:2 ' leading'` 對同一個
-    // 值加了引號：編輯路徑是以 preserveRaw 寫出的，而一列被插入的紀錄帶著它的字面位元組走了
-    // 那條路。兩種寫法 csv2 自己都讀得回來；而那條加引號規則所為之存在的試算表與「好幾種
-    // 解析器」不行，何況 README 把那條規則寫成涵蓋「你交進來的值」。
+    // 因此它抵達時的那些位元組沒有值得保留的來歷——而保留它們會讓 csv2 自己的加引號規則對它失效。
+    // 編輯路徑是以 preserveRaw 寫出的，於是 `-append 'r2, leading'` 會寫出沒有引號的 ` leading`，
+    // 而 `-update 1:2 ' leading'` 會加引號；README 把加引號規則寫成涵蓋「你交進來的值」。
     for i in r.fields.indices { r.fields[i].raw = nil }
     r.number = 0
     return r
@@ -1354,13 +1164,13 @@ func parseRowLiteral(_ text: String, format: Format, expected: Int, what: String
 /// Splits `-add-column`'s NAME into one title per header row.
 ///
 /// It is parsed as a CSV record, not split on commas, because a column name
-/// may contain a comma and this tool has refused to lose one anywhere else.
+/// may contain a comma and this tool refuses to lose one anywhere else.
 /// `'note,備註'` is two titles; `'"a,b",備註'` is a column literally called
 /// `a,b` and its Chinese title.
 ///
 /// 把 `-add-column` 的 NAME 切成「每一列標頭一個標題」。
 /// 它是以一筆 CSV 紀錄來解析的，不是用逗號切開，因為一個欄位名稱可能含有逗號，而這個工具在其他
-/// 任何地方都拒絕弄丟它。`'note,備註'` 是兩個標題；`'"a,b",備註'` 是一個「名字就叫 a,b」的欄位
+/// 任何地方都不會弄丟它。`'note,備註'` 是兩個標題；`'"a,b",備註'` 是一個「名字就叫 a,b」的欄位
 /// 加上它的中文標題。
 func splitHeaderName(_ s: String) throws -> [String] {
     var records: [[String]] = []

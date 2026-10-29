@@ -3,7 +3,7 @@ import Foundation
 // ---------------------------------------------------------------------
 // MARK: - Reading a Markdown table back / 把一張 Markdown 表讀回來
 //
-// `-md` could render a table and nothing could read one. Phase 8a.
+// The reading half of `-md`. Phase 8a.
 //
 // The strategy is translation, not a second parser: a `.md` becomes canonical
 // `.csv2` bytes and the existing reader takes it from there. Every rule that
@@ -11,7 +11,7 @@ import Foundation
 // refusals -- then applies to a Markdown table for free, and cannot drift
 // away from the CSV path because there is only one path.
 //
-// `-md` 算繪得出一張表，而沒有任何東西讀得回一張表。第 8a 階段。
+// `-md` 的讀取那一半。第 8a 階段。
 // 做法是「翻譯」而不是第二個解析器：一個 `.md` 會變成標準的 `.csv2` 位元組，之後交給既有的
 // 讀取器。那個讀取器執行的每一條規則——欄數、標頭列檢查、跳脫、那些拒絕——就免費地適用於一張
 // Markdown 表，而且不可能與 CSV 那條路徑漂移，因為只有一條路徑。
@@ -160,12 +160,8 @@ enum MarkdownIn {
     }
 
     /// Is this the `|---|:--:|` row? That row is what makes a block of lines a
-    /// TABLE rather than prose, and csv2's own reader already names it when it
-    /// meets one, so the thing that used to make reading fail is the thing
-    /// that now says what the file is.
-    /// 這是不是 `|---|:--:|` 那一列？正是那一列讓一疊文字成為一張**表**而不是散文，而 csv2 自己的
-    /// 讀取器遇到它時本來就會指名它——於是「讓讀取失敗的那個東西」，成了「說出這個檔案是什麼」的
-    /// 那個東西。
+    /// TABLE rather than prose.
+    /// 這是不是 `|---|:--:|` 那一列？正是那一列讓一疊文字成為一張**表**而不是散文。
     static func isSeparator(_ cells: [String]) -> Bool {
         guard !cells.isEmpty else { return false }
         for c in cells {
@@ -185,18 +181,16 @@ enum MarkdownIn {
     /// means the line above it was the NEXT table's header, so that line is
     /// handed back rather than kept as a record of this one.
     ///
-    /// The reader and the in-place writer both call this. Until RG they each
-    /// had their own scan, and only the reader's knew the separator rule: with
-    /// no blank line between two tables the reader saw two, the writer saw
-    /// one, and editing the first deleted the second with exit 0. The writer
-    /// is the one that decides which bytes are removed.
+    /// The reader and the in-place writer must both call this. Two separate
+    /// scans disagree on where a table ends when no blank line separates two
+    /// tables, and since the writer decides which bytes are removed, editing
+    /// the first table then deletes the second with exit 0. RG.
     ///
     /// 標頭在 `header`（分隔列在 `header + 1`）的那張表之後的第一行的索引。資料列一直延伸到
     /// 空白行、不是一列的行、或一列分隔列為止——而分隔列表示它上面那一行是**下一張表**的標頭，
     /// 因此那一行要還回去，不能當成這一張的紀錄。
-    /// 讀取器與就地寫回都呼叫這一個。在 RG 之前它們各有一份掃描，而只有讀取器的那一份知道分隔列
-    /// 這條規則：兩張表之間沒有空白行時，讀取器看到兩張、寫回器看到一張，於是編輯第一張就以
-    /// 退出碼 0 刪掉了第二張。決定哪些位元組被刪掉的，是寫回器。
+    /// 讀取器與就地寫回都必須呼叫這一個。兩份各自的掃描，在兩張表之間沒有空白行時會對「表在哪裡
+    /// 結束」看法不同；而決定刪掉哪些位元組的是寫回器，於是編輯第一張會以退出碼 0 刪掉第二張。RG。
     static func tableEnd(_ lines: [String], header: Int) -> Int {
         var i = header + 2
         while i < lines.count {
@@ -255,19 +249,14 @@ extension MarkdownIn {
         // Find every table: a header line, a |---| separator under it, and the
         // rows that follow until something stops being a row.
         //
-        // Finding them ALL and then deciding is the point. The first version of
-        // this read from the top and stopped at the first thing that was not a
-        // row -- so a file holding two tables was read as one, and the second
-        // table's header and separator went in as DATA. `---,---` became a
-        // record and the run exited 0. That is the exact "looks like it
-        // succeeded" failure this tool exists to refuse, and it was introduced
-        // by the same commit that added the feature.
+        // Finding them ALL and then deciding is the point. Reading from the top
+        // and stopping at the first non-row reads two tables as one, with the
+        // second table's header and separator stored as DATA (`---,---` as a
+        // record) and exit 0.
         //
-        // 先把「每一張表」都找出來、再決定，這才是重點。
-        // 這段的第一個版本是從頭讀、遇到第一個「不是一列」的東西就停——於是一個含有兩張表的檔案
-        // 被讀成一張，而第二張表的標頭與分隔列**當成資料**進去了。`---,---` 變成了一筆紀錄，而
-        // 那次執行以 0 結束。那正是這個工具存在所要拒絕的「看起來成功」，而它是被「加入這個功能」
-        // 的同一個 commit 帶進來的。
+        // 先把「每一張表」都找出來、再決定，這才是重點。從頭讀、遇到第一個「不是一列」的東西就停，
+        // 會把兩張表讀成一張，第二張的標頭與分隔列被**當成資料**存進去（`---,---` 成為一筆紀錄），
+        // 而且以 0 結束。
         struct Table {
             var headerAt: Int; var header: [String]; var rows: [(Int, [String])]
             var headerLine = ""; var separatorLine = ""; var rowLines: [String] = []
@@ -347,13 +336,11 @@ extension MarkdownIn {
         // The bytes are handed to the reader as the format the recovered header
         // count implies, so the ESCAPING the translation writes has to be that
         // same format's. Writing .csv2 escapes and then being parsed as .csv
-        // left a value's newline as a literal `\n` in the data -- silent
-        // corruption, found while fixing the CR rendering rather than by the
-        // round that found the CR. One header row is .csv; two is .csv2.
+        // leaves a value's newline as a literal `\n` in the data, silently.
+        // One header row is .csv; two is .csv2.
         // 那些位元組是以「還原出來的標頭列數所隱含的格式」交給讀取器的，因此翻譯時寫出的**跳脫**
         // 也必須是同一個格式的。寫 .csv2 的跳脫、卻被當成 .csv 解析，會讓一個值裡的換行以字面
-        // `\n` 留在資料裡——靜默的損壞，而它是在修 CR 的算繪時撞到的，不是找到 CR 那個回合抓到的。
-        // 一列標頭是 .csv，兩列是 .csv2。
+        // `\n` 留在資料裡，而且不會報錯。一列標頭是 .csv，兩列是 .csv2。
         let wire: Format = headerRows == 2 ? .csv2 : .csv
         var out: [UInt8] = []
         try appendRow(chosen.header, headerRows: headerRows, format: wire, into: &out)
@@ -362,33 +349,27 @@ extension MarkdownIn {
         // What has to be added to a parsed record's line to get the DOCUMENT's.
         //
         // The translated bytes are a table and nothing else, so the parser
-        // numbers them from 1 and a caller holding a 48-line document was told
-        // its record was on line 2. The document line is the only line that
-        // exists for that caller, and until 2026-09-07 csv2 reported the other
-        // one -- under `--physical`, whose entire name says it is not doing
-        // that. LM.
+        // numbers them from 1. The caller has only the document, so the
+        // document line is the one to report, including under `--physical`. LM.
         //
-        // One integer is enough, and that is worth stating because the README
-        // briefly told readers to compute it themselves and got it wrong: the
-        // `|---|` separator is a line in the document and is NOT a line in the
-        // translation, so "find the table and add where it starts" is off by
-        // one for the header. Anchoring on the separator removes the special
-        // case -- data record N is always the separator's line plus N -- and
+        // One integer is enough. The `|---|` separator is a line in the
+        // document and is NOT a line in the translation, so "find the table
+        // and add where it starts" is off by one for the header. Anchoring on
+        // the separator removes the special case -- data record N is always
+        // the separator's line plus N -- and
         // `headerAt + 1 - headerRows` is that same number expressed from what
         // is already in hand. The `- headerRows` term is for a `<br>` header,
         // which is one line in the document and two in the translation. LP.
         //
         // 要得到**文件**的行號，必須加到「解析出來的紀錄行號」上的那個數。
         //
-        // 翻譯後的位元組就只是一張表，因此 parser 從 1 開始編號，而一個手上拿著 48 行文件的呼叫端，
-        // 被告知他的紀錄在第 2 行。對那個呼叫端而言，文件的行號是**唯一存在**的行號；而直到
-        // 2026-09-07 為止，csv2 回報的是另一個——還是在 `--physical` 底下，而那個旗標的整個名字
-        // 就是在說它不會這樣做。LM。
+        // 翻譯後的位元組就只是一張表，因此 parser 從 1 開始編號。呼叫端手上只有那份文件，所以要
+        // 回報的是文件的行號，`--physical` 底下也一樣。LM。
         //
-        // 一個整數就夠，而這件事值得寫出來，因為 README 曾短暫地叫讀者自己算、而且算錯了：`|---|`
-        // 分隔列在文件裡是一行，在翻譯裡**不是**一行，所以「找到那張表、加上它的起始位置」對標頭會
-        // 差一行。改以**分隔列**為錨點就沒有特例——第 N 筆資料永遠是分隔列的行號加 N——而
-        // `headerAt + 1 - headerRows` 正是同一個數字，用手邊已有的東西表示出來。`- headerRows`
+        // 一個整數就夠。`|---|` 分隔列在文件裡是一行，在翻譯裡**不是**一行，所以「找到那張表、
+        // 加上它的起始位置」對標頭會差一行。改以**分隔列**為錨點就沒有特例——第 N 筆資料永遠是
+        // 分隔列的行號加 N——而 `headerAt + 1 - headerRows` 正是同一個數字，用手邊已有的東西
+        // 表示出來。`- headerRows`
         // 那一項是為了 `<br>` 形式的標頭：它在文件裡是一行，在翻譯裡是兩行。LP。
         let lineOffset = chosen.headerAt + 1 - headerRows
         return (out, headerRows, layout, lineOffset)

@@ -65,15 +65,12 @@ let BOM: [UInt8] = [0xEF, 0xBB, 0xBF]
 /// 一律在 grapheme cluster 邊界截斷。家庭 emoji 是 25 位元組、7 個碼位、
 /// 一個 cluster；按位元組切會得到半個家庭與不合法的 UTF-8。一個在報告錯誤時
 /// 自己產生亂碼的工具，會讓人去查錯的方向。
-/// `limit: nil` means no truncation at all. The log passes nil, because an
-/// audit trail that silently drops the middle of a value is not one -- the
-/// README promised the old and new values "in full" while this cut them at 40
-/// characters, and `status_notes`, the column whose corruption is the reason
-/// this project exists, runs to 878 bytes in the real fixture. Round 38.
-/// `limit: nil` 表示完全不截斷。log 傳的就是 nil，因為一份會安靜地把值的中段丟掉的稽核
-/// 軌跡不算稽核軌跡——README 承諾新舊值「完整記錄」，而這裡在第 40 個字元把它們切斷，
-/// 而 `status_notes`（這個專案存在的理由就是那一欄被改壞）在真實素材裡長達 878 bytes。
-/// 第 38 回合。
+/// `limit: nil` means no truncation at all. The log passes nil: an audit
+/// trail that silently drops the middle of a value is not one, and the README
+/// promises the old and new values in full. `status_notes` runs to 878 bytes
+/// in the real fixture. Round 38.
+/// `limit: nil` 表示完全不截斷。log 傳的就是 nil：會安靜丟掉值中段的稽核軌跡不算稽核軌跡，
+/// 而 README 承諾新舊值完整記錄。`status_notes` 在真實素材裡長達 878 bytes。第 38 回合。
 func echoValue(_ bytes: [UInt8], limit: Int? = 40) -> String {
     guard let s = String(bytes: bytes, encoding: .utf8) else {
         // Not UTF-8. Render as hex so the message stays printable rather
@@ -118,21 +115,16 @@ public enum Format: String, Sendable {
     /// A file with no suffix: one column, no header rows, and the line's bytes
     /// are the value. Phase 8b.
     ///
-    /// It is NOT a one-column `.csv2` in its escaping, and that difference is
-    /// the whole of what had to be decided. Measured 2026-08-26: with the
-    /// documented `--headers 1`, the first line of such a file is EATEN as a
-    /// header; a comma in a path turns a `find` dump into a two-column table
-    /// that then fails on the first line without one; and if the escaping were
-    /// `.csv2`'s, a line holding a literal `\n` would change meaning on the
-    /// way in. So: zero header rows, no comma splitting, no quote processing,
-    /// nothing unescaped.
+    /// It is NOT a one-column `.csv2` in its escaping. With `--headers 1` the
+    /// first line would be eaten as a header; splitting on commas turns a path
+    /// containing one into two columns; and `.csv2` unescaping would change
+    /// the meaning of a line holding a literal `\n`. So: zero header rows, no
+    /// comma splitting, no quote processing, nothing unescaped.
     ///
     /// 一個沒有副檔名的檔案：一欄、沒有標頭列，而那一行的位元組就是值。第 8b 階段。
-    /// 它在**跳脫**上不是「一欄的 .csv2」，而那個差別正是必須被定案的全部。2026-08-26 量測：
-    /// 用有記載的 `--headers 1`，這種檔案的第一行會被當成標頭吃掉；路徑裡的一個逗號會把一份
-    /// `find` 輸出變成兩欄的表，接著在第一個沒有逗號的行上失敗；而如果跳脫用 `.csv2` 那一套，
-    /// 一行含字面 `\n` 的內容在讀進來的路上就會改變意思。因此：零列標頭、逗號不切分、不處理引號、
-    /// 什麼都不解跳脫。
+    /// 它在**跳脫**上不是「一欄的 .csv2」。用 `--headers 1` 會把第一行當成標頭吃掉；按逗號切分
+    /// 會把含逗號的路徑變成兩欄；套用 `.csv2` 的解跳脫，則會改變一行含字面 `\n` 的內容的意思。
+    /// 因此：零列標頭、逗號不切分、不處理引號、什麼都不解跳脫。
     case lines
 
     public var headerRows: Int {
@@ -145,44 +137,29 @@ public enum Format: String, Sendable {
 
     /// ONE suffix test, case-insensitive, used for reading and for writing.
     ///
-    /// It was case-sensitive here and case-insensitive in `declaresFormat`
-    /// for one day, and that day produced a message that is false: `-o
-    /// x.CSV2` was refused with "x.CSV2 declares a format with a header"
-    /// while `-i x.CSV2` was refused for declaring NOTHING. Worse, the
-    /// never-convert guard reads THIS function, so `-r -t -i one_header.csv
-    /// -o conv.CSV2` was accepted at rc=0 -- and on a case-insensitive
-    /// filesystem `conv.CSV2` and `conv.csv2` are one inode, so reading it
-    /// back ate a record as header row 0b and the meta line reported the
-    /// smaller count with confidence.
+    /// It must agree with `declaresFormat`: the never-convert guard reads THIS
+    /// function, and on a case-insensitive filesystem `conv.CSV2` and
+    /// `conv.csv2` are one file, so a case-sensitive test here lets a
+    /// one-header file be written where a two-header reader eats a record as
+    /// header row 0b, at rc=0.
     ///
-    /// The old rule was "the check is case-sensitive, so a file named .CSV
-    /// needs --headers too". Nothing in "declared, never detected" requires
-    /// that: matching `.CSV` case-insensitively is still reading the name the
-    /// caller gave, not guessing from content. And on the two platforms where
-    /// `S.CSV` and `s.csv` are the same file, treating them as different
-    /// formats is not a rule anyone can act on.
+    /// Matching `.CSV` case-insensitively is still reading the name the caller
+    /// gave, not guessing from content; a case-sensitive rule cannot be acted
+    /// on where `S.CSV` and `s.csv` are the same file.
     ///
     /// 一個副檔名判斷，大小寫不敏感，讀取與寫入共用。
     ///
-    /// 它曾經在這裡是大小寫敏感、在 `declaresFormat` 是不敏感，而那一天產生了一則假的訊息：
-    /// `-o x.CSV2` 被以「x.CSV2 宣告了一個帶標頭的格式」拒絕，而 `-i x.CSV2` 被以「它什麼都
-    /// 沒有宣告」拒絕。更糟的是，「絕不轉換格式」那道守衛讀的就是這個函式，於是
-    /// `-r -t -i 單列標頭.csv -o conv.CSV2` 以 rc=0 被接受——而在大小寫不敏感的檔案系統上，
-    /// `conv.CSV2` 與 `conv.csv2` 是同一個 inode，於是讀回去時一筆紀錄被當成標頭列 0b 吃掉，
-    /// 而 meta 那一行很有把握地回報了那個比較小的數字。
+    /// 它必須與 `declaresFormat` 一致：「絕不轉換格式」那道守衛讀的就是這個函式，而在大小寫
+    /// 不敏感的檔案系統上 `conv.CSV2` 與 `conv.csv2` 是同一個檔案；這裡若區分大小寫，單列標頭的
+    /// 檔案就能被寫到一個「讀者以兩列標頭讀它」的地方，一筆紀錄被當成標頭列 0b 吃掉，rc=0。
     ///
-    /// 舊規則是「這個檢查區分大小寫，因此名為 .CSV 的檔案也需要 --headers」。而「由宣告決定、
-    /// 絕不偵測」這件事並不要求那樣：以大小寫不敏感的方式匹配 `.CSV`，讀的仍然是呼叫端給的
-    /// 那個名字，不是從內容去猜。而在「`S.CSV` 與 `s.csv` 是同一個檔案」的那兩個平台上，
-    /// 把它們當成兩種格式，不是任何人能夠據以行動的規則。
+    /// 以大小寫不敏感的方式匹配 `.CSV`，讀的仍然是呼叫端給的名字，不是從內容去猜；在
+    /// `S.CSV` 與 `s.csv` 是同一個檔案的平台上，區分大小寫的規則沒有人能據以行動。
     /// Public because the alternative is a caller writing its own copy of
-    /// "the suffix declares the format" -- and that copy drifts away from this
-    /// one with nothing to report it. This rule changed on 2026-08-26 (a
-    /// suffix that is neither .csv nor .csv2 became a one-column list) and any
-    /// copy taken before that is now wrong while still compiling.
-    /// 公開它，因為另一條路是呼叫端自己抄一份「副檔名宣告格式」的規則——而那份複製品會與這一份
-    /// 反向漂移，卻沒有任何東西會回報。這條規則在 2026-08-26 改過（既不是 .csv 也不是 .csv2 的
-    /// 副檔名成為「一欄的行清單」），任何在那之前抄走的複製品，現在都是錯的，而且照樣編得過。
+    /// "the suffix declares the format", and that copy drifts from this one
+    /// while still compiling.
+    /// 公開它，因為另一條路是呼叫端自己抄一份「副檔名宣告格式」的規則，而那份複製品會與這一份
+    /// 漂移，卻照樣編得過。
     public static func from(path: String) -> Format? {
         let lower = path.lowercased()
         if lower.hasSuffix(".csv2") { return .csv2 }
@@ -193,30 +170,20 @@ public enum Format: String, Sendable {
     /// True when the extension makes a promise about the content, so writing
     /// data rows without a header there would make the file lie about itself.
     ///
-    /// The same case-insensitive test as `from(path:)`, asked as a yes/no.
-    /// The two were briefly different -- see the note there -- and one day of
-    /// that was enough to produce both a false message and a silent record
-    /// loss.
+    /// The same case-insensitive test as `from(path:)`, asked as a yes/no; the
+    /// two must not differ (see the note there).
     ///
-    /// With the case-sensitive test here, `-o sel.csv2` was refused for
-    /// writing a headerless selection and `-o SEL.CSV2` was accepted -- same
-    /// directory, same filesystem, same file on macOS and Windows -- and the
-    /// result read back as two data records eaten as header rows, at rc=0.
-    /// The other half of the walk-around was `-o sel_nosuffix` followed by a
-    /// rename, which is what a Makefile writing `$@.tmp` does by default; that
-    /// one this cannot catch, and the README says so.
+    /// A case-sensitive test here would refuse `-o sel.csv2` for a headerless
+    /// selection and accept `-o SEL.CSV2`, the same file on macOS and Windows,
+    /// whose data records then read back as header rows at rc=0. Writing to a
+    /// suffix-less name and renaming (what a Makefile writing `$@.tmp` does)
+    /// cannot be caught here, and the README says so.
     ///
-    /// 大小寫「不敏感」，而且刻意與 `from(path:)` 不是同一個判斷。「讀取」問的是「呼叫端
-    /// 宣告了什麼」，而 csv2 不猜，因此 `-i S.CSV` 仍然需要 `--headers`。「寫入」問的是
-    /// 「下一個讀者會認為這個檔案是什麼」，而下一個讀者可能是試算表，也可能是一個在
-    /// 大小寫不敏感的檔案系統上的 csv2——在那裡 `SEL.CSV2` 與 `sel.csv2` 是同一個名字、
-    /// 同一個檔案。
+    /// 與 `from(path:)` 是同一個大小寫不敏感的判斷，只是以是／否來問；兩者不得不同（見該處說明）。
     ///
-    /// 這裡原本是大小寫敏感的判斷，於是 `-o sel.csv2` 因為「寫入不帶標頭的選取」而被拒絕，
-    /// 而 `-o SEL.CSV2` 被接受——同一個目錄、同一個檔案系統，在 macOS 與 Windows 上還是同一個
-    /// 檔案——而寫出來的結果讀回去時，兩筆資料被當成標頭列吃掉，rc=0。這個繞道的另一半是
-    /// 「先寫成 sel_nosuffix 再改名」，那正是一個寫 `$@.tmp` 的 Makefile 預設會做的事；
-    /// 那一半這裡攔不到，而 README 說了。
+    /// 這裡若區分大小寫，`-o sel.csv2` 會因「寫入不帶標頭的選取」被拒絕，而 `-o SEL.CSV2`——在
+    /// macOS 與 Windows 上是同一個檔案——會被接受，讀回去時資料被當成標頭列吃掉，rc=0。先寫成
+    /// 沒有副檔名的名字再改名（寫 `$@.tmp` 的 Makefile 就是這樣）這裡攔不到，而 README 說了。
     static func declaresFormat(path: String) -> Bool {
         let lower = path.lowercased()
         return lower.hasSuffix(".csv") || lower.hasSuffix(".csv2")
@@ -258,11 +225,10 @@ public struct Record: Sendable {
     public var number: Int = 0
     /// Which header row this is, when it is one: 0 for the English row, 1 for
     /// the Traditional Chinese row. nil for data. The report needs to tell them
-    /// apart -- printing `0` for both made two identical lines that no reader
-    /// could use, which is what `0a` / `0b` in the plan is for.
+    /// apart: printing `0` for both gives two identical, useless lines. Hence
+    /// `0a` / `0b` in the plan.
     /// 這是第幾列標頭（若它是標頭）：0 為英文列、1 為繁體中文列；資料為 nil。
-    /// 報告必須能分辨兩者——兩列都印 `0` 會產生兩行完全相同、讀者無從使用的輸出，
-    /// 而那正是計畫中 `0a` / `0b` 要解決的。
+    /// 報告必須能分辨兩者：兩列都印 `0` 會得到兩行相同、無從使用的輸出，因此計畫中有 `0a` / `0b`。
     public var headerRow: Int? = nil
 
     var count: Int { fields.count }
@@ -340,29 +306,20 @@ enum CSV2Escape {
 // ---------------------------------------------------------------------
 
 extension Record {
-    /// The one a WRITER needs. `Field` had a public init and this did not, so
-    /// a caller outside the module could take a Record apart and could not
-    /// build one -- and `FieldEncoder.encodeRecord` takes a Record. Reported
-    /// by the SoftPCB session, which needed exactly this to turn strings into
-    /// a logged row. The other fields keep their defaults on purpose: offset,
-    /// line and number describe where a record CAME FROM, and a record being
-    /// written has not come from anywhere.
-    /// 這是**寫入端**需要的那一個。`Field` 有一個 public init 而這裡沒有，於是 module 外面的呼叫端
-    /// 拆得開一個 Record、卻建不出一個——而 `FieldEncoder.encodeRecord` 收的正是 Record。由
-    /// SoftPCB session 回報，它需要的正是這個，用來把字串變成一列要寫進日誌的紀錄。其餘欄位刻意
-    /// 保留預設值：offset、line、number 描述的是一筆紀錄「從哪裡來」，而一筆正要被寫出去的紀錄
-    /// 哪裡都還沒來過。
+    /// The one a WRITER needs: a caller outside the module must be able to
+    /// build a Record, because `FieldEncoder.encodeRecord` takes one. The other
+    /// fields keep their defaults on purpose: offset, line and number describe
+    /// where a record CAME FROM, and a record being written has not come from
+    /// anywhere.
+    /// 這是**寫入端**需要的那一個：module 外的呼叫端必須能建出 Record，因為
+    /// `FieldEncoder.encodeRecord` 收的正是 Record。其餘欄位刻意保留預設值：offset、line、
+    /// number 描述的是一筆紀錄「從哪裡來」，而一筆正要被寫出去的紀錄哪裡都還沒來過。
     public init(fields: [Field]) { self.fields = fields }
     // In an extension, not in the body: writing ANY init inside a struct
     // suppresses the memberwise one, and `RecordParser` builds every record it
-    // emits with `Record(fields:offset:line:)`. The build named it at once --
-    // "extra arguments at positions #2, #3" -- which is the kind of failure
-    // worth having, because the alternative is an init that silently loses two
-    // fields.
-    // 放在 extension 裡，不放在本體：在一個 struct 內寫**任何** init 都會抑制 memberwise init，
-    // 而 `RecordParser` 送出的每一筆紀錄，正是用 `Record(fields:offset:line:)` 建的。建置立刻
-    // 指名了它——「extra arguments at positions #2, #3」——那是值得擁有的那種失敗，因為另一個
-    // 結局是一個「安靜地少掉兩個欄位」的 init。
+    // emits with `Record(fields:offset:line:)`.
+    // 放在 extension 裡，不放在本體：在 struct 內寫**任何** init 都會抑制 memberwise init，
+    // 而 `RecordParser` 送出的每一筆紀錄都是用 `Record(fields:offset:line:)` 建的。
 }
 
 public enum FieldEncoder {
@@ -393,16 +350,12 @@ public enum FieldEncoder {
         // Leading or trailing whitespace is quoted as well, though RFC 4180
         // does not require it. It is data, and it is the kind of data that
         // disappears silently: spreadsheets and several parsers strip it from
-        // an unquoted field. csv2 writing `"   "` back as `   ` produced a
-        // file whose value survives ITS OWN reader and not necessarily the
-        // next one's -- and it changed the bytes of a cell that had been
-        // updated with the value it already held, which shows up as a diff
-        // that says nothing happened twice.
+        // an unquoted field. Writing `"   "` back as `   ` would survive csv2's
+        // own reader but not necessarily the next one, and would change the
+        // bytes of a cell updated with the value it already held.
         // 前後的空白也會加引號，雖然 RFC 4180 並不要求。那是資料，而且是那種會安靜消失的
-        // 資料：試算表與好幾種解析器會把未加引號欄位前後的空白去掉。csv2 把 `"   "` 寫回成
-        // `   `，產生的檔案，其值撐得過「它自己的」讀取器，卻不一定撐得過下一個——而且它
-        // 改動了一個「以它原本就有的值去更新」的儲存格的位元組，那在 diff 上會是一句
-        // 「什麼也沒發生」說了兩次。
+        // 資料：試算表與好幾種解析器會把未加引號欄位前後的空白去掉。把 `"   "` 寫回成 `   `，
+        // 撐得過 csv2 自己的讀取器，卻不一定撐得過下一個；而且會改動一個「以原值更新」的儲存格的位元組。
         if !needsQuote, let first = v.first, let last = v.last,
            first == BYTE_SPACE || first == BYTE_TAB || last == BYTE_SPACE || last == BYTE_TAB {
             needsQuote = true
@@ -452,14 +405,12 @@ func refuseUTF16BOM(_ head: [UInt8]) throws {
     guard head.count >= 2 else { return }
     let b0 = head[0], b1 = head[1]
     // Gzip, for the same reason and by the same test. `1F 8B` cannot begin a
-    // UTF-8 CSV any more than `FF FE` can, and a compressed file named
-    // `.csv` was read at rc=0 as one record of binary -- `-contains` found
-    // nothing in it and said so, which is the answer this tool exists not to
-    // give. The guard existed one byte-pattern to the left.
+    // UTF-8 CSV any more than `FF FE` can; without this a compressed file
+    // named `.csv` reads at rc=0 as one record of binary, and `-contains`
+    // reports finding nothing in it.
     // gzip，理由與判斷方式與上面相同。`1F 8B` 與 `FF FE` 一樣，都不可能是一個 UTF-8 CSV 的
-    // 開頭；而一個叫做 `.csv` 的壓縮檔會以 rc=0 被讀成「一筆二進位紀錄」——`-contains` 在
-    // 裡面什麼也沒找到，並且這樣回報，而那正是這個工具存在所要避免的答案。那道守衛，
-    // 就差在左邊一個位元組樣式。
+    // 開頭；少了這一段，一個叫做 `.csv` 的壓縮檔會以 rc=0 被讀成「一筆二進位紀錄」，
+    // 而 `-contains` 會回報在裡面什麼也沒找到。
     if b0 == 0x1F && b1 == 0x8B {
         throw fault(
             "this file begins with a gzip magic number (1f 8b); csv2 reads bytes and does not decompress. Expand it first with: gunzip -c file.csv.gz > file.csv -- the new name has to keep a .csv or .csv2 suffix, because the suffix is what declares the format",
@@ -483,25 +434,21 @@ func refuseUTF16BOM(_ head: [UInt8]) throws {
 /// meets, headers included, because it does not know which of them you meant
 /// to treat as titles -- `Format.headerRows` says how many to skip, and the
 /// CLI's `-r` skips them for you. Somebody moving from the CLI to this type
-/// gets one more record than they expect and finds out when the column names
-/// do not line up. Reported by the first caller to make that move, on its
-/// first attempt; the cost of not writing it here is that everyone after makes
-/// it too.
+/// gets one more record than they expect, and finds out when the column names
+/// do not line up.
 ///
 /// **標頭列也是一筆 Record。** 這個解析器會把它遇到的每一筆都交出去，標頭也不例外，因為它不知道
 /// 你打算把其中哪幾筆當成標題——要跳過幾列請問 `Format.headerRows`，而 CLI 的 `-r` 會替你跳過。
-/// 一個從 CLI 換到這個型別的人，會比預期多拿到一筆，而發現的方式是欄名對不上。這是第一個做出那個
-/// 轉換的呼叫端在它第一次嘗試時回報的；不把這件事寫在這裡的代價，是它之後的每一個人都會再犯一次。
+/// 從 CLI 換到這個型別的人會比預期多拿到一筆，而發現的方式是欄名對不上。
 ///
-/// **`Field` is a name a UI will already have.** Qualify it as `CSV2Core.Field`
-/// rather than importing it bare -- the first consumer of this module collided
-/// with its own `struct Field: View` on day one. That collision is also the
-/// concrete reason to import this as a module instead of compiling the sources
-/// into your own target, where the two names cannot both exist.
-/// **`Field` 是任何 UI 都已經會有的名字。** 請用 `CSV2Core.Field` 限定，不要裸著 import
-/// ——這個 module 的第一個消費端在第一天就與自己的 `struct Field: View` 撞名了。那次撞名同時也是
-/// 「把它當成 module 匯入、而不是把原始碼編進你自己的 target」的具體理由：在同一個 target 裡，
-/// 那兩個名字不可能並存。
+/// **`Field` is a name a UI will already have**, such as `struct Field: View`.
+/// Qualify it as `CSV2Core.Field` rather than importing it bare. That
+/// collision is also the reason to import this as a module instead of
+/// compiling the sources into your own target, where the two names cannot
+/// both exist.
+/// **`Field` 是任何 UI 都已經會有的名字**，例如 `struct Field: View`。請用 `CSV2Core.Field`
+/// 限定，不要裸著 import。這種撞名也是「把它當成 module 匯入、而不是把原始碼編進你自己的
+/// target」的理由：在同一個 target 裡，那兩個名字不可能並存。
 public final class RecordParser {
     private enum State {
         case fieldStart
@@ -545,15 +492,11 @@ public final class RecordParser {
     var chunked = false
     private(set) var sawLF = false
     private(set) var sawCRAsData = false
-    /// Counted, not just flagged. The CR-line-ending check used to ask "was
-    /// there NO LF at all", which a CR-separated file with a single trailing
-    /// LF answers with "there was one" -- so the detector, message and all,
-    /// stayed silent and the file read as ZERO records at rc=0. One byte
-    /// decided whether the user got a first-rate diagnosis or nothing.
-    /// 用數的，不只是用旗標。原本的 CR 行尾檢查問的是「有沒有『完全沒有』LF」，而一個
-    /// 「以 CR 分隔、結尾多一個 LF」的檔案會回答「有一個」——於是那個偵測器連同它寫得很好的
-    /// 訊息一起沉默，而該檔案以 rc=0 讀成「零筆紀錄」。一個位元組決定了使用者拿到的是
-    /// 一流的診斷，還是什麼都沒有。
+    /// Counted, not just flagged. A CR-line-ending check that asks "was there
+    /// NO LF at all" stays silent on a CR-separated file with one trailing LF,
+    /// which then reads as ZERO records at rc=0.
+    /// 用數的，不只是用旗標。若 CR 行尾檢查只問「是不是完全沒有 LF」，一個「以 CR 分隔、
+    /// 結尾多一個 LF」的檔案就會讓它沉默，而該檔案以 rc=0 讀成「零筆紀錄」。
     private var lfCount = 0
     private var crAsDataCount = 0
     private(set) var sawCRLF = false
@@ -618,24 +561,20 @@ public final class RecordParser {
     /// The address a cell-level error prints, in the same shape record-level
     /// errors have always used: the DATA record number AND the physical line.
     ///
-    /// It printed `recordsEmitted + 1`, which counts the header rows too. On a
-    /// `.csv2` the offset was therefore exactly two, so a fault in data record
-    /// 2 was reported as `record 4` -- and `-get 4:2` answered "no such
-    /// record; the file has 2 records". The number in an error message is an
-    /// address somebody types back into `-get` or `-update`; one that does not
-    /// resolve is worse than none, because it sends them to a different cell
-    /// or to a refusal that looks like the file is wrong. Round 38, defect CC.
+    /// `recordsEmitted + 1` alone counts the header rows too, so on a `.csv2`
+    /// it is off by two. The number in an error message is an address
+    /// somebody types back into `-get` or `-update`; one that does not resolve
+    /// sends them to a different cell or to a misleading refusal. Round 38,
+    /// defect CC.
     ///
     /// Header rows get `0a` / `0b`, the names the locating report already uses
     /// for them, rather than a record number they do not have.
     ///
     /// 儲存格層級錯誤所印的位址，形狀與紀錄層級錯誤一直以來的寫法相同：資料紀錄號**與**
     /// 物理行號。
-    /// 原本印的是 `recordsEmitted + 1`，那個計數含標頭列。因此在 `.csv2` 上偏移恰好是二，
-    /// 資料第 2 筆的錯誤會被回報成 `record 4`——而 `-get 4:2` 回答「沒有這一筆；本檔案有
-    /// 2 筆」。錯誤訊息裡的號碼是**會被人打回 `-get` 或 `-update` 的位址**；一個解不出來的
-    /// 位址比沒有更糟，因為它會把人送到另一格，或送到一個「看起來像檔案有問題」的拒絕。
-    /// 第 38 回合，缺陷 CC。
+    /// 單用 `recordsEmitted + 1` 會把標頭列也算進去，在 `.csv2` 上差二。錯誤訊息裡的號碼是
+    /// **會被人打回 `-get` 或 `-update` 的位址**；解不出來的位址會把人送到另一格，或送到一個
+    /// 誤導人的拒絕。第 38 回合，缺陷 CC。
     /// 標頭列給的是 `0a` / `0b`——定位報告本來就這樣稱呼它們——而不是一個它們並不擁有的紀錄號。
     private var faultAt: String {
         let n = recordsEmitted + 1
@@ -653,19 +592,14 @@ public final class RecordParser {
         var bytes = chunk
         if !bomDone {
             bomPending.append(contentsOf: bytes)
-            // The UTF-16 test needs two bytes and the UTF-8 BOM needs three,
-            // so waiting for three skipped it entirely on a file that IS two
-            // bytes -- and a file consisting of nothing but FF FE is what an
-            // editor writes when you save an empty document as UTF-16. It was
-            // accepted at rc=0 as a one-column CSV whose column name is those
-            // two bytes, which are not valid UTF-8, while a zero-byte file --
-            // semantically the same empty file -- is refused for not declaring
-            // its shape. Two rules disagreeing at adjacent sizes.
-            // 判斷 UTF-16 只要兩個位元組，判斷 UTF-8 BOM 要三個，而「等到三個」讓前者在
-            // 「整個檔案就是兩個位元組」時完全沒有機會執行——而一個「只有 FF FE」的檔案，
-            // 正是編輯器把一份空文件存成 UTF-16 時寫出來的東西。它會以 rc=0 被接受，成為一個
-            // 「欄名是那兩個非法 UTF-8 位元組」的單欄 CSV；而一個零位元組的檔案——語意上同樣是
-            // 空的——則因為「沒有宣告自己的形狀」而被拒絕。兩條規則在相鄰的大小上互相矛盾。
+            // The UTF-16 test needs two bytes and the UTF-8 BOM needs three;
+            // waiting for three would skip it on a file that IS two bytes. A
+            // file of nothing but FF FE is what an editor writes for an empty
+            // UTF-16 document, and it would be accepted at rc=0 as a one-column
+            // CSV named by two invalid UTF-8 bytes.
+            // 判斷 UTF-16 只要兩個位元組，判斷 UTF-8 BOM 要三個；等到三個，前者在「整個檔案就是
+            // 兩個位元組」時就沒有機會執行。只有 FF FE 的檔案，正是編輯器把空文件存成 UTF-16 時
+            // 寫出的東西，它會以 rc=0 被接受，成為「欄名是兩個非法 UTF-8 位元組」的單欄 CSV。
             if bomPending.count >= 2 { try refuseUTF16BOM(bomPending) }
             if bomPending.count < BOM.count {
                 return // wait for more; a 1-byte file cannot carry a BOM anyway
@@ -679,7 +613,7 @@ public final class RecordParser {
             // nothing.
             //
             // Refused rather than converted, for the same reason the CR check
-            // above refuses: guessing an encoding is how a tool ends up
+            // refuses: guessing an encoding is how a tool ends up
             // silently producing something plausible and wrong. `iconv` knows
             // how to do this and csv2 does not need to.
             //
@@ -689,7 +623,7 @@ public final class RecordParser {
             // 每隔一個位元組就是 NUL、欄名裡帶著它們，而整份東西會在 rc=0 下解析成一堆
             // 沒有意義的紀錄。
             //
-            // 選擇拒絕而非轉換，理由與上面那個 CR 檢查相同：猜測編碼，正是一個工具最後
+            // 選擇拒絕而非轉換，理由與 CR 檢查相同：猜測編碼，正是一個工具最後
             // 「靜默產生出看似合理而錯誤的東西」的方式。`iconv` 知道怎麼做，csv2 不需要會。
             if Array(bomPending.prefix(3)) == BOM {
                 // A UTF-8 BOM marks "this came from Windows"; Excel exports
@@ -746,14 +680,11 @@ public final class RecordParser {
         case .fieldStart, .unquoted:
             // In `.lines` a comma and a quote are DATA. The line is the
             // value, so the only byte with a meaning is the terminator.
-            // Phase 8b: a `find` dump whose paths contain commas is the case
-            // that decided this, and quoting had to go with it -- half of the
-            // rule would have left `"a,b"` parsing as one field with its
-            // quotes eaten, which is a value nobody wrote.
+            // Phase 8b. Quoting goes with the comma: keeping it would parse
+            // `"a,b"` as one field with its quotes eaten, a value nobody wrote.
             // 在 `.lines` 裡，逗號與引號都是**資料**。那一行就是那個值，因此唯一有意義的位元組
-            // 是終止符。第 8b 階段：決定這件事的，是一份「路徑裡含逗號」的 `find` 輸出，而引號
-            // 必須跟著一起走——只做一半的規則，會讓 `"a,b"` 解析成一個「引號被吃掉」的欄位，
-            // 而那是沒有人寫過的值。
+            // 是終止符。第 8b 階段。引號必須跟著逗號一起不處理：保留它，`"a,b"` 會解析成一個
+            // 「引號被吃掉」的欄位，而那是沒有人寫過的值。
             if b == BYTE_DQUOTE && state == .fieldStart && format != .lines {
                 state = .quoted
                 rawBuf.append(b)
@@ -821,9 +752,9 @@ public final class RecordParser {
         } else if b == BYTE_CR {
             pendingCR = true
         } else {
-            // RFC 4180 does not allow this and neither do we. Appending the
+            // RFC 4180 does not allow this and neither does csv2. Appending the
             // stray bytes would silently produce a value nobody wrote.
-            // RFC 4180 不允許，我們也不允許。把多餘的位元組接上去，會靜默
+            // RFC 4180 不允許，csv2 也不允許。把多餘的位元組接上去，會靜默
             // 產生一個沒有人寫過的值。
             throw fault(
                 "\(faultAt), field \(fields.count + 1): unexpected byte after a closing quote (0x\(String(format: "%02x", b))); a quoted field must be followed by a comma or a line ending",
@@ -862,12 +793,10 @@ public final class RecordParser {
     /// forms -- appearing as a record with exactly ONE field.
     ///
     /// `-md` output redirected into a `.csv` path is a valid one-column CSV
-    /// whenever the data happens to contain no commas, and csv2 read it back at
-    /// rc=0 with the separator row handed over as data record 1. That is the
-    /// failure this project's opening promise rules out: not a refusal, not a
-    /// crash, but a silently half-correct read of a file it had produced itself.
-    /// With commas in the data the field counts disagree and it already failed
-    /// loudly; without them nothing was left to notice.
+    /// whenever the data happens to contain no commas; without this check it
+    /// reads back at rc=0 with the separator row as data record 1, a silently
+    /// half-correct read of a file csv2 produced itself. With commas in the
+    /// data the field counts disagree and it fails loudly anyway.
     ///
     /// One field is required as well as the shape. A real one-column CSV whose
     /// first value is exactly a row of dashes and pipes is conceivable and
@@ -877,10 +806,8 @@ public final class RecordParser {
     /// 一列 Markdown 分隔列——`|---|---|---|`，或其 `:--:` 對齊形式——以「恰好一欄」的
     /// 紀錄形式出現。
     /// 把 `-md` 的輸出重導到 `.csv` 路徑，只要資料剛好不含逗號，那就是一份合法的單欄 CSV；
-    /// 而 csv2 會在 rc=0 下把它讀回來，並把分隔列當成第 1 筆資料交出去。那正是本專案開宗明義
-    /// 排除掉的那種失敗：不是拒絕、不是崩潰，而是對一個它自己產生的檔案，做出一次靜默的、
-    /// 半正確的讀取。資料含逗號時欄數不符，它本來就會大聲失敗；不含逗號時，就沒有東西還會
-    /// 察覺了。
+    /// 少了這道檢查，它會在 rc=0 下被讀回來，分隔列成為第 1 筆資料——對一個 csv2 自己產生的
+    /// 檔案做出靜默的、半正確的讀取。資料含逗號時欄數不符，本來就會大聲失敗。
     /// 除了形狀之外還要求「恰好一欄」。一份真實的單欄 CSV，其首個值剛好是一整列破折號與豎線
     /// ——可以想像，但幾乎不會有人這樣寫；而「多欄」檔案中含有這種值時完全不受影響，因為在
     /// 那裡，那個檔案顯然就是 CSV。
@@ -902,34 +829,17 @@ public final class RecordParser {
         var r = Record(fields: fields, offset: recOffset, line: recLine)
         recordsEmitted += 1
         r.number = recordsEmitted
-        // `format != .lines` is the whole of this fix, and it is where the
-        // guard should always have been scoped. A file with no .csv/.csv2
-        // suffix IS one column by definition, so `r.count == 1` is true of
-        // every record in it -- which turned a check aimed at "a file that
-        // CLAIMS to be CSV yet looks like Markdown" into an unconditional one
-        // there.
-        //
-        // In `.lines` nothing is claimed, so nothing is ambiguous: `#`, JSON,
-        // XML and a Markdown table's own DATA rows all pass through as bytes,
-        // and only the separator was singled out. Same table, one row refused
-        // and the rows above and below it fine. It also protected against
-        // nothing: reading `-md` output as `.lines` gives one field per line,
-        // which is exactly what `.lines` means.
-        //
-        // The cost was a real one -- no text file containing a Markdown table
-        // could be edited line by line, which is the case a user hit. KU.
-        // `format != .lines` 就是這次修正的全部，而這道守衛本來就該有這個範圍。一個沒有
-        // .csv／.csv2 副檔名的檔案，依定義**就是**一欄，因此 `r.count == 1` 對它裡面每一筆都成立
-        // ——那讓一道原本瞄準「一個**自稱**是 CSV、卻長得像 Markdown 的檔案」的檢查，在那裡變成
-        // 無條件的。
-        //
-        // 在 `.lines` 裡什麼都沒有被宣稱，因此沒有任何歧義：`#`、JSON、XML，以及一張 Markdown 表
-        // 自己的**資料列**，全都以位元組原樣通過，只有分隔列被挑了出來。同一張表，一列被拒，
-        // 而它上下的每一列都沒事。它保護的也是一個不存在的危險：用 `.lines` 讀 `-md` 的輸出會
-        // 得到「每行一個欄位」，而那正是 `.lines` 的意思。
-        //
-        // 代價是真實的——任何含 Markdown 表的文字檔都無法逐行編輯，而那正是一位使用者撞到的
-        // 情況。KU。
+        // Not in `.lines`. A file with no .csv/.csv2 suffix IS one column by
+        // definition, so `r.count == 1` holds for every record, and the check
+        // (aimed at a file that CLAIMS to be CSV yet looks like Markdown)
+        // would refuse any text file containing a Markdown table. In `.lines`
+        // nothing is claimed, so nothing is ambiguous: reading `-md` output
+        // as `.lines` gives one field per line, which is what `.lines` means.
+        // KU.
+        // `.lines` 不做這道檢查。沒有 .csv／.csv2 副檔名的檔案依定義**就是**一欄，因此
+        // `r.count == 1` 對每一筆都成立，而這道瞄準「**自稱**是 CSV、卻長得像 Markdown」的檢查，
+        // 會拒絕任何含 Markdown 表的文字檔。在 `.lines` 裡什麼都沒有被宣稱，因此沒有歧義：用
+        // `.lines` 讀 `-md` 的輸出會得到「每行一個欄位」，而那正是 `.lines` 的意思。KU。
         if format != .lines && r.count == 1 && looksLikeMarkdownSeparator(r.fields[0].value) {
             throw fault(
                 "record \(r.number) (line \(r.line)) is a Markdown separator row and has one field, so this is -md output rather than CSV. Name it with a .md suffix and csv2 reads it as a table -- until 2026-08-26 this sentence ended \"-md is one-way and csv2 cannot read it back\", which stopped being true when it learned to read one",
@@ -946,25 +856,15 @@ public final class RecordParser {
     /// every format csv2 reads -- is the signature of a CR-terminated file,
     /// and it is exact where counting was approximate.
     ///
-    /// The test used to be `bare CRs > line feeds`, described in both READMEs
-    /// as "this file uses CR line endings". Those are different statements and
-    /// they came apart in both directions:
+    /// Counting (`bare CRs > line feeds`) is not the same statement as "this
+    /// file uses CR line endings", and fails in both directions:
     ///
-    ///   a,b<LF>1,x<CR><CR><CR>y<LF>       3 CRs, 2 LFs -> refused, and the
-    ///                                     file is LF-terminated. The message
-    ///                                     asserted something false about it,
-    ///                                     and `tr '\r' '\n'`, which the
-    ///                                     message prescribes, turned that one
-    ///                                     record into a file csv2 will not
-    ///                                     read.
+    ///   a,b<LF>1,x<CR><CR><CR>y<LF>       3 CRs, 2 LFs: LF-terminated, yet
+    ///                                     a count would refuse it.
     ///   col<CR>"L<LF>L<LF>L<LF>L"<CR>zz<CR>
-    ///                                     3 CRs, 3 LFs -> accepted at rc=0 as
-    ///                                     three records under a column named
-    ///                                     `col<CR>"L`, quoted field shredded,
-    ///                                     nothing on stderr. A genuine
-    ///                                     CR-terminated file, silently
-    ///                                     misparsed -- the failure the count
-    ///                                     was written to prevent.
+    ///                                     3 CRs, 3 LFs: CR-terminated, yet a
+    ///                                     count would accept it as three
+    ///                                     shredded records at rc=0.
     ///
     /// A CR-terminated file has no LF to end its first line, so everything it
     /// contains lands in the first record -- which is why the header row is
@@ -976,11 +876,9 @@ public final class RecordParser {
     /// 第一筆紀錄——在 csv2 讀得懂的每一種格式裡，那就是標頭列——中的一個裸 CR，是「以 CR
     /// 結尾的檔案」的簽名，而它在「數數」只能近似的地方是精確的。
     ///
-    /// 原本的判斷是「裸 CR 比換行多」，而兩份 README 都把它描述成「本檔案使用 CR 行尾」。
-    /// 那是兩句不同的話，而它們往兩個方向都裂開過：一個 LF 結尾、欄位裡有三個 CR 的檔案被
-    /// 拒絕，訊息對它說了一件假的事，而訊息指定的 `tr` 修法會把那一筆變成讀不回來的檔案；
-    /// 一個真正以 CR 結尾、CR 與 LF 一樣多的檔案則以 rc=0 被接受，成為三筆假紀錄、欄名是
-    /// `col<CR>"L`、引號欄位被撕開，stderr 上一個字也沒有。
+    /// 用數的（「裸 CR 比換行多」）與「本檔案使用 CR 行尾」不是同一句話，而且往兩個方向都會錯：
+    /// 一個 LF 結尾、欄位裡有三個 CR 的檔案會被拒絕；一個真正以 CR 結尾、CR 與 LF 一樣多的檔案
+    /// 則會以 rc=0 被接受，成為三筆被撕開的假紀錄。
     ///
     /// 以 CR 結尾的檔案沒有 LF 去結束它的第一行，因此它的全部內容都落在第一筆紀錄裡——那正是
     /// 「證據永遠在標頭列」的原因。紀錄裡的裸 CR 仍然是資料、仍然能原樣往返；而屬於「欄名」
@@ -995,9 +893,9 @@ public final class RecordParser {
     /// Call once at end of input. Emits a trailing record if the file did not
     /// end with a newline, and reports the CR-only case.
     /// 輸入結束時呼叫一次。若檔案未以換行結尾則吐出最後一筆，並回報 CR-only。
-    /// True only while `finish()` is draining what was left over, so the CR
-    /// test above can tell "a CR in the middle" from "the file ended on one".
-    /// 只有在 `finish()` 正在清空殘留內容時為真，好讓上面那個 CR 判斷分得出
+    /// True only while `finish()` is draining what was left over, so its CR
+    /// test can tell "a CR in the middle" from "the file ended on one".
+    /// 只有在 `finish()` 正在清空殘留內容時為真，好讓它的 CR 判斷分得出
     /// 「中間的一個 CR」與「檔案就結束在一個 CR 上」。
     private var atEOF = false
 
@@ -1022,27 +920,22 @@ public final class RecordParser {
             // The file ENDS on a bare CR, which is what a CR-terminated body
             // looks like from here -- and the header test above cannot see it,
             // because this file's header ended with a proper LF. `(echo a;
-            // cat old_mac_body) > f.csv` is how you get one, and it read as a
-            // SINGLE record at rc=0 with `records:1` on the meta line: every
-            // count in that file wrong by the number of lines in it, and the
-            // documented presence test reporting the wrong number confidently.
+            // cat old_mac_body) > f.csv` produces one; accepted, it would read
+            // as a SINGLE record at rc=0 with `records:1` on the meta line.
             //
             // Exact rather than approximate, again: a file whose last byte is
             // a bare CR is refused, and one that ends with a newline is not,
-            // whatever its records contain. `1,x<CR><CR><CR>y<LF>` -- the
-            // false positive the counting version of this guard produced --
-            // still reads as one record with three CRs in its second field.
+            // whatever its records contain. `1,x<CR><CR><CR>y<LF>` still reads
+            // as one record with three CRs in its second field.
             //
             // 檔案「結束」在一個裸 CR 上，而那正是一個以 CR 結尾的內文從這裡看過去的樣子
-            // ——上面那個標頭檢查看不到它，因為這個檔案的標頭是以正常的 LF 結束的。
-            // `(echo a; cat old_mac_body) > f.csv` 就會產生一個這樣的檔案，而它會以 rc=0
-            // 被讀成「一筆」紀錄、meta 上寫著 `records:1`：那個檔案裡的每一個計數都錯了，
-            // 錯的倍數就是它的行數，而文件指定的那個「有沒有」的檢查，會很有把握地回報一個
-            // 錯的數字。
+            // ——標頭檢查看不到它，因為這個檔案的標頭是以正常的 LF 結束的。
+            // `(echo a; cat old_mac_body) > f.csv` 就會產生這樣的檔案；若接受它，它會以 rc=0
+            // 被讀成「一筆」紀錄、meta 上寫著 `records:1`。
             //
             // 一樣是「精確」而不是「近似」：最後一個位元組是裸 CR 的檔案會被拒絕，而以換行
-            // 結尾的檔案不會，不論它的紀錄裡裝了什麼。`1,x<CR><CR><CR>y<LF>`——當初那個「用數的」
-            // 版本造成的誤判——仍然會被讀成一筆紀錄，第二欄裡有三個 CR。
+            // 結尾的檔案不會，不論它的紀錄裡裝了什麼。`1,x<CR><CR><CR>y<LF>` 仍然會被讀成
+            // 一筆紀錄，第二欄裡有三個 CR。
             if atEOF {
                 throw fault(
                     "this file's last byte is a bare carriage return, which is what a body with CR line endings looks like: everything after the header lands in one record. Convert it first with: tr '\\r' '\\n' < file > converted.csv -- the new name has to keep a .csv or .csv2 suffix. If that CR really is the last byte of the last value, end the file with a newline",
@@ -1052,15 +945,13 @@ public final class RecordParser {
         // A CR-only file (pre-OS X Mac) contains no LF at all, so the whole
         // thing parses as ONE record with millions of fields and then hits
         // the field-count check -- whose message talks about field counts and
-        // sends the user somewhere entirely unrelated. Diagnosing it costs
-        // nothing; not diagnosing it costs an afternoon.
+        // sends the user somewhere entirely unrelated. That diagnosis lives in
+        // refuseCRInHeader, which fires the moment the byte arrives rather
+        // than at end of input.
         // CR-only 檔案（OS X 之前的 Mac 慣例）完全沒有 LF，於是整份被解析成
         // 一筆有數百萬欄的紀錄，接著撞上欄數檢查——而那個訊息在講欄數，會把
-        // 使用者引去一個完全無關的方向。診斷成本幾乎為零，少了它代價是一個下午。
-        // The CR test lives in refuseCRInHeader now, and fires the moment the
-        // byte arrives rather than at end of input.
-        // CR 的判斷現在在 refuseCRInHeader 裡，而且是在那個位元組抵達的當下就觸發，
-        // 不再等到輸入結束。
+        // 使用者引去一個完全無關的方向。那項診斷在 refuseCRInHeader 裡，在那個位元組
+        // 抵達的當下就觸發，不等到輸入結束。
         let pending = recordDirty || !fields.isEmpty || !rawBuf.isEmpty || !valBuf.isEmpty
         guard pending else { return }
 
@@ -1068,9 +959,8 @@ public final class RecordParser {
         // and one way it is not:
         //
         //   * still inside a quoted field -- the closing quote never arrived.
-        //     Incomplete in ANY format. csv2 used to close the quote itself and
-        //     emit the record at rc=0, which is this project's own definition of
-        //     the worst kind of bug: a plausible record nobody wrote.
+        //     Incomplete in ANY format. Closing the quote here would emit a
+        //     plausible record nobody wrote.
         //   * `.csv2` with no trailing newline -- that format guarantees one
         //     record per line, LF-terminated, so a missing final LF is the
         //     signature of a torn write.
@@ -1080,8 +970,7 @@ public final class RecordParser {
         //
         // 輸入在一筆紀錄中途結束。有兩種情況是真的不完整，一種不是：
         //   * 還在引號欄位內——收尾的引號從未出現。這在「任何」格式下都不完整。
-        //     csv2 原本會自己把引號收掉並以 rc=0 吐出那筆紀錄，而那正是本專案自己
-        //     定義的最糟一類缺陷：一筆看似合理、卻沒有人寫過的紀錄。
+        //     在這裡自行把引號收掉，會吐出一筆看似合理、卻沒有人寫過的紀錄。
         //   * `.csv2` 沒有結尾換行——該格式保證一筆一行且以 LF 結尾，缺少結尾 LF
         //     就是撕裂寫入的信號。
         //   * `.csv` 沒有結尾換行「不是」不完整。很多工具產生的最後一行本來就沒有，
@@ -1090,13 +979,12 @@ public final class RecordParser {
         // quoted field and the parser does not yet know whether it closes the
         // field or is the first half of an escaped `""`. At end of input that
         // question is answered: it closed the field, and the record is
-        // complete. Treating it as unterminated rejected every well-formed row
-        // ending in a quoted value -- caught by T46a, where -append of
-        // `zz,last,"note, appended"` started failing.
+        // complete. Treating it as unterminated would reject every well-formed
+        // row ending in a quoted value. T46a.
         // 只有 `.quoted`。`.quotedQuote` 表示剛在引號欄位「內」看到一個引號，解析器
         // 還不知道它是收尾、還是跳脫 `""` 的前半。到了輸入結束，那個問題就有答案了：
         // 它收尾了，紀錄是完整的。把它當成未閉合，會拒絕每一列「以引號值結尾」的
-        // 合法資料——由 T46a 抓到，那裡 `zz,last,"note, appended"` 的追加開始失敗。
+        // 合法資料。T46a。
         let insideQuote = (state == .quoted)
         let incomplete = insideQuote || format == .csv2
 
@@ -1109,13 +997,10 @@ public final class RecordParser {
                 // WARN, and with the size, because "a record" is not what
                 // this always drops. When the quote opens early, everything
                 // after it is ONE unterminated record from the parser's view
-                // -- and that one record can hold the whole rest of the file.
-                // Measured: a ten-record file whose quote opens in record 1
-                // came back with zero records, at rc=0, with nothing on
-                // stderr. The flag was asked for by name, so this is not an
-                // error; it is a surprise large enough that the WARN
-                // machinery, which already fires for a -mid window that
-                // selected nothing, should fire here too.
+                // -- and that one record can hold the whole rest of the file,
+                // leaving zero records at rc=0. The flag was asked for by
+                // name, so this is not an error; it is a surprise large enough
+                // to WARN, as a -mid window that selected nothing does.
                 //
                 // Bytes rather than records: from inside the parser the
                 // discarded text IS one record, and counting the records a
@@ -1124,38 +1009,25 @@ public final class RecordParser {
                 //
                 // 用 WARN，而且帶著大小——因為它丟掉的不總是「一筆」。當引號很早就打開，
                 // 從解析器的角度，其後的一切都是「一筆」未終止的紀錄——而那一筆可以裝著
-                // 整個檔案的其餘部分。實測：一個 10 筆的檔案，引號在第 1 筆打開，回傳 0 筆、
-                // rc=0、stderr 空無一物。這個旗標是被指名要求的，所以它不是錯誤；但它是一個
-                // 大到應該讓 WARN 機制出聲的意外——而那套機制早已為「什麼都沒選到的 -mid
-                // 視窗」而觸發。
+                // 整個檔案的其餘部分，結果是 rc=0 下零筆紀錄。這個旗標是被指名要求的，所以它不是
+                // 錯誤；但它是大到應該 WARN 的意外，就像「什麼都沒選到的 -mid 視窗」一樣。
                 //
                 // 用位元組而不是筆數：從解析器內部看，被丟掉的文字「就是一筆」，而去數
                 // 「讀者本來會在裡面看到幾筆」，等於去解析一段剛剛被宣告為解析不了的文字。
                 // From where the record began to where the input ran out.
+                // Not `rawBuf.count + valBuf.count`: rawBuf holds the bytes as
+                // they arrived (opening quote included) and valBuf the decoded
+                // value, so that sum counts the same text twice.
                 //
-                // It used to be `rawBuf.count + valBuf.count`, which counts the
-                // same text twice: rawBuf holds the bytes as they arrived
-                // (opening quote included) and valBuf the decoded value, so a
-                // tail of B bytes was reported as 2B+1. On a 38-byte file it
-                // said 55 -- more bytes than the file has -- and on a
-                // three-byte tail it said 1, under-reporting. The other half of
-                // the same sentence, "beginning at byte N", was right every
-                // time, which is what made the wrong half credible.
+                // There is no --json field, -log entry or -debug line for this
+                // number. The WARN is its only report, and both READMEs promise it.
                 //
-                // Nothing in the tool could check it: there is no --json field,
-                // no -log entry and no -debug line for this number. The WARN is
-                // its only report, and both READMEs promise it.
+                // 從「這一筆開始的地方」到「輸入用完的地方」。不是 `rawBuf.count + valBuf.count`：
+                // rawBuf 裝的是「抵達時的位元組」（含開引號），valBuf 裝的是解碼後的值，兩者相加會把
+                // 同一段文字數兩次。
                 //
-                // 從「這一筆開始的地方」到「輸入用完的地方」。
-                //
-                // 原本是 `rawBuf.count + valBuf.count`，而那把同一段文字數了兩次：rawBuf 裝的是
-                // 「抵達時的位元組」（含開引號），valBuf 裝的是解碼後的值，於是 B 個位元組的
-                // 尾巴被回報成 2B+1。在一個 38 位元組的檔案上它說 55——比整個檔案還多——而在一個
-                // 三位元組的尾巴上它說 1，少報。同一句話的另一半「beginning at byte N」每次都對，
-                // 而那正是讓錯的那一半顯得可信的原因。
-                //
-                // 工具裡沒有任何東西能檢查它：這個數字沒有 --json 欄位、沒有 -log 條目、
-                // 也沒有 -debug 行。那則 WARN 是它唯一的報告，而兩份 README 都承諾了它。
+                // 這個數字沒有 --json 欄位、沒有 -log 條目、也沒有 -debug 行。那則 WARN 是它唯一的
+                // 報告，而兩份 README 都承諾了它。
                 let dropped = max(0, offset - recOffset)
                 Logger.shared.warn(
                     "--truncate-partial discarded \(dropped) bytes: an unterminated record beginning at byte \(recOffset). If the quote opened early, that is everything after it")
@@ -1167,15 +1039,11 @@ public final class RecordParser {
             }
             if insideQuote {
                 // A parallel worker calls finish() at the end of its CHUNK, not
-                // at the end of the file, and this message was written for the
-                // latter. On a chunk boundary that lands inside a quoted field
-                // it said three wrong things at once: that the input ended
-                // (the worker's view ended), which record was at fault (it
-                // counts from the start of the chunk), and that
-                // --truncate-partial would help (it would discard a complete
-                // record). The same file gave the correct diagnosis at a
-                // larger chunk size -- the parser contradicting itself about
-                // what a file contains, decided by an environment variable.
+                // at the end of the file. On a chunk boundary inside a quoted
+                // field, the end-of-file message below would be wrong three
+                // ways: the input did not end, the record number counts from
+                // the chunk start, and --truncate-partial would discard a
+                // complete record.
                 //
                 // A chunk ending mid-quote means one thing: the file does not
                 // have one record per line, which is the premise the parallel
@@ -1183,12 +1051,9 @@ public final class RecordParser {
                 // and let the caller do what this tool does everywhere else
                 // with a premise that turned out false -- discard it and scan.
                 //
-                // 平行工作者是在自己那「一塊」的結尾呼叫 finish()，不是在檔案結尾，而這則
-                // 訊息是為後者寫的。當區塊邊界落在引號欄位中間，它一次說錯三件事：輸入結束了
-                // （結束的是工作者的視野）、是哪一筆出問題（它是從區塊開頭數的）、以及
-                // --truncate-partial 會有幫助（它會丟掉一筆完整的紀錄）。同一個檔案在較大的
-                // chunk 下得到的是正確診斷——解析器對一個檔案的內容與自己矛盾，而決定權在一個
-                // 環境變數手上。
+                // 平行工作者是在自己那「一塊」的結尾呼叫 finish()，不是在檔案結尾。當區塊邊界落在
+                // 引號欄位中間，底下那則「檔案結束」的訊息會錯三件事：輸入並沒有結束、紀錄號是從
+                // 區塊開頭數的、而 --truncate-partial 會丟掉一筆完整的紀錄。
                 //
                 // 區塊在引號中間結束只代表一件事：這個檔案不是一筆一行，而那正是格式或索引
                 // 交給平行路徑的前提。所以就說那件事，讓呼叫端做這個工具在其他每一處對
@@ -1198,17 +1063,11 @@ public final class RecordParser {
                         "a chunk boundary fell inside a quoted field, so this file does not have one record per line -- which is what the parallel path was told it had",
                         "有一個區塊邊界落在引號欄位中間，因此這個檔案並不是一筆一行——而「一筆一行」正是平行路徑被告知的前提")
                 }
-                // The DATA record number, as faultAt has computed it since
-                // round 38's CC. This message kept using the raw
-                // `recordsEmitted + 1`, which counts the header rows, so on a
-                // `.csv2` it named record 6 of a four-record file -- an
-                // address that resolves to nothing when typed back into -get.
-                // The correction existed a few lines above and this one call
-                // site did not use it.
-                // 資料紀錄號，與 faultAt 自第 38 回合的 CC 起所計算的一致。這則訊息一直沿用
-                // 原始的 `recordsEmitted + 1`，那個計數含標頭列，於是在 `.csv2` 上它會把一個
-                // 4 筆檔案的問題指名為第 6 筆——一個打回 `-get` 會解不出來的位址。那個修正
-                // 就在上面幾行，而這一個呼叫點沒有用它。
+                // The DATA record number, as faultAt computes it (round 38,
+                // CC): the raw `recordsEmitted + 1` counts the header rows and
+                // gives an address that resolves to nothing in -get.
+                // 資料紀錄號，與 faultAt 的算法一致（第 38 回合，CC）：原始的
+                // `recordsEmitted + 1` 含標頭列，給出的位址打回 `-get` 會解不出來。
                 let n = max(1, recordsEmitted + 1 - format.headerRows)
                 throw fault(
                     "record \(n): the input ends inside a quoted field -- the closing quote is missing. The record is incomplete; pass --truncate-partial to discard it.",
@@ -1241,23 +1100,20 @@ public final class ByteSource {
 
     public init(path: String, chunkSize: Int = 1 << 16, startAt: UInt64 = 0) throws {
         // A FIFO is opened with a plain blocking open(2), not through
-        // FileHandle. Foundation's opener does not wait for a writer, so
-        // `csv2 -r -i fifo.csv` started before the writer arrived read EOF
-        // immediately and reported `expected 1 header row(s), found 0` -- the
-        // message for a file with nothing in it -- for a stream that was about
-        // to deliver three lines. Every other Unix tool blocks there, and the
-        // block is what removes the race: the reader waits, the writer opens,
-        // the bytes arrive.
+        // FileHandle. Foundation's opener does not wait for a writer, so a
+        // `csv2 -r -i fifo.csv` started before the writer would read EOF at
+        // once and report an empty file. Every other Unix tool blocks there,
+        // and the block is what removes the race: the reader waits, the
+        // writer opens, the bytes arrive.
         //
-        // Only for the non-regular case, so the ordinary path keeps the
-        // FileHandle it has always had, seeking included.
+        // Only for the non-regular case, so the ordinary path keeps
+        // FileHandle, seeking included.
         // FIFO 用一個單純的、會阻塞的 open(2) 開啟，不走 FileHandle。Foundation 的開檔不會
-        // 等待寫入端，於是「在寫入端出現之前就啟動」的 `csv2 -r -i fifo.csv` 立刻讀到 EOF，
-        // 並回報 `expected 1 header row(s), found 0`——那是「檔案裡什麼都沒有」的訊息——而那條
-        // 串流其實正要送來三行。其他每一個 Unix 工具都會在那裡阻塞，而正是那個阻塞消除了
-        // 這個競態：讀取端等待，寫入端開啟，位元組抵達。
+        // 等待寫入端，於是在寫入端出現之前就啟動的 `csv2 -r -i fifo.csv` 會立刻讀到 EOF，
+        // 並回報成空檔案。其他每一個 Unix 工具都會在那裡阻塞，而正是那個阻塞消除了這個競態：
+        // 讀取端等待，寫入端開啟，位元組抵達。
         //
-        // 只針對「非一般檔案」，因此原本那條路徑仍然用它一直以來的 FileHandle，seek 也照舊。
+        // 只針對「非一般檔案」，因此一般路徑仍然用 FileHandle，seek 也照舊。
         if Platform.fileKind(path: path) == .fifo {
             let fd = Platform.openBlockingForRead(path: path)
             guard fd >= 0 else {
@@ -1366,14 +1222,12 @@ public final class ByteSink {
     /// 檔案 sink 沒有這個描述子，也沒有那種失敗。
     private let pipeSafeFD: Int32?
     /// The descriptor every sink writes through -- the only thing it writes
-    /// through. There was a FileHandle here as well until DV and EE removed
-    /// every use of it: Windows will not hand out a descriptor from one, and
-    /// FileHandle.write answers a failed write with an exception nobody
-    /// catches. A field nothing reads is a claim that something does.
-    /// 每個 sink 實際寫出所用的描述子——也是它唯一用來寫出的東西。這裡原本還有一個
-    /// FileHandle，直到 DV 與 EE 把它的每一處使用都拿掉：Windows 不會從它交出描述子，
-    /// 而 FileHandle.write 對「寫入失敗」的回答是一個沒有人接的例外。一個沒有人讀的欄位，
-    /// 本身就是一句「有人在讀它」的宣稱。
+    /// through. No FileHandle: Windows will not hand out a descriptor from
+    /// one, and FileHandle.write answers a failed write with an exception
+    /// nobody catches. DV, EE.
+    /// 每個 sink 實際寫出所用的描述子——也是它唯一用來寫出的東西。不用 FileHandle：
+    /// Windows 不會從它交出描述子，而 FileHandle.write 對「寫入失敗」的回答是一個沒有人接的
+    /// 例外。DV、EE。
     private let writeFD: Int32?
     private let tmpPath: String?
     private let finalPath: String?
@@ -1426,10 +1280,9 @@ public final class ByteSink {
 
     /// Writes to a temp file beside the target and renames on close. rename
     /// is atomic within a filesystem, so a failure part-way through leaves
-    /// the original intact -- this project already has two records of a CSV
-    /// being written wrong and restored from git.
+    /// the original intact.
     /// 寫入目標檔旁的暫存檔，關閉時 rename。rename 在同一檔案系統內是原子的，
-    /// 因此中途失敗時原檔完好——本專案已有兩次 CSV 被寫壞、靠 git 還原的紀錄。
+    /// 因此中途失敗時原檔完好。
     init(atomicPath path: String, limit: Int = 1 << 16) throws {
         let dir = (path as NSString).deletingLastPathComponent
         let base = (path as NSString).lastPathComponent
@@ -1458,26 +1311,13 @@ public final class ByteSink {
 
     func flush() {
         if buf.isEmpty { return }
-        // Every sink writes the same way. The file branch used to call
-        // handle.write, on the reasoning that a file cannot meet a broken pipe
-        // -- true, and beside the point: it can meet a full disk, and
-        // FileHandle.write answers that with an exception nobody catches. A
-        // -o edit onto a full volume aborted with exit 134, no diagnostic at
-        // all, and its temp file left behind.
-        // 每個 sink 都以同一種方式寫出。檔案那一支原本呼叫 handle.write，理由是「檔案
-        // 不可能遇到管線斷掉」——那是對的，而且不是重點：它會遇到磁碟寫滿，而 FileHandle.write
-        // 對此的回答是一個沒有人接的例外。一次寫到滿磁碟的 -o 編輯以 134 中止、一個字的
-        // 診斷也沒有，並留下它的暫存檔。
-        // 這裡原本還有一段更早的註解，說「stdout 不走 handle.write，而檔案 sink 仍然走」。
-        // 那段話在改動之後就不再成立，卻與新的說明並排放著——兩段文字互相矛盾，而讀者沒有
-        // 辦法知道哪一段是現在的。那正是本專案一再犯的第二種形狀：**新增文字，卻沒有作廢
-        // 它所推翻的那一段。** 一併刪掉了。
-        // An older comment sat here saying stdout does not go through
-        // handle.write "while a file sink keeps it". That stopped being true
-        // with this change and was left beside the new explanation, so two
-        // paragraphs contradicted each other with nothing to say which was
-        // current -- this project's second recurring shape: adding text
-        // without invalidating what it makes false. Removed.
+        // Every sink writes the same way, file sinks included. A file cannot
+        // meet a broken pipe, but it can meet a full disk, and
+        // FileHandle.write answers that with an uncaught exception: exit 134,
+        // no diagnostic, temp file left behind.
+        // 每個 sink 都以同一種方式寫出，檔案 sink 也一樣。檔案不會遇到管線斷掉，但會遇到
+        // 磁碟寫滿，而 FileHandle.write 對此的回答是一個沒有人接的例外：以 134 中止、沒有任何
+        // 診斷，並留下暫存檔。
         if let fd = writeFD {
             let failure = Platform.writeAll(fd: fd, buf)
             if failure != 0 { writeFailed(failure) }
@@ -1552,25 +1392,21 @@ public final class ByteSink {
             // whole new one -- and it behaves identically on both platforms.
             // replaceItemAt is a Foundation abstraction that does more than
             // that (backup items, attribute preservation) and is a SEPARATE
-            // implementation in swift-corelibs-foundation: on Linux it left
-            // the destination unchanged, so --in-place silently did nothing
-            // while exiting zero. Caught by T28b running in the guest, not by
-            // anything on macOS.
+            // implementation in swift-corelibs-foundation: on Linux it leaves
+            // the destination unchanged, so --in-place silently does nothing
+            // while exiting zero. T28b, which only fails in the Linux guest.
             // 使用 POSIX rename(2)，而非 FileManager.replaceItemAt。rename 正是
             // 這份設計要的原語——在同一檔案系統內是原子的，讀者要嘛看到完整的舊
             // 檔、要嘛看到完整的新檔——而且兩個平台行為一致。replaceItemAt 是
             // Foundation 的抽象，做的事更多（備份項目、屬性保留），且在
             // swift-corelibs-foundation 中是另一份實作：在 Linux 上它讓目的檔
-            // 維持不變，於是 --in-place 什麼也沒做卻以 0 結束。這是由 T28b 在
-            // guest 內執行時抓到的，macOS 上沒有任何東西會發現。
+            // 維持不變，於是 --in-place 什麼也沒做卻以 0 結束。T28b，只在 Linux guest 內會失敗。
             // The mode of the file being replaced, carried onto the temp file
             // BEFORE the rename. A temp file is created fresh with the umask's
-            // mode, so without this an edit silently rewrote 0600 as 0644 --
-            // an operation whose whole job is to change one cell, quietly
-            // changing who can read the file.
+            // mode, so without this an edit of one cell would silently turn
+            // 0600 into 0644 and change who can read the file.
             // 被取代的那個檔案的模式，在 rename「之前」套到暫存檔上。暫存檔是新建的，帶的是
-            // umask 的模式，因此少了這一步，一次編輯會把 0600 靜默改寫成 0644——一個「工作
-            // 就只是改一格」的操作，悄悄地改變了誰讀得到這個檔案。
+            // umask 的模式，因此少了這一步，只改一格的編輯會把 0600 靜默改成 0644，改變誰讀得到這個檔案。
             Platform.copyMode(from: final, to: tmp)
             Platform.forgetTemp()
             if !Platform.replaceFile(tmp, final) {
