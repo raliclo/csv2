@@ -24,6 +24,8 @@ import Foundation
 import Darwin
 #elseif canImport(Glibc)
 import Glibc
+#elseif canImport(Musl)
+import Musl
 #elseif canImport(ucrt)
 import ucrt
 import WinSDK
@@ -449,9 +451,9 @@ enum Platform {
         // Int.max, which is never "low".
         // RLIM_INFINITY 不是每個平台都匯入；無上限會被夾到 Int.max，永遠不算「低」。
         // The resource argument's type differs as getrusage's does: Int32 on
-        // Darwin, an imported enum on glibc.
-        // resource 參數的型別與 getrusage 一樣有差異：Darwin 上是 Int32，glibc 上是匯入的 enum。
-        #if canImport(Darwin)
+        // Darwin and musl, an imported enum on glibc.
+        // resource 參數的型別與 getrusage 一樣有差異：Darwin 與 musl 上是 Int32，glibc 上是匯入的 enum。
+        #if canImport(Darwin) || canImport(Musl)
         let resource: Int32 = RLIMIT_NOFILE
         #else
         let resource: Int32 = Int32(RLIMIT_NOFILE.rawValue)
@@ -1121,7 +1123,8 @@ enum Platform {
         // `who` 參數的「型別」不同：Darwin 宣告 getrusage(Int32, ...)，glibc 宣告
         // getrusage(__rusage_who_t, ...)，而 RUSAGE_SELF 被匯入為 __rusage_who。
         // 直接傳過去在 macOS 上編得過、在 Linux 上會失敗。
-        #if canImport(Darwin)
+        // musl declares it as Darwin does. / musl 的宣告與 Darwin 相同。
+        #if canImport(Darwin) || canImport(Musl)
         let who: Int32 = RUSAGE_SELF
         #else
         let who: Int32 = Int32(RUSAGE_SELF.rawValue)
@@ -1141,7 +1144,7 @@ enum Platform {
     /// 特意命名，讓呼叫端能誠實回報，而不是把 0 當成一次量測印出去。Windows 上
     /// 這個值來自另一組 API 且尚未驗證，因此 metrics 那一行會如實說明。
     static var peakRSSIsVerified: Bool {
-        #if canImport(Darwin) || canImport(Glibc)
+        #if canImport(Darwin) || canImport(Glibc) || canImport(Musl)
         return true
         #else
         return false
@@ -1151,7 +1154,7 @@ enum Platform {
     static var name: String {
         #if canImport(Darwin)
         return "darwin"
-        #elseif canImport(Glibc)
+        #elseif canImport(Glibc) || canImport(Musl)
         return "linux"
         #elseif canImport(ucrt)
         return "windows"
