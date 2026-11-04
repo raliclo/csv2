@@ -177,6 +177,13 @@ waits for that run, refuses unless all six archives came back, and hands them
 to `publish.zsh`, which does the rest with the checks it already has.
 `--fetch` stops after the download.
 
+Where tags cannot be pushed -- a Claude Code cloud session cannot -- run the
+workflow by hand with `release_version` set to `X.Y.Z`: it tags develop's head,
+builds at the tag, and runs the same `publish.zsh` in a final job, which also
+commits Formula/ and scoop/ to develop. Either way the release notes come from
+`release-notes/X.Y.Z.md`, written before publishing, and the line with each
+suite's result is generated from the run.
+
 ## Formats
 
 The input suffix declares the format:

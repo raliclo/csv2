@@ -125,7 +125,11 @@ release_state() {
     fi
 }
 command -v gh >/dev/null 2>&1 || { print -u2 -- "gh is not on PATH"; exit 1 }
-gh api user >/dev/null 2>&1 || { print -u2 -- "gh cannot reach the GitHub REST API as a user (gh api user failed) / gh 無法以使用者身分使用 GitHub REST API"; exit 1 }
+# `repos/$REPO`, not `user`: a workflow's GITHUB_TOKEN cannot read /user, and
+# release.yml's publish job runs this script with one.
+# 問 `repos/$REPO` 而不是 `user`：workflow 的 GITHUB_TOKEN 讀不了 /user，而 release.yml 的 publish job
+# 正是用它執行這支腳本。
+gh api "repos/$REPO" >/dev/null 2>&1 || { print -u2 -- "gh cannot reach $REPO through the GitHub REST API / gh 無法透過 GitHub REST API 存取 $REPO"; exit 1 }
 RELEASE_STATE=$(release_state) || { print -u2 -- "cannot list the releases of $REPO; refusing rather than assuming $TAG is unpublished / 無法列出 $REPO 的 release；拒絕，而不是假設 $TAG 尚未發布"; exit 1 }
 if [[ $RELEASE_STATE == draft ]]; then
     print -u2 -- "a DRAFT release for $TAG exists, probably left by a failed run; look at it on GitHub, delete it, and run again"
