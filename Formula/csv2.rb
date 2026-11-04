@@ -32,7 +32,7 @@
 class Csv2 < Formula
   desc "Fail-loudly CSV parser and editor: names the record and field, never repairs"
   homepage "https://github.com/raliclo/csv2"
-  version "0.1.8"
+  version "0.1.9"
   license "MIT"
 
   # This url is the macOS arm64 one AND the formula's default, on purpose.
@@ -60,8 +60,8 @@ class Csv2 < Formula
   #
   # 它寫在**這裡**而不是複製一份進 `on_macos { on_arm }`，因為 publish.zsh 改寫時要求「每個平台
   # 恰好一個 url 與一個 sha256」，看到兩個就拒絕。每個平台一個位置，是兩邊都需要的安排。
-  url "https://github.com/raliclo/csv2/releases/download/v0.1.8/csv2-0.1.8-macos-arm64.tar.zst"
-  sha256 "2a97339375aa2eae9fae31869bd6b61f5e482d7597e36d6d98071b790b901ceb"
+  url "https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-macos-arm64.tar.zst"
+  sha256 "9387eac2c3964066df9d75c10dfb3475d39959e1d9d81cb970d3d7a6eddcca86"
 
   # Only the platforms whose archive was built AND verified on that platform.
   # macOS x86_64 is deliberately absent rather than pointed at an archive nobody
@@ -77,8 +77,8 @@ class Csv2 < Formula
 
   on_linux do
     on_intel do
-      url "https://github.com/raliclo/csv2/releases/download/v0.1.8/csv2-0.1.8-linux-x86_64.tar.zst"
-      sha256 "1eafcacb37e86af211f9209362cc5fa66793f060253e00a9656b953c2183d649"
+      url "https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-linux-x86_64-musl.tar.zst"
+      sha256 "d67731c870895baaec60a866c05cac293887f0b2145ca45d05a6b0e9149bf70e"
     end
     # aarch64 arrives in v0.1.1. It was absent from v0.1.0 not because it was
     # untested -- T47 compares twelve invocations byte for byte against macOS
@@ -89,8 +89,8 @@ class Csv2 < Formula
     # 呼叫與 macOS 逐位元比對——而是因為一份「在 tag 打完之後才建的」封存，會回報與它三個手足
     # 不同的版本字串，那就是 QD。v0.1.1 的四份封存全部是在 tag 上建的。
     on_arm do
-      url "https://github.com/raliclo/csv2/releases/download/v0.1.8/csv2-0.1.8-linux-aarch64.tar.zst"
-      sha256 "3fd36c112b2a9935210f193d3d248a201dda056374b979f89a92a346dacd07c0"
+      url "https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-linux-aarch64-musl.tar.zst"
+      sha256 "25ccf125971148d1bb2e0af7a2fee1e8a80df1081ce954ba7610237f4cdeb0b3"
     end
   end
 
@@ -106,6 +106,6 @@ class Csv2 < Formula
   test do
     (testpath/"p.csv").write("pkg,license\nzlib,MIT\n")
     assert_equal "MIT", shell_output("#{bin}/csv2 -get 1:license -i #{testpath}/p.csv").strip
-    assert_match "csv2 0.1.8", shell_output("#{bin}/csv2 --version")
+    assert_match "csv2 0.1.9", shell_output("#{bin}/csv2 --version")
   end
 end
