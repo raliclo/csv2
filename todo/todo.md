@@ -933,6 +933,37 @@ Linux VM and the default build stay glibc, and the Linux release archives are
 2. README 的「安裝發行版」仍寫四份封存，那是 v0.1.8 的事實；0.1.9 發布後再改。
 3. plan.md 的「Linux 發行建置（`-musl`）全靜態」方塊：等 linux-x86_64-musl 的整套測試在 CI 上通過才勾。
 
+## ~~v0.1.9~~ 已出貨
+
+### 2026-11-04：v0.1.9 出了，八個平台，第一次全由 release.yml 建置與發布
+
+`https://github.com/raliclo/csv2/releases/tag/v0.1.9`，tag 指向 `427bca3`，由 release.yml 執行 41836252844 的
+tag job 打上、在同一次執行裡建置與發布。內容：Linux 兩種（glibc 與 `-musl`）、新平台 macos-x86_64 與
+windows-arm64、SP、SO、Windows 改用 Swift 6.4.2（見 `release-notes/0.1.9.md` 與 known-defects.md）。
+
+| 平台 | runner | build id | 套件 | 封存 sha256 |
+|---|---|---|---|---|
+| Linux x86_64（glibc） | ubuntu-24.04，swift:6.4.2-noble | `v0.1.9 / 427bca31` | 1574/0/3 | `4e354133…` |
+| Linux aarch64（glibc） | ubuntu-24.04-arm | `v0.1.9 / 427bca31` | 1574/0/3 | `b113a360…` |
+| Linux x86_64 musl | ubuntu-24.04 | `v0.1.9 / 427bca31` | 1575/0/3 | `d67731c8…` |
+| Linux aarch64 musl | ubuntu-24.04-arm | `v0.1.9 / 427bca31` | 1575/0/3 | `25ccf125…` |
+| macOS x86_64 | macos-26-intel，Swift 6.3.3 | `v0.1.9 / 427bca31` | 1577/0/1 | `6f37efc3…` |
+| macOS arm64 | macos-26，Swift 6.3.3 | `v0.1.9 / 427bca31` | 1577/0/1 | `9387eac2…` |
+| Windows x86_64 | windows-2025，Swift 6.4.2 | `v0.1.9 / 427bca31` | 未跑（release.zsh 解開、執行、讀 CSV） | `2b34d884…` |
+| Windows arm64 | windows-11-arm，Swift 6.4.2 | `v0.1.9 / 427bca31` | 未跑（同上） | `6f8dae0e…` |
+
+- **發布由 release.yml 的 publish job 執行**：雲端 session 推不了 tag（git 403），經 API 建 tag 或 release 也被
+  proxy 拒絕，所以以 `release_version` 觸發 workflow，由它的 GITHUB_TOKEN 打 tag，並在最後一個 job 執行
+  publish.zsh。publish.zsh 先建草稿、16 個資產逐一上傳後讀回比對，才公開，接著從公開 URL 重新下載比對 8 份封存。
+- **到發布成功之前失敗了三次，都沒有發出任何東西**：一次是六份封存時被取消（使用者改要八份）；一次是 T239a
+  （release_build_notes.zsh 寫死了 Windows 架構名）；一次是 runner 上較新的 gh 拒絕輸出含跳脫序列的 job log，
+  改用 curl。三次之間 `v0.1.9` tag 以 `retag_unreleased` 移動過兩次，每次都先確認沒有任何 release 或草稿。
+- **Formula/scoop**：publish job 改寫並提交 `87c684c`（macOS arm64、Linux 兩個 `-musl`、Windows x86_64）；使用者
+  要求之後，`d455b1d` 依實際 hash 補上 macos-x86_64 與 windows-arm64。
+- **節點升級沒有做**：這次沒有逐一在節點上 `brew upgrade` 或替換 PATH 上的那一份；guest 的 prebuilt 歸 LinuxCS-M4。
+- **Windows 的整套測試沒有在 CI 跑**；v0.1.8 是在 Ralic-W11 上跑的 1537/0/19。這次只有 release.zsh 的「解開、執行、
+  讀 CSV」。若要相同的保證，需要在 Windows 節點上對 0.1.9 跑一次整套測試。
+
 ## ~~v0.1.8~~ 已出貨
 
 ### 2026-10-29：v0.1.8 出了，四個平台，五個節點都升級了
