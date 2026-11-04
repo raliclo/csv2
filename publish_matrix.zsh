@@ -197,6 +197,31 @@ extra=$(cd -- "$tmp" && find . -type f -name '*.tar.zst' | sed 's|.*/||' | sort 
     print -u2 -- "這次執行產生了這支腳本沒有預期的封存：${extra//$'\n'/ }"
     exit 1
 }
+# The build-and-suites line for the release notes, GENERATED from this run:
+# each job's own log says its PASS/FAIL/SKIP, so nothing is transcribed. A
+# Linux or macOS job without that line refuses; Windows does not run the suite
+# in CI, and the line says so rather than leaving a gap that reads as a pass.
+# release notes 的「建置與測試結果」那一行，由這次執行**產生**：每個 job 自己的 log 說了它的
+# PASS/FAIL/SKIP，因此沒有任何東西是手抄的。Linux 或 macOS 的 job 沒有那一行就拒絕；Windows 在 CI 裡
+# 不跑整套測試，這一行就照實說，而不是留下一個看起來像通過的空白。
+swift_win=$(sed -n 's/^ *SWIFT_VERSION: *"\([0-9.]*\)".*/\1/p' .github/workflows/$WORKFLOW | head -1)
+typeset -a suites_en suites_zh
+for plat in $PLATFORMS; do
+    [[ $plat == windows-* ]] && continue
+    job=$(gh api "repos/$REPO/actions/runs/$run_id/jobs?per_page=50" --jq ".jobs[] | select(.name == \"$plat\") | .id")
+    [[ $job == <-> ]] || { print -u2 -- "no job named $plat in run $run_id / 執行 $run_id 裡沒有名為 $plat 的 job"; exit 1 }
+    counts=$(gh api "repos/$REPO/actions/jobs/$job/logs" | LC_ALL=C grep -a -oE 'PASS [0-9]+ +FAIL [0-9]+ +SKIP [0-9]+' | tail -1 || true)
+    [[ -n $counts ]] || { print -u2 -- "the $plat job's log has no suite summary / $plat 的 log 裡沒有測試摘要"; exit 1 }
+    c=(${=counts})
+    suites_en+=("$plat $c[2]/$c[4]/$c[6]")
+    suites_zh+=("$plat $c[2]/$c[4]/$c[6]")
+done
+{
+    print -r -- "Built at \`$TAG / ${TAG_SHA[1,8]}\` by [release.yml run $run_id](https://github.com/$REPO/actions/runs/$run_id), each platform on a runner of its own. Suites (pass/fail/skip): ${(j:, :)suites_en}. On windows-x86_64 and windows-arm64 the suite does not run in CI; release.zsh extracted each archive, ran the binary and had it read a CSV. Windows needs the Swift $swift_win runtime."
+    print -r -- ""
+    print -r -- "每個平台都在它自己的 runner 上、於 \`$TAG / ${TAG_SHA[1,8]}\` 由 [release.yml 執行 $run_id](https://github.com/$REPO/actions/runs/$run_id) 建置。測試（通過/失敗/略過）：${(j:、:)suites_zh}。windows-x86_64 與 windows-arm64 在 CI 裡不跑整套測試；release.zsh 解開了每一份封存、執行了執行檔，並讓它讀一個 CSV。Windows 需要 Swift $swift_win runtime。"
+} > "$tmp/csv2-$VERSION-build.md"
+want+=("$tmp/csv2-$VERSION-build.md")
 cp -- $want "$DIST/"
 say "  downloaded into dist/ / 已下載到 dist/："
 for plat in $PLATFORMS; do say "    csv2-$VERSION-$plat.tar.zst"; done
