@@ -38,8 +38,15 @@ for plat in $PLATFORMS; do
     suites_en+=("$plat $c[2]/$c[4]/$c[6]")
     suites_zh+=("$plat $c[2]/$c[4]/$c[6]")
 done
+# The Windows names come from the platforms passed in, not from a literal: a
+# line naming an architecture this run did not build is LA, and T239 holds
+# every script to it.
+# Windows 的名字取自傳進來的平台清單，不寫成字面值：說出一個這次執行沒有建置的架構就是 LA，而 T239 要求
+# 每一支腳本都遵守它。
+wins=(${(M)PLATFORMS:#windows-*})
+(( ${#wins} )) || wins=(Windows)
 {
-    print -r -- "Built at \`$TAG / ${TAG_SHA[1,8]}\` by [release.yml run $run_id](https://github.com/$REPO/actions/runs/$run_id), each platform on a runner of its own. Suites (pass/fail/skip): ${(j:, :)suites_en}. On windows-x86_64 and windows-arm64 the suite does not run in CI; release.zsh extracted each archive, ran the binary and had it read a CSV. Windows needs the Swift $swift_win runtime."
+    print -r -- "Built at \`$TAG / ${TAG_SHA[1,8]}\` by [release.yml run $run_id](https://github.com/$REPO/actions/runs/$run_id), each platform on a runner of its own. Suites (pass/fail/skip): ${(j:, :)suites_en}. On ${(j: and :)wins} the suite does not run in CI; release.zsh extracted each archive, ran the binary and had it read a CSV. Windows needs the Swift $swift_win runtime."
     print -r -- ""
-    print -r -- "每個平台都在它自己的 runner 上、於 \`$TAG / ${TAG_SHA[1,8]}\` 由 [release.yml 執行 $run_id](https://github.com/$REPO/actions/runs/$run_id) 建置。測試（通過/失敗/略過）：${(j:、:)suites_zh}。windows-x86_64 與 windows-arm64 在 CI 裡不跑整套測試；release.zsh 解開了每一份封存、執行了執行檔，並讓它讀一個 CSV。Windows 需要 Swift $swift_win runtime。"
+    print -r -- "每個平台都在它自己的 runner 上、於 \`$TAG / ${TAG_SHA[1,8]}\` 由 [release.yml 執行 $run_id](https://github.com/$REPO/actions/runs/$run_id) 建置。測試（通過/失敗/略過）：${(j:、:)suites_zh}。${(j: 與 :)wins} 在 CI 裡不跑整套測試；release.zsh 解開了每一份封存、執行了執行檔，並讓它讀一個 CSV。Windows 需要 Swift $swift_win runtime。"
 } > "$out"
