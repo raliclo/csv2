@@ -14777,3 +14777,31 @@ b
 Reported by another session: on the unreleased develop, -update-where fails on every file with
 no header row. RQ's resolved-position token is understood by resolveColumn, but the headerless
 branch reads the column with Int(token) instead. T340 only used a file with a header.
+
+## SO. T212 的 SwiftPM 建置在 Swift 6.3.3 上失敗：那個 package 沒有宣告平台，而 `FileHandle.close()` 要 macOS 10.15
+
+來源：`.github/workflows/release.yml` 第 2 次執行（2026-11-04，`2c6103f`），macos-26 與 macos-26-intel 兩個 runner，
+映像的工具鏈是 `Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)`。節點（Swift 6.4）上 T212 一直通過。
+
+```console
+# macos-26-arm64
+FAIL  T212     |          `- note: add '@available' attribute to enclosing instance method 386 | } 387 |   / 實得如上
+# macos-26（Intel）
+FAIL  T212 1216 |     } 1217 | } [9/9] Compiling CSV2Core Width.swift  / 實得如上
+```
+
+T212 只印 `module_api.zsh` 輸出的最後三行，所以錯誤本文沒有留下來。**成因是推論，不是讀到的**：兩個行號落在子集裡
+僅有的兩處 `try? FileHandle.close()`——`src/Support.swift:385`（`Logger.close()`）與 `src/Core.swift:1215`
+（`ByteSource` 的 deinit）。會丟錯的 `close()` 是 macOS 10.15 才有的 API，而 `module_api.zsh` 寫出的
+`Package.swift` 沒有 `platforms`，SwiftPM 6.3 就以它的預設最低版本 macOS 10.13 編譯，於是要求
+`@available`。`swiftc` 的一般建置以主機的 macOS 為目標，所以不受影響；節點上的 SwiftPM 6.4 預設值顯然較高。
+
+這對用 SwiftPM 引用 CSV2Core 的用戶端（第 9 階段，SoftPCB）是真的：一個沒有宣告平台的 package，用 6.3 以前的
+工具鏈就建不起來。**計畫**：T212 的 package 明確宣告 `.macOS(.v10_15)`，讓結果不再取決於工具鏈的預設值；
+plan.md 第 9 階段寫明用戶端需要 macOS 10.15 以上。若下一次 CI 執行 T212 在 6.3.3 上通過，推論即成立。
+
+From CI run 2 on macos-26 runners (Swift 6.3.3): T212's SwiftPM build of the CSV2Core subset fails. The
+error text was cut to three lines; the line numbers point at the subset's two `try? FileHandle.close()`
+calls, an API from macOS 10.15, while the generated Package.swift declares no platform and SwiftPM 6.3
+defaults to macOS 10.13. Inferred, not read. Plan: declare `.macOS(.v10_15)` in T212's package and
+state the minimum for clients in plan.md phase 9; T212 passing on 6.3.3 confirms the inference.
