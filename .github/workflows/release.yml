@@ -1,0 +1,223 @@
+# Build, test and package csv2 for every platform it ships on.
+# 在 csv2 出貨的每一個平台上建置、測試與打包。
+#
+# Each target is built, tested and packaged ON ITS OWN RUNNER by the same
+# scripts a node runs by hand (compile_csv2.zsh, test/test_csv2.zsh,
+# release.zsh). That keeps release.zsh's rule: an archive is made where its
+# binary was built and run, so the version inside it was checked by running it.
+# 每個目標都在**它自己的 runner 上**，以節點手動執行的同一組腳本（compile_csv2.zsh、
+# test/test_csv2.zsh、release.zsh）建置、測試與打包。這守住了 release.zsh 的規則：封存在它的
+# 執行檔被建置與執行過的地方產生，因此裡面的版本是靠執行它檢查過的。
+#
+# This workflow does NOT publish. publish_matrix.zsh downloads the archives of
+# the run for a tag and hands them to publish.zsh, which checks every binary's
+# build id against the tag's commit, creates the release and rewrites
+# Formula/ and scoop/. One publisher, with the checks it already has.
+# 這個 workflow **不**發布。publish_matrix.zsh 下載某個 tag 那次執行的封存，交給 publish.zsh——
+# 它拿每個執行檔的 build id 與 tag 的 commit 比對、建立 release、改寫 Formula/ 與 scoop/。
+# 只有一個發布者，帶著它既有的檢查。
+#
+# Targets: {macos,windows} x {x86_64,arm64}, and linux-{x86_64,aarch64}-musl.
+# The Linux release archives are -musl only, fully static; the default glibc
+# build is what the Linux VM builds and tests, and is not published (the user,
+# 2026-11-04). Linux arm64 is named linux-aarch64, as on the nodes. No x86-32:
+# macOS has none and Swift ships no i686 toolchain for Windows or Linux.
+# 目標：{macos,windows} x {x86_64,arm64}，以及 linux-{x86_64,aarch64}-musl。Linux 發行封存只有
+# -musl，完全靜態；預設的 glibc 建置是 Linux VM 建置與測試的對象，不發布（使用者，2026-11-04）。
+# Linux arm64 命名為 linux-aarch64，與各節點一致。不建 x86-32：macOS 沒有，Swift 也沒有提供
+# Windows 或 Linux 的 i686 工具鏈。
+#
+# macOS runs on macos-26: on macos-15 the image's Swift was 6.1.2 and three
+# cases failed that pass on the nodes (run 1). The archive must come from the
+# OS and Swift the release is made with, not an older image's.
+# macOS 用 macos-26：macos-15 映像的 Swift 是 6.1.2，有三個在節點上會通過的案例失敗了（第 1 次
+# 執行）。封存必須來自發布所用的作業系統與 Swift，而不是一個較舊映像的。
+name: release-build
+
+on:
+  push:
+    tags: ["v*.*.*"]
+    # Branches only when something that changes a build changed, so a
+    # documentation commit does not start eight runners.
+    # 分支只在「會改變建置的東西」有變動時才觸發，免得一個只改文件的 commit 啟動八台 runner。
+    branches: ["**"]
+    paths:
+      - "src/**"
+      - "compile_csv2.zsh"
+      - "compile_csv2_linux.zsh"
+      - "compile_csv2_win.bat"
+      - "build_id.zsh"
+      - "release.zsh"
+      - "test/**"
+      - ".github/workflows/release.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "compile_csv2.zsh"
+      - "compile_csv2_linux.zsh"
+      - "compile_csv2_win.bat"
+      - "build_id.zsh"
+      - "release.zsh"
+      - "test/**"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SWIFT_VERSION: "6.4.2"
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-x86_64-musl,  runner: ubuntu-24.04,     container: "swift:6.4.2-noble", compile_args: "-musl" }
+          - { platform: linux-aarch64-musl, runner: ubuntu-24.04-arm, container: "swift:6.4.2-noble", compile_args: "-musl" }
+          - { platform: macos-x86_64,       runner: macos-26-intel }
+          - { platform: macos-arm64,        runner: macos-26 }
+          - { platform: windows-x86_64,     runner: windows-2025,     swift_arch: amd64 }
+          - { platform: windows-arm64,      runner: windows-11-arm,   swift_arch: arm64 }
+    steps:
+      # The suite's environment, as on the nodes (run 1):
+      #   - a UTF-8 locale, or zsh's ${(m)#} counts bytes and T19a measures wrong;
+      #   - xxd, which the suite calls;
+      #   - zsh as the account's login shell: install.zsh asks the ACCOUNT which
+      #     startup file to write, and T203 expects the zsh answer.
+      # 測試套件的環境，與各節點相同（第 1 次執行）：
+      #   - UTF-8 locale，否則 zsh 的 ${(m)#} 數的是位元組，T19a 會量錯；
+      #   - xxd，測試會呼叫它；
+      #   - 帳號的登入 shell 是 zsh：install.zsh 問的是**帳號**要寫哪個啟動檔，T203 期待 zsh 的答案。
+      - name: Tools (Linux) / 工具（Linux）
+        if: runner.os == 'Linux'
+        run: |
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends git zsh zstd binutils python3 xxd locales
+          usermod -s "$(command -v zsh)" "$(id -un)"
+          echo LANG=C.UTF-8 >> "$GITHUB_ENV"
+          echo LC_ALL=C.UTF-8 >> "$GITHUB_ENV"
+
+      # The SDK must match swiftc exactly. Checksum from swift.org, the same one
+      # multissh's CI uses for this version.
+      # SDK 必須與 swiftc 完全相符。checksum 取自 swift.org，與 multissh 的 CI 對這個版本用的相同。
+      - name: Static Linux SDK (musl) / Static Linux SDK（musl）
+        if: matrix.compile_args == '-musl'
+        run: |
+          swift sdk install \
+            "https://download.swift.org/swift-${SWIFT_VERSION}-release/static-sdk/swift-${SWIFT_VERSION}-RELEASE/swift-${SWIFT_VERSION}-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz" \
+            --checksum 3786b179936d9cc9e266dd506bd1654176358d7b25288e243359f4d17cc4dc5a
+          # Named rather than searched: where swiftpm keeps it varies by version
+          # (multissh run 11).
+          # 直接指名而不靠搜尋：swiftpm 把它放在哪裡隨版本而異（multissh 第 11 次執行）。
+          sdk=$(find / -type d -name swift-linux-musl -path "*swift-${SWIFT_VERSION}-RELEASE_static-linux*" 2>/dev/null | head -1)
+          [ -n "$sdk" ] || { echo "installed SDK not found / 找不到已安裝的 SDK"; exit 1; }
+          echo "SWIFT_STATIC_SDK=$sdk" >> "$GITHUB_ENV"
+
+      - name: Tools (macOS) / 工具（macOS）
+        if: runner.os == 'macOS'
+        run: |
+          command -v zstd >/dev/null || brew install zstd
+          swiftc --version
+
+      - name: Swift (Windows) / Swift（Windows）
+        if: runner.os == 'Windows'
+        uses: compnerd/gha-setup-swift@main
+        with:
+          build_arch: ${{ matrix.swift_arch }}
+          branch: swift-${{ env.SWIFT_VERSION }}-release
+          tag: ${{ env.SWIFT_VERSION }}-RELEASE
+
+      - name: zsh (Windows) / zsh（Windows）
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          path-type: inherit
+          install: zsh zstd tar
+
+      # LF on Windows too: a CRLF checkout breaks every zsh script. The .bat
+      # keeps CRLF through .gitattributes.
+      # Windows 上也用 LF：CRLF 的 checkout 會讓每個 zsh 腳本壞掉。.bat 透過 .gitattributes 保持 CRLF。
+      - name: LF line endings / LF 換行
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.autocrlf false
+
+      # Full history and tags: the build id comes from `git describe` (build_id.zsh).
+      # 完整歷史與 tag：build id 來自 `git describe`（build_id.zsh）。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The container runs as root over a checkout owned by the runner user, and
+      # git refuses a "dubious ownership" repository -- which build_id.zsh would
+      # turn into a refusal to guess the id.
+      # 容器以 root 執行，而 checkout 屬於 runner 使用者；git 會拒絕「dubious ownership」的
+      # repository——build_id.zsh 會把那變成「拒絕用猜的產生 id」。
+      - name: safe.directory
+        shell: bash
+        run: git config --global --add safe.directory '*'
+
+      # Two lines, not `a && b`: bash -e does not stop on a failure inside an
+      # && list (multissh run 11).
+      # 分兩行而非 `a && b`：bash -e 不會因 && 串列中的失敗而停止（multissh 第 11 次執行）。
+      - name: Build / 建置
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          zsh ./compile_csv2.zsh ${{ matrix.compile_args }}
+          ls -l release/csv2
+
+      - name: Build (Windows) / 建置（Windows）
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          zsh ./compile_csv2.zsh
+          ls -l release/csv2.exe
+
+      # The whole suite, against the binary just built, on every Linux and
+      # macOS target -- the musl ones included, since a different libc is
+      # exactly where a CSV tool's behaviour could change unseen.
+      # 整套測試，對剛建好的執行檔，在每一個 Linux 與 macOS 目標上執行——包括 musl，因為換一套 libc
+      # 正是一個 CSV 工具的行為可能在沒人看見時改變的地方。
+      - name: Test / 測試
+        if: runner.os != 'Windows'
+        shell: bash
+        run: zsh ./test/test_csv2.zsh
+
+      - name: Package / 打包
+        if: runner.os != 'Windows'
+        shell: bash
+        run: zsh ./release.zsh
+
+      - name: Package (Windows) / 打包（Windows）
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: zsh ./release.zsh
+
+      # The name release.zsh read out of the binary must be the platform this
+      # job builds; a mismatch would upload one platform under another's name.
+      # musl archives must also hold a static executable.
+      # release.zsh 從執行檔讀出的名字必須就是這個 job 要建的平台；不一致會把一個平台以另一個的
+      # 名字上傳。musl 封存裡還必須是靜態執行檔。
+      - name: Check platform / 檢查平台
+        shell: bash
+        run: |
+          set -e
+          ls -l dist/
+          ls dist/csv2-*-${{ matrix.platform }}.tar.zst dist/csv2-*-${{ matrix.platform }}.tar.zst.sha256
+          n=$(ls dist/*.tar.zst | wc -l)
+          [ "$n" -eq 1 ] || { echo "expected one archive, found $n / 預期一份封存，找到 $n 份"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: csv2-${{ matrix.platform }}
+          path: |
+            dist/*.tar.zst
+            dist/*.tar.zst.sha256
+          if-no-files-found: error

@@ -98,9 +98,9 @@ built with 6.4.1, v0.1.4 with
 
 Requirements: Swift 6 with warnings treated as errors. The build uses plain
 Swift source files, Foundation, and Dispatch; it does not use SwiftPM or
-SwiftNIO. On Linux it also needs Swift's Static Linux SDK of the same version
-as the toolchain (`swift sdk install`, with the checksum swift.org lists); the
-build stops and names the one it needs when it is missing.
+SwiftNIO. The `-musl` build below also needs Swift's Static Linux SDK of the
+same version as the toolchain (`swift sdk install`, with the checksum swift.org
+lists); the build stops and names the one it needs when it is missing.
 
 ```zsh
 ./compile_csv2.zsh
@@ -138,6 +138,40 @@ script run over ssh needs to find it: a clean non-login shell has
 `/usr/local/bin` on its PATH and does not have `/opt/homebrew/bin`, which
 `path_helper` adds from `/etc/zprofile` for login shells only. install.zsh
 says which of the two you got.
+
+### A static Linux build: `-musl`
+
+```zsh
+./compile_csv2.zsh -musl
+```
+
+Linux only, and opt-in. It links csv2 fully static against musl with Swift's
+Static Linux SDK, so the binary runs on any Linux of its architecture with no
+Swift runtime and no particular glibc. It needs the Static Linux SDK that
+matches `swiftc` exactly; it is found where swift_tar and multissh look for it,
+or named with `SWIFT_STATIC_SDK` (the SDK's `swift-linux-musl` directory). The
+build refuses to finish if the result still names a program interpreter.
+
+**The default Linux build stays glibc.** That is what the Linux VM builds and
+tests (`compile_csv2_linux.zsh`), and `-musl` changes nothing there.
+`release.zsh` reads the platform out of the binary's own header, so a `-musl`
+build is packaged as `linux-<arch>-musl` beside the glibc archive rather than
+over it.
+
+### Publishing every platform
+
+```zsh
+./publish_matrix.zsh 0.1.9              # says what it would do
+./publish_matrix.zsh 0.1.9 --publish    # tag, wait for CI, download, ./publish.zsh
+```
+
+`.github/workflows/release.yml` builds, tests and packages six targets, each
+on a runner of its own platform: macOS and Windows on x86_64 and arm64, and
+`linux-x86_64-musl` and `linux-aarch64-musl`. Those two are the only Linux
+archives; the glibc build is not published. `publish_matrix.zsh` pushes the tag,
+waits for that run, refuses unless all six archives came back, and hands them
+to `publish.zsh`, which does the rest with the checks it already has.
+`--fetch` stops after the download.
 
 ## Formats
 

@@ -871,6 +871,65 @@ after that first one was sound and faithfully inherited a false premise. The
 lesson is one sentence: ask the machine, not the file that describes it. It was
 booted at the time.
 
+## 多平台發布與 `-musl` / Every platform from CI, and `-musl`（2026-11-04 起）
+
+Asked for on 2026-11-04: a `-musl` flag modelled on swift_tar and multissh, and a
+publish path covering {linux, macos, windows} x {x86_64, arm64}. The user then
+settled the libc question (after 64f5fec had made every Linux build musl): the
+Linux VM and the default build stay glibc, and the Linux release archives are
+`-musl` only. Six archives per release.
+
+2026-11-04 要求：比照 swift_tar 與 multissh 加上 `-musl`，並讓發布涵蓋 {linux, macos, windows} x
+{x86_64, arm64}。之後使用者定案了 libc（在 64f5fec 把所有 Linux 建置改成 musl 之後）：Linux VM 與預設
+建置維持 glibc，Linux 發行封存只有 `-musl`。每次發布六份封存。
+
+**Done / 已做：**
+
+- `compile_csv2.zsh -musl`（或 `--musl`）：僅限 Linux，轉交 `compile_csv2_linux.zsh`；在其他平台上拒絕
+  而不是忽略。`compile_csv2_linux.zsh` 預設回到 RJ 的 glibc；`-musl` 才走 64f5fec 的 musl 流程，而且沒有
+  `readelf` 時拒絕（64f5fec 原本是略過檢查）。
+- `release.zsh`：平台改從**執行檔的檔頭**讀（ELF e_machine 與 PT_INTERP、Mach-O cputype、PE machine），
+  不再用 `uname`。原因：Windows arm64 上 MSYS2 以 x64 模擬，`uname -m` 說 x86_64（multissh 2026-11-04
+  遇過）；`uname` 分不出 glibc 與 musl；Rosetta 下的 shell 也說 x86_64。認不得的格式（含 universal
+  Mach-O、32 位元 PE）一律拒絕。本機以 `/bin/ls`、`gcc -static` 的執行檔與手工組出的 Mach-O／PE 檔頭
+  驗證過每一個分支。平台判定放在版本檢查**之後**（第 1 次 CI 執行時 T322b/c/f 因順序與措辭而失敗）。
+- `compile_csv2_win.bat`：依 `swiftc -print-target-info` 的 triple 選 `vcvarsarm64.bat` 或
+  `vcvars64.bat`。第 1 次 CI 執行：windows-arm64 與 windows-x86_64 都建置並打包成功。
+- `.github/workflows/release.yml`：六個目標各在自己平台的 runner 上建置、（Linux 與 macOS）跑整套測試、
+  `release.zsh` 打包；**不發布**。
+- `publish_matrix.zsh <X.Y.Z> [--fetch|--publish]`：先做 publish.zsh 的拒絕（在推送 tag、啟動 runner
+  之前）、推 tag、等 CI、下載、要求**恰好**六份、再 `exec ./publish.zsh --publish`。以假 `gh` 模擬過：
+  缺一份、多一份、CI 失敗、dist/ 已有檔案、tag 指向別的 commit——全部拒絕；全部齊全時放進 dist/。
+- `publish.zsh`：拒絕 glibc 的 Linux 封存；第一次 `-musl` 發布時把 Formula 裡 `linux-<arch>.tar.zst`
+  那一筆改寫成 `-musl`，之後直接沿用。在 Formula 副本上模擬過連續兩次發布。
+- T329 依執行檔分流：有程式直譯器 → glibc 的檢查（RJ）；沒有 → a–d。
+
+**CI run 1 (2026-11-04, 8 targets, before the libc decision) / 第 1 次 CI 執行：**
+
+- musl 兩個 job 編譯失敗於 `RLIMIT_NOFILE.rawValue`——那正是 f151afe 修掉的，rebase 後已包含。
+- glibc Linux 的套件失敗：T19a（容器沒有 UTF-8 locale，zsh 的 `${(m)#}` 數位元組）、T203（root 的登入
+  shell 不是 zsh）、`xxd` 不存在——都是環境，已在 workflow 補上。T322b/c/f 是我造成的，已修。
+- macOS 15 runner（Swift 6.1.2）：T212（`if #available`）、T276b、T352a（就地編輯後出現兩個 BOM）。
+  節點（macOS 26、Swift 6.4）上這三個都通過，所以 runner 改為 macos-26。**若 macos-26 上仍失敗，
+  它們就是 csv2 在那個環境的缺陷，要先寫進 `todo/known-defects.md` 再修。** T352a 尤其值得注意：
+  它表示某個 Foundation 版本下就地編輯會多寫一個 BOM。
+
+**Considered and rejected / 考慮過但否決：**
+
+- 讓 CI 自己建立 release（multissh 的做法）。否決：publish.zsh 已經是唯一的發布者，並拿每個執行檔的
+  build id 與 commit 比對（T312）；第二個發布者就是第二套檢查。
+- `release.zsh -musl` 旗標。否決：release.zsh 不收引數（RB），而平台可以從執行檔本身讀出（QI）。
+- Windows 上用 `PROCESSOR_ARCHITECTURE` 判斷 arm64。否決：在 MSYS2 的 x64 模擬下它可能說 AMD64。
+- 同時發布 glibc 與 musl 的 Linux 封存。否決：使用者選了只發布 musl。
+
+**Not yet done / 尚未完成：**
+
+1. macos-x86_64 與 windows-arm64 在 Formula／scoop 裡沒有條目；publish.zsh 會發布它們，但改寫套件檔時
+   說「no entry, leaving it alone」。要加條目需要第一次多平台發布之後的真實 url 與 sha256。Formula 上方
+   「macOS x86_64 刻意缺席」的理由屆時也要改寫：CI 的 macos-26-intel 正是「在產生它的地方執行過」。
+2. README 的「安裝發行版」仍寫四份封存，那是 v0.1.8 的事實；0.1.9 發布後再改。
+3. plan.md 的「Linux 發行建置（`-musl`）全靜態」方塊：等 linux-x86_64-musl 的整套測試在 CI 上通過才勾。
+
 ## ~~v0.1.8~~ 已出貨
 
 ### 2026-10-29：v0.1.8 出了，四個平台，五個節點都升級了

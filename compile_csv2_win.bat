@@ -54,6 +54,21 @@ if errorlevel 1 (
 :: current-directory lookup for everything vcvars runs from the repo root,
 :: which is what the variable exists to prevent. Appending cannot shadow
 :: anything already on PATH. QK.
+:: The MSVC environment must match the machine swiftc targets. vcvars64.bat sets
+:: up x64 libraries, and an arm64 swiftc linking against them fails, so on
+:: Windows arm64 it is vcvarsarm64.bat. The answer comes from swiftc's own
+:: target, not from PROCESSOR_ARCHITECTURE: under MSYS2, which runs
+:: x64-emulated on arm64, the environment can say AMD64 there (multissh,
+:: 2026-11-04). Chinese text: release.zsh, beside binary_platform.
+set "_vcvars=vcvars64.bat"
+set "_vccomp=Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+set "_triple="
+for /f "usebackq delims=" %%T in (`swiftc -print-target-info ^| findstr /c:"triple"`) do if not defined _triple set "_triple=%%T"
+echo !_triple! | findstr /c:"aarch64" > nul
+if not errorlevel 1 (
+    set "_vcvars=vcvarsarm64.bat"
+    set "_vccomp=Microsoft.VisualStudio.Component.VC.Tools.ARM64"
+)
 set "_vsinstaller=C:\Program Files (x86)\Microsoft Visual Studio\Installer"
 set "_vswhere=%_vsinstaller%\vswhere.exe"
 where cl.exe > nul 2>&1
@@ -64,17 +79,17 @@ if errorlevel 1 (
         exit /b 1
     )
     set "_vsroot="
-    for /f "usebackq delims=" %%I in (`"%_vswhere%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "_vsroot=%%I"
+    for /f "usebackq delims=" %%I in (`"%_vswhere%" -latest -products * -requires !_vccomp! -property installationPath`) do set "_vsroot=%%I"
     if not defined _vsroot (
         echo [FAIL] MSVC C++ tools not found by vswhere.
         exit /b 1
     )
-    if not exist "!_vsroot!\VC\Auxiliary\Build\vcvars64.bat" (
-        echo [FAIL] vcvars64.bat not found under "!_vsroot!"
+    if not exist "!_vsroot!\VC\Auxiliary\Build\!_vcvars!" (
+        echo [FAIL] !_vcvars! not found under "!_vsroot!"
         exit /b 1
     )
     set "PATH=!PATH!;!_vsinstaller!"
-    call "!_vsroot!\VC\Auxiliary\Build\vcvars64.bat" > nul
+    call "!_vsroot!\VC\Auxiliary\Build\!_vcvars!" > nul
 )
 
 :: The build identity, produced before the list that names it is read. Same

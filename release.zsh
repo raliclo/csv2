@@ -74,12 +74,105 @@ else
     exit 1
 fi
 
-case "$(uname -s)" in
-    Darwin)                        OS=macos ;;
-    Linux)                         OS=linux ;;
-    MSYS*|MINGW*|CYGWIN*|Windows*) OS=windows ;;
-    *)                             OS=$(uname -s | tr '[:upper:]' '[:lower:]') ;;
-esac
+# ---------------------------------------------------------------------
+# The platform comes from the BINARY's own header, not from uname, for the same
+# reason the version does (QI): uname describes the shell that runs this
+# script, and that is not always the machine the binary is for.
+#
+#   - Windows on arm64: MSYS2 runs x64-emulated there and `uname -m` says
+#     x86_64, so an arm64 csv2.exe would be uploaded under the x86_64 name.
+#     multissh met this on 2026-11-04 and reads the compiler's target instead;
+#     the PE header is the same answer without asking a compiler.
+#   - Linux with -musl: uname cannot tell glibc from musl. A binary with no
+#     PT_INTERP is the static musl build (compile_csv2.zsh -musl); every glibc
+#     build names ld-linux as its interpreter, -static-stdlib or not. (A fully
+#     static GLIBC build would be named -musl too; no script here makes one,
+#     and Foundation does not support it.)
+#   - macOS under Rosetta: `uname -m` says x86_64 in a translated shell.
+#
+# Read with `od`, which macOS, Linux and MSYS2 all have. Anything this does not
+# recognise is refused rather than named by guessing.
+#
+# 平台取自**執行檔自己的檔頭**，不取自 uname，理由與版本相同（QI）：uname 描述的是執行這支
+# 腳本的 shell，而那不一定就是這個執行檔所屬的機器。
+#
+#   - arm64 上的 Windows：MSYS2 在那裡以 x64 模擬執行，`uname -m` 說 x86_64，於是一個 arm64 的
+#     csv2.exe 會掛著 x86_64 的名字上傳。multissh 在 2026-11-04 遇過，改讀編譯器的 target；
+#     PE 檔頭給的是同一個答案，而不必去問編譯器。
+#   - 以 -musl 建置的 Linux：uname 分不出 glibc 與 musl。沒有 PT_INTERP 的執行檔就是靜態 musl
+#     建置（compile_csv2.zsh -musl）；每一個 glibc 建置，不論有無 -static-stdlib，都指名 ld-linux
+#     為 interpreter。（完全靜態的 **glibc** 建置也會被命名為 -musl；這裡沒有任何腳本會產生它，
+#     Foundation 也不支援。）
+#   - Rosetta 下的 macOS：被轉譯的 shell 裡 `uname -m` 說 x86_64。
+#
+# 以 `od` 讀取，macOS、Linux、MSYS2 都有。凡是這裡認不得的一律拒絕，不用猜的命名。
+# ---------------------------------------------------------------------
+# u_le <file> <offset> <bytes>: the unsigned little-endian integer there.
+# u_le <檔案> <位移> <位元組數>：那裡的無號 little-endian 整數。
+u_le() {
+    local -a b
+    local i
+    integer v=0
+    b=(${=$(od -An -tu1 -v -j "$2" -N "$3" -- "$1")})
+    (( ${#b} == $3 )) || return 1
+    for (( i = $3; i >= 1; i-- )); do (( v = v * 256 + b[i] )); done
+    print -r -- $v
+}
+# binary_platform <file>: prints <os>-<arch>[-musl], or fails.
+# binary_platform <檔案>：印出 <os>-<arch>[-musl]，否則失敗。
+binary_platform() {
+    local f=$1 magic
+    integer m phoff phentsize phnum i lfanew
+    magic=$(od -An -tx1 -v -N4 -- "$f" | tr -d ' \n')
+    case $magic in
+        7f454c46)   # ELF
+            [[ $(u_le "$f" 4 1) == 2 ]] || { print -u2 -- "not a 64-bit ELF"; return 1 }
+            m=$(u_le "$f" 18 2)
+            local arch
+            case $m in
+                62)  arch=x86_64 ;;    # EM_X86_64
+                183) arch=aarch64 ;;   # EM_AARCH64
+                *)   print -u2 -- "ELF e_machine $m is not one this project ships"; return 1 ;;
+            esac
+            phoff=$(u_le "$f" 32 8); phentsize=$(u_le "$f" 54 2); phnum=$(u_le "$f" 56 2)
+            (( phnum > 0 && phentsize > 0 )) || { print -u2 -- "ELF has no program headers"; return 1 }
+            for (( i = 0; i < phnum; i++ )); do
+                # PT_INTERP = 3: a dynamic executable, i.e. the glibc build.
+                # PT_INTERP = 3：動態執行檔，也就是 glibc 建置。
+                if [[ $(u_le "$f" $(( phoff + i * phentsize )) 4) == 3 ]]; then
+                    print -r -- linux-$arch
+                    return 0
+                fi
+            done
+            print -r -- linux-$arch-musl
+            ;;
+        cffaedfe)   # Mach-O 64-bit, little-endian
+            m=$(u_le "$f" 4 4)
+            case $m in
+                16777223) print -r -- macos-x86_64 ;;   # CPU_TYPE_X86_64 0x01000007
+                16777228) print -r -- macos-arm64 ;;    # CPU_TYPE_ARM64  0x0100000c
+                *)        print -u2 -- "Mach-O cputype $m is not one this project ships"; return 1 ;;
+            esac
+            ;;
+        4d5a*)      # MZ, then the PE header at e_lfanew
+            lfanew=$(u_le "$f" 60 4)
+            [[ $(od -An -tx1 -v -j $lfanew -N4 -- "$f" | tr -d ' \n') == 50450000 ]] || { print -u2 -- "MZ without a PE header"; return 1 }
+            m=$(u_le "$f" $(( lfanew + 4 )) 2)
+            case $m in
+                34404) print -r -- windows-x86_64 ;;   # IMAGE_FILE_MACHINE_AMD64 0x8664
+                43620) print -r -- windows-arm64 ;;    # IMAGE_FILE_MACHINE_ARM64 0xaa64
+                *)     print -u2 -- "PE machine $m is not one this project ships"; return 1 ;;
+            esac
+            ;;
+        *)
+            # Including cafebabe: a universal Mach-O names two platforms, and an
+            # archive is named for one.
+            # 包括 cafebabe：universal Mach-O 指名兩個平台，而一份封存只以一個命名。
+            print -u2 -- "unrecognised executable format (magic $magic)"
+            return 1
+            ;;
+    esac
+}
 # The binary is asked EVERY time, whatever the environment holds. VERSION is a
 # common name and CI sets it, so taking an inherited one would package a binary
 # under another version's name. RE.
@@ -109,8 +202,15 @@ if [[ -n $_env_version && $_env_version != "$VERSION" ]]; then
     print -r -u2 -- "環境裡設了 VERSION=$_env_version，而執行檔回報的是 $VERSION；封存以執行檔為準命名，請取消 VERSION 或重新建置"
     exit 1
 fi
-ARCH=$(uname -m)
-STEM=csv2-$VERSION-$OS-$ARCH
+# Asked AFTER the version checks, so a binary refused for its version is
+# refused for that, and named.
+# 在版本檢查**之後**才問，這樣一個因版本被拒絕的執行檔，被拒絕的理由就是版本，而且會被指名。
+if ! PLATFORM=$(binary_platform "$BIN"); then
+    print -u2 -- "cannot tell which platform $BIN was built for, so the archive would have no honest name"
+    print -u2 -- "看不出 $BIN 是為哪個平台建置的，因此這份封存沒有一個誠實的名字"
+    exit 1
+fi
+STEM=csv2-$VERSION-$PLATFORM
 ARCHIVE=$DIST/$STEM.tar.zst
 
 # ---------------------------------------------------------------------

@@ -228,6 +228,23 @@ ARCHIVES=("$DIST"/csv2-$VERSION-*.tar.zst(N))
     exit 1
 }
 
+# Linux archives are -musl only from v0.1.9 on (the user, 2026-11-04): the
+# glibc build is what the Linux VM builds and tests, not what is shipped. A
+# glibc archive collected from a node would otherwise go out beside the musl one
+# and, through the package files, replace it.
+# 從 v0.1.9 起，Linux 封存只有 -musl（使用者，2026-11-04）：glibc 建置是 Linux VM 建置與測試的
+# 對象，不是出貨的東西。否則一份從節點收來的 glibc 封存會與 musl 那份一起出去，並經由套件檔取代它。
+for a in $ARCHIVES; do
+    case ${a:t} in
+        *-linux-*-musl.tar.zst) ;;
+        *-linux-*)
+            print -u2 -- "${a:t} is a glibc Linux archive; Linux releases are built with ./compile_csv2.zsh -musl"
+            print -u2 -- "${a:t} 是 glibc 的 Linux 封存；Linux 發行版以 ./compile_csv2.zsh -musl 建置"
+            exit 1
+            ;;
+    esac
+done
+
 say "publish csv2 $VERSION as $TAG / 將 csv2 $VERSION 以 $TAG 發布"
 say "  commit  : $(git rev-parse --short HEAD)"
 say "  archives:"
@@ -501,11 +518,11 @@ rewrite_version() {   # $1 = file
     say "    ${file:t}: $old -> $VERSION on $n line(s)"
 }
 
-rewrite_pair() {   # $1 = file, $2 = archive basename, $3 = its sha256
+rewrite_pair() {   # $1 = file, $2 = archive basename, $3 = its sha256, [$4 = the platform name the file still uses]
     setopt local_options extended_glob
     local file=$1 base=$2 h=$3
     local url=$base_url/$base
-    local plat=${${base#csv2-$VERSION-}%.tar.zst}
+    local plat=${4:-${${base#csv2-$VERSION-}%.tar.zst}}
     [[ -n $plat && $plat != $base ]] || {
         print -u2 -- "cannot read a platform out of $base"
         print -u2 -- "無法從 $base 讀出平台名稱"
@@ -554,7 +571,16 @@ for a in $ARCHIVES; do
         *) continue ;;
     esac
     [[ -r $target ]] || continue
-    grep -q -- "${base##csv2-$VERSION-}" "$target" 2>/dev/null || {
+    # The first -musl release replaces the entry that still names the glibc
+    # archive (linux-<arch>.tar.zst); after that the entry names -musl itself.
+    # 第一次 -musl 發布時，取代仍指向 glibc 封存（linux-<arch>.tar.zst）的那一筆；之後那一筆就直接
+    # 指名 -musl。
+    entry=${${base##csv2-$VERSION-}%.tar.zst}
+    if [[ $entry == linux-*-musl ]] && ! grep -q -- "$entry.tar.zst" "$target" 2>/dev/null \
+       && grep -q -- "${entry%-musl}.tar.zst" "$target" 2>/dev/null; then
+        entry=${entry%-musl}
+    fi
+    grep -q -- "$entry.tar.zst" "$target" 2>/dev/null || {
         # The platform is not listed in that file. That is a decision, not an
         # oversight -- a platform whose archive could not be verified where it
         # was made is left out on purpose -- so say so and move on.
@@ -566,7 +592,7 @@ for a in $ARCHIVES; do
     would "rewrite ${target:t} for $base"
     if (( DO_PUBLISH )); then
         rewrite_version "$target"
-        rewrite_pair "$target" "$base" "${HASH[$base]}"
+        rewrite_pair "$target" "$base" "${HASH[$base]}" "$entry"
     fi
 done
 

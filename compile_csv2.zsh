@@ -16,6 +16,11 @@
 # Usage / 用法：
 #   ./compile_csv2.zsh            optimised build / 最佳化建置
 #   ./compile_csv2.zsh --debug    -Onone with assertions / 不最佳化、保留斷言
+#   ./compile_csv2.zsh -musl      Linux only: fully static against musl, for the
+#                                 release archives; the default stays glibc, which
+#                                 the Linux VM builds. See compile_csv2_linux.zsh.
+#                                 僅限 Linux：對 musl 完全靜態，供發行封存；預設仍是
+#                                 glibc，也就是 Linux VM 的建置。見 compile_csv2_linux.zsh。
 # =====================================================================
 set -e
 cd "$(dirname "$0")"
@@ -55,15 +60,22 @@ OPT="-O"
 for arg in "$@"; do
     case "$arg" in
         --debug) OPT="-Onone" ;;
+        # Both spellings, as in multissh. Refused off Linux rather than ignored:
+        # an ignored -musl hands release.zsh a binary the person believes static.
+        # 兩種寫法都收，與 multissh 相同。在 Linux 以外拒絕而不是忽略：被忽略的 -musl 會把一個
+        # 那個人以為是靜態的執行檔交給 release.zsh。
+        -musl|--musl)
+            [[ $HOST_KERNEL == Linux ]] || { print -u2 -- "-musl is for Linux only (this is $HOST_KERNEL) / -musl 僅限 Linux（這裡是 $HOST_KERNEL）"; exit 2 }
+            ;;
         *) echo "unknown option: $arg / 未知選項：$arg" >&2; exit 2 ;;
     esac
 done
 
-# Linux builds in one place: compile_csv2_linux.zsh links fully static against
-# musl and knows where the SDK lives. A second copy of that here is how the two
-# would drift. The swiftc on PATH is the toolchain it uses.
-# Linux 只在一個地方建置：compile_csv2_linux.zsh 對 musl 完全靜態連結，也知道 SDK 在哪裡。在這裡
-# 再寫一份，就是兩者開始分歧的方式。它用的是 PATH 上那個 swiftc 所屬的工具鏈。
+# Linux builds in one place: compile_csv2_linux.zsh builds glibc by default and
+# fully static musl with -musl, and knows where the SDK lives. A second copy of
+# that here is how the two would drift. The swiftc on PATH is the toolchain it uses.
+# Linux 只在一個地方建置：compile_csv2_linux.zsh 預設建置 glibc，加 -musl 時對 musl 完全靜態連結，
+# 也知道 SDK 在哪裡。在這裡再寫一份，就是兩者開始分歧的方式。它用的是 PATH 上那個 swiftc 所屬的工具鏈。
 if [[ $HOST_KERNEL == Linux ]]; then
     swiftc_path=$(command -v swiftc) || { print -u2 -- "swiftc not found on PATH / PATH 上找不到 swiftc"; exit 1 }
     SWIFT_PREFIX=${swiftc_path:A:h:h} SRC_DIR=${0:A:h} exec zsh "${0:A:h}/compile_csv2_linux.zsh" "$@"

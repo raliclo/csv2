@@ -17882,16 +17882,23 @@ echo
 echo "--- T329: the binary names no toolchain to find its runtime in / T329：執行檔不指望任何工具鏈目錄提供 runtime ---"
 # RJ. On Linux swiftc writes the toolchain's version-numbered path into RPATH,
 # so a dynamic binary stops running when the machine's Swift moves on. Linux
-# builds are fully static against musl (plan.md, "Linux 建置：musl"): no
-# program interpreter (a), no shared library at all, so no Swift runtime and no
-# glibc (b), no RPATH or RUNPATH (d), and it runs with an empty environment
-# (c). macOS asks the same question of its own format: no LC_RPATH,
+# has two builds (plan.md, "Linux 建置：musl"), and the binary says which it is:
+# with a program interpreter it is the default glibc build, which must have no
+# RPATH or RUNPATH (a) and no Swift runtime among its dependencies (b); without
+# one it is the -musl build, which must have no shared library at all, so no
+# Swift runtime and no glibc (b), and no RPATH or RUNPATH (d). Both run with an
+# empty environment (c). A -musl build that came out dynamic is not taken for
+# glibc unnoticed: compile_csv2_linux.zsh refuses it, and release.zsh names its
+# archive from the header, so it could not be published as -musl. macOS asks the same question of its own format: no LC_RPATH,
 # and every dependency under /usr/lib or /System, which the OS owns. Windows is
 # RC, a different answer (ship the DLLs), so it is not asked here.
 # RJ。Linux 上 swiftc 會把工具鏈帶版本號的路徑寫進 RPATH，機器上的 Swift 一換，動態連結的執行檔
-# 就跑不起來。Linux 建置對 musl 完全靜態（plan.md「Linux 建置：musl」）：沒有程式直譯器（a）、
-# 沒有任何共享函式庫，因此沒有 Swift runtime 也沒有 glibc（b）、沒有 RPATH／RUNPATH（d）、
-# 環境變數全空也能執行（c）。macOS 用它自己的格式問同一個問題：沒有
+# 就跑不起來。Linux 有兩種建置（plan.md「Linux 建置：musl」），由執行檔自己說明它是哪一種：有程式
+# 直譯器的是預設的 glibc 建置，必須沒有 RPATH／RUNPATH（a）、依賴裡沒有 Swift runtime（b）；沒有的
+# 是 -musl 建置，必須沒有任何共享函式庫，因此沒有 Swift runtime 也沒有 glibc（b），也沒有
+# RPATH／RUNPATH（d）。兩者都要在環境變數全空時能執行（c）。一個結果是動態的 -musl 建置不會被
+# 默默當成 glibc：compile_csv2_linux.zsh 會拒絕它，而 release.zsh 依檔頭為封存命名，所以它不可能以
+# -musl 之名發布。macOS 用它自己的格式問同一個問題：沒有
 # LC_RPATH，而且每一個依賴都在作業系統擁有的 /usr/lib 或 /System 底下。Windows 是 RC，答案不同
 # （把 DLL 一起帶上），所以這裡不問。
 case "$(uname -s 2>/dev/null)" in
@@ -17909,9 +17916,20 @@ case "$(uname -s 2>/dev/null)" in
             _t329=$(LC_ALL=C readelf -d "$CSV2" 2>&1)
             if [[ $_t329_l != *"Program Headers"* ]]; then
                 bad "T329 readelf could not read the binary, so nothing was checked: ${_t329_l[1,200]} / readelf 讀不了這個執行檔，等於什麼都沒查"
+            elif [[ $_t329_l == *INTERP* ]]; then
+                # The default glibc build (RJ). It has dependencies, so the guard
+                # is that readelf listed some.
+                # 預設的 glibc 建置（RJ）。它有依賴，所以把關的是 readelf 確實列出了一些。
+                if [[ $_t329 != *"(NEEDED)"* ]]; then
+                    bad "T329 a dynamic binary with no dependency listed, so nothing was checked: ${_t329[1,200]} / 一個動態執行檔卻一個依賴都沒列，等於什麼都沒查"
+                else
+                    assert_eq "$(print -r -- "$_t329" | grep -cE '\((RPATH|RUNPATH)\)' || true)" 0 \
+                        "T329a glibc build: no RPATH or RUNPATH / glibc 建置：沒有 RPATH 或 RUNPATH"
+                    assert_eq "$(print -r -- "$_t329" | grep '(NEEDED)' | grep -cE 'libswift|libFoundation|lib_Foundation|libdispatch|libBlocksRuntime' || true)" 0 \
+                        "T329b glibc build: no Swift runtime among the dependencies / glibc 建置：依賴裡沒有 Swift runtime"
+                fi
             else
-                assert_eq "$(print -r -- "$_t329_l" | grep -c 'INTERP' || true)" 0 \
-                    "T329a no program interpreter: it is a static executable / 沒有程式直譯器：是靜態執行檔"
+                ok "T329a musl build: no program interpreter, a static executable / musl 建置：沒有程式直譯器，是靜態執行檔"
                 assert_eq "$(print -r -- "$_t329" | grep -c '(NEEDED)' || true)" 0 \
                     "T329b no shared library at all, so no Swift runtime and no glibc / 沒有任何共享函式庫，因此沒有 Swift runtime 也沒有 glibc"
                 assert_eq "$(print -r -- "$_t329" | grep -cE '\((RPATH|RUNPATH)\)' || true)" 0 \

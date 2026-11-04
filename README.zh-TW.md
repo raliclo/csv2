@@ -79,8 +79,9 @@ runtime 跟著「那一版 release」走，不是跟著最新的 Swift：v0.1.5 
 ## 從原始碼建置與安裝
 
 需求：Swift 6，並將警告視為錯誤。建置使用純 Swift 原始檔、Foundation 與
-Dispatch，不使用 SwiftPM 或 SwiftNIO。在 Linux 上還需要與工具鏈同一版的 Swift Static Linux SDK
-（以 `swift sdk install` 安裝，附上 swift.org 列出的 checksum）；缺少時建置會停下，並指名它需要的那一份。
+Dispatch，不使用 SwiftPM 或 SwiftNIO。下面的 `-musl` 建置還需要與工具鏈同一版的
+Swift Static Linux SDK（以 `swift sdk install` 安裝，附上 swift.org 列出的 checksum）；缺少時建置會停下，
+並指名它需要的那一份。
 
 ```zsh
 ./compile_csv2.zsh
@@ -113,6 +114,34 @@ rc=0 **不代表** `csv2` 可以用名字執行：在 `--no-rc` 之下明確地�
 的目錄：一個乾淨的非登入 shell，PATH 裡有 `/usr/local/bin`，而**沒有** `/opt/homebrew/bin`
 ——後者是 `path_helper` 從 `/etc/zprofile` 加的，那只在登入 shell 執行。install.zsh 會說出
 你拿到的是哪一種。
+
+### 靜態的 Linux 建置：`-musl`
+
+```zsh
+./compile_csv2.zsh -musl
+```
+
+僅限 Linux，且需明確指定。它以 Swift 的 Static Linux SDK 把 csv2 對 musl 完全靜態連結，所以這個執行檔
+在該架構的任何 Linux 上都能執行，不需要 Swift runtime，也不挑 glibc 版本。它需要與 `swiftc` 完全相符的
+Static Linux SDK；會在 swift_tar 與 multissh 找的那些位置尋找，或以 `SWIFT_STATIC_SDK`（SDK 的
+`swift-linux-musl` 目錄）指定。結果若仍指名 program interpreter，建置會拒絕完成。
+
+**預設的 Linux 建置仍是 glibc。** 那是 Linux VM 建置與測試的對象（`compile_csv2_linux.zsh`），`-musl`
+在那裡什麼都不改變。`release.zsh` 從執行檔自己的檔頭讀出平台，所以 `-musl` 建置會被打包成
+`linux-<arch>-musl`，與 glibc 封存並存，而不是覆蓋它。
+
+### 發布所有平台
+
+```zsh
+./publish_matrix.zsh 0.1.9              # 說出它會做什麼
+./publish_matrix.zsh 0.1.9 --publish    # 打 tag、等 CI、下載、./publish.zsh
+```
+
+`.github/workflows/release.yml` 建置、測試並打包六個目標，每一個都在它自己平台的 runner 上：x86_64 與
+arm64 上的 macOS、Windows，以及 `linux-x86_64-musl` 與 `linux-aarch64-musl`。這兩個是唯一的 Linux 封存，
+glibc 建置不發布。`publish_matrix.zsh` 推送 tag、等那次
+執行完成、六份封存沒有全部回來就拒絕，然後交給 `publish.zsh`，由它以既有的檢查完成其餘步驟。`--fetch`
+在下載後就停止。
 
 ## 格式
 

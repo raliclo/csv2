@@ -27,8 +27,9 @@
 # Expected in the guest / guest 內預期存在：
 #   /workspace/opt/swift/usr/bin/swiftc    Swift toolchain
 #   /workspace/csv2/src/*.swift            source, injected by the host driver
-#   the Static Linux SDK (musl) of the SAME Swift version, found in this order:
-#   與工具鏈「同一版」的 Static Linux SDK（musl），依序尋找：
+#   with -musl only: the Static Linux SDK (musl) of the SAME Swift version,
+#   found in this order:
+#   僅 -musl 時：與工具鏈「同一版」的 Static Linux SDK（musl），依序尋找：
 #     $SWIFT_STATIC_SDK                    its swift-linux-musl directory / 它的 swift-linux-musl 目錄
 #     $SWIFT_SDKS_PATH, /workspace/opt/swift-sdks, ~/.swiftpm/swift-sdks
 #                                          where `swift sdk install` puts it / `swift sdk install` 放的位置
@@ -39,7 +40,8 @@
 # Output / 輸出：$SRC_DIR/release/csv2  (a native Linux ELF / 原生 Linux ELF)
 #
 # Usage / 用法：
-#   zsh /workspace/csv2/compile_csv2_linux.zsh
+#   zsh /workspace/csv2/compile_csv2_linux.zsh          glibc, as the VM builds / glibc，VM 的建置
+#   zsh /workspace/csv2/compile_csv2_linux.zsh -musl    fully static, for release archives / 全靜態，供發行封存
 #   SRC_DIR=/elsewhere zsh compile_csv2_linux.zsh
 # =====================================================================
 set -eu
@@ -56,9 +58,11 @@ die() { print -u2 -- "compile_csv2_linux: $*"; exit 1 }
 cd "$SRC_DIR"
 
 OPT="-O"
+MUSL=0
 for arg in "$@"; do
     case "$arg" in
         --debug) OPT="-Onone" ;;
+        -musl|--musl) MUSL=1 ;;
         *) die "unknown option: $arg / 未知選項：$arg" ;;
     esac
 done
@@ -112,83 +116,107 @@ mkdir -p release
 # 說出**量到**的，而不是假設的。見檔首的 LA。
 HOST_UNAME=$(uname -sm)
 print -- "Building csv2 for $HOST_UNAME ($OPT) / 正在為 $HOST_UNAME 建置 csv2（$OPT）"
-# Fully static against musl, with Swift's Static Linux SDK: no program
-# interpreter and no shared library at all, so the binary runs on any Linux of
-# its architecture, whatever its libc and whatever Swift it has. The user
-# decided this on 2026-11-04 (plan.md, "Linux 建置：musl"). It replaces RJ's
-# glibc -static-stdlib build, which still needed the machine's glibc. Measured
-# on WSL x86_64 with Swift 6.4.1: 56,581,048 bytes stripped against glibc's
-# 58,694,944. Most of either is Foundation and its ICU data.
-# 以 Swift 的 Static Linux SDK 對 musl 完全靜態連結：沒有程式直譯器、也沒有任何共享函式庫，
-# 所以在同架構的任何 Linux 上都能執行，不論它的 libc 與 Swift 是哪一版。2026-11-04 使用者決定
-# （plan.md「Linux 建置：musl」），取代 RJ 的 glibc 加 -static-stdlib——那仍需要機器上的 glibc。
-# WSL x86_64、Swift 6.4.1 實測：strip 後 56,581,048 bytes，glibc 版 58,694,944。兩者大部分都是
-# Foundation 與它的 ICU 資料。
+# Two builds, chosen by -musl. The user decided on 2026-11-04 -- first that
+# Linux goes musl (64f5fec), then, the same day, that the VM keeps glibc and
+# only the release archives are musl. So:
 #
-# The SDK must be the toolchain's own version: Swift has no ABI stability on
-# Linux, and the SDK carries the static runtime the compiler links in. No
-# fallback to glibc when it is missing -- a build that quietly changed what it
-# produces is the failure this project exists to refuse.
-# SDK 必須與工具鏈同一版：Swift 在 Linux 上沒有 ABI 穩定性，而 SDK 帶著編譯器要連進去的靜態
-# runtime。找不到時**不**退回 glibc——一個安靜地改變產物的建置，正是這個專案存在所要拒絕的失敗。
-ARCH=$(uname -m)
-# `swiftc --version` drops a trailing .0 -- 6.4.0 says "Swift version 6.4
-# (swift-6.4-RELEASE)" -- while the SDK is named swift-6.4.0-RELEASE, so the
-# version is read as numbers and given three parts.
-# `swiftc --version` 會省略結尾的 .0——6.4.0 印的是「Swift version 6.4 (swift-6.4-RELEASE)」——
-# 而 SDK 的名字是 swift-6.4.0-RELEASE，所以版本以數字讀出，並補成三段。
-[[ $("$SWIFTC" --version 2>&1) =~ 'Swift version ([0-9]+)\.([0-9]+)(\.([0-9]+))?' ]] ||
-    die "cannot read the Swift version from $SWIFTC --version / 無法從 $SWIFTC --version 讀出 Swift 版本"
-SWIFT_TAG=swift-$match[1].$match[2].${match[4]:-0}-RELEASE
-if [[ -n ${SWIFT_STATIC_SDK:-} ]]; then
-    sdk_roots=($SWIFT_STATIC_SDK(N/))
+#   default  glibc with -static-stdlib (RJ): what the Linux VM builds and tests.
+#   -musl    fully static against musl: what release.yml builds for the
+#            linux-<arch>-musl archives, the only Linux archives published.
+#
+# 兩種建置，由 -musl 選擇。使用者在 2026-11-04 先決定 Linux 改用 musl（64f5fec），同一天又決定
+# VM 維持 glibc、只有發行封存用 musl。因此：
+#
+#   預設   glibc 加 -static-stdlib（RJ）：Linux VM 建置與測試的對象。
+#   -musl  對 musl 完全靜態：release.yml 為 linux-<arch>-musl 封存建置的，也是唯一發布的 Linux 封存。
+if (( ! MUSL )); then
+    # RJ: Swift linked statically so the binary survives a toolchain change;
+    # glibc, libstdc++ and libgcc_s still come from the machine.
+    # RJ：靜態連結 Swift，讓執行檔撐得過工具鏈更換；glibc、libstdc++ 與 libgcc_s 仍來自機器。
+    "$SWIFTC" -swift-version 6 -warnings-as-errors $OPT -static-stdlib -o release/csv2 $SOURCES
+    [[ $OPT == -O ]] && strip release/csv2
 else
-    sdk_roots=()
-    for base in ${SWIFT_SDKS_PATH:-} /workspace/opt/swift-sdks $HOME/.swiftpm/swift-sdks; do
-        [[ -n $base ]] && sdk_roots+=($base/${SWIFT_TAG}_static-linux-*.artifactbundle/*/swift-linux-musl(N/))
-    done
-    sdk_roots=(${(u)sdk_roots})
-fi
-if (( ${#sdk_roots} == 0 )); then
-    print -ru2 -- "compile_csv2_linux: no Static Linux SDK for $SWIFT_TAG / 找不到 $SWIFT_TAG 的 Static Linux SDK"
-    print -ru2 -- "  install the one for this exact version, with the checksum swift.org lists for it:"
-    print -ru2 -- "  請安裝與工具鏈完全同版的那一份，並附上 swift.org 為它列出的 checksum："
-    print -ru2 -- "    swift sdk install https://download.swift.org/${${SWIFT_TAG:l}%-release}-release/static-sdk/$SWIFT_TAG/${SWIFT_TAG}_static-linux-0.1.0.artifactbundle.tar.gz --checksum <sha256>"
-    print -ru2 -- "  or set SWIFT_STATIC_SDK to its swift-linux-musl directory / 或把 SWIFT_STATIC_SDK 設為它的 swift-linux-musl 目錄"
-    exit 1
-fi
-(( ${#sdk_roots} == 1 )) ||
-    die "more than one Static Linux SDK for $SWIFT_TAG: ${sdk_roots[*]}; set SWIFT_STATIC_SDK / $SWIFT_TAG 的 Static Linux SDK 不只一份，請設定 SWIFT_STATIC_SDK"
-sysroot=(${sdk_roots[1]}/musl-*.sdk/$ARCH(N/))
-(( ${#sysroot} == 1 )) || die "no musl-*.sdk/$ARCH under ${sdk_roots[1]} / ${sdk_roots[1]} 底下沒有 musl-*.sdk/$ARCH"
-SYSROOT=${sysroot[1]}
-print -- "  sdk: $SYSROOT"
+    # Fully static against musl, with Swift's Static Linux SDK: no program
+    # interpreter and no shared library at all, so the binary runs on any Linux of
+    # its architecture, whatever its libc and whatever Swift it has. The user
+    # decided this on 2026-11-04 (plan.md, "Linux 建置：musl"). It replaces RJ's
+    # glibc -static-stdlib build, which still needed the machine's glibc. Measured
+    # on WSL x86_64 with Swift 6.4.1: 56,581,048 bytes stripped against glibc's
+    # 58,694,944. Most of either is Foundation and its ICU data.
+    # 以 Swift 的 Static Linux SDK 對 musl 完全靜態連結：沒有程式直譯器、也沒有任何共享函式庫，
+    # 所以在同架構的任何 Linux 上都能執行，不論它的 libc 與 Swift 是哪一版。2026-11-04 使用者決定
+    # （plan.md「Linux 建置：musl」），取代 RJ 的 glibc 加 -static-stdlib——那仍需要機器上的 glibc。
+    # WSL x86_64、Swift 6.4.1 實測：strip 後 56,581,048 bytes，glibc 版 58,694,944。兩者大部分都是
+    # Foundation 與它的 ICU 資料。
+    #
+    # The SDK must be the toolchain's own version: Swift has no ABI stability on
+    # Linux, and the SDK carries the static runtime the compiler links in. No
+    # fallback to glibc when it is missing -- a build that quietly changed what it
+    # produces is the failure this project exists to refuse.
+    # SDK 必須與工具鏈同一版：Swift 在 Linux 上沒有 ABI 穩定性，而 SDK 帶著編譯器要連進去的靜態
+    # runtime。找不到時**不**退回 glibc——一個安靜地改變產物的建置，正是這個專案存在所要拒絕的失敗。
+    ARCH=$(uname -m)
+    # `swiftc --version` drops a trailing .0 -- 6.4.0 says "Swift version 6.4
+    # (swift-6.4-RELEASE)" -- while the SDK is named swift-6.4.0-RELEASE, so the
+    # version is read as numbers and given three parts.
+    # `swiftc --version` 會省略結尾的 .0——6.4.0 印的是「Swift version 6.4 (swift-6.4-RELEASE)」——
+    # 而 SDK 的名字是 swift-6.4.0-RELEASE，所以版本以數字讀出，並補成三段。
+    [[ $("$SWIFTC" --version 2>&1) =~ 'Swift version ([0-9]+)\.([0-9]+)(\.([0-9]+))?' ]] ||
+        die "cannot read the Swift version from $SWIFTC --version / 無法從 $SWIFTC --version 讀出 Swift 版本"
+    SWIFT_TAG=swift-$match[1].$match[2].${match[4]:-0}-RELEASE
+    if [[ -n ${SWIFT_STATIC_SDK:-} ]]; then
+        sdk_roots=($SWIFT_STATIC_SDK(N/))
+    else
+        sdk_roots=()
+        for base in ${SWIFT_SDKS_PATH:-} /workspace/opt/swift-sdks $HOME/.swiftpm/swift-sdks; do
+            [[ -n $base ]] && sdk_roots+=($base/${SWIFT_TAG}_static-linux-*.artifactbundle/*/swift-linux-musl(N/))
+        done
+        sdk_roots=(${(u)sdk_roots})
+    fi
+    if (( ${#sdk_roots} == 0 )); then
+        print -ru2 -- "compile_csv2_linux: no Static Linux SDK for $SWIFT_TAG / 找不到 $SWIFT_TAG 的 Static Linux SDK"
+        print -ru2 -- "  install the one for this exact version, with the checksum swift.org lists for it:"
+        print -ru2 -- "  請安裝與工具鏈完全同版的那一份，並附上 swift.org 為它列出的 checksum："
+        print -ru2 -- "    swift sdk install https://download.swift.org/${${SWIFT_TAG:l}%-release}-release/static-sdk/$SWIFT_TAG/${SWIFT_TAG}_static-linux-0.1.0.artifactbundle.tar.gz --checksum <sha256>"
+        print -ru2 -- "  or set SWIFT_STATIC_SDK to its swift-linux-musl directory / 或把 SWIFT_STATIC_SDK 設為它的 swift-linux-musl 目錄"
+        exit 1
+    fi
+    (( ${#sdk_roots} == 1 )) ||
+        die "more than one Static Linux SDK for $SWIFT_TAG: ${sdk_roots[*]}; set SWIFT_STATIC_SDK / $SWIFT_TAG 的 Static Linux SDK 不只一份，請設定 SWIFT_STATIC_SDK"
+    sysroot=(${sdk_roots[1]}/musl-*.sdk/$ARCH(N/))
+    (( ${#sysroot} == 1 )) || die "no musl-*.sdk/$ARCH under ${sdk_roots[1]} / ${sdk_roots[1]} 底下沒有 musl-*.sdk/$ARCH"
+    SYSROOT=${sysroot[1]}
+    print -- "  sdk: $SYSROOT"
 
-# The SDK's own clang resources go to the linker: crtbeginT.o, crtend.o and
-# compiler-rt live there, not in the toolchain's clang directory.
-# 把 SDK 自己的 clang 資源交給連結器：crtbeginT.o、crtend.o 與 compiler-rt 在那裡，不在工具鏈的
-# clang 目錄裡。
-"$SWIFTC" -swift-version 6 -warnings-as-errors $OPT \
-    -target $ARCH-swift-linux-musl -sdk "$SYSROOT" -resource-dir "$SYSROOT/usr/lib/swift_static" \
-    -static-executable -static-stdlib -use-ld=lld \
-    -Xclang-linker -resource-dir -Xclang-linker "$SYSROOT/usr/lib/swift/clang" \
-    -o release/csv2 $SOURCES
-# An -O build is stripped HERE rather than at packaging, so the suite runs the
-# binary that gets archived; --debug keeps its symbols.
-# -O 建置在**這裡** strip，而不是封存時，所以測試跑的就是要封存的那一份；--debug 保留符號。
-[[ $OPT == -O ]] && strip release/csv2
+    # The SDK's own clang resources go to the linker: crtbeginT.o, crtend.o and
+    # compiler-rt live there, not in the toolchain's clang directory.
+    # 把 SDK 自己的 clang 資源交給連結器：crtbeginT.o、crtend.o 與 compiler-rt 在那裡，不在工具鏈的
+    # clang 目錄裡。
+    "$SWIFTC" -swift-version 6 -warnings-as-errors $OPT \
+        -target $ARCH-swift-linux-musl -sdk "$SYSROOT" -resource-dir "$SYSROOT/usr/lib/swift_static" \
+        -static-executable -static-stdlib -use-ld=lld \
+        -Xclang-linker -resource-dir -Xclang-linker "$SYSROOT/usr/lib/swift/clang" \
+        -o release/csv2 $SOURCES
+    # An -O build is stripped HERE rather than at packaging, so the suite runs the
+    # binary that gets archived; --debug keeps its symbols.
+    # -O 建置在**這裡** strip，而不是封存時，所以測試跑的就是要封存的那一份；--debug 保留符號。
+    [[ $OPT == -O ]] && strip release/csv2
 
-# Refuse a result that is not fully static. T329 asks the same of the binary
-# under test; this stops a wrong build here, before anything is packed.
-# 拒絕不是完全靜態的產物。T329 對受測的執行檔問同樣的問題；這裡在打包之前就擋下錯的建置。
-if command -v readelf >/dev/null 2>&1; then
-    hdr=$(LC_ALL=C readelf -lW release/csv2 2>&1)
-    [[ $hdr == *"Program Headers"* ]] || die "readelf could not read release/csv2: ${hdr[1,200]} / readelf 讀不了 release/csv2"
-    [[ $hdr != *INTERP* ]] || die "release/csv2 has a program interpreter; it is not static / release/csv2 有程式直譯器，不是靜態的"
-    [[ $(LC_ALL=C readelf -d release/csv2 2>&1) != *"(NEEDED)"* ]] ||
-        die "release/csv2 needs shared libraries; it is not static / release/csv2 需要共享函式庫，不是靜態的"
-else
-    print -- "  readelf not found; static linkage not checked here (T329 skips too) / 找不到 readelf，這裡沒有檢查是否靜態（T329 也會略過）"
+    # Refuse a result that is not fully static. T329 asks the same of the binary
+    # under test; this stops a wrong build here, before anything is packed.
+    # 拒絕不是完全靜態的產物。T329 對受測的執行檔問同樣的問題；這裡在打包之前就擋下錯的建置。
+    if command -v readelf >/dev/null 2>&1; then
+        hdr=$(LC_ALL=C readelf -lW release/csv2 2>&1)
+        [[ $hdr == *"Program Headers"* ]] || die "readelf could not read release/csv2: ${hdr[1,200]} / readelf 讀不了 release/csv2"
+        [[ $hdr != *INTERP* ]] || die "release/csv2 has a program interpreter; it is not static / release/csv2 有程式直譯器，不是靜態的"
+        [[ $(LC_ALL=C readelf -d release/csv2 2>&1) != *"(NEEDED)"* ]] ||
+            die "release/csv2 needs shared libraries; it is not static / release/csv2 需要共享函式庫，不是靜態的"
+    else
+        # A -musl build that cannot be checked is not reported as static.
+        # 無法檢查的 -musl 建置，不會被當成靜態的回報。
+        die "-musl needs readelf (binutils) to check the result is static / -musl 需要 readelf（binutils）來檢查結果是靜態的"
+    fi
+
 fi
 
 # Verify by RUNNING it, not by checking the file exists -- the same rule the

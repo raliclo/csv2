@@ -1742,6 +1742,20 @@ metadata 的形狀不是，因此讓步的是後者。
 
 ## Linux 建置：musl（2026-11-04 使用者決定）
 
+**2026-11-04 稍後的修正：VM 維持 glibc，只有發行封存用 musl。** 同一天使用者又決定：
+`-musl` 用在 Linux 發行版，而 Linux VM 必須用 glibc。所以 `compile_csv2_linux.zsh` 的**預設**回到
+RJ 的 glibc 加 `-static-stdlib`（VM 建置與測試的就是它），加上 `-musl`（`compile_csv2.zsh -musl`
+會轉交）才走下面描述的 musl 全靜態建置。發布的 Linux 封存**只有** `linux-<arch>-musl`：它們由
+`.github/workflows/release.yml` 在 x86_64 與 aarch64 的 runner 上各自原生建置、跑整套測試、打包；
+`publish.zsh` 拒絕 glibc 的 Linux 封存。封存名稱帶 `-musl`，因為 `release.zsh` 從執行檔的檔頭讀出
+平台（沒有 PT_INTERP 就是 musl），兩種建置因此不可能以同一個名字出現。T329 依執行檔分流：有程式
+直譯器的套用 glibc 的檢查，沒有的套用 a–d。以下原文描述的是 musl 那一種建置。
+
+Later on 2026-11-04 the user decided the Linux VM keeps glibc and only the release archives are
+musl. `compile_csv2_linux.zsh` defaults to RJ's glibc build again; `-musl` selects the build below.
+The only Linux archives published are `linux-<arch>-musl`, built natively and tested by
+`release.yml`; `publish.zsh` refuses a glibc Linux archive.
+
 **Linux 的正式建置對 musl 完全靜態連結**，用 Swift 的 Static Linux SDK（`-target <arch>-swift-linux-musl
 -static-executable`）。產物沒有程式直譯器、沒有任何共享函式庫：不需要 Swift 工具鏈，也不需要 glibc，
 在同架構的任何 Linux 上都能跑。它取代 RJ 的 glibc 加 `-static-stdlib`——那只把 Swift 靜態連進去，
@@ -2849,7 +2863,7 @@ profile。也就是說，要讓 guest 從 GitHub pull，就得在裡面放一把
 - [x] `compile_csv2_linux.zsh`，比照 `compile_swift_tar_linux.zsh`
 - [x] 放進 workspace 映像（不佔 rootfs 的 128 MiB 預算）
 - [x] 測試 T47（跨平台逐位元相同）
-- [ ] Linux 建置改為 musl 全靜態：T329a–d 在 WSL（x86_64）上通過
+- [ ] Linux 發行建置（`-musl`）全靜態：T329a–d 與整套測試在 x86_64 上通過（WSL 或 release.yml 的 linux-x86_64-musl）
 - [x] 同上，guest aarch64：用 workspace 的 6.4.0 Static Linux SDK 原生建置，T329a–d 與整套測試皆無失敗（2026-11-04）
 
 ### 第 7 階段（暫緩）：出貨 ⏸
