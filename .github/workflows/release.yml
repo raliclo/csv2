@@ -20,6 +20,10 @@
 #     because a Claude Code cloud session can push branches but not tags, and
 #     its proxy refuses tag and release writes through the API too (403,
 #     2026-11-04); a workflow's own token can do both. multissh does the same.
+#     It is the FALLBACK: a release made with the workflow's token shows
+#     "github-actions released this", and the user wants to be shown as the
+#     releaser, so from v0.2.0 releases come from publish_matrix.zsh on the
+#     user's machine (2026-11-04; v0.1.9 was made here and is left as it is).
 # 兩種發布方式，一個發布者。不論哪一種，都是 publish.zsh 在做：它拿每個執行檔的 build id 與 tag 的 commit
 # 比對、以 release-notes/<版本>.md 建立 release、改寫 Formula/ 與 scoop/。
 #   - 人的機器上：./publish_matrix.zsh X.Y.Z --publish 推送 tag、等它啟動的那次執行、下載封存、執行 publish.zsh。
@@ -27,6 +31,9 @@
 #     tag 上**進行，publish job 執行 publish.zsh 並把 Formula/ 與 scoop/ 提交到 develop。它存在的理由是：
 #     Claude Code 的雲端 session 能推送分支、不能推送 tag，它的 proxy 也拒絕經由 API 寫入 tag 與 release
 #     （403，2026-11-04）；workflow 自己的 token 兩者都做得到。multissh 也是這樣做。
+#     它是**備用**：以 workflow 的 token 建立的 release 會顯示「github-actions released this」，而使用者要
+#     顯示為發布者本人，所以從 v0.2.0 起由使用者機器上的 publish_matrix.zsh 發布（2026-11-04；v0.1.9 是在
+#     這裡發的，維持原樣）。
 #
 # Targets, eight: {macos,windows} x {x86_64,arm64}, and Linux on x86_64 and
 # aarch64 twice -- linux-<arch>-glibc (the default build, the one the Linux VM

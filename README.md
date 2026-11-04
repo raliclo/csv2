@@ -181,12 +181,17 @@ waits for that run, refuses unless all eight archives came back, and hands them
 to `publish.zsh`, which does the rest with the checks it already has.
 `--fetch` stops after the download.
 
-Where tags cannot be pushed -- a Claude Code cloud session cannot -- run the
+**Publish from your own machine with `publish_matrix.zsh`.** The release is
+created with your gh login, so GitHub shows you as the one who released it.
+
+Only where tags cannot be pushed -- a Claude Code cloud session cannot -- run the
 workflow by hand with `release_version` set to `X.Y.Z`: it tags develop's head,
 builds at the tag, and runs the same `publish.zsh` in a final job, which also
 commits Formula/ and scoop/ to develop. Either way the release notes come from
 `release-notes/X.Y.Z.md`, written before publishing, and the line with each
-suite's result is generated from the run.
+suite's result is generated from the run. A release made this way shows
+"github-actions released this", which is why it is the fallback: v0.1.9 was
+made so, and from v0.2.0 releases are made from the user's machine.
 
 ## Formats
 

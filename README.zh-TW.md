@@ -148,10 +148,13 @@ arm64 上的 macOS、Windows，以及 x86_64 與 aarch64 上 glibc 與 `-musl` �
 執行完成、八份封存沒有全部回來就拒絕，然後交給 `publish.zsh`，由它以既有的檢查完成其餘步驟。`--fetch`
 在下載後就停止。
 
-在不能推送 tag 的地方（Claude Code 的雲端 session 就不能），手動執行這個 workflow，把 `release_version`
+**請在自己的機器上用 `publish_matrix.zsh` 發布。** release 以你的 gh 登入建立，GitHub 上顯示的發布者就是你。
+
+只有在不能推送 tag 的地方（Claude Code 的雲端 session 就不能），才手動執行這個 workflow，把 `release_version`
 設為 `X.Y.Z`：它在 develop 的頂端打 tag、在 tag 上建置，並在最後一個 job 執行同一支 `publish.zsh`，同時把
 Formula/ 與 scoop/ 提交到 develop。不論哪一種方式，release notes 都取自發布之前寫好的
-`release-notes/X.Y.Z.md`，而每一套測試結果的那一行由那次執行產生。
+`release-notes/X.Y.Z.md`，而每一套測試結果的那一行由那次執行產生。以這種方式建立的 release 會顯示
+「github-actions released this」，所以它只是備用：v0.1.9 是這樣發的，從 v0.2.0 起在使用者自己的機器上發布。
 
 ## 格式
 

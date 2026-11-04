@@ -960,6 +960,9 @@ windows-arm64、SP、SO、Windows 改用 Swift 6.4.2（見 `release-notes/0.1.9.
   改用 curl。三次之間 `v0.1.9` tag 以 `retag_unreleased` 移動過兩次，每次都先確認沒有任何 release 或草稿。
 - **Formula/scoop**：publish job 改寫並提交 `87c684c`（macOS arm64、Linux 兩個 `-musl`、Windows x86_64）；使用者
   要求之後，`d455b1d` 依實際 hash 補上 macos-x86_64 與 windows-arm64。
+- **發布者顯示為 github-actions**：因為 release 是用 workflow 的 GITHUB_TOKEN 建立的。使用者希望顯示為本人
+  （LZFSE2-Cloud 轉達，lzfse2 已改），決定 0.1.9 維持原樣、不重建；從 0.2.0 起在使用者自己的機器上以
+  `publish_matrix.zsh` 發布，CI 的 `release_version` 只作備用。
 - **節點升級沒有做**：這次沒有逐一在節點上 `brew upgrade` 或替換 PATH 上的那一份；guest 的 prebuilt 歸 LinuxCS-M4。
 - **Windows 的整套測試沒有在 CI 跑**；v0.1.8 是在 Ralic-W11 上跑的 1537/0/19。這次只有 release.zsh 的「解開、執行、
   讀 CSV」。若要相同的保證，需要在 Windows 節點上對 0.1.9 跑一次整套測試。
