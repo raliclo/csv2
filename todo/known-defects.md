@@ -14778,7 +14778,10 @@ Reported by another session: on the unreleased develop, -update-where fails on e
 no header row. RQ's resolved-position token is understood by resolveColumn, but the headerless
 branch reads the column with Int(token) instead. T340 only used a file with a header.
 
-## SO. T212 的 SwiftPM 建置在 Swift 6.3.3 上失敗：那個 package 沒有宣告平台，而 `FileHandle.close()` 要 macOS 10.15
+## SO. T212 的 SwiftPM 建置在 Swift 6.3.3 上失敗：那個 package 沒有宣告平台，而 `FileHandle.close()` 要 macOS 10.15（2026-11-04 修正，T212）
+
+**修正與證實**：`ec307d5` 讓 T212 的 package 宣告 `.macOS(.v10_15)`。release.yml 第 4 次執行起，macos-26 與
+macos-26-intel（Swift 6.3.3）上 T212 都通過，推論成立。
 
 來源：`.github/workflows/release.yml` 第 2 次執行（2026-11-04，`2c6103f`），macos-26 與 macos-26-intel 兩個 runner，
 映像的工具鏈是 `Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)`。節點（Swift 6.4）上 T212 一直通過。
@@ -14806,7 +14809,11 @@ calls, an API from macOS 10.15, while the generated Package.swift declares no pl
 defaults to macOS 10.13. Inferred, not read. Plan: declare `.macOS(.v10_15)` in T212's package and
 state the minimum for clients in plan.md phase 9; T212 passing on 6.3.3 confirms the inference.
 
-## SP. macOS x86_64 上，未加 `--pretty` 的 `-md` 的 RSS 隨輸入成長（T19d）
+## SP. macOS x86_64 上，未加 `--pretty` 的 `-md` 的 RSS 隨輸入成長（2026-11-04 修正，T19d）
+
+**修正與證實**：`8f9f838` 在 Darwin 上每一列以 `Platform.drainingPool` 排空一次 autorelease pool。release.yml 在
+`a902504` 的執行（41828812851）裡，macos-26-intel 的 T19d 通過，`4001792B→3919872B`（修正前是 `4067328→14548992`），
+整套 1577/0/1。假設成立。
 
 來源：`.github/workflows/release.yml` 第 2 次與第 3 次執行（2026-11-04，`2c6103f`、`e9db7d2`），macos-26-intel runner，
 `Apple Swift version 6.3.3`。兩次都重現。macos-x86_64 過去從未出貨、也從未在任何節點上測過，所以這是第一次量到。
