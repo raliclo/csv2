@@ -150,7 +150,11 @@ jobs:
 
       # Full history and tags: the build id comes from `git describe` (build_id.zsh).
       # 完整歷史與 tag：build id 來自 `git describe`（build_id.zsh）。
-      - uses: actions/checkout@v4
+      # checkout and upload-artifact at v5, their Node.js 24 releases. v4 of each runs on Node.js 20, which
+      # GitHub has deprecated and now forces onto 24 with a warning (run 1).
+      # 兩者都用 v5：以 Node.js 24 執行的版本。v4 跑在 Node.js 20 上，GitHub 已棄用它，現在會
+      # 強制改用 24 並發出警告（第 1 次執行）。
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -214,7 +218,7 @@ jobs:
           n=$(ls dist/*.tar.zst | wc -l)
           [ "$n" -eq 1 ] || { echo "expected one archive, found $n / 預期一份封存，找到 $n 份"; exit 1; }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: csv2-${{ matrix.platform }}
           path: |
