@@ -98,9 +98,44 @@ fi
 # 一份封存必須**在 tag 上**建置，否則它的 build id 說不出版本號——那就是 QD——所以可行的順序是：
 # 先打 tag、各節點建置、收集、發布。對「tag 已存在」一律拒絕，會讓這個順序無法成立，逼人
 # 「在打 tag 之前建置」——那正是它想防的缺陷。
+# GitHub is asked through `gh api`, the REST API, and nothing else. `gh release`
+# goes through GraphQL, which a Claude Code session cannot reach (403), and
+# `gh auth status` fails there although REST works -- so the 0.1.9 release
+# could not be made from the session that built it. REST works everywhere gh
+# does.
+# 對 GitHub 只透過 `gh api`（REST API）發問。`gh release` 走的是 GraphQL，Claude Code session 碰不到
+# （403）；`gh auth status` 在那裡也會失敗，儘管 REST 可用——所以 0.1.9 的 release 原本無法從建置它的
+# 那個 session 發出。REST 在任何 gh 能用的地方都能用。
+#
+# release_state: prints `published`, `draft` or `none` for $TAG, and FAILS when
+# GitHub cannot be asked. A failed question is not an answer of "none": that
+# reading is how a published release gets cut a second time. Drafts are
+# listed too: the tag endpoint does not show them, and a draft is what a
+# failed run of this script leaves.
+# release_state：印出 $TAG 的 `published`、`draft` 或 `none`；問不到 GitHub 時**失敗**。問題失敗不等於
+# 回答「none」：那樣解讀，正是一個已發布的 release 被再切一次的方式。草稿也列出：tag 的端點看不到它們，
+# 而草稿正是這支腳本失敗時會留下的東西。
+release_state() {
+    local out
+    out=$(gh api --paginate "repos/$REPO/releases?per_page=100" \
+          --jq ".[] | select(.tag_name == \"$TAG\") | if .draft then \"draft\" else \"published\" end") || return 1
+    if [[ $out == *published* ]]; then print -r -- published
+    elif [[ $out == *draft* ]]; then print -r -- draft
+    else print -r -- none
+    fi
+}
+command -v gh >/dev/null 2>&1 || { print -u2 -- "gh is not on PATH"; exit 1 }
+gh api user >/dev/null 2>&1 || { print -u2 -- "gh cannot reach the GitHub REST API as a user (gh api user failed) / gh 無法以使用者身分使用 GitHub REST API"; exit 1 }
+RELEASE_STATE=$(release_state) || { print -u2 -- "cannot list the releases of $REPO; refusing rather than assuming $TAG is unpublished / 無法列出 $REPO 的 release；拒絕，而不是假設 $TAG 尚未發布"; exit 1 }
+if [[ $RELEASE_STATE == draft ]]; then
+    print -u2 -- "a DRAFT release for $TAG exists, probably left by a failed run; look at it on GitHub, delete it, and run again"
+    print -u2 -- "$TAG 已有一個**草稿** release，大概是某次失敗的執行留下的；請到 GitHub 看過、刪除後再執行"
+    exit 1
+fi
+
 TAG_EXISTED=0
 if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-    if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
+    if [[ $RELEASE_STATE == published ]]; then
         print -u2 -- "$TAG is already published. Re-cutting it disturbs anyone who fetched it; pick the next version"
         print -u2 -- "$TAG 已經發布過了。重打它會動到任何抓過它的人；請改用下一個版本號"
         exit 1
@@ -116,8 +151,6 @@ if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
     fi
     TAG_EXISTED=1
 fi
-command -v gh >/dev/null 2>&1 || { print -u2 -- "gh is not on PATH"; exit 1 }
-gh auth status >/dev/null 2>&1 || { print -u2 -- "gh is not authenticated"; exit 1 }
 
 # ---------------------------------------------------------------------
 # 2. The archives. Their checksums are RECOMPUTED here, never read from the
@@ -309,12 +342,42 @@ fi
 # ---------------------------------------------------------------------
 typeset -a ASSETS
 for a in $ARCHIVES; do ASSETS+=("$a" "$a.sha256"); done
-would "gh release create $TAG -R $REPO with ${#ASSETS} assets"
+# A DRAFT first, every asset uploaded and read back through the API, and only
+# then made public. Created public, a failure halfway through the uploads
+# leaves a release with some platforms missing that anyone can already see.
+# 先建成**草稿**，每個資產上傳後經由 API 讀回比對，然後才公開。若一開始就是公開的，上傳到一半失敗，會留下
+# 一個缺了某些平台、卻已經人人看得到的 release。
+would "create a draft release $TAG in $REPO, upload ${#ASSETS} assets, read each back, then make it public"
 if (( DO_PUBLISH )); then
-    gh release create "$TAG" -R "$REPO" --verify-tag \
-        --title "csv2 $VERSION" \
-        --notes "csv2 $VERSION. Archives are .tar.zst, one per platform, each packed on the machine that built its binary. Verify with the .sha256 beside it. Release notes are edited after publishing; see README.md for what is in this version." \
-        "${ASSETS[@]}" >/dev/null
+    # The tag must be on GitHub, or the release would make one from the
+    # default branch's head -- what --verify-tag refused.
+    # tag 必須已在 GitHub 上，否則 release 會從預設分支的頂端自己產生一個——--verify-tag 原本拒絕的就是這個。
+    gh api "repos/$REPO/git/ref/tags/$TAG" >/dev/null || {
+        print -u2 -- "$TAG is not on GitHub; push it first / $TAG 不在 GitHub 上；請先推送"
+        exit 1
+    }
+    RELEASE_ID=$(gh api -X POST "repos/$REPO/releases" \
+        -f tag_name="$TAG" -f name="csv2 $VERSION" -F draft=true \
+        -f body="csv2 $VERSION. Archives are .tar.zst, one per platform, each built, tested and packed on a machine of that platform. Verify with the .sha256 beside it. The Linux archives (-musl) are fully static. Release notes are edited after publishing; see README.md for what is in this version." \
+        --jq .id)
+    [[ $RELEASE_ID == <-> ]] || { print -u2 -- "creating the draft release gave no id: [$RELEASE_ID]"; exit 1 }
+    say "    draft release $RELEASE_ID"
+    rtmp=$(mktemp -d)
+    for f in $ASSETS; do
+        asset_id=$(gh api -X POST -H "Content-Type: application/octet-stream" \
+            "https://uploads.github.com/repos/$REPO/releases/$RELEASE_ID/assets?name=${f:t}" \
+            --input "$f" --jq .id)
+        [[ $asset_id == <-> ]] || { print -u2 -- "${f:t}: the upload gave no asset id; the draft $RELEASE_ID is left for you to inspect"; exit 1 }
+        gh api -H "Accept: application/octet-stream" "repos/$REPO/releases/assets/$asset_id" > "$rtmp/${f:t}"
+        [[ $(sha256_of "$rtmp/${f:t}") == $(sha256_of "$f") ]] || {
+            print -u2 -- "${f:t} reads back from the draft differently from what was uploaded; the draft $RELEASE_ID is left for you to inspect"
+            print -u2 -- "${f:t} 從草稿讀回來與上傳的不同；草稿 $RELEASE_ID 留著讓你檢查"
+            exit 1
+        }
+        say "    uploaded and read back: ${f:t}"
+    done
+    rm -rf -- "$rtmp"
+    gh api -X PATCH "repos/$REPO/releases/$RELEASE_ID" -F draft=false --jq .html_url
 fi
 
 # ---------------------------------------------------------------------

@@ -71,7 +71,11 @@ say() { print -r -- "$1" }
 #    工作樹不乾淨，就白跑了全部。
 # ---------------------------------------------------------------------
 command -v gh >/dev/null 2>&1 || { print -u2 -- "gh is not on PATH / PATH 上沒有 gh"; exit 1 }
-gh auth status >/dev/null 2>&1 || { print -u2 -- "gh is not authenticated / gh 尚未登入"; exit 1 }
+# REST only, as in publish.zsh: `gh auth status` and `gh release` need
+# GraphQL, which a Claude Code session cannot reach. `gh run` is REST.
+# 只用 REST，與 publish.zsh 相同：`gh auth status` 與 `gh release` 需要 GraphQL，Claude Code session
+# 碰不到。`gh run` 走的是 REST。
+gh api user >/dev/null 2>&1 || { print -u2 -- "gh cannot reach the GitHub REST API as a user / gh 無法以使用者身分使用 GitHub REST API"; exit 1 }
 [[ -z "$(git status --porcelain)" ]] || {
     print -u2 -- "the working tree is not clean; a tag would name a state that was not published"
     print -u2 -- "工作區不乾淨；那個 tag 會指向一個沒有被發布的狀態"
@@ -84,8 +88,15 @@ git fetch -q --tags origin
     print -u2 -- "HEAD 領先 origin；請先推送，否則那個 tag 指向一個沒有人抓得到的 commit"
     exit 1
 }
-if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
-    print -u2 -- "$TAG is already published; pick the next version / $TAG 已經發布過了；請改用下一個版本號"
+# Drafts included, and a failed question is a refusal, not "no release".
+# 草稿也算；問不到 GitHub 時拒絕，而不是當成「沒有 release」。
+_rel=$(gh api --paginate "repos/$REPO/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\") | .draft") || {
+    print -u2 -- "cannot list the releases of $REPO / 無法列出 $REPO 的 release"
+    exit 1
+}
+if [[ -n $_rel ]]; then
+    print -u2 -- "$TAG already has a release (draft: $_rel); pick the next version, or delete a leftover draft first"
+    print -u2 -- "$TAG 已經有 release（草稿：$_rel）；請改用下一個版本號，或先刪除殘留的草稿"
     exit 1
 fi
 HEAD_SHA=$(git rev-parse HEAD)
