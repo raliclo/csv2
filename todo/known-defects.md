@@ -14805,3 +14805,35 @@ error text was cut to three lines; the line numbers point at the subset's two `t
 calls, an API from macOS 10.15, while the generated Package.swift declares no platform and SwiftPM 6.3
 defaults to macOS 10.13. Inferred, not read. Plan: declare `.macOS(.v10_15)` in T212's package and
 state the minimum for clients in plan.md phase 9; T212 passing on 6.3.3 confirms the inference.
+
+## SP. macOS x86_64 上，未加 `--pretty` 的 `-md` 的 RSS 隨輸入成長（T19d）
+
+來源：`.github/workflows/release.yml` 第 2 次與第 3 次執行（2026-11-04，`2c6103f`、`e9db7d2`），macos-26-intel runner，
+`Apple Swift version 6.3.3`。兩次都重現。macos-x86_64 過去從未出貨、也從未在任何節點上測過，所以這是第一次量到。
+
+```console
+# macos-26-intel，第 2 次與第 3 次執行
+FAIL  T19d -md streaming RSS (small→4067328, big→14548992)
+FAIL  T19d -md streaming RSS (small→4087808, big→14790656)
+# 同一個 runner、同一次執行，一般串流不受影響
+PASS  T9a -si/-so RSS does not grow with the input (77601B→3997696B, 3329563B→4091904B)
+# 對照：第 4 次執行（ec307d5）的 macos-26（arm64）與 Linux musl
+PASS  T19d -md without --pretty still streams (9207808B→9388032B RSS)      # macOS arm64
+PASS  T19d -md without --pretty still streams (18526208B→18526208B RSS)    # linux-x86_64-musl
+```
+
+m_big 是 80000 列、3,329,563 位元組。Intel 上 `-md` 多了約 10 MB（約為輸入的三倍），arm64 只多了約 180 KB，Linux 沒有變。
+只有 `-md` 的路徑會長，`-si/-so` 不會，所以問題在 `-md` 每列做的事，不在讀取。
+
+**成因是假設，尚未證實**：`MarkdownOut.cell`（`src/Support.swift`）對每個儲存格呼叫 Foundation 的
+`String(bytes:encoding:)` 與四次 `replacingOccurrences`。在 Darwin 上它們經過 NSString 橋接，可能產生 autoreleased
+物件，而 `MarkdownWriter.emit` 的串流迴圈裡沒有 autorelease pool，所以要到行程結束才釋放。arm64 與 x86_64 對
+autoreleased 回傳值的最佳化不同，可以解釋只有 Intel 會長。**計畫**：在 Darwin 上把每一列的儲存格算繪包進
+autorelease pool（經由 Platform.swift，不在呼叫點寫 `#if`）；若 T19d 在 macos-26-intel 上通過，假設即成立，
+否則撤回這個修正、改找別的成因。
+
+From CI runs 2 and 3 on macos-26-intel: `-md` without `--pretty` grows by about 10 MB on a 3.3 MB input,
+while `-si/-so` on the same runner stays flat, arm64 macOS grows by 180 KB and Linux not at all. Hypothesis,
+unproven: MarkdownOut.cell's Foundation calls leave autoreleased objects that the streaming loop never drains,
+and x86_64 does not elide them the way arm64 does. Plan: an autorelease pool per row on Darwin, through
+Platform.swift; T19d passing on macos-26-intel confirms it, otherwise revert.
