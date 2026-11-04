@@ -29,13 +29,13 @@
 #     （403，2026-11-04）；workflow 自己的 token 兩者都做得到。multissh 也是這樣做。
 #
 # Targets, eight: {macos,windows} x {x86_64,arm64}, and Linux on x86_64 and
-# aarch64 twice -- linux-<arch> (glibc, the default build, the one the Linux VM
+# aarch64 twice -- linux-<arch>-glibc (the default build, the one the Linux VM
 # builds and tests) and linux-<arch>-musl (fully static). Both Linux kinds are
 # published; Homebrew on Linux points at -musl (the user, 2026-11-04). Linux
 # arm64 is named linux-aarch64, as on the nodes. No x86-32: macOS has none and
 # Swift ships no i686 toolchain for Windows or Linux.
-# 目標共八個：{macos,windows} x {x86_64,arm64}，以及 x86_64 與 aarch64 上各兩種 Linux——linux-<arch>
-# （glibc，預設建置，Linux VM 建置與測試的那一種）與 linux-<arch>-musl（完全靜態）。兩種 Linux 都發布；
+# 目標共八個：{macos,windows} x {x86_64,arm64}，以及 x86_64 與 aarch64 上各兩種 Linux——linux-<arch>-glibc
+# （預設建置，Linux VM 建置與測試的那一種）與 linux-<arch>-musl（完全靜態）。兩種 Linux 都發布；
 # Linux 上的 Homebrew 指向 -musl（使用者，2026-11-04）。Linux arm64 命名為 linux-aarch64，與各節點一致。
 # 不建 x86-32：macOS 沒有，Swift 也沒有提供 Windows 或 Linux 的 i686 工具鏈。
 #
@@ -153,8 +153,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { platform: linux-x86_64,       runner: ubuntu-24.04,     container: "swift:6.4.2-noble" }
-          - { platform: linux-aarch64,      runner: ubuntu-24.04-arm, container: "swift:6.4.2-noble" }
+          - { platform: linux-x86_64-glibc, runner: ubuntu-24.04,     container: "swift:6.4.2-noble" }
+          - { platform: linux-aarch64-glibc, runner: ubuntu-24.04-arm, container: "swift:6.4.2-noble" }
           - { platform: linux-x86_64-musl,  runner: ubuntu-24.04,     container: "swift:6.4.2-noble", compile_args: "-musl" }
           - { platform: linux-aarch64-musl, runner: ubuntu-24.04-arm, container: "swift:6.4.2-noble", compile_args: "-musl" }
           - { platform: macos-x86_64,       runner: macos-26-intel }
@@ -335,7 +335,7 @@ jobs:
       - name: Release notes build line / release notes 的建置行
         run: |
           zsh ./release_build_notes.zsh "$VERSION" "$GITHUB_RUN_ID" "$(git rev-parse HEAD)" "dist/csv2-$VERSION-build.md" \
-            linux-x86_64 linux-aarch64 linux-x86_64-musl linux-aarch64-musl macos-x86_64 macos-arm64 windows-x86_64 windows-arm64
+            linux-x86_64-glibc linux-aarch64-glibc linux-x86_64-musl linux-aarch64-musl macos-x86_64 macos-arm64 windows-x86_64 windows-arm64
           cat "dist/csv2-$VERSION-build.md"
       - name: Publish / 發布
         run: zsh ./publish.zsh "$VERSION" --publish

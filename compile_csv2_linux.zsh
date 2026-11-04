@@ -121,14 +121,14 @@ print -- "Building csv2 for $HOST_UNAME ($OPT) / 正在為 $HOST_UNAME 建置 cs
 # the release ships both. So:
 #
 #   default  glibc with -static-stdlib (RJ): what the Linux VM builds and tests,
-#            published as linux-<arch>.
+#            published as linux-<arch>-glibc (bare linux-<arch> in v0.1.9).
 #   -musl    fully static against musl, published as linux-<arch>-musl; the
 #            one Homebrew on Linux installs.
 #
 # 兩種建置，由 -musl 選擇。使用者在 2026-11-04 先決定 Linux 改用 musl（64f5fec），同一天又決定
 # VM 維持 glibc、發行版兩種都出。因此：
 #
-#   預設   glibc 加 -static-stdlib（RJ）：Linux VM 建置與測試的對象，發布為 linux-<arch>。
+#   預設   glibc 加 -static-stdlib（RJ）：Linux VM 建置與測試的對象，發布為 linux-<arch>-glibc（v0.1.9 是不帶字尾的 linux-<arch>）。
 #   -musl  對 musl 完全靜態，發布為 linux-<arch>-musl；Linux 上的 Homebrew 安裝的是它。
 if (( ! MUSL )); then
     # RJ: Swift linked statically so the binary survives a toolchain change;

@@ -8,11 +8,11 @@
 #    ./publish_matrix.zsh 0.1.9 --publish    the same, then ./publish.zsh 0.1.9 --publish
 #    ./publish_matrix.zsh --help             print this and do nothing / 印出這段說明，什麼都不做
 #
-#  Platforms: linux-{x86_64,aarch64} (glibc), linux-{x86_64,aarch64}-musl
+#  Platforms: linux-{x86_64,aarch64}-glibc, linux-{x86_64,aarch64}-musl
 #  (static), macos-{x86_64,arm64}, windows-{x86_64,arm64}.
 #  Each is built, tested and packaged by .github/workflows/release.yml on a
 #  runner of that platform.
-#  平台：linux-{x86_64,aarch64}（glibc）、linux-{x86_64,aarch64}-musl（靜態）、
+#  平台：linux-{x86_64,aarch64}-glibc、linux-{x86_64,aarch64}-musl（靜態）、
 #  macos-{x86_64,arm64}、windows-{x86_64,arm64}。每一個都由 .github/workflows/release.yml
 #  在該平台的 runner 上建置、測試與打包。
 #
@@ -36,7 +36,7 @@ cd -- "$HERE"
 
 REPO=raliclo/csv2
 WORKFLOW=release.yml
-PLATFORMS=(linux-x86_64 linux-aarch64 linux-x86_64-musl linux-aarch64-musl
+PLATFORMS=(linux-x86_64-glibc linux-aarch64-glibc linux-x86_64-musl linux-aarch64-musl
            macos-x86_64 macos-arm64 windows-x86_64 windows-arm64)
 DIST=$HERE/dist
 

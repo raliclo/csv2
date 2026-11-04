@@ -85,7 +85,8 @@ fi
 #     the PE header is the same answer without asking a compiler.
 #   - Linux with -musl: uname cannot tell glibc from musl. A binary with no
 #     PT_INTERP is the static musl build (compile_csv2.zsh -musl); every glibc
-#     build names ld-linux as its interpreter, -static-stdlib or not. (A fully
+#     build names ld-linux as its interpreter, -static-stdlib or not, and is
+#     named linux-<arch>-glibc (from v0.2.0; v0.1.9 left it bare). (A fully
 #     static GLIBC build would be named -musl too; no script here makes one,
 #     and Foundation does not support it.)
 #   - macOS under Rosetta: `uname -m` says x86_64 in a translated shell.
@@ -101,7 +102,7 @@ fi
 #     PE 檔頭給的是同一個答案，而不必去問編譯器。
 #   - 以 -musl 建置的 Linux：uname 分不出 glibc 與 musl。沒有 PT_INTERP 的執行檔就是靜態 musl
 #     建置（compile_csv2.zsh -musl）；每一個 glibc 建置，不論有無 -static-stdlib，都指名 ld-linux
-#     為 interpreter。（完全靜態的 **glibc** 建置也會被命名為 -musl；這裡沒有任何腳本會產生它，
+#     為 interpreter，命名為 linux-<arch>-glibc（從 v0.2.0 起；v0.1.9 不帶字尾）。（完全靜態的 **glibc** 建置也會被命名為 -musl；這裡沒有任何腳本會產生它，
 #     Foundation 也不支援。）
 #   - Rosetta 下的 macOS：被轉譯的 shell 裡 `uname -m` 說 x86_64。
 #
@@ -118,8 +119,8 @@ u_le() {
     for (( i = $3; i >= 1; i-- )); do (( v = v * 256 + b[i] )); done
     print -r -- $v
 }
-# binary_platform <file>: prints <os>-<arch>[-musl], or fails.
-# binary_platform <檔案>：印出 <os>-<arch>[-musl]，否則失敗。
+# binary_platform <file>: prints <os>-<arch>, or linux-<arch>-glibc|-musl, or fails.
+# binary_platform <檔案>：印出 <os>-<arch>，或 linux-<arch>-glibc|-musl，否則失敗。
 binary_platform() {
     local f=$1 magic
     integer m phoff phentsize phnum i lfanew
@@ -140,7 +141,7 @@ binary_platform() {
                 # PT_INTERP = 3: a dynamic executable, i.e. the glibc build.
                 # PT_INTERP = 3：動態執行檔，也就是 glibc 建置。
                 if [[ $(u_le "$f" $(( phoff + i * phentsize )) 4) == 3 ]]; then
-                    print -r -- linux-$arch
+                    print -r -- linux-$arch-glibc
                     return 0
                 fi
             done

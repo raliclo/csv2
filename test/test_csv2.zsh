@@ -17038,7 +17038,7 @@ fi
 # 每個平台恰好一個 url：publish.zsh 的 rewrite_pair 看到兩個就拒絕，所以「把 arm64 那筆複製一份到
 # on_arm 區塊裡來修 QP」會改成弄壞下一次出貨。兩個要求只在一種形狀上相容。
 _t311_dupes=""
-for _t311_p in macos-arm64 linux-x86_64 linux-aarch64; do
+for _t311_p in macos-arm64 linux-x86_64-musl linux-aarch64-musl; do
     _t311_n=$(LC_ALL=C grep -c "https://github.com/.*${_t311_p}\.tar\.zst" "$ROOT/Formula/csv2.rb" | tr -d ' ')
     [[ $_t311_n == 1 ]] || _t311_dupes="$_t311_dupes $_t311_p=$_t311_n"
 done

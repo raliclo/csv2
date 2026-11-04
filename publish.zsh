@@ -265,11 +265,25 @@ ARCHIVES=("$DIST"/csv2-$VERSION-*.tar.zst(N))
     exit 1
 }
 
-# From v0.1.9 Linux ships twice: linux-<arch> (glibc, the default build) and
-# linux-<arch>-musl (fully static). Both are published; the package files take
-# -musl only (the user, 2026-11-04), so the glibc ones are skipped there below.
-# 從 v0.1.9 起，Linux 出貨兩種：linux-<arch>（glibc，預設建置）與 linux-<arch>-musl（完全靜態）。兩種都
-# 發布；套件檔只採用 -musl（使用者，2026-11-04），所以下面改寫套件檔時略過 glibc 那兩份。
+# From v0.1.9 Linux ships twice: glibc (the default build) and -musl (fully
+# static). From v0.2.0 both kinds say which they are: linux-<arch>-glibc and
+# linux-<arch>-musl. v0.1.9 named the glibc one bare linux-<arch>, which reads
+# as "the Linux build" and hides that it needs the machine's glibc (the user,
+# 2026-11-04). A bare linux-<arch> is now refused, so a build that skipped
+# release.zsh's naming cannot slip through. The package files take -musl only,
+# so the glibc ones are skipped there below.
+# 從 v0.1.9 起，Linux 出貨兩種：glibc（預設建置）與 -musl（完全靜態）。從 v0.2.0 起兩種都說出自己是哪一種：
+# linux-<arch>-glibc 與 linux-<arch>-musl。v0.1.9 把 glibc 那份命名為不帶字尾的 linux-<arch>，讀起來像
+# 「那個 Linux 版」，藏起了它需要機器上的 glibc（使用者，2026-11-04）。現在拒收不帶字尾的 linux-<arch>，
+# 於是一份沒經過 release.zsh 命名的建置混不進來。套件檔只採用 -musl，所以下面改寫套件檔時略過 glibc 那兩份。
+for a in $ARCHIVES; do
+    case ${${a:t}#csv2-$VERSION-} in
+        linux-*-glibc.tar.zst|linux-*-musl.tar.zst|macos-*|windows-*) ;;
+        *)  print -u2 -- "${a:t}: a Linux archive must end in -glibc or -musl"
+            print -u2 -- "${a:t}：Linux 封存的名稱必須以 -glibc 或 -musl 結尾"
+            exit 1 ;;
+    esac
+done
 
 # The release notes are a FILE in the repository, written before publishing.
 # Until 0.1.8 they were typed into the release on GitHub afterwards: a step
@@ -657,7 +671,7 @@ for a in $ARCHIVES; do
     # on which file sorts last.
     # Linux 上的 Homebrew 安裝 -musl 封存。dist/ 裡兩種都有時，若讓 glibc 那份也改寫同一筆，結果就取決於
     # 哪個檔案排在最後。
-    if [[ $base == *-linux-* && $base != *-musl.tar.zst ]]; then
+    if [[ $base == *-linux-*-glibc.tar.zst ]]; then
         say "    $base: glibc, published but not in ${target:t}, which takes -musl"
         continue
     fi

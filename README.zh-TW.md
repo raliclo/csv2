@@ -20,18 +20,19 @@ English documentation: [README.md](README.md)。
 執行檔、並讓它讀一個 CSV**。v0.1.8 與更早的版本發布四份。
 
 ```sh
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-macos-arm64.tar.zst
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-macos-arm64.tar.zst.sha256
-sha256sum -c csv2-0.1.9-macos-arm64.tar.zst.sha256
-zstd -d csv2-0.1.9-macos-arm64.tar.zst -c | tar -x
-./csv2-0.1.9-macos-arm64/csv2 --version
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.0/csv2-0.2.0-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.0/csv2-0.2.0-macos-arm64.tar.zst.sha256
+sha256sum -c csv2-0.2.0-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.2.0-macos-arm64.tar.zst -c | tar -x
+./csv2-0.2.0-macos-arm64/csv2 --version
 ```
 
-其餘的把 `macos-arm64` 換成 `macos-x86_64`、`linux-x86_64-musl`、`linux-aarch64-musl`、`linux-x86_64`、
-`linux-aarch64`、`windows-x86_64` 或 `windows-arm64`。在 Linux 上，沒有特別理由就選 `-musl`：它不需要機器上
-的任何東西，也是 Homebrew 安裝的那一份。`linux-<arch>` 是 glibc 建置；到 v0.1.8 為止它們是唯一的 Linux 封存。
+其餘的把 `macos-arm64` 換成 `macos-x86_64`、`linux-x86_64-musl`、`linux-aarch64-musl`、`linux-x86_64-glibc`、
+`linux-aarch64-glibc`、`windows-x86_64` 或 `windows-arm64`。在 Linux 上，沒有特別理由就選 `-musl`：它不需要機器上
+的任何東西，也是 Homebrew 安裝的那一份。`-glibc` 是 glibc 建置；v0.1.9 把它們命名為不帶字尾的 `linux-<arch>`，
+到 v0.1.8 為止那是唯一的 Linux 封存。
 
-**從 v0.1.9 起，Linux 的封存對 musl 完全靜態連結。** 它們不需要 Swift 工具鏈，也不需要 glibc，
+**`-musl` 的 Linux 封存對 musl 完全靜態連結**（從 v0.1.9 起）。它們不需要 Swift 工具鏈，也不需要 glibc，
 因此在同架構的任何 Linux 上都能跑，機器上的 Swift 換了版本也照樣能跑。v0.1.6 到 v0.1.8 只把 Swift
 靜態連進去，仍需要機器上的 glibc、libstdc++ 與 libgcc_s。v0.1.5 的 aarch64 執行檔在 RPATH 裡以版本號
 指名自己的工具鏈，那份工具鏈一被換掉它就起不來了。代價是大小：解開後約 57 MB，原本約 1 MB。
@@ -58,7 +59,7 @@ scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.
 
 **在 Windows 上，csv2 需要「建置它的那一版」Swift runtime，而封存與 Scoop 都不會替你安裝它。**
 Windows 的封存裡只有 `csv2.exe`；它從 `PATH` 載入 `swiftCore.dll`、`Foundation.dll` 以及另外十來個
-DLL。v0.1.9 是用 **Swift 6.4.2** 建置的，所以請安裝 Swift 6.4.2 的 runtime——也就是
+DLL。v0.2.0 是用 **Swift 6.4.2** 建置的，所以請安裝 Swift 6.4.2 的 runtime——也就是
 `%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.2\usr\bin` 這個目錄，由
 [swift.org](https://www.swift.org/install/windows/) 的 Swift 6.4.2 安裝程式建立並加進 `PATH`。
 
@@ -76,7 +77,7 @@ where swiftCore.dll
 差一個修補版號的 runtime 看過能跑——用 6.4.0 建置的 v0.1.4 在 6.4.1 上能跑——差一個次版號則如上所述
 跑不起來。其餘都沒量過，因此穩妥的選擇是「建置那一版 release 的 runtime」。
 
-runtime 跟著「那一版 release」走，不是跟著最新的 Swift：v0.1.9 用 6.4.2，v0.1.5 到 v0.1.8 用 6.4.1，v0.1.4 用 6.4.0 建置，v0.1.3 與更早的版本
+runtime 跟著「那一版 release」走，不是跟著最新的 Swift：v0.1.9 與 v0.2.0 用 6.4.2，v0.1.5 到 v0.1.8 用 6.4.1，v0.1.4 用 6.4.0 建置，v0.1.3 與更早的版本
 用 Swift 6.3.3。如果 `csv2 --version` 回報的是 0.1.3，那麼安裝 6.4.x 是錯的解法。
 
 ## 從原始碼建置與安裝
@@ -137,8 +138,8 @@ Static Linux SDK；會在 swift_tar 與 multissh 找的那些位置尋找，或�
 ### 發布所有平台
 
 ```zsh
-./publish_matrix.zsh 0.1.9              # 說出它會做什麼
-./publish_matrix.zsh 0.1.9 --publish    # 打 tag、等 CI、下載、./publish.zsh
+./publish_matrix.zsh 0.2.0              # 說出它會做什麼
+./publish_matrix.zsh 0.2.0 --publish    # 打 tag、等 CI、下載、./publish.zsh
 ```
 
 `.github/workflows/release.yml` 建置、測試並打包八個目標，每一個都在它自己平台的 runner 上：x86_64 與

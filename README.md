@@ -25,21 +25,21 @@ extracting the archive, running the extracted binary and having it read a CSV.
 v0.1.8 and earlier published four.
 
 ```sh
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-macos-arm64.tar.zst
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-macos-arm64.tar.zst.sha256
-sha256sum -c csv2-0.1.9-macos-arm64.tar.zst.sha256
-zstd -d csv2-0.1.9-macos-arm64.tar.zst -c | tar -x
-./csv2-0.1.9-macos-arm64/csv2 --version
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.0/csv2-0.2.0-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.0/csv2-0.2.0-macos-arm64.tar.zst.sha256
+sha256sum -c csv2-0.2.0-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.2.0-macos-arm64.tar.zst -c | tar -x
+./csv2-0.2.0-macos-arm64/csv2 --version
 ```
 
 Substitute `macos-x86_64`, `linux-x86_64-musl`, `linux-aarch64-musl`,
-`linux-x86_64`, `linux-aarch64`, `windows-x86_64` or `windows-arm64` for the
-others. On Linux, `-musl` is the one to take unless you have a reason not to:
-it needs nothing from the machine, and it is what Homebrew installs. The
-`linux-<arch>` archives are the glibc build; up to v0.1.8 they were the only
-Linux archives.
+`linux-x86_64-glibc`, `linux-aarch64-glibc`, `windows-x86_64` or
+`windows-arm64` for the others. On Linux, `-musl` is the one to take unless
+you have a reason not to: it needs nothing from the machine, and it is what
+Homebrew installs. The `-glibc` archives are the glibc build. v0.1.9 named
+them bare `linux-<arch>`, and up to v0.1.8 those were the only Linux archives.
 
-**The Linux archives are fully static from v0.1.9 on**, linked against musl.
+**The `-musl` Linux archives are fully static** (from v0.1.9 on), linked against musl.
 They need no Swift toolchain and no glibc, so they run on any Linux of their
 architecture and keep running when the machine's Swift changes. v0.1.6 to
 v0.1.8 linked Swift statically but still needed the machine's glibc, libstdc++
@@ -72,7 +72,7 @@ scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.
 **On Windows, csv2 needs the Swift runtime of the version that built it, and
 neither the archive nor Scoop installs that for you.** The Windows archive
 holds `csv2.exe` and nothing else; it loads `swiftCore.dll`, `Foundation.dll`
-and about a dozen siblings from `PATH`. v0.1.9 was built with **Swift 6.4.2**,
+and about a dozen siblings from `PATH`. v0.2.0 was built with **Swift 6.4.2**,
 so install the Swift 6.4.2 runtime — the directory
 `%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.2\usr\bin`, which the Swift 6.4.2
 installer from [swift.org](https://www.swift.org/install/windows/) creates and
@@ -96,8 +96,8 @@ A different patch version has been seen to work — v0.1.4, built with 6.4.0,
 runs on 6.4.1 — and a different minor version to fail, as above. Nothing else
 has been measured, so the safe choice is the runtime that built the release.
 
-The runtime follows the release, not the latest Swift: v0.1.9 was built with
-6.4.2, v0.1.5 to v0.1.8 with 6.4.1, v0.1.4 with
+The runtime follows the release, not the latest Swift: v0.1.9 and v0.2.0 were
+built with 6.4.2, v0.1.5 to v0.1.8 with 6.4.1, v0.1.4 with
 6.4.0, and v0.1.3 and earlier with Swift 6.3.3. If `csv2 --version` reports
 0.1.3, installing 6.4.x is the wrong fix.
 
@@ -169,8 +169,8 @@ over it.
 ### Publishing every platform
 
 ```zsh
-./publish_matrix.zsh 0.1.9              # says what it would do
-./publish_matrix.zsh 0.1.9 --publish    # tag, wait for CI, download, ./publish.zsh
+./publish_matrix.zsh 0.2.0              # says what it would do
+./publish_matrix.zsh 0.2.0 --publish    # tag, wait for CI, download, ./publish.zsh
 ```
 
 `.github/workflows/release.yml` builds, tests and packages eight targets, each
