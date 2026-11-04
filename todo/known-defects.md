@@ -14224,6 +14224,9 @@ bytes and use that as the line base.
 
 ## RJ. Linux 建置把工具鏈的**絕對路徑**寫進 RPATH，換工具鏈後執行檔就跑不起來（2026-10-22 發現；同日決定正式的 Linux 建置一律靜態，T329a–c）
 
+**2026-11-04：底下的 glibc 加 `-static-stdlib` 已由 musl 全靜態取代**（使用者決定，見 plan.md「Linux 建置：musl」）。
+RJ 本身仍然成立：產物不帶 RPATH、不依賴工具鏈，現在連 glibc 也不依賴。T329 改為 a–d。
+
 guest 從 Swift 6.3.3 換成 6.4.0、移除 6.3.3 之後，已發布的 `csv2-0.1.5-linux-aarch64` 在 guest 裡無法執行：
 
 ```console

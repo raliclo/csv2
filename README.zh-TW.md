@@ -28,10 +28,10 @@ zstd -d csv2-0.1.8-macos-arm64.tar.zst -c | tar -x
 
 其餘三個把 `macos-arm64` 換成 `linux-x86_64`、`linux-aarch64` 或 `windows-x86_64`。
 
-**從 v0.1.6 起，Linux 的封存是靜態連結的。** 它們只需要 libc、libm、libstdc++ 與 libgcc_s，
-不需要 Swift 工具鏈，因此機器上的 Swift 換了版本也照樣能跑。v0.1.5 的 aarch64 執行檔做不到：它在
-RPATH 裡以版本號指名自己的工具鏈，那份工具鏈一被換掉它就起不來了。代價是大小：解開後 57 到 59 MB，
-原本約 1 MB。
+**從 v0.1.9 起，Linux 的封存對 musl 完全靜態連結。** 它們不需要 Swift 工具鏈，也不需要 glibc，
+因此在同架構的任何 Linux 上都能跑，機器上的 Swift 換了版本也照樣能跑。v0.1.6 到 v0.1.8 只把 Swift
+靜態連進去，仍需要機器上的 glibc、libstdc++ 與 libgcc_s。v0.1.5 的 aarch64 執行檔在 RPATH 裡以版本號
+指名自己的工具鏈，那份工具鏈一被換掉它就起不來了。代價是大小：解開後約 57 MB，原本約 1 MB。
 
 **aarch64 Linux 的封存從 v0.1.1 起才有**；v0.1.0 沒有。aarch64 的建置每一次執行都會測——**T47**
 拿十二組呼叫與 macOS 逐位元比對。
@@ -79,7 +79,8 @@ runtime 跟著「那一版 release」走，不是跟著最新的 Swift：v0.1.5 
 ## 從原始碼建置與安裝
 
 需求：Swift 6，並將警告視為錯誤。建置使用純 Swift 原始檔、Foundation 與
-Dispatch，不使用 SwiftPM 或 SwiftNIO。
+Dispatch，不使用 SwiftPM 或 SwiftNIO。在 Linux 上還需要與工具鏈同一版的 Swift Static Linux SDK
+（以 `swift sdk install` 安裝，附上 swift.org 列出的 checksum）；缺少時建置會停下，並指名它需要的那一份。
 
 ```zsh
 ./compile_csv2.zsh

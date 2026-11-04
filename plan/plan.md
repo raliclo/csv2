@@ -1740,6 +1740,43 @@ metadata 的形狀不是，因此讓步的是後者。
 為此 `-debug` 新增一行 `metrics:`，回報讀取位元組數與峰值 RSS。少了它，T9、T12、T13
 只能停在 SKIP：「它是以環狀緩衝寫的」不構成記憶體有上界的證據。
 
+## Linux 建置：musl（2026-11-04 使用者決定）
+
+**Linux 的正式建置對 musl 完全靜態連結**，用 Swift 的 Static Linux SDK（`-target <arch>-swift-linux-musl
+-static-executable`）。產物沒有程式直譯器、沒有任何共享函式庫：不需要 Swift 工具鏈，也不需要 glibc，
+在同架構的任何 Linux 上都能跑。它取代 RJ 的 glibc 加 `-static-stdlib`——那只把 Swift 靜態連進去，
+仍需要機器上的 glibc、libstdc++ 與 libgcc_s。
+
+The Linux release build is fully static against musl, through Swift's Static Linux SDK. The binary has
+no program interpreter and no shared library, so it needs neither a Swift toolchain nor glibc. It
+replaces RJ's glibc `-static-stdlib` build, which still needed the machine's glibc.
+
+**理由是可攜性，不是大小。** 同一份原始碼、WSL x86_64、Swift 6.4.1，兩者都 strip 過：
+
+| | 未壓縮 | zstd -19 |
+|---|---|---|
+| glibc 加 `-static-stdlib` | 58,694,944 B | 16,824,867 B |
+| musl 全靜態 | 56,581,048 B | 16,468,344 B |
+
+只小 3.6%（壓縮後 2.1%）：兩者大部分都是 Foundation 與它的 ICU 資料。
+
+**做法與它的條件：**
+
+- 每個 Linux 節點仍在自己身上原生建置（WSL、guest），發布流程不變。`compile_csv2.zsh` 在 Linux 上
+  交給 `compile_csv2_linux.zsh`，建置邏輯只有一份。
+- SDK 必須與工具鏈**同一版**：Swift 在 Linux 上沒有 ABI 穩定性，而 SDK 帶著要連進去的靜態 runtime。
+  依序找 `$SWIFT_STATIC_SDK`、`$SWIFT_SDKS_PATH`、`/workspace/opt/swift-sdks`、`~/.swiftpm/swift-sdks`。
+- **找不到 SDK 時建置失敗，不退回 glibc。** 安靜地換掉產物的建置，正是這個專案要拒絕的那種失敗。
+- 建置腳本在連結後自己檢查：有程式直譯器或有 NEEDED 就拒絕。T329a–d 對受測的執行檔問同樣的問題。
+- 程式上唯一的差異：musl 的 `getrlimit`、`getrusage` 與 Darwin 一樣收 `Int32`（見下方缺陷一）。
+
+**考慮過、沒有選的：**
+
+- **比照 swift_tar，在 Mac 上交叉建置兩個 Linux 版、再到 Linux 上驗證。** Mac 上確實建得出來，在 guest
+  與 WSL 上也都跑過。但那會改變「每份封存在建置它的機器上打包」這條發布規則，而原生建置只需要每個
+  節點多裝一個 SDK。
+- **維持 glibc。** 體積差不多；使用者要的是不依賴機器上的 libc。
+
 ## 第 6 階段實作時定案的事，以及它抓到的兩個缺陷
 
 第 6 階段的價值不是「多一個平台能跑」，而是它**抓得到 macOS 上永遠不會顯現的缺陷**，
@@ -1753,7 +1790,8 @@ guard getrusage(RUSAGE_SELF, &usage) == 0 else { return 0 }
 
 Darwin 宣告 `getrusage(Int32, ...)`，glibc 宣告 `getrusage(__rusage_who_t, ...)`，
 而 `RUSAGE_SELF` 本身被匯入為 `__rusage_who`。同一行在 macOS 上編譯得過，在 Linux 上
-是型別錯誤，**連編都編不過**。
+是型別錯誤，**連編都編不過**。musl 則與 Darwin 一樣宣告成 `Int32`，所以那個分支判斷的是
+「是不是 glibc」，不是「是不是 Linux」。
 
 「`ru_maxrss` 在 Darwin 是 bytes、在 Linux 是 KB」也成立，但問題還更早一步。
 
@@ -2811,6 +2849,8 @@ profile。也就是說，要讓 guest 從 GitHub pull，就得在裡面放一把
 - [x] `compile_csv2_linux.zsh`，比照 `compile_swift_tar_linux.zsh`
 - [x] 放進 workspace 映像（不佔 rootfs 的 128 MiB 預算）
 - [x] 測試 T47（跨平台逐位元相同）
+- [ ] Linux 建置改為 musl 全靜態：T329a–d 在 WSL（x86_64）上通過
+- [x] 同上，guest aarch64：用 workspace 的 6.4.0 Static Linux SDK 原生建置，T329a–d 與整套測試皆無失敗（2026-11-04）
 
 ### 第 7 階段（暫緩）：出貨 ⏸
 

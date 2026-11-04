@@ -24,6 +24,8 @@ answer.
 
 ```zsh
 ./compile_csv2.zsh      # auto-detects macOS/Linux/Windows / 自動偵測 macOS／Linux／Windows
+                        # Linux: static musl, needs the Static Linux SDK of the same Swift version
+                        # Linux：musl 全靜態，需要同版 Swift 的 Static Linux SDK
 ./test/test_csv2.zsh    # 0 FAIL; on macOS the one SKIP is T47 / 0 失敗；macOS 上唯一的 SKIP 是 T47
 
 # the Linux half, driven from the parent project (boots a guest VM)

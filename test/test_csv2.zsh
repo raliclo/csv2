@@ -17882,14 +17882,16 @@ echo
 echo "--- T329: the binary names no toolchain to find its runtime in / T329：執行檔不指望任何工具鏈目錄提供 runtime ---"
 # RJ. On Linux swiftc writes the toolchain's version-numbered path into RPATH,
 # so a dynamic binary stops running when the machine's Swift moves on. Linux
-# builds are static: no RPATH or RUNPATH (a), no Swift
-# runtime library among the dependencies (b), and it runs with an empty
-# environment (c). macOS asks the same question of its own format: no LC_RPATH,
+# builds are fully static against musl (plan.md, "Linux 建置：musl"): no
+# program interpreter (a), no shared library at all, so no Swift runtime and no
+# glibc (b), no RPATH or RUNPATH (d), and it runs with an empty environment
+# (c). macOS asks the same question of its own format: no LC_RPATH,
 # and every dependency under /usr/lib or /System, which the OS owns. Windows is
 # RC, a different answer (ship the DLLs), so it is not asked here.
 # RJ。Linux 上 swiftc 會把工具鏈帶版本號的路徑寫進 RPATH，機器上的 Swift 一換，動態連結的執行檔
-# 就跑不起來。Linux 建置是靜態的：沒有 RPATH／RUNPATH（a）、依賴裡沒有任何
-# Swift runtime 函式庫（b）、環境變數全空也能執行（c）。macOS 用它自己的格式問同一個問題：沒有
+# 就跑不起來。Linux 建置對 musl 完全靜態（plan.md「Linux 建置：musl」）：沒有程式直譯器（a）、
+# 沒有任何共享函式庫，因此沒有 Swift runtime 也沒有 glibc（b）、沒有 RPATH／RUNPATH（d）、
+# 環境變數全空也能執行（c）。macOS 用它自己的格式問同一個問題：沒有
 # LC_RPATH，而且每一個依賴都在作業系統擁有的 /usr/lib 或 /System 底下。Windows 是 RC，答案不同
 # （把 DLL 一起帶上），所以這裡不問。
 case "$(uname -s 2>/dev/null)" in
@@ -17898,14 +17900,22 @@ case "$(uname -s 2>/dev/null)" in
             T329_SKIPPED=1
             skipt "T329 the binary names no toolchain / 執行檔不指望工具鏈目錄 (no readelf on this system / 這個系統沒有 readelf)"
         else
+            # A static binary has nothing to list as a dependency, so the
+            # guard is that readelf read the file at all: an unreadable file
+            # also lists no NEEDED and no INTERP.
+            # 靜態的執行檔沒有依賴可列，所以把關的是 readelf 確實讀到了這個檔：讀不了的檔案同樣
+            # 列不出 NEEDED 和 INTERP。
+            _t329_l=$(LC_ALL=C readelf -lW "$CSV2" 2>&1)
             _t329=$(LC_ALL=C readelf -d "$CSV2" 2>&1)
-            if [[ $_t329 != *"(NEEDED)"* ]]; then
-                bad "T329 readelf printed no dependencies at all, so nothing was checked: ${_t329[1,200]} / readelf 一個依賴都沒印，等於什麼都沒查"
+            if [[ $_t329_l != *"Program Headers"* ]]; then
+                bad "T329 readelf could not read the binary, so nothing was checked: ${_t329_l[1,200]} / readelf 讀不了這個執行檔，等於什麼都沒查"
             else
+                assert_eq "$(print -r -- "$_t329_l" | grep -c 'INTERP' || true)" 0 \
+                    "T329a no program interpreter: it is a static executable / 沒有程式直譯器：是靜態執行檔"
+                assert_eq "$(print -r -- "$_t329" | grep -c '(NEEDED)' || true)" 0 \
+                    "T329b no shared library at all, so no Swift runtime and no glibc / 沒有任何共享函式庫，因此沒有 Swift runtime 也沒有 glibc"
                 assert_eq "$(print -r -- "$_t329" | grep -cE '\((RPATH|RUNPATH)\)' || true)" 0 \
-                    "T329a no RPATH or RUNPATH / 沒有 RPATH 或 RUNPATH"
-                assert_eq "$(print -r -- "$_t329" | grep '(NEEDED)' | grep -cE 'libswift|libFoundation|lib_Foundation|libdispatch|libBlocksRuntime' || true)" 0 \
-                    "T329b no Swift runtime among the dependencies / 依賴裡沒有 Swift runtime"
+                    "T329d no RPATH or RUNPATH / 沒有 RPATH 或 RUNPATH"
             fi
             if env -i "$CSV2" --version >/dev/null 2>&1; then
                 ok "T329c it runs with an empty environment / 環境變數全空也能執行"

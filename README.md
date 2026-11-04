@@ -32,11 +32,13 @@ zstd -d csv2-0.1.8-macos-arm64.tar.zst -c | tar -x
 
 Substitute `linux-x86_64`, `linux-aarch64` or `windows-x86_64` for the others.
 
-**The Linux archives are statically linked from v0.1.6 on.** They need libc,
-libm, libstdc++ and libgcc_s and no Swift toolchain, so they keep running when
-the machine's Swift changes. The v0.1.5 aarch64 binary did not: it named its
-toolchain by version in its RPATH and stopped starting when that toolchain was
-replaced. The price is size, 57 to 59 MB unpacked instead of about 1 MB.
+**The Linux archives are fully static from v0.1.9 on**, linked against musl.
+They need no Swift toolchain and no glibc, so they run on any Linux of their
+architecture and keep running when the machine's Swift changes. v0.1.6 to
+v0.1.8 linked Swift statically but still needed the machine's glibc, libstdc++
+and libgcc_s. The v0.1.5 aarch64 binary named its toolchain by version in its
+RPATH and stopped starting when that toolchain was replaced. The price is
+size, about 57 MB unpacked instead of about 1 MB.
 
 **aarch64 Linux archives exist from v0.1.1 on**; v0.1.0 has none. The aarch64
 build is tested on every run — T47 compares twelve invocations byte for byte
@@ -96,7 +98,9 @@ built with 6.4.1, v0.1.4 with
 
 Requirements: Swift 6 with warnings treated as errors. The build uses plain
 Swift source files, Foundation, and Dispatch; it does not use SwiftPM or
-SwiftNIO.
+SwiftNIO. On Linux it also needs Swift's Static Linux SDK of the same version
+as the toolchain (`swift sdk install`, with the checksum swift.org lists); the
+build stops and names the one it needs when it is missing.
 
 ```zsh
 ./compile_csv2.zsh
