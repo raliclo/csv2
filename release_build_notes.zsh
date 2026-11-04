@@ -26,13 +26,34 @@ WORKFLOW=release.yml
 cd -- "${0:A:h}"
 [[ $run_id == <-> ]] || { print -u2 -- "the run id must be a number (got: $run_id)"; exit 2 }
 
+# The job logs are fetched with curl, not `gh api`. They are full of terminal
+# escape sequences (colour codes), and a newer gh refuses to print such a
+# response -- "the response contains terminal escape sequences; pass
+# --allow-escape-sequences" -- while older ones (2.89, 2.95) do not know that
+# flag at all. The first eight-archive publish job (2026-11-04) got an empty
+# log that way and refused. curl passes the bytes through whatever gh does.
+# The token: GH_TOKEN in a workflow, gh's own on a person's machine, and none
+# where a proxy supplies it (a Claude Code session).
+# job log 用 curl 抓，不用 `gh api`。log 裡滿是終端機跳脫序列（顏色碼），較新的 gh 拒絕輸出這種回應——
+# 「the response contains terminal escape sequences; pass --allow-escape-sequences」——而較舊的（2.89、2.95）
+# 根本不認得那個旗標。第一次八份封存的 publish job（2026-11-04）因此拿到空的 log 而拒絕。curl 不論 gh 怎麼
+# 做都把位元組原樣交出。token：workflow 裡用 GH_TOKEN，人的機器上用 gh 自己的，有 proxy 代為提供的地方
+# （Claude Code session）就不帶。
+log_token=${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}
+job_log() {   # job_log <job id>
+    if [[ -n $log_token ]]; then
+        curl -sfL -H "Authorization: Bearer $log_token" "https://api.github.com/repos/$REPO/actions/jobs/$1/logs"
+    else
+        curl -sfL "https://api.github.com/repos/$REPO/actions/jobs/$1/logs"
+    fi
+}
 swift_win=$(sed -n 's/^ *SWIFT_VERSION: *"\([0-9.]*\)".*/\1/p' .github/workflows/$WORKFLOW | head -1)
 typeset -a suites_en suites_zh
 for plat in $PLATFORMS; do
     [[ $plat == windows-* ]] && continue
     job=$(gh api "repos/$REPO/actions/runs/$run_id/jobs?per_page=50" --jq ".jobs[] | select(.name == \"$plat\") | .id")
     [[ $job == <-> ]] || { print -u2 -- "no job named $plat in run $run_id / 執行 $run_id 裡沒有名為 $plat 的 job"; exit 1 }
-    counts=$(gh api "repos/$REPO/actions/jobs/$job/logs" | LC_ALL=C grep -a -oE 'PASS [0-9]+ +FAIL [0-9]+ +SKIP [0-9]+' | tail -1 || true)
+    counts=$(job_log "$job" | LC_ALL=C grep -a -oE 'PASS [0-9]+ +FAIL [0-9]+ +SKIP [0-9]+' | tail -1 || true)
     [[ -n $counts ]] || { print -u2 -- "the $plat job's log has no suite summary / $plat 的 log 裡沒有測試摘要"; exit 1 }
     c=(${=counts})
     suites_en+=("$plat $c[2]/$c[4]/$c[6]")
