@@ -2863,7 +2863,7 @@ profile。也就是說，要讓 guest 從 GitHub pull，就得在裡面放一把
 - [x] `compile_csv2_linux.zsh`，比照 `compile_swift_tar_linux.zsh`
 - [x] 放進 workspace 映像（不佔 rootfs 的 128 MiB 預算）
 - [x] 測試 T47（跨平台逐位元相同）
-- [ ] Linux 發行建置（`-musl`）全靜態：T329a–d 與整套測試在 x86_64 上通過（WSL 或 release.yml 的 linux-x86_64-musl）
+- [x] Linux 發行建置（`-musl`）全靜態：T329a–d 與整套測試在 x86_64 上通過（WSL 或 release.yml 的 linux-x86_64-musl）— release.yml 第 2 次執行（41825350428）@ 2c6103f：linux-x86_64-musl 整套 0 失敗、3 略過（T145e、T354、T47，皆為環境或由母專案執行），T329a–d 全數執行並通過；linux-aarch64-musl 同樣 0 失敗
 - [x] 同上，guest aarch64：用 workspace 的 6.4.0 Static Linux SDK 原生建置，T329a–d 與整套測試皆無失敗（2026-11-04）
 
 ### 第 7 階段（暫緩）：出貨 ⏸
@@ -3237,6 +3237,17 @@ rules they implement are the oldest and most heavily tested thing in the tree.
 （第 74 到 78 回合改動了輸出、拒絕與「副檔名的意義」）。這裡承諾的是刻意挑過的那個窄面：
 位元組進去、紀錄出來、紀錄再變回位元組。那七個沒有一個被任何一輪盲測的發現碰過，而它們實作的解析
 規則是這棵樹裡最老、也被測得最重的東西。
+
+### Minimum platform for a client / 用戶端的最低平台
+
+A SwiftPM package that depends on the subset declares `platforms: [.macOS(.v10_15)]`
+or higher. `FileHandle.close()` throws only from macOS 10.15, and a package that
+declares nothing gets its SwiftPM's default minimum -- 10.13 under Swift 6.3.3,
+where T212 failed (SO). Linux and Windows have no such floor.
+
+依賴這個子集的 SwiftPM package 要宣告 `platforms: [.macOS(.v10_15)]` 或更高。會丟錯的
+`FileHandle.close()` 從 macOS 10.15 才有，而什麼都沒宣告的 package 拿到的是它的 SwiftPM 的預設最低
+版本——Swift 6.3.3 下是 10.13，T212 就在那裡失敗（SO）。Linux 與 Windows 沒有這個下限。
 
 ### How it is verified / 它是怎麼被驗證的
 

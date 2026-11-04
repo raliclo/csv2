@@ -49,6 +49,7 @@ on:
       - "build_id.zsh"
       - "release.zsh"
       - "test/**"
+      - "verifications/module_api.zsh"
       - ".github/workflows/release.yml"
   pull_request:
     paths:
@@ -59,6 +60,7 @@ on:
       - "build_id.zsh"
       - "release.zsh"
       - "test/**"
+      - "verifications/module_api.zsh"
       - ".github/workflows/release.yml"
   workflow_dispatch:
 

@@ -201,11 +201,20 @@ spm_build() {
     local pkg=$WORK/spm_v6
     rm -rf $pkg; mkdir -p $pkg/Sources/CSV2Core
     for f in $SUBSET; do cp $ROOT/src/$f.swift $pkg/Sources/CSV2Core/; done
+    # The platform is DECLARED, not left to the toolchain. FileHandle.close()
+    # throws only from macOS 10.15, and a package with no `platforms` gets
+    # whatever minimum its SwiftPM defaults to: 10.13 under Swift 6.3.3, where
+    # this build failed (SO), higher under 6.4, where it passed. A client of
+    # CSV2Core needs the same line; plan.md, phase 9.
+    # 平台是**宣告**的，不交給工具鏈決定。會丟錯的 FileHandle.close() 從 macOS 10.15 才有，而沒有
+    # `platforms` 的 package 拿到的是它的 SwiftPM 預設的最低版本：Swift 6.3.3 下是 10.13，這個建置在
+    # 那裡失敗（SO）；6.4 下較高，於是通過。CSV2Core 的用戶端需要同一行；見 plan.md 第 9 階段。
     cat > $pkg/Package.swift <<PKG
 // swift-tools-version:6.0
 import PackageDescription
 let package = Package(
     name: "CSV2Core",
+    platforms: [.macOS(.v10_15)],
     products: [.library(name: "CSV2Core", targets: ["CSV2Core"])],
     targets: [.target(name: "CSV2Core", swiftSettings: [.swiftLanguageMode(.v6)])]
 )
