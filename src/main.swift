@@ -11,7 +11,7 @@
 
 import Foundation
 
-let CSV2_VERSION = "0.1.8"
+let CSV2_VERSION = "0.1.9"
 
 // ---------------------------------------------------------------------
 // MARK: - Options / 選項

@@ -17,20 +17,24 @@ aarch64 Linux, WSL, and Windows through the standalone module/client check.
 
 ## Install a release
 
-Four archives are published per version, one per platform that can both build
-and verify its own — each was packed on the machine that built the binary, and
-the packaging script ends by extracting the archive, running the extracted
-binary and having it read a CSV.
+Six archives are published per version, from v0.1.9 on: macOS and Windows on
+x86_64 and arm64, and Linux on x86_64 and aarch64. Each was built, tested and
+packed on a machine of its own platform, and the packaging script ends by
+extracting the archive, running the extracted binary and having it read a CSV.
+v0.1.8 and earlier published four.
 
 ```sh
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.8/csv2-0.1.8-macos-arm64.tar.zst
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.8/csv2-0.1.8-macos-arm64.tar.zst.sha256
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-macos-arm64.tar.zst.sha256
 sha256sum -c csv2-0.1.8-macos-arm64.tar.zst.sha256
 zstd -d csv2-0.1.8-macos-arm64.tar.zst -c | tar -x
 ./csv2-0.1.8-macos-arm64/csv2 --version
 ```
 
-Substitute `linux-x86_64`, `linux-aarch64` or `windows-x86_64` for the others.
+Substitute `macos-x86_64`, `linux-x86_64-musl`, `linux-aarch64-musl`,
+`windows-x86_64` or `windows-arm64` for the others. The Linux names carry
+`-musl` from v0.1.9 on; v0.1.8 and earlier are `linux-x86_64` and
+`linux-aarch64`.
 
 **The Linux archives are fully static from v0.1.9 on**, linked against musl.
 They need no Swift toolchain and no glibc, so they run on any Linux of their
@@ -65,9 +69,9 @@ scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.
 **On Windows, csv2 needs the Swift runtime of the version that built it, and
 neither the archive nor Scoop installs that for you.** The Windows archive
 holds `csv2.exe` and nothing else; it loads `swiftCore.dll`, `Foundation.dll`
-and about a dozen siblings from `PATH`. v0.1.8 was built with **Swift 6.4.1**,
-so install the Swift 6.4.1 runtime — the directory
-`%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.1\usr\bin`, which the Swift 6.4.1
+and about a dozen siblings from `PATH`. v0.1.9 was built with **Swift 6.4.2**,
+so install the Swift 6.4.2 runtime — the directory
+`%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.2\usr\bin`, which the Swift 6.4.2
 installer from [swift.org](https://www.swift.org/install/windows/) creates and
 puts on `PATH`.
 
@@ -89,8 +93,8 @@ A different patch version has been seen to work — v0.1.4, built with 6.4.0,
 runs on 6.4.1 — and a different minor version to fail, as above. Nothing else
 has been measured, so the safe choice is the runtime that built the release.
 
-The runtime follows the release, not the latest Swift: v0.1.5 to v0.1.8 were
-built with 6.4.1, v0.1.4 with
+The runtime follows the release, not the latest Swift: v0.1.9 was built with
+6.4.2, v0.1.5 to v0.1.8 with 6.4.1, v0.1.4 with
 6.4.0, and v0.1.3 and earlier with Swift 6.3.3. If `csv2 --version` reports
 0.1.3, installing 6.4.x is the wrong fix.
 

@@ -15,18 +15,21 @@ English documentation: [README.md](README.md)。
 
 ## 安裝發行版
 
-每個版本發布四份封存，各屬於一個「既建得出、也驗得了自己」的平台——每一份都在它的執行檔被建置的
-那台機器上打包，而打包腳本的結尾是**解開封存、執行解開後的執行檔、並讓它讀一個 CSV**。
+從 v0.1.9 起，每個版本發布六份封存：x86_64 與 arm64 上的 macOS、Windows，以及 x86_64 與 aarch64
+上的 Linux。每一份都在它自己平台的機器上建置、測試並打包，而打包腳本的結尾是**解開封存、執行解開後的
+執行檔、並讓它讀一個 CSV**。v0.1.8 與更早的版本發布四份。
 
 ```sh
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.8/csv2-0.1.8-macos-arm64.tar.zst
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.8/csv2-0.1.8-macos-arm64.tar.zst.sha256
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-macos-arm64.tar.zst.sha256
 sha256sum -c csv2-0.1.8-macos-arm64.tar.zst.sha256
 zstd -d csv2-0.1.8-macos-arm64.tar.zst -c | tar -x
 ./csv2-0.1.8-macos-arm64/csv2 --version
 ```
 
-其餘三個把 `macos-arm64` 換成 `linux-x86_64`、`linux-aarch64` 或 `windows-x86_64`。
+其餘的把 `macos-arm64` 換成 `macos-x86_64`、`linux-x86_64-musl`、`linux-aarch64-musl`、`windows-x86_64`
+或 `windows-arm64`。Linux 的名字從 v0.1.9 起帶 `-musl`；v0.1.8 與更早的版本是 `linux-x86_64` 與
+`linux-aarch64`。
 
 **從 v0.1.9 起，Linux 的封存對 musl 完全靜態連結。** 它們不需要 Swift 工具鏈，也不需要 glibc，
 因此在同架構的任何 Linux 上都能跑，機器上的 Swift 換了版本也照樣能跑。v0.1.6 到 v0.1.8 只把 Swift
@@ -55,9 +58,9 @@ scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.
 
 **在 Windows 上，csv2 需要「建置它的那一版」Swift runtime，而封存與 Scoop 都不會替你安裝它。**
 Windows 的封存裡只有 `csv2.exe`；它從 `PATH` 載入 `swiftCore.dll`、`Foundation.dll` 以及另外十來個
-DLL。v0.1.8 是用 **Swift 6.4.1** 建置的，所以請安裝 Swift 6.4.1 的 runtime——也就是
-`%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.1\usr\bin` 這個目錄，由
-[swift.org](https://www.swift.org/install/windows/) 的 Swift 6.4.1 安裝程式建立並加進 `PATH`。
+DLL。v0.1.9 是用 **Swift 6.4.2** 建置的，所以請安裝 Swift 6.4.2 的 runtime——也就是
+`%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.2\usr\bin` 這個目錄，由
+[swift.org](https://www.swift.org/install/windows/) 的 Swift 6.4.2 安裝程式建立並加進 `PATH`。
 
 版本不同的 runtime 可能跑不起來，而且失敗時什麼都不說。一個用 Swift 6.3.3 建置的 v0.1.3，在只有 6.4.0
 的機器上完全沒有輸出，在 `cmd.exe` 下以 `0xC0000139`（找不到進入點）結束，在 bash 與 zsh 下則是
@@ -73,7 +76,7 @@ where swiftCore.dll
 差一個修補版號的 runtime 看過能跑——用 6.4.0 建置的 v0.1.4 在 6.4.1 上能跑——差一個次版號則如上所述
 跑不起來。其餘都沒量過，因此穩妥的選擇是「建置那一版 release 的 runtime」。
 
-runtime 跟著「那一版 release」走，不是跟著最新的 Swift：v0.1.5 到 v0.1.8 用 6.4.1，v0.1.4 用 6.4.0 建置，v0.1.3 與更早的版本
+runtime 跟著「那一版 release」走，不是跟著最新的 Swift：v0.1.9 用 6.4.2，v0.1.5 到 v0.1.8 用 6.4.1，v0.1.4 用 6.4.0 建置，v0.1.3 與更早的版本
 用 Swift 6.3.3。如果 `csv2 --version` 回報的是 0.1.3，那麼安裝 6.4.x 是錯的解法。
 
 ## 從原始碼建置與安裝
