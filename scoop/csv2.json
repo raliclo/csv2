@@ -25,14 +25,20 @@
         "appends instead of refusing.",
         "If csv2 was placed by install.zsh before, run `./install.zsh --uninstall` first:",
         "Scoop overwrites that shim. After this, install.zsh refuses to write over it.",
-        "Only 64bit is published: an archive is built on the machine that built the binary,",
-        "and only that arrangement lets the version inside it be checked by running it."
+        "64bit and arm64 (from 0.1.9): each archive is built, tested and packed on a machine",
+        "of its own architecture, the only arrangement that lets the version inside it be",
+        "checked by running it."
     ],
     "architecture": {
         "64bit": {
             "url": "https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-windows-x86_64.tar.zst",
             "hash": "2b34d8845ce8fffc284e4cd7d56b3347229a28372fdca9bc0c77b8d7d638bb27",
             "extract_dir": "csv2-0.1.9-windows-x86_64"
+        },
+        "arm64": {
+            "url": "https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-windows-arm64.tar.zst",
+            "hash": "6f8dae0ea22c4dd70b8602f62a554523d553df0f1eab59d6dfc64491ef4e4933",
+            "extract_dir": "csv2-0.1.9-windows-arm64"
         }
     },
     "bin": "csv2.exe",
@@ -43,6 +49,9 @@
         "architecture": {
             "64bit": {
                 "url": "https://github.com/raliclo/csv2/releases/download/v$version/csv2-$version-windows-x86_64.tar.zst"
+            },
+            "arm64": {
+                "url": "https://github.com/raliclo/csv2/releases/download/v$version/csv2-$version-windows-arm64.tar.zst"
             }
         },
         "hash": {

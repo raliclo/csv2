@@ -17026,10 +17026,19 @@ fi
 # which is the failure the block's own comment says it exists to avoid.
 # 因為那個預設就是 arm64 的封存，macOS x86_64 必須被**明講**拒絕——否則一台 Intel Mac 會安靜地抓走一個
 # 它執行不了的執行檔，而那正是那個區塊的註解說它要避免的失敗。
-if LC_ALL=C grep -qE '^ +depends_on arch: :arm64' "$ROOT/Formula/csv2.rb"; then
-    ok "T311b macOS is restricted to arm64, so the default url cannot reach an Intel Mac / macOS 被限制在 arm64，於是那個預設 url 到不了 Intel Mac"
+# From v0.1.9 an Intel Mac has its own archive. The default url is still the
+# arm64 one (T311a), so what keeps an Intel Mac off it is now an
+# `on_macos { on_intel { url ...macos-x86_64 } }` block, and the old
+# `depends_on arch: :arm64` must be gone or it would refuse the Intel Mac the
+# url was added for.
+# 從 v0.1.9 起，Intel Mac 有自己的封存。預設 url 仍是 arm64 的（T311a），所以讓 Intel Mac 不會抓到它的，
+# 現在是一個 `on_macos { on_intel { url ...macos-x86_64 } }` 區塊；而舊的 `depends_on arch: :arm64` 必須
+# 拿掉，否則它會拒絕那台正是為它加上 url 的 Intel Mac。
+_t311_intel=$(LC_ALL=C sed -n '/^  on_macos do/,/^  end/p' "$ROOT/Formula/csv2.rb" | LC_ALL=C sed -n '/on_intel do/,/end/p' | LC_ALL=C grep -c 'url ".*macos-x86_64\.tar\.zst"' | tr -d ' ')
+if [[ $_t311_intel == 1 ]] && ! LC_ALL=C grep -qE '^ +depends_on arch: :arm64' "$ROOT/Formula/csv2.rb"; then
+    ok "T311b an Intel Mac gets its own macos-x86_64 url inside on_macos/on_intel, and macOS is not restricted to arm64 / Intel Mac 在 on_macos/on_intel 裡有自己的 macos-x86_64 url，macOS 也沒有被限制在 arm64"
 else
-    bad "T311b nothing restricts macOS to arm64, so an Intel Mac would fetch the arm64 archive / 沒有任何東西把 macOS 限制在 arm64，Intel Mac 會抓到 arm64 封存"
+    bad "T311b on_macos/on_intel macos-x86_64 urls: $_t311_intel, arm64 restriction present: $(LC_ALL=C grep -cE '^ +depends_on arch: :arm64' "$ROOT/Formula/csv2.rb") / Intel Mac 沒有自己的 url，或 macOS 仍被限制在 arm64"
 fi
 
 # Exactly one url per platform: publish.zsh's rewrite_pair refuses when it finds
@@ -17038,7 +17047,7 @@ fi
 # 每個平台恰好一個 url：publish.zsh 的 rewrite_pair 看到兩個就拒絕，所以「把 arm64 那筆複製一份到
 # on_arm 區塊裡來修 QP」會改成弄壞下一次出貨。兩個要求只在一種形狀上相容。
 _t311_dupes=""
-for _t311_p in macos-arm64 linux-x86_64-musl linux-aarch64-musl; do
+for _t311_p in macos-arm64 macos-x86_64 linux-x86_64-musl linux-aarch64-musl; do
     _t311_n=$(LC_ALL=C grep -c "https://github.com/.*${_t311_p}\.tar\.zst" "$ROOT/Formula/csv2.rb" | tr -d ' ')
     [[ $_t311_n == 1 ]] || _t311_dupes="$_t311_dupes $_t311_p=$_t311_n"
 done

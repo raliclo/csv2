@@ -64,15 +64,18 @@ class Csv2 < Formula
   sha256 "9387eac2c3964066df9d75c10dfb3475d39959e1d9d81cb970d3d7a6eddcca86"
 
   # Only the platforms whose archive was built AND verified on that platform.
-  # macOS x86_64 is deliberately absent rather than pointed at an archive nobody
-  # could run where it was made -- and since the default url above is the arm64
-  # one, "absent" has to be said out loud or an Intel Mac would silently fetch a
-  # binary it cannot execute. That is what the requirement below is for.
-  # 只列出「封存在該平台上被建置**且**被驗證過」的平台。macOS x86_64 是刻意缺席，而不是指向一份
-  # 「在產生它的地方沒有人執行得了」的封存——而既然上面那個預設 url 是 arm64 的，「缺席」就必須被
-  # **說出來**，否則一台 Intel Mac 會安靜地抓走一個它執行不了的執行檔。底下那道要求就是為了這件事。
+  # Until v0.1.8 macOS x86_64 was absent, and `depends_on arch: :arm64` kept an
+  # Intel Mac from fetching the arm64 default above. From v0.1.9 release.yml
+  # builds, tests and packs it on a macos-26-intel runner, so an Intel Mac gets
+  # its own url here and the restriction is gone.
+  # 只列出「封存在該平台上被建置**且**被驗證過」的平台。到 v0.1.8 為止 macOS x86_64 缺席，由
+  # `depends_on arch: :arm64` 擋住 Intel Mac，免得它抓走上面那個 arm64 的預設 url。從 v0.1.9 起，
+  # release.yml 在 macos-26-intel runner 上建置、測試並打包它，所以 Intel Mac 在這裡有自己的 url，那道限制也拿掉了。
   on_macos do
-    depends_on arch: :arm64
+    on_intel do
+      url "https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-macos-x86_64.tar.zst"
+      sha256 "6f37efc36aa7609abccdb69e6c661843e3e6532a5521ba98120b89698c4d73a0"
+    end
   end
 
   on_linux do
