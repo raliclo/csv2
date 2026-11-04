@@ -664,7 +664,14 @@ final class MarkdownEmitter: RecordEmitter {
     func emit(_ r: Record, matches: [Int], ctx: EmitContext) throws {
         var cells: [String] = []
         if ctx.rownum { cells.append("\(r.number)") }
-        cells.append(contentsOf: r.fields.map { MarkdownOut.cell($0.value) })
+        // Each cell goes through Foundation (MarkdownOut.cell), and on Darwin
+        // what it leaves autoreleased is freed only when a pool drains; without
+        // one here a streaming -md held it for the whole run, about 10 MB more
+        // on a 3.3 MB input on macOS x86_64 (SP, T19d).
+        // 每個儲存格都會經過 Foundation（MarkdownOut.cell），在 Darwin 上它留下的 autoreleased 物件
+        // 要等 pool 排空才會釋放；這裡沒有 pool 時，串流的 -md 會把它們留到整趟執行結束，在 macOS
+        // x86_64 上 3.3 MB 的輸入多了約 10 MB（SP，T19d）。
+        cells.append(contentsOf: Platform.drainingPool { r.fields.map { MarkdownOut.cell($0.value) } })
         if pretty {
             for c in cells { bufferedBytes += c.utf8.count }
             // Refuse above the limit rather than try and get killed. --pretty

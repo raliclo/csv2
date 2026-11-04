@@ -38,8 +38,8 @@ enum Platform {
     // -----------------------------------------------------------------
 
     /// Runs `body` inside an autorelease pool where the platform has one, and
-    /// plain where it does not. It serves one call site, the read loop, and
-    /// lives here because `autoreleasepool` does not exist on Linux Swift: at
+    /// plain where it does not. It serves two call sites, the read loop and
+    /// `-md`'s per-row cell rendering (SP), and lives here because `autoreleasepool` does not exist on Linux Swift: at
     /// the call site it builds on macOS and fails on Linux with
     /// `cannot find 'autoreleasepool' in scope`.
     ///
@@ -50,7 +50,7 @@ enum Platform {
     /// ARC, so the plain branch is correct, not a stub.
     ///
     /// 在有 autorelease pool 的平台上把 `body` 包進一個 pool，沒有的平台就直接執行。
-    /// 它只服務一個呼叫點（讀取迴圈），放在這裡是因為 `autoreleasepool` 在 Linux 的
+    /// 它服務兩個呼叫點（讀取迴圈，以及 `-md` 每一列的儲存格算繪，SP），放在這裡是因為 `autoreleasepool` 在 Linux 的
     /// Swift 上不存在：寫在呼叫點旁邊，macOS 能建置，Linux 則以
     /// `cannot find 'autoreleasepool' in scope` 失敗。
     ///
