@@ -14844,3 +14844,44 @@ while `-si/-so` on the same runner stays flat, arm64 macOS grows by 180 KB and L
 unproven: MarkdownOut.cell's Foundation calls leave autoreleased objects that the streaming loop never drains,
 and x86_64 does not elide them the way arm64 does. Plan: an autorelease pool per row on Darwin, through
 Platform.swift; T19d passing on macos-26-intel confirms it, otherwise revert.
+
+## SQ. 以 tag push 觸發的 release.yml，建出的執行檔 build id 說的是前一個 tag，publish.zsh 因此拒絕發布
+
+來源：v0.2.0 的發布（2026-11-05），`./publish_matrix.zsh 0.2.0 --publish` 在使用者的機器上執行。tag `v0.2.0`
+是 annotated（tag 物件 `4b5cc1e`，指向 `3aa9df0`）。它觸發的 release.yml 執行 41874784865 全部成功，八份封存都
+下載到了 dist/，但 GitHub 上沒有出現 release。
+
+```console
+$ ./publish.zsh 0.2.0            # 不加 --publish 的空跑
+csv2-0.2.0-linux-aarch64-glibc.tar.zst: the binary carries no build id of the form "v0.2.0 / <commit>"
+$ ./csv2-0.2.0-macos-arm64/csv2 --version        # 從 dist/ 的封存解出來的
+csv2 0.2.0 (v0.1.9-4-g3aa9df06)
+# CI log，macos-arm64 job 的 checkout 步驟
+git -c protocol.version=2 fetch --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+git rev-parse refs/tags/v0.2.0
+git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin +3aa9df0636df9e7b7921e9f7302d8ffc9ad3ad9a:refs/tags/v0.2.0
+git checkout --progress --force refs/tags/v0.2.0
+OK: csv2 0.2.0 (v0.1.9-4-g3aa9df06) -> release/csv2
+```
+
+**成因**：`actions/checkout@v5` 遇到 tag push 時，先抓下所有 tag，接著以 commit 的 sha 把 `refs/tags/v0.2.0` 覆寫
+一次。覆寫後它指向 commit 本身，不再指向 tag 物件，變成一個輕量 tag。`build_id.zsh` 的 `git describe`（不加
+`--tags`）只認 annotated tag，於是跳過它，往回找到 `v0.1.9`。工作流程把 RELEASE_TAG 留空、讓 checkout 用預設的
+ref，正好是會被覆寫的那一條路。v0.1.9 走的是 workflow_dispatch，所以沒碰到。
+
+**沒有造成損害**：publish.zsh 比對每一份執行檔內嵌的 build id，八份都對不上，因此沒有發出任何東西。那個檢查
+就是為了這種情況而存在（QD）。CI 的整套測試也全部通過，T303a 還印出了 `v0.1.9-4-g3aa9df06`，因為它只要求
+build id 帶有一個 commit。
+
+**計畫**：release.yml 的建置 job 在 checkout 之後，以 `git fetch --force --tags` 把 tag 物件抓回來；建置的
+ref 是 tag 時，建置後立刻檢查 build id 是否就是 `v<版本> / <commit>`，不對就讓那個 job 失敗，不必等到
+publish.zsh 才發現。tag 只要還沒有 release，就可以移動到修正的 commit（retag_unreleased）。
+
+A tag-push run of release.yml builds binaries whose build id names the
+previous tag. actions/checkout re-fetches the pushed tag by commit sha,
+which turns the annotated v0.2.0 into a lightweight ref, and `git
+describe` without --tags skips it, landing on v0.1.9: `csv2 0.2.0
+(v0.1.9-4-g3aa9df06)`. publish.zsh refused all eight archives, as it is
+meant to, so nothing was published. Plan: re-fetch the tags with --force
+after checkout, and fail the build job at once when a tag build's id is
+not `v<version> / <commit>`.

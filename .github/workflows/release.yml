@@ -257,6 +257,17 @@ jobs:
         shell: bash
         run: git config --global --add safe.directory '*'
 
+      # SQ: on a tag push, checkout re-fetches the tag by commit sha, which
+      # turns an annotated tag into a lightweight ref. `git describe` then skips
+      # it and the build id names the previous tag (v0.2.0's first run built
+      # "v0.1.9-4-g3aa9df06"). Fetch the tag objects back before building.
+      # SQ：tag push 時，checkout 以 commit sha 重新抓那個 tag，把 annotated tag 變成輕量 ref；
+      # `git describe` 於是跳過它，build id 說的是前一個 tag（v0.2.0 第一次執行建出
+      # 「v0.1.9-4-g3aa9df06」）。建置前把 tag 物件抓回來。
+      - name: Annotated tags back / 取回 annotated tag
+        shell: bash
+        run: git fetch --force --tags origin
+
       # Two lines, not `a && b`: bash -e does not stop on a failure inside an
       # && list (multissh run 11).
       # 分兩行而非 `a && b`：bash -e 不會因 && 串列中的失敗而停止（multissh 第 11 次執行）。
@@ -273,6 +284,25 @@ jobs:
         run: |
           zsh ./compile_csv2.zsh
           ls -l release/csv2.exe
+
+      # SQ: a tag build must carry "<tag> / <commit>", the id publish.zsh checks.
+      # Fail here, before the suites, rather than after every job has finished.
+      # SQ：tag 上的建置必須帶著「<tag> / <commit>」，也就是 publish.zsh 檢查的 id。在這裡就失敗，
+      # 不要等到每一個 job 都跑完。
+      - name: Build id names the tag / build id 指名 tag
+        if: github.ref_type == 'tag' || env.RELEASE_TAG != ''
+        shell: bash
+        run: |
+          tag=${RELEASE_TAG:-$GITHUB_REF_NAME}
+          want="$tag / $(git rev-parse --short=8 HEAD)"
+          bin=release/csv2; [[ -f $bin ]] || bin=release/csv2.exe
+          if LC_ALL=C grep -a -q -F -- "$want" "$bin"; then
+            echo "build id: $want"
+          else
+            echo "::error::$bin does not carry the build id '$want' (SQ)"
+            LC_ALL=C grep -a -o -E 'v[0-9]+\.[0-9]+\.[0-9]+[-a-z0-9]*( / [0-9a-f]{7,40})?' "$bin" | sort -u | head -5
+            exit 1
+          fi
 
       # The whole suite, against the binary just built, on every Linux and
       # macOS target -- the musl ones included, since a different libc is
