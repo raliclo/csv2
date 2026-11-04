@@ -877,11 +877,11 @@ Asked for on 2026-11-04: a `-musl` flag modelled on swift_tar and multissh, and 
 publish path covering {linux, macos, windows} x {x86_64, arm64}. The user then
 settled the libc question (after 64f5fec had made every Linux build musl): the
 Linux VM and the default build stay glibc, and the Linux release archives are
-`-musl` only. Six archives per release.
+`-musl` only. Eight archives per release (after the change below).
 
 2026-11-04 要求：比照 swift_tar 與 multissh 加上 `-musl`，並讓發布涵蓋 {linux, macos, windows} x
 {x86_64, arm64}。之後使用者定案了 libc（在 64f5fec 把所有 Linux 建置改成 musl 之後）：Linux VM 與預設
-建置維持 glibc，Linux 發行封存只有 `-musl`。每次發布六份封存。
+建置維持 glibc，Linux 發行封存只有 `-musl`。每次發布八份封存（依下方的改變）。
 
 **Done / 已做：**
 
@@ -920,7 +920,10 @@ Linux VM and the default build stay glibc, and the Linux release archives are
   build id 與 commit 比對（T312）；第二個發布者就是第二套檢查。
 - `release.zsh -musl` 旗標。否決：release.zsh 不收引數（RB），而平台可以從執行檔本身讀出（QI）。
 - Windows 上用 `PROCESSOR_ARCHITECTURE` 判斷 arm64。否決：在 MSYS2 的 x64 模擬下它可能說 AMD64。
-- 同時發布 glibc 與 musl 的 Linux 封存。否決：使用者選了只發布 musl。
+- ~~同時發布 glibc 與 musl 的 Linux 封存。否決：使用者選了只發布 musl。~~ **同一天改為採用**：使用者要八份封存，
+  Linux 的 glibc（`linux-<arch>`）與 `-musl` 都發布；Formula 在 Linux 上指向 `-musl`，publish.zsh 改寫套件檔時
+  略過 glibc 那兩份。0.1.9 那次六份封存的發布執行（41831258677）在發布之前被取消；它已推送的 `v0.1.9` tag 沒有
+  任何 release，以 release.yml 的 `retag_unreleased` 移到新的頂端。
 
 **Not yet done / 尚未完成：**
 

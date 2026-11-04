@@ -28,15 +28,16 @@
 #     Claude Code 的雲端 session 能推送分支、不能推送 tag，它的 proxy 也拒絕經由 API 寫入 tag 與 release
 #     （403，2026-11-04）；workflow 自己的 token 兩者都做得到。multissh 也是這樣做。
 #
-# Targets: {macos,windows} x {x86_64,arm64}, and linux-{x86_64,aarch64}-musl.
-# The Linux release archives are -musl only, fully static; the default glibc
-# build is what the Linux VM builds and tests, and is not published (the user,
-# 2026-11-04). Linux arm64 is named linux-aarch64, as on the nodes. No x86-32:
-# macOS has none and Swift ships no i686 toolchain for Windows or Linux.
-# 目標：{macos,windows} x {x86_64,arm64}，以及 linux-{x86_64,aarch64}-musl。Linux 發行封存只有
-# -musl，完全靜態；預設的 glibc 建置是 Linux VM 建置與測試的對象，不發布（使用者，2026-11-04）。
-# Linux arm64 命名為 linux-aarch64，與各節點一致。不建 x86-32：macOS 沒有，Swift 也沒有提供
-# Windows 或 Linux 的 i686 工具鏈。
+# Targets, eight: {macos,windows} x {x86_64,arm64}, and Linux on x86_64 and
+# aarch64 twice -- linux-<arch> (glibc, the default build, the one the Linux VM
+# builds and tests) and linux-<arch>-musl (fully static). Both Linux kinds are
+# published; Homebrew on Linux points at -musl (the user, 2026-11-04). Linux
+# arm64 is named linux-aarch64, as on the nodes. No x86-32: macOS has none and
+# Swift ships no i686 toolchain for Windows or Linux.
+# 目標共八個：{macos,windows} x {x86_64,arm64}，以及 x86_64 與 aarch64 上各兩種 Linux——linux-<arch>
+# （glibc，預設建置，Linux VM 建置與測試的那一種）與 linux-<arch>-musl（完全靜態）。兩種 Linux 都發布；
+# Linux 上的 Homebrew 指向 -musl（使用者，2026-11-04）。Linux arm64 命名為 linux-aarch64，與各節點一致。
+# 不建 x86-32：macOS 沒有，Swift 也沒有提供 Windows 或 Linux 的 i686 工具鏈。
 #
 # macOS runs on macos-26: on macos-15 the image's Swift was 6.1.2 and three
 # cases failed that pass on the nodes (run 1). The archive must come from the
@@ -79,6 +80,11 @@ on:
         description: "X.Y.Z to tag on develop and publish (empty: build only) / 要在 develop 打 tag 並發布的版本（空白：只建置）"
         required: false
         default: ""
+      retag_unreleased:
+        description: "Move an existing tag that has NO release (not even a draft) to develop's head / 把一個沒有任何 release（連草稿都沒有）的既有 tag 移到 develop 頂端"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -106,10 +112,25 @@ jobs:
       - name: Tag develop / 在 develop 打 tag
         env:
           VERSION: ${{ inputs.release_version }}
+          RETAG: ${{ inputs.retag_unreleased }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "release_version must be X.Y.Z / 版本必須是 X.Y.Z"; exit 1; }
           [ "$GITHUB_REF" = refs/heads/develop ] || { echo "release from develop only / 只能從 develop 發布"; exit 1; }
-          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then echo "v$VERSION already exists / 已存在"; exit 1; fi
+          # An existing tag is moved only when asked AND nothing was released
+          # from it -- not even a draft. A published version is never re-cut
+          # (publish.zsh's rule); an unpublished tag only names a commit, and
+          # its archives are rebuilt at the new one below.
+          # 既有的 tag 只在被要求、而且沒有從它發布過任何東西（連草稿都沒有）時才移動。已發布的版本永遠不重切
+          # （publish.zsh 的規則）；未發布的 tag 只是指名一個 commit，它的封存會在下面於新的 commit 上重建。
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            [ "$RETAG" = true ] || { echo "v$VERSION already exists; set retag_unreleased if nothing was released from it / 已存在；若沒有從它發布過任何東西，請設定 retag_unreleased"; exit 1; }
+            rel=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"v$VERSION\") | .id")
+            [ -z "$rel" ] || { echo "v$VERSION has a release (or draft) $rel; it is not moved / v$VERSION 已有 release（或草稿）$rel，不移動"; exit 1; }
+            echo "moving unreleased v$VERSION from $(git rev-parse "v$VERSION^{commit}") to $GITHUB_SHA / 把未發布的 v$VERSION 從上面那個 commit 移到 $GITHUB_SHA"
+            git tag -d "v$VERSION"
+            git push origin ":refs/tags/v$VERSION"
+          fi
           # The source must already say this version, or every binary would
           # carry another one and publish.zsh would refuse them all at the end.
           # 原始碼必須已經寫著這個版本，否則每個執行檔都會帶著別的版本，publish.zsh 最後會全部拒絕。
@@ -132,6 +153,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - { platform: linux-x86_64,       runner: ubuntu-24.04,     container: "swift:6.4.2-noble" }
+          - { platform: linux-aarch64,      runner: ubuntu-24.04-arm, container: "swift:6.4.2-noble" }
           - { platform: linux-x86_64-musl,  runner: ubuntu-24.04,     container: "swift:6.4.2-noble", compile_args: "-musl" }
           - { platform: linux-aarch64-musl, runner: ubuntu-24.04-arm, container: "swift:6.4.2-noble", compile_args: "-musl" }
           - { platform: macos-x86_64,       runner: macos-26-intel }
@@ -312,7 +335,7 @@ jobs:
       - name: Release notes build line / release notes 的建置行
         run: |
           zsh ./release_build_notes.zsh "$VERSION" "$GITHUB_RUN_ID" "$(git rev-parse HEAD)" "dist/csv2-$VERSION-build.md" \
-            linux-x86_64-musl linux-aarch64-musl macos-x86_64 macos-arm64 windows-x86_64 windows-arm64
+            linux-x86_64 linux-aarch64 linux-x86_64-musl linux-aarch64-musl macos-x86_64 macos-arm64 windows-x86_64 windows-arm64
           cat "dist/csv2-$VERSION-build.md"
       - name: Publish / 發布
         run: zsh ./publish.zsh "$VERSION" --publish

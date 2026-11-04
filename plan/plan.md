@@ -1742,7 +1742,10 @@ metadata 的形狀不是，因此讓步的是後者。
 
 ## Linux 建置：musl（2026-11-04 使用者決定）
 
-**2026-11-04 稍後的修正：VM 維持 glibc，只有發行封存用 musl。** 同一天使用者又決定：
+**2026-11-04 稍後的修正：VM 維持 glibc，發行版 glibc 與 musl 兩種都出，Homebrew 用 musl。**
+（先是「只發布 musl」，同一天使用者改為八份封存：Linux 的 glibc 與 `-musl` 都發布，Formula 在 Linux 上指向
+`-musl`。下面這段寫的是「只發布 musl」那一版，`publish.zsh` 已不再拒絕 glibc 的 Linux 封存，而是在改寫套件檔時
+略過它們。） 同一天使用者又決定：
 `-musl` 用在 Linux 發行版，而 Linux VM 必須用 glibc。所以 `compile_csv2_linux.zsh` 的**預設**回到
 RJ 的 glibc 加 `-static-stdlib`（VM 建置與測試的就是它），加上 `-musl`（`compile_csv2.zsh -musl`
 會轉交）才走下面描述的 musl 全靜態建置。發布的 Linux 封存**只有** `linux-<arch>-musl`：它們由
@@ -1753,8 +1756,8 @@ RJ 的 glibc 加 `-static-stdlib`（VM 建置與測試的就是它），加上 `
 
 Later on 2026-11-04 the user decided the Linux VM keeps glibc and only the release archives are
 musl. `compile_csv2_linux.zsh` defaults to RJ's glibc build again; `-musl` selects the build below.
-The only Linux archives published are `linux-<arch>-musl`, built natively and tested by
-`release.yml`; `publish.zsh` refuses a glibc Linux archive.
+Then, the same day: both Linux kinds are published (eight archives), and Homebrew on Linux points
+at `-musl`; publish.zsh publishes the glibc archives and leaves them out of the package files.
 
 **Linux 的正式建置對 musl 完全靜態連結**，用 Swift 的 Static Linux SDK（`-target <arch>-swift-linux-musl
 -static-executable`）。產物沒有程式直譯器、沒有任何共享函式庫：不需要 Swift 工具鏈，也不需要 glibc，

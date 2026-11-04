@@ -17,8 +17,9 @@ aarch64 Linux, WSL, and Windows through the standalone module/client check.
 
 ## Install a release
 
-Six archives are published per version, from v0.1.9 on: macOS and Windows on
-x86_64 and arm64, and Linux on x86_64 and aarch64. Each was built, tested and
+Eight archives are published per version, from v0.1.9 on: macOS and Windows on
+x86_64 and arm64, and Linux on x86_64 and aarch64 in two kinds, glibc and
+fully static musl. Each was built, tested and
 packed on a machine of its own platform, and the packaging script ends by
 extracting the archive, running the extracted binary and having it read a CSV.
 v0.1.8 and earlier published four.
@@ -26,15 +27,17 @@ v0.1.8 and earlier published four.
 ```sh
 curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-macos-arm64.tar.zst
 curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-macos-arm64.tar.zst.sha256
-sha256sum -c csv2-0.1.8-macos-arm64.tar.zst.sha256
-zstd -d csv2-0.1.8-macos-arm64.tar.zst -c | tar -x
-./csv2-0.1.8-macos-arm64/csv2 --version
+sha256sum -c csv2-0.1.9-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.1.9-macos-arm64.tar.zst -c | tar -x
+./csv2-0.1.9-macos-arm64/csv2 --version
 ```
 
 Substitute `macos-x86_64`, `linux-x86_64-musl`, `linux-aarch64-musl`,
-`windows-x86_64` or `windows-arm64` for the others. The Linux names carry
-`-musl` from v0.1.9 on; v0.1.8 and earlier are `linux-x86_64` and
-`linux-aarch64`.
+`linux-x86_64`, `linux-aarch64`, `windows-x86_64` or `windows-arm64` for the
+others. On Linux, `-musl` is the one to take unless you have a reason not to:
+it needs nothing from the machine, and it is what Homebrew installs. The
+`linux-<arch>` archives are the glibc build; up to v0.1.8 they were the only
+Linux archives.
 
 **The Linux archives are fully static from v0.1.9 on**, linked against musl.
 They need no Swift toolchain and no glibc, so they run on any Linux of their
@@ -157,7 +160,8 @@ or named with `SWIFT_STATIC_SDK` (the SDK's `swift-linux-musl` directory). The
 build refuses to finish if the result still names a program interpreter.
 
 **The default Linux build stays glibc.** That is what the Linux VM builds and
-tests (`compile_csv2_linux.zsh`), and `-musl` changes nothing there.
+tests (`compile_csv2_linux.zsh`), and `-musl` changes nothing there. Both are
+published, as `linux-<arch>` and `linux-<arch>-musl`.
 `release.zsh` reads the platform out of the binary's own header, so a `-musl`
 build is packaged as `linux-<arch>-musl` beside the glibc archive rather than
 over it.
@@ -169,11 +173,11 @@ over it.
 ./publish_matrix.zsh 0.1.9 --publish    # tag, wait for CI, download, ./publish.zsh
 ```
 
-`.github/workflows/release.yml` builds, tests and packages six targets, each
+`.github/workflows/release.yml` builds, tests and packages eight targets, each
 on a runner of its own platform: macOS and Windows on x86_64 and arm64, and
-`linux-x86_64-musl` and `linux-aarch64-musl`. Those two are the only Linux
-archives; the glibc build is not published. `publish_matrix.zsh` pushes the tag,
-waits for that run, refuses unless all six archives came back, and hands them
+Linux on x86_64 and aarch64 as both glibc and `-musl`. Homebrew on Linux points
+at `-musl`. `publish_matrix.zsh` pushes the tag,
+waits for that run, refuses unless all eight archives came back, and hands them
 to `publish.zsh`, which does the rest with the checks it already has.
 `--fetch` stops after the download.
 

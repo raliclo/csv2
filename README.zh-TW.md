@@ -15,21 +15,21 @@ English documentation: [README.md](README.md)。
 
 ## 安裝發行版
 
-從 v0.1.9 起，每個版本發布六份封存：x86_64 與 arm64 上的 macOS、Windows，以及 x86_64 與 aarch64
-上的 Linux。每一份都在它自己平台的機器上建置、測試並打包，而打包腳本的結尾是**解開封存、執行解開後的
+從 v0.1.9 起，每個版本發布八份封存：x86_64 與 arm64 上的 macOS、Windows，以及 x86_64 與 aarch64
+上的 Linux 各兩種——glibc 與完全靜態的 musl。每一份都在它自己平台的機器上建置、測試並打包，而打包腳本的結尾是**解開封存、執行解開後的
 執行檔、並讓它讀一個 CSV**。v0.1.8 與更早的版本發布四份。
 
 ```sh
 curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-macos-arm64.tar.zst
 curl -LO https://github.com/raliclo/csv2/releases/download/v0.1.9/csv2-0.1.9-macos-arm64.tar.zst.sha256
-sha256sum -c csv2-0.1.8-macos-arm64.tar.zst.sha256
-zstd -d csv2-0.1.8-macos-arm64.tar.zst -c | tar -x
-./csv2-0.1.8-macos-arm64/csv2 --version
+sha256sum -c csv2-0.1.9-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.1.9-macos-arm64.tar.zst -c | tar -x
+./csv2-0.1.9-macos-arm64/csv2 --version
 ```
 
-其餘的把 `macos-arm64` 換成 `macos-x86_64`、`linux-x86_64-musl`、`linux-aarch64-musl`、`windows-x86_64`
-或 `windows-arm64`。Linux 的名字從 v0.1.9 起帶 `-musl`；v0.1.8 與更早的版本是 `linux-x86_64` 與
-`linux-aarch64`。
+其餘的把 `macos-arm64` 換成 `macos-x86_64`、`linux-x86_64-musl`、`linux-aarch64-musl`、`linux-x86_64`、
+`linux-aarch64`、`windows-x86_64` 或 `windows-arm64`。在 Linux 上，沒有特別理由就選 `-musl`：它不需要機器上
+的任何東西，也是 Homebrew 安裝的那一份。`linux-<arch>` 是 glibc 建置；到 v0.1.8 為止它們是唯一的 Linux 封存。
 
 **從 v0.1.9 起，Linux 的封存對 musl 完全靜態連結。** 它們不需要 Swift 工具鏈，也不需要 glibc，
 因此在同架構的任何 Linux 上都能跑，機器上的 Swift 換了版本也照樣能跑。v0.1.6 到 v0.1.8 只把 Swift
@@ -131,7 +131,8 @@ Static Linux SDK；會在 swift_tar 與 multissh 找的那些位置尋找，或�
 
 **預設的 Linux 建置仍是 glibc。** 那是 Linux VM 建置與測試的對象（`compile_csv2_linux.zsh`），`-musl`
 在那裡什麼都不改變。`release.zsh` 從執行檔自己的檔頭讀出平台，所以 `-musl` 建置會被打包成
-`linux-<arch>-musl`，與 glibc 封存並存，而不是覆蓋它。
+`linux-<arch>-musl`，與 glibc 封存並存，而不是覆蓋它。兩種都會發布，分別是 `linux-<arch>` 與
+`linux-<arch>-musl`。
 
 ### 發布所有平台
 
@@ -140,10 +141,10 @@ Static Linux SDK；會在 swift_tar 與 multissh 找的那些位置尋找，或�
 ./publish_matrix.zsh 0.1.9 --publish    # 打 tag、等 CI、下載、./publish.zsh
 ```
 
-`.github/workflows/release.yml` 建置、測試並打包六個目標，每一個都在它自己平台的 runner 上：x86_64 與
-arm64 上的 macOS、Windows，以及 `linux-x86_64-musl` 與 `linux-aarch64-musl`。這兩個是唯一的 Linux 封存，
-glibc 建置不發布。`publish_matrix.zsh` 推送 tag、等那次
-執行完成、六份封存沒有全部回來就拒絕，然後交給 `publish.zsh`，由它以既有的檢查完成其餘步驟。`--fetch`
+`.github/workflows/release.yml` 建置、測試並打包八個目標，每一個都在它自己平台的 runner 上：x86_64 與
+arm64 上的 macOS、Windows，以及 x86_64 與 aarch64 上 glibc 與 `-musl` 兩種 Linux。Linux 上的 Homebrew
+指向 `-musl`。`publish_matrix.zsh` 推送 tag、等那次
+執行完成、八份封存沒有全部回來就拒絕，然後交給 `publish.zsh`，由它以既有的檢查完成其餘步驟。`--fetch`
 在下載後就停止。
 
 在不能推送 tag 的地方（Claude Code 的雲端 session 就不能），手動執行這個 workflow，把 `release_version`

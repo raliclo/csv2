@@ -118,17 +118,18 @@ HOST_UNAME=$(uname -sm)
 print -- "Building csv2 for $HOST_UNAME ($OPT) / 正在為 $HOST_UNAME 建置 csv2（$OPT）"
 # Two builds, chosen by -musl. The user decided on 2026-11-04 -- first that
 # Linux goes musl (64f5fec), then, the same day, that the VM keeps glibc and
-# only the release archives are musl. So:
+# the release ships both. So:
 #
-#   default  glibc with -static-stdlib (RJ): what the Linux VM builds and tests.
-#   -musl    fully static against musl: what release.yml builds for the
-#            linux-<arch>-musl archives, the only Linux archives published.
+#   default  glibc with -static-stdlib (RJ): what the Linux VM builds and tests,
+#            published as linux-<arch>.
+#   -musl    fully static against musl, published as linux-<arch>-musl; the
+#            one Homebrew on Linux installs.
 #
 # 兩種建置，由 -musl 選擇。使用者在 2026-11-04 先決定 Linux 改用 musl（64f5fec），同一天又決定
-# VM 維持 glibc、只有發行封存用 musl。因此：
+# VM 維持 glibc、發行版兩種都出。因此：
 #
-#   預設   glibc 加 -static-stdlib（RJ）：Linux VM 建置與測試的對象。
-#   -musl  對 musl 完全靜態：release.yml 為 linux-<arch>-musl 封存建置的，也是唯一發布的 Linux 封存。
+#   預設   glibc 加 -static-stdlib（RJ）：Linux VM 建置與測試的對象，發布為 linux-<arch>。
+#   -musl  對 musl 完全靜態，發布為 linux-<arch>-musl；Linux 上的 Homebrew 安裝的是它。
 if (( ! MUSL )); then
     # RJ: Swift linked statically so the binary survives a toolchain change;
     # glibc, libstdc++ and libgcc_s still come from the machine.

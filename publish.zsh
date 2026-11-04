@@ -265,22 +265,11 @@ ARCHIVES=("$DIST"/csv2-$VERSION-*.tar.zst(N))
     exit 1
 }
 
-# Linux archives are -musl only from v0.1.9 on (the user, 2026-11-04): the
-# glibc build is what the Linux VM builds and tests, not what is shipped. A
-# glibc archive collected from a node would otherwise go out beside the musl one
-# and, through the package files, replace it.
-# 從 v0.1.9 起，Linux 封存只有 -musl（使用者，2026-11-04）：glibc 建置是 Linux VM 建置與測試的
-# 對象，不是出貨的東西。否則一份從節點收來的 glibc 封存會與 musl 那份一起出去，並經由套件檔取代它。
-for a in $ARCHIVES; do
-    case ${a:t} in
-        *-linux-*-musl.tar.zst) ;;
-        *-linux-*)
-            print -u2 -- "${a:t} is a glibc Linux archive; Linux releases are built with ./compile_csv2.zsh -musl"
-            print -u2 -- "${a:t} 是 glibc 的 Linux 封存；Linux 發行版以 ./compile_csv2.zsh -musl 建置"
-            exit 1
-            ;;
-    esac
-done
+# From v0.1.9 Linux ships twice: linux-<arch> (glibc, the default build) and
+# linux-<arch>-musl (fully static). Both are published; the package files take
+# -musl only (the user, 2026-11-04), so the glibc ones are skipped there below.
+# 從 v0.1.9 起，Linux 出貨兩種：linux-<arch>（glibc，預設建置）與 linux-<arch>-musl（完全靜態）。兩種都
+# 發布；套件檔只採用 -musl（使用者，2026-11-04），所以下面改寫套件檔時略過 glibc 那兩份。
 
 # The release notes are a FILE in the repository, written before publishing.
 # Until 0.1.8 they were typed into the release on GitHub afterwards: a step
@@ -663,6 +652,15 @@ for a in $ARCHIVES; do
         *) continue ;;
     esac
     [[ -r $target ]] || continue
+    # Homebrew on Linux installs the -musl archive. With both kinds in dist/,
+    # letting the glibc one rewrite the same entry would make the result depend
+    # on which file sorts last.
+    # Linux 上的 Homebrew 安裝 -musl 封存。dist/ 裡兩種都有時，若讓 glibc 那份也改寫同一筆，結果就取決於
+    # 哪個檔案排在最後。
+    if [[ $base == *-linux-* && $base != *-musl.tar.zst ]]; then
+        say "    $base: glibc, published but not in ${target:t}, which takes -musl"
+        continue
+    fi
     # The first -musl release replaces the entry that still names the glibc
     # archive (linux-<arch>.tar.zst); after that the entry names -musl itself.
     # 第一次 -musl 發布時，取代仍指向 glibc 封存（linux-<arch>.tar.zst）的那一筆；之後那一筆就直接

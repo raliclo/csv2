@@ -8,11 +8,11 @@
 #    ./publish_matrix.zsh 0.1.9 --publish    the same, then ./publish.zsh 0.1.9 --publish
 #    ./publish_matrix.zsh --help             print this and do nothing / 印出這段說明，什麼都不做
 #
-#  Platforms: linux-{x86_64,aarch64}-musl (static; the only Linux archives,
-#  the glibc build is the VM's), macos-{x86_64,arm64}, windows-{x86_64,arm64}.
+#  Platforms: linux-{x86_64,aarch64} (glibc), linux-{x86_64,aarch64}-musl
+#  (static), macos-{x86_64,arm64}, windows-{x86_64,arm64}.
 #  Each is built, tested and packaged by .github/workflows/release.yml on a
 #  runner of that platform.
-#  平台：linux-{x86_64,aarch64}-musl（靜態；唯一的 Linux 封存，glibc 建置屬於 VM）、
+#  平台：linux-{x86_64,aarch64}（glibc）、linux-{x86_64,aarch64}-musl（靜態）、
 #  macos-{x86_64,arm64}、windows-{x86_64,arm64}。每一個都由 .github/workflows/release.yml
 #  在該平台的 runner 上建置、測試與打包。
 #
@@ -36,7 +36,7 @@ cd -- "$HERE"
 
 REPO=raliclo/csv2
 WORKFLOW=release.yml
-PLATFORMS=(linux-x86_64-musl linux-aarch64-musl
+PLATFORMS=(linux-x86_64 linux-aarch64 linux-x86_64-musl linux-aarch64-musl
            macos-x86_64 macos-arm64 windows-x86_64 windows-arm64)
 DIST=$HERE/dist
 
@@ -65,9 +65,9 @@ say() { print -r -- "$1" }
 
 # ---------------------------------------------------------------------
 # 1. The same refusals publish.zsh makes, made BEFORE a tag is pushed: pushing
-#    the tag starts six runners, and finding out afterwards that the tree was
+#    the tag starts eight runners, and finding out afterwards that the tree was
 #    dirty wastes all of them.
-# 1. 與 publish.zsh 相同的拒絕，但在推送 tag **之前**做：推送 tag 會啟動六台 runner，事後才發現
+# 1. 與 publish.zsh 相同的拒絕，但在推送 tag **之前**做：推送 tag 會啟動八台 runner，事後才發現
 #    工作樹不乾淨，就白跑了全部。
 # ---------------------------------------------------------------------
 command -v gh >/dev/null 2>&1 || { print -u2 -- "gh is not on PATH / PATH 上沒有 gh"; exit 1 }
