@@ -46,6 +46,12 @@ case "$HOST_KERNEL" in
         # external command」失敗，根本走不到 Swift 建置；節點於是保留舊的執行檔，之後的測試
         # 測的是那一個。不論有無這個變數，`.\` 都有效。讓 VsDevCmd.bat 找不到 vswhere.exe 的
         # 也是同一個變數。QK。
+        # The newest installed Swift, not whichever one this shell was started
+        # with: after an upgrade deletes the old toolchain, a shell opened
+        # before it names a swiftc that is gone. SR.
+        # 用的是最新安裝的 Swift，而不是這個 shell 開啟時帶著的那一個：升級刪掉舊工具鏈後，
+        # 在那之前開啟的 shell 指向的 swiftc 已經不存在。SR。
+        source ./swift_windows_env.zsh
         MSYS2_ARG_CONV_EXCL='*' cmd.exe /d /c '.\compile_csv2_win.bat' "$@"
         exit $?
         ;;

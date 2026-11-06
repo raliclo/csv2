@@ -10,6 +10,12 @@
 #  在每個節點上各跑一次；每一次產生「它所在平台」的一份封存。這裡沒有交叉打包：一份封存
 #  來自「在打包的地方建置並測試過」的執行檔——那是唯一能以「執行它」來檢查版本的方式。
 #
+#  On Windows the archive also carries the VC++ runtime DLLs csv2.exe imports
+#  (the Swift runtime is linked in statically, SR), and the extracted copy is
+#  verified with only the system directories on PATH.
+#  Windows 上的封存另外帶著 csv2.exe 匯入的 VC++ runtime DLL（Swift runtime 已靜態連結，SR），
+#  而解開的副本以只含系統目錄的 PATH 驗證。
+#
 #    ./release.zsh           package release/csv2[.exe] into dist/ / 把 release/csv2[.exe] 打包進 dist/
 #    ./release.zsh --help    print this and do nothing / 印出這段說明，什麼都不做
 #
@@ -27,7 +33,7 @@ setopt no_unset pipe_fail errexit
 # 在任何事情執行之前：打錯一個旗標，代價是一行輸出，不是一份封存。
 case ${1:-} in
     '') ;;
-    -h|--help) sed -n '3,20p' ${0:A} | sed 's/^# \{0,2\}//'; exit 0 ;;
+    -h|--help) sed -n '3,26p' ${0:A} | sed 's/^# \{0,2\}//'; exit 0 ;;
     *) print -r -u2 -- "release.zsh takes no argument (got: $1); see --help / release.zsh 不收引數（收到：$1），請見 --help"; exit 2 ;;
 esac
 
@@ -297,6 +303,57 @@ cp -- "$BIN" "$DIST/$STEM/$BIN_NAME"
 cp -- "$HERE/LICENSE" "$HERE/README.md" "$HERE/README.zh-TW.md" "$DIST/$STEM/"
 chmod 755 "$DIST/$STEM/$BIN_NAME"
 
+# Windows: the VC++ runtime DLLs go into the archive beside csv2.exe. SR made
+# the Swift runtime static; what csv2.exe still imports beyond Windows itself
+# is VCRUNTIME140 and MSVCP140, which a Windows without the VC++
+# redistributable lacks. They are found by walking the PE imports
+# transitively (MSVCP140 imports VCRUNTIME140_1, which a one-level scan never
+# sees), and only what the Swift runtime directory holds is copied, which
+# leaves out every Windows system DLL. Same as lzfse2's release.zsh. An import
+# of any Swift runtime DLL means the static link did not happen, and that is
+# refused rather than shipped.
+# Windows：VC++ runtime DLL 放進封存，與 csv2.exe 同一個目錄。SR 讓 Swift runtime 改為靜態；
+# csv2.exe 在 Windows 本身之外仍匯入的是 VCRUNTIME140 與 MSVCP140，沒裝 VC++ 可轉散發套件的
+# Windows 沒有它們。做法是順著 PE 匯入表遞移走訪（MSVCP140 匯入 VCRUNTIME140_1，單層掃描看不到），
+# 而且只複製 Swift runtime 目錄裡有的，因此排除了每一個 Windows 系統 DLL。與 lzfse2 的
+# release.zsh 相同。只要匯入任何 Swift runtime DLL，就代表靜態連結沒有發生，那會被拒絕，而不是出貨。
+if [[ $BIN_NAME == csv2.exe ]]; then
+    source "$HERE/swift_windows_env.zsh"
+    _rt=${swift_windows_runtime_bin:-}
+    if [[ -z $_rt || ! -f $_rt/vcruntime140.dll ]]; then
+        print -u2 -- "no Swift runtime directory with vcruntime140.dll was found to copy the VC++ DLLs from"
+        print -u2 -- "找不到含有 vcruntime140.dll 的 Swift runtime 目錄，無法複製 VC++ DLL"
+        exit 1
+    fi
+    _od=$(command -v llvm-objdump || command -v objdump || true)
+    [[ -n $_od ]] || { print -u2 -- "no llvm-objdump or objdump on PATH / PATH 上沒有 llvm-objdump 或 objdump"; exit 1 }
+    typeset -A _seen=()
+    typeset -a _queue=("$BIN") _swift_dlls=()
+    while (( ${#_queue} )); do
+        _cur=${_queue[1]}; shift _queue
+        for _dep in ${(f)"$("$_od" -p "$_cur" | awk '/DLL Name:/ { print $3 }')"}; do
+            case ${_dep:l} in
+                swift*.dll|foundation*.dll|_foundation*.dll|dispatch.dll|blocksruntime.dll) _swift_dlls+=($_dep) ;;
+            esac
+            [[ -n $_dep && -z ${_seen[${_dep:l}]:-} && -f $_rt/${_dep:l} ]] || continue
+            _seen[${_dep:l}]=1
+            cp -- "$_rt/${_dep:l}" "$DIST/$STEM/"
+            _queue+=("$_rt/${_dep:l}")
+        done
+    done
+    if (( ${#_swift_dlls} )); then
+        print -u2 -- "csv2.exe imports Swift runtime DLLs (${_swift_dlls[*]}); -static-stdlib did not take"
+        print -u2 -- "csv2.exe 匯入了 Swift runtime DLL（${_swift_dlls[*]}）；-static-stdlib 沒有生效"
+        exit 1
+    fi
+    if [[ -z ${_seen[vcruntime140.dll]:-} ]]; then
+        print -u2 -- "the imports of csv2.exe never reach vcruntime140.dll; nothing was bundled"
+        print -u2 -- "csv2.exe 的匯入一路下來都沒有用到 vcruntime140.dll；什麼都沒收錄"
+        exit 1
+    fi
+    print -r -- "bundled VC++ runtime DLLs / 已收錄 VC++ runtime DLL：${(ok)_seen}"
+fi
+
 # Every tool below is given a RELATIVE name from inside the right directory,
 # never an absolute one. `$DIST` comes from `${0:A:h}`, which on Windows is
 # MSYS-style `/c/Users/...` because that is what zsh's `pwd` gives there -- and
@@ -332,7 +389,19 @@ trap 'rm -rf -- "$CHECK"' EXIT
 ( cd -- "$DIST" && zstd -dq -c "$STEM.tar.zst" ) | ( cd -- "$CHECK" && tar -xf - )
 EXTRACTED=$CHECK/$STEM/$BIN_NAME
 [[ -x $EXTRACTED ]] || { print -u2 -- "the archive does not contain an executable $BIN_NAME"; exit 1 }
-EXTRACTED_VERSION=$("$EXTRACTED" --version)
+# On Windows the extracted copy runs with only the system directories on PATH,
+# so no Swift runtime can be borrowed from the toolchain (SR), and the bundled
+# DLLs must be in the archive, not only in the staging directory.
+# Windows 上解開的副本以只含系統目錄的 PATH 執行，因此借不到工具鏈的 Swift runtime（SR），而收錄的
+# DLL 必須在封存裡，不只是在暫存目錄裡。
+RUN_PATH=$PATH
+if [[ $BIN_NAME == csv2.exe ]]; then
+    RUN_PATH=/c/Windows/System32:/c/Windows
+    for _dll in ${(k)_seen}; do
+        [[ -f $CHECK/$STEM/$_dll ]] || { print -u2 -- "the archive is missing $_dll / 封存裡少了 $_dll"; exit 1 }
+    done
+fi
+EXTRACTED_VERSION=$(PATH=$RUN_PATH "$EXTRACTED" --version)
 if [[ $EXTRACTED_VERSION != "$REPORTED" ]]; then
     print -u2 -- "the extracted binary reports [$EXTRACTED_VERSION], the source one [$REPORTED]"
     print -u2 -- "解開後的執行檔回報 [$EXTRACTED_VERSION]，來源那個回報 [$REPORTED]"
@@ -346,7 +415,7 @@ printf 'pkg,license\nzlib,MIT\n' > "$CHECK/probe.csv"
 # csv2.exe is a native Windows program too, so it is asked from inside $CHECK
 # with a bare filename rather than handed the absolute path. QO.
 # csv2.exe 同樣是原生 Windows 程式，因此從 $CHECK 裡面以裸檔名問它，不把絕對路徑交給它。QO。
-PROBE=$( cd -- "$CHECK" && "./$STEM/$BIN_NAME" -get 1:license -i probe.csv )
+PROBE=$( cd -- "$CHECK" && PATH=$RUN_PATH "./$STEM/$BIN_NAME" -get 1:license -i probe.csv )
 [[ $PROBE == MIT ]] || { print -u2 -- "the extracted binary could not read a CSV: got [$PROBE]"; exit 1 }
 
 # ---------------------------------------------------------------------

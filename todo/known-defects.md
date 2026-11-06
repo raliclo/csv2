@@ -15030,3 +15030,67 @@ openInput. The path was needed only for the index lookup and the
 torn-append check, neither of which applies to a pipe. MK documented the
 refusal without a reason; --in-place has one (nothing to write back to),
 -count does not. Plan: skip both when there is no -i and count by scanning.
+
+## SR. Windows 上 Swift 一升級，已安裝的 csv2 與建置、測試都改用一個已被刪除的 Swift
+
+來源：2026-11-06 13:11，這台 Windows 11 上的 Swift 由 6.4.1 升到 6.4.2，安裝程式刪掉了 `Toolchains\6.4.1+Asserts`、
+`Runtimes\6.4.1` 與 `Platforms\6.4.1`。在那之前開啟的 shell，PATH 與 SDKROOT 仍指向那三個目錄。以下由 CSV2-W11
+session 在這樣一個 shell 裡親手重現（Git Bash，同日）：
+
+```console
+$ ls ~/AppData/Local/Programs/Swift/{Toolchains,Runtimes,Platforms}
+6.4.2+Asserts   6.4.2   6.4.2
+$ printf '%s\n' "$SDKROOT"
+C:\Users\lowei\AppData\Local\Programs\Swift\Platforms\6.4.1\Windows.platform\Developer\SDKs\Windows.sdk
+$ ~/scoop/shims/csv2 --version              # scoop 裝的 0.1.8，動態連結
+C:/Users/lowei/scoop/shims/csv2.exe: error while loading shared libraries: ?: cannot open shared object file: No such file or directory
+$ echo $?
+127
+$ PATH="$HOME/AppData/Local/Programs/Swift/Runtimes/6.4.2/usr/bin:$PATH" ~/scoop/shims/csv2 --version
+csv2 0.1.8 (v0.1.8 / 8a7fa704)
+$ swiftc --version
+bash: swiftc: command not found
+```
+
+**三件事，同一個成因。**
+
+1. **已安裝的 csv2 跑不起來。** Windows 的封存只有一個動態連結的 `csv2.exe`，它從 PATH 載入建置它的那一版 Swift
+   runtime（RC）。runtime 目錄被刪除後，舊 shell 裡的 csv2 什麼都不印、以 127 結束；換上 6.4.2 的 runtime 又能跑——
+   所以檔案本身沒壞，壞的是「它需要的東西不在它找的地方」。新開的 shell 讀登錄檔的 PATH，所以沒事，這使得症狀看起來
+   像是隨機的。
+2. **建置找不到 swiftc。** `compile_csv2.zsh` 在 Windows 上直接呼叫 `compile_csv2_win.bat`，用的是呼叫者 PATH 上剛好有的
+   swiftc。舊 shell 的 PATH 只有已刪除的 6.4.1，於是建置失敗。
+3. **測試帶著過期的 SDKROOT。** Swift-Cross-UI-Windows session 同日回報（**未在此重現**）：它把 6.4.2 加進 PATH 但沒有改
+   SDKROOT，整套測試的結果是 1 FAIL，即 T212：`no such SDK ... 6.4.1 ... unable to load standard library`。T212 的
+   SwiftPM 建置會讀 SDKROOT，而測試沒有自己決定用哪一版 Swift。
+
+另一個觀察，不是 csv2 的缺陷：這個 Git Bash 的 PATH 上，`~/.local/bin`（第 9 項）排在 `~/scoop/shims`（第 36 項）之前，
+而 `~/.local/bin/csv2` 是一份 2026-08-20 的舊建置，所以在這裡打 `csv2` 拿到的不是 scoop 裝的那一份。
+
+**計畫**：
+
+- **(1)** `compile_csv2_win.bat` 加上 `-static-stdlib`，把 Swift runtime 與 Foundation（含 ICU）連進執行檔。執行檔
+  由約 0.7 MB 變成約 53 MB。VCRUNTIME140 與 MSVCP140 仍是動態的：它們屬於 Microsoft 的 VC++ 可轉散發套件，裝在
+  System32，不隨 Swift 升級而消失。T329 原本在 Windows 上 SKIP（「那是 RC」），改成在 Windows 上也檢查兩件事：
+  匯入表裡沒有 Swift runtime 的 DLL，以及執行檔在環境變數全空時能跑。
+- **(2)、(3)** 新增 `swift_windows_env.zsh`，移植自 multissh 的 `helper/swift_windows_env.zsh`：挑出「有相同版本
+  runtime」的最新工具鏈，從 PATH 移除其他所有 Swift 項目，並把 SDKROOT 指向該版本的 SDK。`compile_csv2.zsh`
+  在呼叫 batch 之前、`test/test_csv2.zsh` 在開頭，都在 Windows 上 source 它。T357 用一棵假的 `Programs\Swift`
+  檢查它的選擇。（rebase 到上游時改號為 T359：上游已用掉 T357 與 T358。）
+- **還沒決定**：Windows 封存要不要附上 VCRUNTIME140、MSVCP140（LZFSE2-Win 的做法），以及 README 的
+  「On Windows, csv2 needs the Swift runtime...」那一段要改成什麼。那一段在靜態建置發布之後就過期了。
+
+On 2026-11-06 the Windows Swift moved from 6.4.1 to 6.4.2 and the installer
+deleted the 6.4.1 toolchain, runtime and SDK. In a shell opened before that,
+three things broke at once. The scoop-installed csv2 0.1.8, dynamically
+linked, prints nothing and exits 127; with the 6.4.2 runtime prepended it
+runs. compile_csv2.zsh finds no swiftc, since it uses whatever the caller's
+PATH holds. And T212 fails on a stale SDKROOT that still names the 6.4.1 SDK
+(reported by Swift-Cross-UI-Windows, not reproduced here). Plan: build
+statically (-static-stdlib; VCRUNTIME140 and MSVCP140 stay dynamic). T329
+checks on Windows too: no Swift DLL is imported, and the exe runs with an
+empty environment. Add swift_windows_env.zsh, sourced by the build and the
+suite, which chooses the newest installed toolchain that has a matching
+runtime and sets SDKROOT to match (T357; T359 after the rebase onto
+upstream, which had taken T357 and T358). Open: whether the archive should
+bundle the VC++ DLLs, and the README's Windows runtime section.

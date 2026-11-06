@@ -163,8 +163,14 @@ if not defined _sources (
 
 if not exist release mkdir release
 
-echo Building csv2.exe ^(%_opt%^)
-swiftc -swift-version 6 -warnings-as-errors %_opt% %_sources% -o release\csv2.exe
+:: -static-stdlib links the Swift runtime and Foundation (ICU included) into the
+:: exe, so csv2.exe runs with no Swift runtime on PATH. Linked dynamically, it
+:: needed the Runtimes\<version> of the Swift that built it: on 2026-11-06 the
+:: upgrade from 6.4.1 to 6.4.2 deleted Runtimes\6.4.1, and every shell opened
+:: before the upgrade failed with "cannot open shared object file". The exe grows
+:: from about 0.7 MB to about 53 MB. VCRUNTIME140 and MSVCP140 stay dynamic.
+echo Building csv2.exe ^(%_opt%, static Swift runtime^)
+swiftc -swift-version 6 -warnings-as-errors -static-stdlib %_opt% %_sources% -o release\csv2.exe
 if errorlevel 1 (
     echo [FAIL] swiftc failed.
     exit /b 1

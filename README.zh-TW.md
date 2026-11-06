@@ -62,9 +62,18 @@ brew install raliclo/csv2/csv2
 scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.json
 ```
 
-**在 Windows 上，csv2 需要「建置它的那一版」Swift runtime，而封存與 Scoop 都不會替你安裝它。**
-Windows 的封存裡只有 `csv2.exe`；它從 `PATH` 載入 `swiftCore.dll`、`Foundation.dll` 以及另外十來個
-DLL。v0.2.1 是用 **Swift 6.4.2** 建置的，所以請安裝 Swift 6.4.2 的 runtime——也就是
+**在 Windows 上，v0.2.1 之後的 release 完全不需要 Swift。** 它把 Swift runtime 與 Foundation 靜態連結進去，
+所以 `csv2.exe` 約 53 MB，而不是 0.7 MB。它的封存還在旁邊附上它匯入的 Microsoft VC++ runtime DLL
+（`vcruntime140.dll`、`vcruntime140_1.dll`、`msvcp140.dll`），所以在沒有安裝 VC++ 可轉散發套件的 Windows 上也能啟動。
+打包腳本會用只含 `C:\Windows\System32` 與 `C:\Windows` 的 `PATH` 執行解開後的副本來確認這件事。
+請讓這些 DLL 與 `csv2.exe` 待在同一個目錄，Windows 會先找那裡。原因寫在 `todo/known-defects.md` 的 SR。
+簡單說：Swift 從 6.4.1 升到 6.4.2 時刪掉了舊的 runtime，於是升級前開啟的每一個 shell 裡，已安裝的 csv2 都跑不起來。
+
+**v0.2.1 以前（含 v0.2.1）的 release，需要「建置它的那一版」Swift runtime，而封存與 Scoop 都不會替你安裝它。**
+（到 2026-11-11 為止，這一段是本節的開頭，講的是每一個 release。上一段的初稿把分界寫成「2026-11-06 以後的
+建置」；v0.2.1 在那之後才建置，卻仍是動態連結，因為打 tag 時靜態建置還沒進 develop。）它們的 Windows 封存裡
+只有 `csv2.exe`；它從 `PATH` 載入 `swiftCore.dll`、`Foundation.dll` 以及另外十來個 DLL。封存裡沒有 DLL 的，
+就是這一類。v0.2.1 是用 **Swift 6.4.2** 建置的，所以請安裝 Swift 6.4.2 的 runtime——也就是
 `%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.2\usr\bin` 這個目錄，由
 [swift.org](https://www.swift.org/install/windows/) 的 Swift 6.4.2 安裝程式建立並加進 `PATH`。
 
@@ -77,7 +86,8 @@ DLL。v0.2.1 是用 **Swift 6.4.2** 建置的，所以請安裝 Swift 6.4.2 的 
 where swiftCore.dll
 ```
 
-它應該指向一個 `Runtimes\6.4.1` 目錄。完全沒有安裝 Swift 的機器沒有測過；請預期它同樣起不來。
+它應該指向建置那一版 release 的 Swift 所屬的 `Runtimes\<版本>` 目錄。（到 2026-11-06 為止這裡寫的是
+`Runtimes\6.4.1`，與上一段說的版本已經對不上。）完全沒有安裝 Swift 的機器沒有拿這些動態建置測過；請預期它同樣起不來。
 
 差一個修補版號的 runtime 看過能跑——用 6.4.0 建置的 v0.1.4 在 6.4.1 上能跑——差一個次版號則如上所述
 跑不起來。其餘都沒量過，因此穩妥的選擇是「建置那一版 release 的 runtime」。

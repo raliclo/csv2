@@ -117,6 +117,11 @@ esac
 # 像是程式壞了。multissh session 會設它，同一棵樹在普通 shell 下通過、經由連線就失敗。在此 unset，
 # 把這個決定限制在這支腳本與它啟動的行程內，而不依賴呼叫者的環境。
 if (( IS_WINDOWS )); then unset MSYS2_ARG_CONV_EXCL; fi
+# The newest installed Swift for the cases that compile (T212's SwiftPM build
+# reads SDKROOT), not whichever one the calling shell was started with. SR.
+# 需要編譯的案例（T212 的 SwiftPM 建置會讀 SDKROOT）用最新安裝的 Swift，而不是呼叫者的
+# shell 開啟時帶著的那一個。SR。
+if (( IS_WINDOWS )); then source "$ROOT/swift_windows_env.zsh"; fi
 # `.exe` on Windows, because that is what the build produces there, and
 # `release/` there can hold both a current `csv2.exe` and an older `csv2`. The
 # extension-less default would make the STALE BINARY check compare the sources
@@ -17909,7 +17914,9 @@ echo "--- T329: the binary names no toolchain to find its runtime in / T329：�
 # glibc unnoticed: compile_csv2_linux.zsh refuses it, and release.zsh names its
 # archive from the header, so it could not be published as -musl. macOS asks the same question of its own format: no LC_RPATH,
 # and every dependency under /usr/lib or /System, which the OS owns. Windows is
-# RC, a different answer (ship the DLLs), so it is not asked here.
+# RC, a different answer (ship the DLLs), so it is not asked here. -- Until
+# 2026-11-06. The DLLs were never shipped, and the Windows build is now static
+# (SR), so Windows is asked too: see its branch below.
 # RJ。Linux 上 swiftc 會把工具鏈帶版本號的路徑寫進 RPATH，機器上的 Swift 一換，動態連結的執行檔
 # 就跑不起來。Linux 有兩種建置（plan.md「Linux 建置：musl」），由執行檔自己說明它是哪一種：有程式
 # 直譯器的是預設的 glibc 建置，必須沒有 RPATH／RUNPATH（a）、依賴裡沒有 Swift runtime（b）；沒有的
@@ -17918,7 +17925,8 @@ echo "--- T329: the binary names no toolchain to find its runtime in / T329：�
 # 默默當成 glibc：compile_csv2_linux.zsh 會拒絕它，而 release.zsh 依檔頭為封存命名，所以它不可能以
 # -musl 之名發布。macOS 用它自己的格式問同一個問題：沒有
 # LC_RPATH，而且每一個依賴都在作業系統擁有的 /usr/lib 或 /System 底下。Windows 是 RC，答案不同
-# （把 DLL 一起帶上），所以這裡不問。
+# （把 DLL 一起帶上），所以這裡不問。——到 2026-11-06 為止。那些 DLL 從來沒有被帶上過，而 Windows
+# 建置現在是靜態的（SR），所以 Windows 也要問：見下方它的分支。
 case "$(uname -s 2>/dev/null)" in
     Linux)
         if ! command -v readelf >/dev/null 2>&1; then
@@ -17981,9 +17989,48 @@ case "$(uname -s 2>/dev/null)" in
             fi
         fi
         ;;
+    MINGW*|MSYS*|CYGWIN*)
+        # SR. The Windows build links the Swift runtime statically since
+        # 2026-11-06, so the question is now the same one: no Swift runtime DLL
+        # among the imports (a), and it runs with an empty environment (c).
+        # VCRUNTIME140 and MSVCP140 stay dynamic and are allowed: they are the
+        # VC++ redistributable in System32, which a Swift upgrade does not touch.
+        # Until then this branch was a SKIP reading "Windows ships its runtime
+        # DLLs instead; that is RC" -- and no archive ever shipped them.
+        # SR。Windows 建置自 2026-11-06 起靜態連結 Swift runtime，所以要問的也是同一件事：
+        # 匯入表裡沒有 Swift runtime 的 DLL（a），而且環境變數全空也能執行（c）。VCRUNTIME140 與
+        # MSVCP140 仍是動態的，而且允許：它們是 System32 裡的 VC++ 可轉散發套件，Swift 升級不會
+        # 動到。在那之前這裡是一個 SKIP，寫著「Windows 改為隨附 runtime DLL，那是 RC」——而從來
+        # 沒有任何一份封存附上過它們。
+        # llvm-objdump first: the Swift toolchain ships it, so every node that
+        # builds csv2 has it. An MSYS2 objdump found first on PATH exited 127
+        # from this zsh on 2026-11-06 (a second MSYS runtime), and printed
+        # nothing for the guard below to read.
+        # 先找 llvm-objdump：Swift 工具鏈自帶它，所以每個建得了 csv2 的節點都有。2026-11-06 PATH 上
+        # 先找到的 MSYS2 objdump 從這個 zsh 呼叫時以 127 結束（第二套 MSYS runtime），什麼都沒印，
+        # 下面的把關讀到的是空的。
+        _t329_od=$(command -v llvm-objdump || command -v objdump || true)
+        if [[ -z $_t329_od ]]; then
+            T329_SKIPPED=1
+            skipt "T329 the binary names no toolchain / 執行檔不指望工具鏈目錄 (no objdump on this system / 這個系統沒有 objdump)"
+        else
+            _t329=$("$_t329_od" -p "$CSV2" 2>&1 | grep 'DLL Name:' || true)
+            if [[ $_t329 != *KERNEL32* ]]; then
+                bad "T329 objdump listed no imports at all, so nothing was checked: ${_t329[1,200]} / objdump 一個匯入都沒列，等於什麼都沒查"
+            else
+                assert_eq "$(print -r -- "$_t329" | grep -ciE 'swift|Foundation|dispatch|BlocksRuntime|icu' || true)" 0 \
+                    "T329a no Swift runtime DLL among the imports / 匯入表裡沒有 Swift runtime 的 DLL"
+            fi
+            if env -i "$CSV2" --version >/dev/null 2>&1; then
+                ok "T329c it runs with an empty environment / 環境變數全空也能執行"
+            else
+                bad "T329c it does not run with an empty environment / 環境變數全空時無法執行"
+            fi
+        fi
+        ;;
     *)
         T329_SKIPPED=1
-        skipt "T329 the binary names no toolchain / 執行檔不指望工具鏈目錄 (Windows ships its runtime DLLs instead; that is RC / Windows 改為隨附 runtime DLL，那是 RC)"
+        skipt "T329 the binary names no toolchain / 執行檔不指望工具鏈目錄 (no check written for $(uname -s) / 沒有為 $(uname -s) 寫檢查)"
         ;;
 esac
 
@@ -18612,6 +18659,54 @@ else
     assert_eq "$_t358_got" "$_t358_want" \
         "T358 the binary's LC_BUILD_VERSION minos is compile_csv2.zsh's MACOS_MIN / 執行檔 LC_BUILD_VERSION 的 minos 就是 compile_csv2.zsh 的 MACOS_MIN"
 fi
+
+echo "--- T359: swift_windows_env.zsh picks the newest installed Swift / T359：swift_windows_env.zsh 挑出最新安裝的 Swift ---"
+# SR. A fake Programs\Swift: 6.4.1 and 6.11.0 have a toolchain but no
+# runtime, 6.9.0 and 6.10.0 have both, and only 6.10.0 has an SDK. The newest
+# PAIR is 6.10.0, which a string sort would put before 6.9.0 (a). PATH starts
+# with a deleted 6.4.1 in both spellings, as a shell opened before the
+# upgrade has it; both go and the rest stays (b). SDKROOT names 6.10.0's SDK
+# (c). With no complete pair the helper leaves PATH and SDKROOT alone (d).
+# Off Windows it changes nothing (T359). Written as T357 and renumbered at the
+# rebase, when T357 and T358 had been taken upstream.
+# SR。一棵假的 Programs\Swift：6.4.1 與 6.11.0 有工具鏈但沒有 runtime，6.9.0 與 6.10.0 兩者都有，
+# 只有 6.10.0 有 SDK。最新的「一對」是 6.10.0，而字串排序會把它排在 6.9.0 之前（a）。PATH 開頭是
+# 一個已刪除的 6.4.1，兩種寫法各一，與升級前開啟的 shell 相同；兩者都被移除，其餘不動（b）。SDKROOT
+# 指向 6.10.0 的 SDK（c）。沒有完整的一對時，helper 不動 PATH 與 SDKROOT（d）。不在 Windows 上時
+# 什麼都不改（T359）。原本寫成 T357，rebase 時上游已用掉 T357 與 T358，因此改號。
+_t359_sw=$TMP/t359/Programs/Swift
+mkdir -p "$_t359_sw"/Toolchains/{6.4.1,6.9.0,6.10.0,6.11.0}+Asserts/usr/bin \
+         "$_t359_sw"/Runtimes/{6.9.0,6.10.0}/usr/bin \
+         "$_t359_sw"/Platforms/6.10.0/Windows.platform/Developer/SDKs/Windows.sdk \
+         "$TMP/t359e/Programs/Swift/Toolchains/6.4.2+Asserts/usr/bin"
+_t359_stale='/c/gone/Programs/Swift/Runtimes/6.4.1/usr/bin:\\gone\Programs\Swift\Toolchains\6.4.1+Asserts\usr\bin'
+_t359_run() {   # LOCALAPPDATA-dir -> PATH entries, then SDKROOT on the last line
+    LOCALAPPDATA=$1 PATH="$_t359_stale:$PATH" SDKROOT=old zsh -fc \
+        'source "$1/swift_windows_env.zsh"; printf "%s\n" $path; printf "SDKROOT=%s\n" "$SDKROOT"' _ "$ROOT" 2>&1
+}
+if (( IS_WINDOWS )); then
+    _t359=$(_t359_run "$(cygpath -w "$TMP/t359")")
+    assert_eq "$(print -r -- "$_t359" | sed -n '1,2p' | sed 's|.*/Programs/Swift/||' | tr '\n' ' ')" \
+        "Runtimes/6.10.0/usr/bin Toolchains/6.10.0+Asserts/usr/bin " \
+        "T359a the newest toolchain with a runtime, 6.10.0, comes first / 有 runtime 的最新工具鏈 6.10.0 排在最前面"
+    assert_eq "$(print -r -- "$_t359" | grep -c '6\.4\.1' || true) $(print -r -- "$_t359" | grep -cx '/usr/bin' || true)" "0 1" \
+        "T359b the deleted 6.4.1 is gone in both spellings, /usr/bin stays / 已刪除的 6.4.1 兩種寫法都被移除，/usr/bin 留著"
+    assert_eq "$(print -r -- "$_t359" | tail -1)" \
+        "SDKROOT=$(cygpath -w "$_t359_sw/Platforms/6.10.0/Windows.platform/Developer/SDKs/Windows.sdk")\\" \
+        "T359c SDKROOT names 6.10.0's SDK / SDKROOT 指向 6.10.0 的 SDK"
+    _t359=$(_t359_run "$(cygpath -w "$TMP/t359e")")
+    assert_eq "$(print -r -- "$_t359" | sed -n '1p') $(print -r -- "$_t359" | tail -1)" \
+        "/c/gone/Programs/Swift/Runtimes/6.4.1/usr/bin SDKROOT=old" \
+        "T359d no toolchain with a runtime: PATH and SDKROOT are left as they were / 沒有帶 runtime 的工具鏈：PATH 與 SDKROOT 維持原樣"
+else
+    _t359=$(_t359_run "$TMP/t359")
+    assert_eq "$(print -r -- "$_t359" | sed -n '1p') $(print -r -- "$_t359" | tail -1)" \
+        "/c/gone/Programs/Swift/Runtimes/6.4.1/usr/bin SDKROOT=old" \
+        "T359 off Windows it changes nothing / 不在 Windows 上時什麼都不改"
+fi
+_t359_help=$(zsh "$ROOT/swift_windows_env.zsh" --help 2>&1)
+assert_eq "$? $(print -r -- "$_t359_help" | grep -c 'Source this')" "0 1" \
+    "T359e --help prints the header and exits 0 / --help 印出檔頭並以 0 結束"
 
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is

@@ -5,6 +5,9 @@
     "license": "MIT",
     "notes": [
         "Installed as csv2.exe. Verify with:  csv2 --version",
+        "A release AFTER 0.2.1 needs NO Swift: the Swift runtime is linked in, and the",
+        "VC++ DLLs it imports ship beside csv2.exe. Its archive holds DLLs.",
+        "An archive holding only csv2.exe is 0.2.1 or earlier, and that one",
         "REQUIRES the Swift runtime of the version that BUILT THE RELEASE YOU GET, which",
         "Scoop does not install. Look at the version this manifest installs:",
         "  csv2 0.1.3  was built with Swift 6.3.3  -> needs Runtimes\\6.3.3\\usr\\bin on PATH",

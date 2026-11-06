@@ -77,11 +77,28 @@ With Scoop:
 scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.json
 ```
 
-**On Windows, csv2 needs the Swift runtime of the version that built it, and
-neither the archive nor Scoop installs that for you.** The Windows archive
-holds `csv2.exe` and nothing else; it loads `swiftCore.dll`, `Foundation.dll`
-and about a dozen siblings from `PATH`. v0.2.1 was built with **Swift 6.4.2**,
-so install the Swift 6.4.2 runtime — the directory
+**On Windows, releases after v0.2.1 need no Swift at all.** It
+links the Swift runtime and Foundation statically, so `csv2.exe` is about
+53 MB instead of 0.7 MB. Its archive also carries the Microsoft VC++ runtime
+DLLs it imports (`vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`)
+beside it, so it starts on a Windows without the VC++ redistributable too. The
+packaging script checks this by running the extracted copy with only
+`C:\Windows\System32` and `C:\Windows` on `PATH`. Keep the DLLs in the same
+directory as `csv2.exe`; Windows looks there first. The reason is in
+`todo/known-defects.md`, SR. In short, upgrading Swift from 6.4.1 to 6.4.2
+deleted the old runtime, and the installed csv2 stopped working in every shell
+opened before the upgrade.
+
+**Releases up to and including v0.2.1 need the Swift runtime of the version
+that built them, and neither the archive nor Scoop installs it for you.**
+(Until 2026-11-11 this paragraph opened the section and spoke of every
+release. A first draft of the paragraph above drew the line at "a build made
+on or after 2026-11-06"; v0.2.1 was built after that date and is still
+dynamic, because the static build had not reached develop when it was
+tagged.) Their Windows archive holds `csv2.exe` and nothing else; it loads
+`swiftCore.dll`, `Foundation.dll` and about a dozen siblings from `PATH`. An
+archive that holds no DLLs is one of these. v0.2.1 was built with
+**Swift 6.4.2**, so install the Swift 6.4.2 runtime — the directory
 `%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.2\usr\bin`, which the Swift 6.4.2
 installer from [swift.org](https://www.swift.org/install/windows/) creates and
 puts on `PATH`.
@@ -97,8 +114,10 @@ anything else:
 where swiftCore.dll
 ```
 
-It should name a `Runtimes\6.4.1` directory. A machine with no Swift installed
-at all has not been tested; expect it not to start either.
+It should name the `Runtimes\<version>` directory of the Swift that built the
+release. (It said `Runtimes\6.4.1` until 2026-11-06, a version that no longer
+matched the paragraph above it.) A machine with no Swift installed at all has
+not been tested with these dynamic builds; expect it not to start either.
 
 A different patch version has been seen to work — v0.1.4, built with 6.4.0,
 runs on 6.4.1 — and a different minor version to fail, as above. Nothing else
