@@ -15094,3 +15094,78 @@ suite, which chooses the newest installed toolchain that has a matching
 runtime and sets SDKROOT to match (T357; T359 after the rebase onto
 upstream, which had taken T357 and T358). Open: whether the archive should
 bundle the VC++ DLLs, and the README's Windows runtime section.
+
+**2026-11-07 追記**：上面「還沒決定」的兩件事已在 b19d381 決定——使用者選了附上 VC++ DLL，`release.zsh` 從
+`swift_windows_runtime_bin` 依匯入表遞移複製 vcruntime140.dll、vcruntime140_1.dll、msvcp140.dll；README 的
+Windows 段落改寫為以 2026-11-06 為界的兩段。原文保留，因為它記錄的是寫下時的狀態。
+
+使用者在自己的終端機對 b19d381 跑完整測試：
+
+```
+PASS 1541   FAIL 2   SKIP 19
+FAIL  T300a not executable in the index: 100644 swift_windows_env.zsh  / 索引裡不可執行的如上
+FAIL  T312b 7-char gave [refused], 8-char gave [refused] / 兩種長度的結果如上
+```
+
+- **T300a 是 b19d381 本身的缺陷**：新增的 `swift_windows_env.zsh` 以 100644 進了索引。它有 shebang 與可直接
+  執行的 `--help`，T300 要求這種檔案在索引裡是 100755（`git ls-files -s swift_windows_env.zsh` 讀到 100644）。
+  在 Windows 上 `chmod` 不會改變 git 看到的模式，要用 `git update-index --chmod=+x`。
+- **T312b 仍未解**。先前在本 session 把它歸因於「msys2 的 `zstd` 排在 PATH 前面、從 zsh 呼叫以 127 結束」，並
+  斷定那只是這個 Claude session 的環境。使用者的終端機也失敗，所以那個斷定不成立：HKCU 與 HKLM 的 Path 都沒有
+  msys2，`~/.zshrc`（轉發到 lzfse2 的 `zshrc.zsh`）也沒有加它。拿掉 msys2 之後，在套件外以同一形狀重現
+  （`zsh -fc` 與 `zsh -ic` 兩種、TMP 放在 `test/` 底下、source 了 `swift_windows_env.zsh`、`no_unset pipe_fail`）
+  都得到 `ok v9.9.9 / abcdef1`。`_t312_try` 把子 shell 的 stderr 丟進 `/dev/null`，所以套件的輸出不說
+  `archive_commit_ok` 為什麼拒絕。下一步是在使用者那個終端機讀 `whence -a zstd tar grep` 與 `TMPDIR`。
+- **T312b 的原因（同日查明）**：上一條「那個斷定不成立」本身也錯了一半。使用者的終端機（`uname -s` 讀到
+  `MSYS_NT-10.0-26300`）PATH 上同樣是 msys2 排第一：`whence -a zstd` 第一個是
+  `/c/Users/lowei/scoop/apps/msys2/current/usr/bin/zstd`。所以原先的歸因（msys2 的 zstd）是對的，錯的是「只有
+  這個 session 才有」。msys2 是從哪裡進到那個 PATH 的還不知道，登錄檔沒有。用 `~/t312diag.zsh`（測試那一段
+  的複本，stderr 不丟棄、開 xtrace）在使用者終端機讀到：
+
+  ```
+  == make rc=127
+  ls: cannot access '/c/Users/lowei/proj/csv2/test/.t312diag.1LBZsN/a.tar.zst': No such file or directory
+  +archive_commit_ok:5> tar -xf - csv2-9.9.9-probe/csv2
+  tar: This does not look like a tar archive
+  a.tar.zst: the binary carries no build id of the form "v9.9.9 / <commit>"
+  RESULT refused
+  ```
+
+  而 msys2 的 zstd 從 bash 呼叫正常、從這個 zsh 呼叫**不印任何東西就以 127 結束**：
+
+  ```
+  $ ~/scoop/apps/msys2/current/usr/bin/zstd --version            # bash
+  *** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***
+  $ zsh -fc '/c/Users/lowei/scoop/apps/msys2/current/usr/bin/zstd --version; print rc=$?'
+  rc=127
+  ```
+
+  **這是測試的缺陷，不只是環境**：T312 的前提只問 `command -v zstd`，那只證明 PATH 上有一個叫 zstd 的檔案，
+  不證明它能跑。三份合成封存因此一份都沒建出來，而 T312b 把「沒有封存」讀成「拒絕」。更糟的是負控組：
+  T312c、T312d 期待的正是 `refused`，所以它們在**什麼都沒量到**的情況下 PASS 了——就是本檔反覆出現的那種
+  「看起來成功」。修法：前提改成 zstd 要真的能執行（`zstd --version` 成功），否則 SKIP 並寫出是哪一支
+  zstd、結束碼多少；並在 `_t312_make` 之後確認封存真的存在，不存在就 FAIL，讓 T312c、T312d 不能再靠空檔
+  通過。不改成「挑一支能跑的 zstd」：`publish.zsh` 用的是 PATH 上第一個 `zstd`，測試若換一支，量的就不是
+  發布時真正會跑的那一支。
+
+On 2026-11-07 the user ran the full suite on b19d381 in their own terminal:
+1541 PASS, 2 FAIL, 19 SKIP. T300a is a defect of b19d381 itself: the new
+swift_windows_env.zsh entered the index as 100644, while T300 requires a
+script with a shebang to be 100755; on Windows `chmod` does not reach the
+index, so the fix is `git update-index --chmod=+x`. T312b is still open. This
+session had blamed an msys2 zstd that exits 127 from zsh and called it local
+to this session; it fails in the user's terminal too, where neither registry
+Path nor the zsh rc adds msys2, so that explanation does not hold. Outside the
+suite, the same shape passes. `_t312_try` discards the child's stderr, so the
+suite does not say why archive_commit_ok refused.
+
+Found the same day: the user's terminal (uname MSYS_NT) also has msys2's
+usr/bin first, so the msys2 zstd was the cause after all; what was wrong was
+"only in this session". That zstd works from bash and exits 127, silently,
+from this zsh. No synthetic archive was ever written, and T312b read "no
+archive" as "refused". Worse, the controls T312c and T312d expect "refused",
+so they passed having measured nothing. The suite's guard asked only
+`command -v zstd`. Fix: require `zstd --version` to succeed, otherwise SKIP
+naming the binary and its exit code, and FAIL when a synthetic archive was
+not written. Rejected: picking some zstd that works, because publish.zsh runs
+the first zstd on PATH and the test would then measure a different binary.

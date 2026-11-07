@@ -17099,7 +17099,22 @@ echo "--- T312: publish.zsh refuses an archive built from another commit / T312�
 # 相符（因為那份 .sha256 正是建置它的節點自己寫的）、解得開、名字正確。release.zsh 自己的檢查比對的是
 # 執行檔與 checkout，所以一個 fetch 靜默失敗的節點會打包過期的執行檔並以 0 結束。這裡改讀封存裡的
 # build id。
-if [[ -r $ROOT/publish.zsh ]] && command -v zstd >/dev/null 2>&1; then
+# The guard asks that zstd RUNS, not that a file of that name is on PATH. An
+# msys2 zstd first on PATH exits 127 from this zsh without a word, so no
+# archive below was written: T312b read "no archive" as "refused", and the
+# controls T312c and T312d, which expect "refused", passed having measured
+# nothing. SR. It does not go looking for another zstd that works:
+# publish.zsh runs the first one on PATH, and that is the one to measure.
+# 前提問的是 zstd「能跑」，不是 PATH 上有一個叫這個名字的檔案。PATH 上排第一的 msys2 zstd 從這個 zsh
+# 呼叫時一句話都不說就以 127 結束，於是底下一份封存都沒寫出來：T312b 把「沒有封存」讀成「拒絕」，而
+# 期待「拒絕」的負控組 T312c、T312d 在什麼都沒量到的情況下通過。SR。這裡不去找另一支能跑的 zstd：
+# publish.zsh 跑的是 PATH 上第一個，要量的就是那一個。
+_t312_zstd=$(command -v zstd 2>/dev/null || true)
+_t312_zrc=0
+if [[ -n $_t312_zstd ]]; then
+    zstd --version >/dev/null 2>&1 || _t312_zrc=$?
+fi
+if [[ -r $ROOT/publish.zsh && -n $_t312_zstd ]] && (( _t312_zrc == 0 )); then
 _t312_fn=$TMP/t312fn.zsh
 sed -n '/^ARCHIVE_BUILD_ID=""$/,/^}$/p' "$ROOT/publish.zsh" > "$_t312_fn"
 if LC_ALL=C grep -q '^archive_commit_ok() {' "$_t312_fn"; then
@@ -17116,6 +17131,10 @@ _t312_make() {   # _t312_make <name> <text inside the fake binary>
     rm -rf "$d"; mkdir -p "$d/csv2-9.9.9-probe"
     print -r -- "padding $2 padding" > "$d/csv2-9.9.9-probe/csv2"
     ( cd -- "$d" && tar -cf - csv2-9.9.9-probe | zstd -q -o "$TMP/t312-$1.tar.zst" )
+    # Without this, a refusal of a missing archive passes T312c and T312d. SR.
+    # 少了這一步，對一份不存在的封存的拒絕會讓 T312c、T312d 通過。SR。
+    [[ -s $TMP/t312-$1.tar.zst ]] ||
+        bad "T312 the synthetic archive t312-$1.tar.zst was not written, so the case using it measures nothing / 合成封存 t312-$1.tar.zst 沒有寫出來，用它的案例什麼都沒量到"
 }
 _t312_try() {   # _t312_try <name>  -- prints "ok <build id>" or "refused"
     zsh -c '
@@ -17175,7 +17194,7 @@ else
 fi
 else
     T312_SKIPPED=1
-    skipt "T312 publish.zsh refuses an archive built from another commit / publish.zsh 拒絕用別的 commit 建出來的封存 (publish.zsh or zstd is absent here / 這裡沒有 publish.zsh 或 zstd)"
+    skipt "T312 publish.zsh refuses an archive built from another commit / publish.zsh 拒絕用別的 commit 建出來的封存 (publish.zsh or zstd is absent here, or zstd does not run: [${_t312_zstd:-none}] rc=$_t312_zrc / 這裡沒有 publish.zsh 或 zstd，或 zstd 跑不起來)"
 fi
 
 echo
