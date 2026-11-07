@@ -958,8 +958,11 @@ SQ 已修正（見 `release-notes/0.2.0.md` 與 known-defects.md）。
 - **Formula/scoop**：publish.zsh 改寫並讀回，`02faf84` 提交；提交前 M4 上的整套測試 0 失敗。
 - **母專案的 `helper/install_release.zsh`** 原本下載不帶後綴的 `linux-x86_64`，0.2.0 起已沒有這個檔名。
   母專案 `8a81db0` 讓它依版本選名，0.2.0 起用 `-glibc`。
-- **節點升級**：M4 `brew upgrade` → `csv2 0.2.0 (v0.2.0 / 61598406)`。Windows、WSL 連不上（不在同一個區域網路），
-  guest 的 VM 沒有在跑；已請各節點的負責 session 代為升級。
+- **節點升級**：M4 `brew upgrade` → `csv2 0.2.0 (v0.2.0 / 61598406)`。Windows、WSL 從 M4 連不上（不在同一個區域
+  網路），由 csv2-win 代為升級：scoop 的 `csv2.exe` 與 WSL 的 `/usr/local/bin/csv2` 都讀到 `v0.2.0 / 61598406`。
+  **但兩邊 login shell 的 PATH 先找到的都是 `~/.local/bin/csv2`**：Windows 那份是 2026-08-20 的舊動態建置，執行時
+  rc=127（cmd.exe 不受影響）；WSL 那份是 11/06 從 61598406 建的開發版，印 `v0.1.9-6-g61598406`。前者由 csv2-win
+  以靜態建置取代。guest 的 VM 沒有在跑，guest 與 prebuilt 已交給 LinuxCS-M4。M6 沒有從這裡升級。
 - **Windows 的整套測試沒有在 CI 跑**，與 0.1.9 相同。
 
 ## ~~v0.1.9~~ 已出貨
