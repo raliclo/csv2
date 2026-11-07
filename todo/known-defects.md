@@ -14896,3 +14896,43 @@ describe` without --tags skips it, landing on v0.1.9: `csv2 0.2.0
 meant to, so nothing was published. Plan: re-fetch the tags with --force
 after checkout, and fail the build job at once when a tag build's id is
 not `v<version> / <commit>`.
+
+## ST. `publish_matrix.zsh` 每次都把下載的封存留在 `$TMPDIR`：最後一行 `exec` 讓 EXIT trap 永遠不會執行
+
+來源：v0.2.0 發布後，使用者要求清理 `/private/var/folders`（2026-11-07）。在 `$TMPDIR` 找到兩個 publish_matrix
+的暫存目錄，各 64M，分別來自 11/5 被 SQ 擋下的那次和 11/7 成功的那次：
+
+```
+$ du -sh $TMPDIR/csv2-matrix.*
+ 64M	/var/folders/27/1t3nl4gn2wd1q6l1z8g600gr0000gn/T/csv2-matrix.5c7XUH
+ 64M	/var/folders/27/1t3nl4gn2wd1q6l1z8g600gr0000gn/T/csv2-matrix.X9Rcx0
+$ ls $TMPDIR/csv2-matrix.5c7XUH
+csv2-0.2.0-build.md  csv2-linux-aarch64-glibc  csv2-linux-aarch64-musl  csv2-linux-x86_64-glibc ...
+```
+
+**成因**：`publish_matrix.zsh` 第 179–180 行建立暫存目錄並設定 `trap 'rm -rf -- "$tmp"' EXIT`，但腳本最後一行是
+`exec ./publish.zsh "$VERSION" --publish`。`exec` 以 publish.zsh 取代目前的 shell，原本的 shell 不會「結束」，
+所以 EXIT trap 不會執行。成功與失敗都一樣（publish.zsh 拒絕時也一樣），因為兩者都經過 `exec`。
+`--fetch` 模式以 `exit 0` 結束，不受影響。最小重現（zsh 5.9，macOS）：
+
+```
+$ cat demo.zsh
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/sr-demo.XXXXXX")
+trap 'rm -rf -- "$tmp"' EXIT
+print -r -- "$tmp"
+exec true
+$ d=$(zsh demo.zsh); [[ -d $d ]] && print "left behind: $d"
+left behind: /var/folders/27/1t3nl4gn2wd1q6l1z8g600gr0000gn/T//sr-demo.vkCxkJ
+```
+
+**影響**：只有磁碟空間，每次發布約 64M；發出去的東西不受影響。macOS 會定期清 `$TMPDIR`，所以不會無限累積，
+但腳本宣稱會清，實際沒有。
+
+**計畫**：不用 `exec`，改為一般呼叫 publish.zsh，再以它的退出碼結束，讓 EXIT trap 照常執行。考慮過在 `exec`
+之前先 `rm -rf "$tmp"`，不採用：那樣 trap 仍然是一句不會生效的話，下一個在 `exec` 之後才用到 `$tmp` 的修改
+會再踩一次。
+
+`publish_matrix.zsh` leaves its download directory (~64M) in `$TMPDIR` on
+every run, because its last line `exec`s publish.zsh: the shell is
+replaced rather than exited, so the `EXIT` trap that removes the directory
+never fires. Plan: call publish.zsh normally and exit with its status.
