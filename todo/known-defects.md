@@ -15099,10 +15099,10 @@ bundle the VC++ DLLs, and the README's Windows runtime section.
 `swift_windows_runtime_bin` 依匯入表遞移複製 vcruntime140.dll、vcruntime140_1.dll、msvcp140.dll；README 的
 Windows 段落改寫為以 2026-11-06 為界的兩段。原文保留，因為它記錄的是寫下時的狀態。
 
-使用者在自己的終端機對 b19d381 跑完整測試：
+使用者在自己的終端機對 b19d381 跑完整測試，得到兩個 FAIL（總結行裡的 PASS 數量不抄進來：T69a 不准文件
+引用它，因為它每次提交都會過期。這段第一版就抄了，於是下一輪測試在 T69a 失敗）：
 
 ```
-PASS 1541   FAIL 2   SKIP 19
 FAIL  T300a not executable in the index: 100644 swift_windows_env.zsh  / 索引裡不可執行的如上
 FAIL  T312b 7-char gave [refused], 8-char gave [refused] / 兩種長度的結果如上
 ```
@@ -15148,8 +15148,9 @@ FAIL  T312b 7-char gave [refused], 8-char gave [refused] / 兩種長度的結果
   通過。不改成「挑一支能跑的 zstd」：`publish.zsh` 用的是 PATH 上第一個 `zstd`，測試若換一支，量的就不是
   發布時真正會跑的那一支。
 
-On 2026-11-07 the user ran the full suite on b19d381 in their own terminal:
-1541 PASS, 2 FAIL, 19 SKIP. T300a is a defect of b19d381 itself: the new
+On 2026-11-07 the user ran the full suite on b19d381 in their own terminal
+and got two FAILs. (Its PASS count is left out: T69a forbids quoting one, and
+the first draft of this entry did, so the next run failed T69a.) T300a is a defect of b19d381 itself: the new
 swift_windows_env.zsh entered the index as 100644, while T300 requires a
 script with a shebang to be 100755; on Windows `chmod` does not reach the
 index, so the fix is `git update-index --chmod=+x`. T312b is still open. This
