@@ -18561,6 +18561,25 @@ printf 'p,q\nx1,z\n' > "$TMP/t356.csv"
 assert_eq "$("$CSV2" --headers 0 -update-where x1 y -i "$TMP/t356.csv" -so 2>&1 | tr '\n' ' ')" "p,q y,z " \
     "T356b a .csv with --headers 0: the matching cell is edited / 以 --headers 0 讀的 .csv：符合的那一格被改到"
 
+echo "--- T357: publish_matrix.zsh lets its EXIT trap run / T357：publish_matrix.zsh 讓它的 EXIT trap 執行 ---"
+# ST. Its last line was `exec ./publish.zsh`, which replaces the shell, so the
+# EXIT trap that removes the download directory never ran and every publish
+# left ~64M in $TMPDIR. While the script has that trap, no line may exec (a).
+# The control (b) puts the old line back into a copy and must be caught.
+# ST。它最後一行原本是 `exec ./publish.zsh`，exec 會取代 shell，清掉下載目錄的 EXIT trap 從未執行，
+# 每次發布都在 $TMPDIR 留下約 64M。只要腳本有那個 trap，就不得有任何一行 exec（a）。
+# 負控組（b）把舊的那一行放回一份複本，必須被抓到。
+_t357_execs() { LC_ALL=C grep -c -E '^[[:space:]]*exec[[:space:]]' "$1" | tr -d ' ' }
+if LC_ALL=C grep -q "trap 'rm -rf -- \"\$tmp\"' EXIT" "$ROOT/publish_matrix.zsh"; then
+    assert_eq "$(_t357_execs "$ROOT/publish_matrix.zsh")" "0" \
+        "T357a publish_matrix.zsh has an EXIT trap and no exec that would skip it / publish_matrix.zsh 有 EXIT trap，且沒有會跳過它的 exec"
+else
+    bad "T357a publish_matrix.zsh no longer sets the EXIT trap this case is about; update T357 / publish_matrix.zsh 已不再設定本案例所針對的 EXIT trap；請更新 T357"
+fi
+{ cat "$ROOT/publish_matrix.zsh"; print -r -- 'exec ./publish.zsh "$VERSION" --publish'; } > "$TMP/t357.zsh"
+assert_eq "$(_t357_execs "$TMP/t357.zsh")" "1" \
+    "T357b with the old exec line put back, the check sees it / 把舊的 exec 那一行放回去，檢查看得到它"
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

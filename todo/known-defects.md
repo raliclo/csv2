@@ -14897,7 +14897,11 @@ meant to, so nothing was published. Plan: re-fetch the tags with --force
 after checkout, and fail the build job at once when a tag build's id is
 not `v<version> / <commit>`.
 
-## ST. `publish_matrix.zsh` 每次都把下載的封存留在 `$TMPDIR`：最後一行 `exec` 讓 EXIT trap 永遠不會執行
+## ST. `publish_matrix.zsh` 每次都把下載的封存留在 `$TMPDIR`：最後一行 `exec` 讓 EXIT trap 永遠不會執行（2026-11-07 修正，T357a–b）
+
+**修正與證實**：publish_matrix.zsh 改為一般呼叫 publish.zsh，再以它的退出碼結束。上面那個最小重現改成同樣寫法
+之後，暫存目錄就被清掉了。T357a 檢查腳本有 EXIT trap 且沒有任何一行 `exec`；T357b 是負控組，把舊的那一行放回
+一份複本，檢查必須看得到。M4 上整套測試 1580/0/1。真正的發布要到下一次才會走過這條路。
 
 來源：v0.2.0 發布後，使用者要求清理 `/private/var/folders`（2026-11-07）。在 `$TMPDIR` 找到兩個 publish_matrix
 的暫存目錄，各 64M，分別來自 11/5 被 SQ 擋下的那次和 11/7 成功的那次：

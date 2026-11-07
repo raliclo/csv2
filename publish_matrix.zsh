@@ -217,5 +217,9 @@ fi
 # 4. publish.zsh does the rest, with every check it already makes.
 # 4. 其餘交給 publish.zsh，連同它既有的每一道檢查。
 # ---------------------------------------------------------------------
+# Not `exec`: exec replaces this shell, so the EXIT trap that removes $tmp never ran
+# and every publish left ~64M behind (ST).
+# 不用 `exec`：exec 會取代這個 shell，清掉 $tmp 的 EXIT trap 因此從未執行，每次發布都留下約 64M（ST）。
 say ""
-exec ./publish.zsh "$VERSION" --publish
+./publish.zsh "$VERSION" --publish
+exit $?
