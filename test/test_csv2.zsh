@@ -18735,7 +18735,7 @@ assert_eq "$? $(print -r -- "$_t359_help" | grep -c 'Source this')" "0 1" \
     "T359e --help prints the header and exits 0 / --help 印出檔頭並以 0 結束"
 
 echo
-echo "--- T358: release.zsh names the Windows binary csv2.exe from uname / T358：release.zsh 依 uname 把 Windows 的執行檔定為 csv2.exe ---"
+echo "--- T360: release.zsh names the Windows binary csv2.exe from uname / T360：release.zsh 依 uname 把 Windows 的執行檔定為 csv2.exe ---"
 # SR. release.zsh chose the binary with `[[ -x $HERE/release/csv2 ]]` first,
 # and MSYS/Cygwin zsh answers that true for csv2.exe. Windows therefore took
 # BIN_NAME=csv2 and skipped every csv2.exe branch: the VC++ DLL bundling and
@@ -18746,7 +18746,9 @@ echo "--- T358: release.zsh names the Windows binary csv2.exe from uname / T358�
 # 也回答真。Windows 因此取到 BIN_NAME=csv2，跳過每一個 csv2.exe 分支：VC++ DLL 收錄與只含系統目錄的
 # 檢查。一次試跑以 0 結束、說「verified」，封存裡卻沒有任何 DLL。在這裡執行 release.zsh 看不出來——
 # 一個叫 csv2.exe 的假執行檔用 release/csv2 也跑得起來——所以這裡直接讀那段選擇。
-_t358_check() {   # _t358_check <file>  -- prints "ok" or what is wrong
+# Written as T358 and renumbered at the rebase: upstream had taken T358.
+# 原本寫成 T358，rebase 時上游已用掉 T358，因此改號。
+_t360_check() {   # _t360_check <file>  -- prints "ok" or what is wrong
     if LC_ALL=C grep -qE '\[\[ -x \$HERE/release/csv2 \]\]' "$1"; then
         print -r -- "selects by [[ -x \$HERE/release/csv2 ]]"
     elif ! LC_ALL=C grep -qE '^ *MINGW\*\|MSYS\*\|CYGWIN\*\) *BIN_NAME=csv2\.exe' "$1"; then
@@ -18756,17 +18758,17 @@ _t358_check() {   # _t358_check <file>  -- prints "ok" or what is wrong
     fi
 }
 if [[ -r $ROOT/release.zsh ]]; then
-    assert_eq "$(_t358_check "$ROOT/release.zsh")" ok \
-        "T358a release.zsh sets BIN_NAME from uname, not from which file exists / release.zsh 依 uname 設定 BIN_NAME，不依哪個檔案存在"
-    # The control: the shape b19d381 shipped must be caught.
-    # 負控組：b19d381 出貨的那個形狀必須被抓到。
+    assert_eq "$(_t360_check "$ROOT/release.zsh")" ok \
+        "T360a release.zsh sets BIN_NAME from uname, not from which file exists / release.zsh 依 uname 設定 BIN_NAME，不依哪個檔案存在"
+    # The control: the shape SR's first commit shipped must be caught.
+    # 負控組：SR 第一個 commit 出貨的那個形狀必須被抓到。
     print -rl -- 'if [[ -x $HERE/release/csv2 ]]; then' '    BIN_NAME=csv2' \
-        'elif [[ -x $HERE/release/csv2.exe ]]; then' '    BIN_NAME=csv2.exe' 'fi' > "$TMP/t358-old.zsh"
-    assert_eq "$(_t358_check "$TMP/t358-old.zsh")" "selects by [[ -x \$HERE/release/csv2 ]]" \
-        "T358b the old existence-based selection is caught / 舊的「依存在與否」選擇會被抓到"
+        'elif [[ -x $HERE/release/csv2.exe ]]; then' '    BIN_NAME=csv2.exe' 'fi' > "$TMP/t360-old.zsh"
+    assert_eq "$(_t360_check "$TMP/t360-old.zsh")" "selects by [[ -x \$HERE/release/csv2 ]]" \
+        "T360b the old existence-based selection is caught / 舊的「依存在與否」選擇會被抓到"
 else
-    T358_SKIPPED=1
-    skipt "T358 release.zsh names the Windows binary from uname / release.zsh 依 uname 命名 Windows 執行檔 (no release.zsh in this tree / 這棵樹裡沒有 release.zsh)"
+    T360_SKIPPED=1
+    skipt "T360 release.zsh names the Windows binary from uname / release.zsh 依 uname 命名 Windows 執行檔 (no release.zsh in this tree / 這棵樹裡沒有 release.zsh)"
 fi
 
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
@@ -18889,7 +18891,7 @@ fi
 (( ${T337_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T332_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T354_SKIPPED:-0} )) && (( want_skip += 1 ))
-(( ${T358_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T360_SKIPPED:-0} )) && (( want_skip += 1 ))
 # The symlink and POSIX-mode capabilities, each probed at run time rather than
 # inferred from the platform's name -- see the probe beside zstat_mode. JT.
 # symlink 與 POSIX 模式這兩個能力，各自在執行期探測，而不是從平台名字推論——見 zstat_mode
