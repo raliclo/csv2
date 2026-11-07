@@ -14991,7 +14991,8 @@ instead of 2. Not investigated, and not told apart whether sed or csv2 differs t
 `--headers 0/1/2` 數出 3/2/1、只有標頭得 0、空輸入得 0；引號沒收尾仍以 rc=1 拒絕；沒給 `--headers` 仍以 rc=1
 要求它；`--in-place` 仍拒絕 stdin。T257e 改為斷言：stdin 的答案與檔案相同、`--headers 0` 作用得到、
 `--in-place` 拒絕並指名 `-i FILE`。負控組：brew 的 0.2.0 對同一個檢查回 `-count needs -i FILE`、rc=1。
-M4 上整套測試 1581/0/1。README 兩個語言版本的那一句已改寫。
+M4 上整套測試 1581/0/1；aarch64 Linux guest（複本 `/workspace/csv2-sw`，以 nohup 執行）1566/0/7，七個略過都是
+環境因素；T47 跨平台比對 24 項通過。README 兩個語言版本的那一句已改寫。
 
 來源：使用者回報（2026-11-07）。一個 agent 想確認管線輸入只有一筆紀錄，發現 `-count` 只能用在檔案上，只好改成
 「`-get 2:1` 必須失敗」的間接檢查。使用者要求把它當成缺陷修正。
