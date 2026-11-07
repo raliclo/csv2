@@ -962,7 +962,9 @@ SQ 已修正（見 `release-notes/0.2.0.md` 與 known-defects.md）。
   網路），由 csv2-win 代為升級：scoop 的 `csv2.exe` 與 WSL 的 `/usr/local/bin/csv2` 都讀到 `v0.2.0 / 61598406`。
   **但兩邊 login shell 的 PATH 先找到的都是 `~/.local/bin/csv2`**：Windows 那份是 2026-08-20 的舊動態建置，執行時
   rc=127（cmd.exe 不受影響）；WSL 那份是 11/06 從 61598406 建的開發版，印 `v0.1.9-6-g61598406`。前者由 csv2-win
-  以靜態建置取代。guest 的 VM 沒有在跑，guest 與 prebuilt 已交給 LinuxCS-M4。M6 沒有從這裡升級。
+  以靜態建置取代。guest 與 prebuilt 由 LinuxCS-M4 處理（母專案 `5d96598`）：
+  prebuilt 取自已發布的 linux-aarch64-glibc 封存（`748620b3…`），guest 的 `/workspace/csv2/release/csv2` 讀到
+  `v0.2.0 / 61598406`。M6 沒有從這裡升級。
 - **Windows 的整套測試沒有在 CI 跑**，與 0.1.9 相同。
 
 ## ~~v0.1.9~~ 已出貨
