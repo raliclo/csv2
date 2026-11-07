@@ -434,7 +434,8 @@ stdout 空白，訊息會指名兩個逃生口。**那個上限數的是「資�
 csv2 -update 1:1 'X' -si --headers 1 -so < data.csv
 ```
 
-`-count` 與 `--in-place` 會直接拒絕 stdin，並指名 `-i FILE`。
+`-count` 也能讀 stdin，和其他讀取一樣要給 `-si --headers N`；管線旁邊沒有索引，所以一律掃描。
+`--in-place` 會拒絕 stdin，並指名 `-i FILE`：沒有檔案可以寫回。
 
 從管線讀取**永遠是單執行緒**的，因此無論門檻允許什麼，`-contains` 在那裡都不會走平行路徑；而
 `-debug` 會回報 `file_bytes=0`——那讓「索引」那一節描述的「`read_bytes` 對上 `file_bytes`」比較，

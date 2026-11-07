@@ -547,7 +547,9 @@ to write back to:
 csv2 -update 1:1 'X' -si --headers 1 -so < data.csv
 ```
 
-`-count` and `--in-place` refuse stdin outright and say so, naming `-i FILE`.
+`-count` reads stdin too, with `-si --headers N` like any other read; on a pipe
+it always scans, since there is no index beside it. `--in-place` refuses stdin
+and says so, naming `-i FILE`: there is no file to write back to.
 
 Reading from a pipe is always single-threaded, so `-contains` never takes the
 parallel path there whatever the thresholds allow, and `-debug` reports

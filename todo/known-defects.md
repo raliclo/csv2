@@ -14985,7 +14985,13 @@ T276b 以 `sed '1a\' + 換行 + '套件,授權'` 在 `pkg,license` 之後插入�
 From the same run on macos-15: T276b's .csv2, built with `sed '1a\'`, read back with 3 fields on header row 0b
 instead of 2. Not investigated, and not told apart whether sed or csv2 differs there. Outside support, as SU.
 
-## SW. `-count` 不接受 stdin：`-si` 一律被拒絕，呼叫端只能改用 `-get 2:1` 必須失敗之類的繞路
+## SW. `-count` 不接受 stdin：`-si` 一律被拒絕，呼叫端只能改用 `-get 2:1` 必須失敗之類的繞路（2026-11-07 修正，T257e）
+
+**修正與證實**：`runCount` 只在有 `-i FILE` 時查索引、做截斷附加檢查；stdin 交給原本的掃描計數。
+`--headers 0/1/2` 數出 3/2/1、只有標頭得 0、空輸入得 0；引號沒收尾仍以 rc=1 拒絕；沒給 `--headers` 仍以 rc=1
+要求它；`--in-place` 仍拒絕 stdin。T257e 改為斷言：stdin 的答案與檔案相同、`--headers 0` 作用得到、
+`--in-place` 拒絕並指名 `-i FILE`。負控組：brew 的 0.2.0 對同一個檢查回 `-count needs -i FILE`、rc=1。
+M4 上整套測試 1581/0/1。README 兩個語言版本的那一句已改寫。
 
 來源：使用者回報（2026-11-07）。一個 agent 想確認管線輸入只有一筆紀錄，發現 `-count` 只能用在檔案上，只好改成
 「`-get 2:1` 必須失敗」的間接檢查。使用者要求把它當成缺陷修正。

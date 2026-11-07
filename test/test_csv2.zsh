@@ -13785,16 +13785,25 @@ else
     bad "T257d agree=$_t257_a1/$_t257_a2 disagree=$_t257_d1/$_t257_d2 / 實得如上"
 fi
 
-# MK/ML. -count refuses stdin; an edit through a pipe works and needs a
-# destination.
-# MK／ML。`-count` 拒絕 stdin；經由管線的編輯可行，而且需要一個目的地。
-"$CSV2" -count -si --headers 1 < "$TMP/t257one.csv" >/dev/null 2>"$TMP/t257.err"
-_t257_cnt=$?
+# MK/ML/SW. -count answers on stdin (SW: it used to refuse it, which sent
+# callers to "-get 2:1 must fail"); --in-place still refuses stdin, naming
+# -i FILE, since there is no file to write back to; an edit through a pipe
+# works and needs a destination. Three records with --headers 0 checks that
+# the header setting really reaches the stdin count.
+# MK／ML／SW。`-count` 在 stdin 上會回答（SW：原本拒絕，逼得呼叫端改用「-get 2:1 必須失敗」）；
+# `--in-place` 仍拒絕 stdin 並指名 -i FILE，因為沒有檔案可寫回；經由管線的編輯可行，而且需要一個
+# 目的地。以 --headers 0 數出三筆，確認標頭設定確實作用到 stdin 的計數。
+_t257_cnt=$("$CSV2" -count -si --headers 1 < "$TMP/t257one.csv" 2>"$TMP/t257.err"; print -r -- "rc=$?")
+_t257_cnt0=$("$CSV2" -count -si --headers 0 < "$TMP/t257two.csv2" 2>/dev/null)
+_t257_cntf=$("$CSV2" -count -i "$TMP/t257one.csv" 2>/dev/null)
+"$CSV2" -update 1:1 'X' -si --headers 1 --in-place < "$TMP/t257one.csv" >/dev/null 2>"$TMP/t257ip.err"
+_t257_ip=$?
 _t257_edit=$("$CSV2" -update 1:1 'X' -si --headers 1 -so < "$TMP/t257one.csv" 2>/dev/null)
-if [[ $_t257_cnt == 1 ]] && LC_ALL=C grep -q 'i FILE' "$TMP/t257.err" && [[ $_t257_edit == $'a,b\nX,2' ]]; then
-    ok "T257e -count refuses stdin naming -i FILE, while an edit through a pipe works / -count 拒絕 stdin 並指名 -i FILE，而經由管線的編輯可行"
+if [[ $_t257_cnt == $'1\nrc=0' && $_t257_cnt0 == 3 && $_t257_cntf == 1 && $_t257_ip == 1 ]] \
+   && LC_ALL=C grep -q 'i FILE' "$TMP/t257ip.err" && [[ $_t257_edit == $'a,b\nX,2' ]]; then
+    ok "T257e -count answers on stdin as on the file, --in-place refuses stdin naming -i FILE, an edit through a pipe works / -count 在 stdin 上的答案與檔案相同，--in-place 拒絕 stdin 並指名 -i FILE，經由管線的編輯可行"
 else
-    bad "T257e count_rc=$_t257_cnt err=[$(tr '\n' '|' < "$TMP/t257.err")] edit=[${_t257_edit//$'\n'/|}] / 實得如上"
+    bad "T257e count=[${_t257_cnt//$'\n'/|}] err=[$(tr '\n' '|' < "$TMP/t257.err")] h0=$_t257_cnt0 file=$_t257_cntf inplace_rc=$_t257_ip edit=[${_t257_edit//$'\n'/|}] / 實得如上"
 fi
 
 echo "--- T258: the two spellings of -delete, and what a record number means / T258：-delete 的兩種寫法，以及紀錄號指的是什麼 ---"

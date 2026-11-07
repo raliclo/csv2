@@ -617,9 +617,13 @@ func runBuildIndex(_ o: Options) throws {
 /// 所要消滅的那種歧義：讀不到它的呼叫端，分不出「這個檔案是空的」與「這次執行沒有索引」。
 /// 一個動詞一定會回答，只是有時候比較慢。
 func runCount(_ o: Options) throws {
-    guard let path = o.input else {
-        throw fault("-count needs -i FILE", "-count 需要 -i FILE")
-    }
+    // stdin (-si) is counted by the scan below. The path is needed only for the
+    // index lookup and the torn-append check, and neither applies to a pipe. SW:
+    // this used to refuse stdin outright, which sent callers to roundabout checks
+    // such as "-get 2:1 must fail".
+    // stdin（-si）由底下的掃描計數。路徑只用在查索引與截斷附加檢查，兩者都不適用於管線。SW：
+    // 這裡原本直接拒絕 stdin，逼得呼叫端改用「-get 2:1 必須失敗」這類繞路的檢查。
+    let path = o.input
 
     // O(1) when a usable index is beside the file. `CSVIndex.load` is the same
     // gate every other reader goes through, so a stale or unusable sidecar is
@@ -628,7 +632,7 @@ func runCount(_ o: Options) throws {
     // 檔案旁有一份可用索引時是 O(1)。`CSVIndex.load` 就是其他每一個讀取者走的同一道關口，
     // 因此一份過期或不可用的 sidecar 在這裡被捨棄的方式與那裡完全相同——而底下的掃描接著會給出
     // 同一個答案，那正是 T80 斷言的東西。
-    if !o.noIndex, let idx = CSVIndex.load(dataPath: path) {
+    if !o.noIndex, let path, let idx = CSVIndex.load(dataPath: path) {
         // Say so. README calls -debug the only window onto whether an index was
         // used, and `-count`'s whole claim is O(1)-via-index, so it must print
         // `index hit` too. The miss side is already covered: a stale sidecar
@@ -655,7 +659,9 @@ func runCount(_ o: Options) throws {
     // `--build-index` 就是用來明說的。
     let plan = try openInput(o)
     defer { plan.source.close() }
-    try checkTornAppend(path: path, format: plan.format, truncatePartial: o.truncatePartial)
+    if let path {
+        try checkTornAppend(path: path, format: plan.format, truncatePartial: o.truncatePartial)
+    }
 
     var headers: [Record] = []
     var n = 0
