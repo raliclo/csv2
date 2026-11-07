@@ -14845,7 +14845,18 @@ unproven: MarkdownOut.cell's Foundation calls leave autoreleased objects that th
 and x86_64 does not elide them the way arm64 does. Plan: an autorelease pool per row on Darwin, through
 Platform.swift; T19d passing on macos-26-intel confirms it, otherwise revert.
 
-## SQ. 以 tag push 觸發的 release.yml，建出的執行檔 build id 說的是前一個 tag，publish.zsh 因此拒絕發布
+## SQ. 以 tag push 觸發的 release.yml，建出的執行檔 build id 說的是前一個 tag，publish.zsh 因此拒絕發布（2026-11-06 修正，release.yml 的 build id 檢查）
+
+**修正與證實**：`6159840` 讓 release.yml 在 checkout 之後執行 `git fetch --force --tags origin`，並在建置後加上
+「build id 指名 tag」這一步。刪掉 `v0.2.0` 後在 `6159840` 重新打 tag，tag push 觸發的執行 42177822755 中，八個
+建置 job 的這一步全部通過。publish.zsh 讀到的八份 build id 都是 `v0.2.0 / 61598406`，v0.2.0 已於 2026-11-06 發布。
+那次執行的 macos-x86_64 第一次因為 GitHub runner 斷線失敗（「The hosted runner lost communication with the
+server」，失敗前 build id 那一步已經通過）；只重跑那一個 job 就通過了，與本缺陷無關。
+
+Fixed in `6159840`: the tags are re-fetched with --force after checkout, and a
+tag build fails at once unless its id is `v<version> / <commit>`. Run
+42177822755, started by pushing the re-made v0.2.0 tag, passed that check on all eight
+jobs, and publish.zsh read `v0.2.0 / 61598406` from every archive.
 
 來源：v0.2.0 的發布（2026-11-05），`./publish_matrix.zsh 0.2.0 --publish` 在使用者的機器上執行。tag `v0.2.0`
 是 annotated（tag 物件 `4b5cc1e`，指向 `3aa9df0`）。它觸發的 release.yml 執行 41874784865 全部成功，八份封存都

@@ -933,6 +933,35 @@ Linux VM and the default build stay glibc, and the Linux release archives are
 2. README 的「安裝發行版」仍寫四份封存，那是 v0.1.8 的事實；0.1.9 發布後再改。
 3. plan.md 的「Linux 發行建置（`-musl`）全靜態」方塊：等 linux-x86_64-musl 的整套測試在 CI 上通過才勾。
 
+## ~~v0.2.0~~ 已出貨
+
+### 2026-11-06：v0.2.0 出了，Linux 封存改名為 -glibc／-musl，第一次在使用者的機器上發布
+
+`https://github.com/raliclo/csv2/releases/tag/v0.2.0`，tag 指向 `6159840`，由 release.yml 執行 42177822755
+（tag push 觸發）建置。發布者是 raliclo：`publish_matrix.zsh 0.2.0 --publish` 在使用者的機器上執行。
+內容：glibc 的 Linux 封存改名為 `linux-<arch>-glibc`，執行檔本身不變；publish.zsh 拒絕不帶後綴的 Linux 名稱；
+SQ 已修正（見 `release-notes/0.2.0.md` 與 known-defects.md）。
+
+| 平台 | build id | 套件 | 封存 sha256 |
+|---|---|---|---|
+| linux-x86_64-glibc | `v0.2.0 / 61598406` | 1574/0/3 | `80f5465b…` |
+| linux-aarch64-glibc | `v0.2.0 / 61598406` | 1574/0/3 | `748620b3…` |
+| linux-x86_64-musl | `v0.2.0 / 61598406` | 1575/0/3 | `e4b41cbb…` |
+| linux-aarch64-musl | `v0.2.0 / 61598406` | 1575/0/3 | `46a09d65…` |
+| macos-x86_64 | `v0.2.0 / 61598406` | 1577/0/1 | `37ceeb94…` |
+| macos-arm64 | `v0.2.0 / 61598406` | 1577/0/1 | `708c1b53…` |
+| windows-x86_64 | `v0.2.0 / 61598406` | 未跑（release.zsh 解開、執行、讀 CSV） | `2e93724c…` |
+| windows-arm64 | `v0.2.0 / 61598406` | 未跑（同上） | `24d17477…` |
+
+- **到發布成功之前失敗了兩次，都沒有發出任何東西**：第一次是 SQ（build id 說 `v0.1.9-4-g3aa9df06`，publish.zsh
+  拒絕）；tag 刪掉、修正後重打。第二次是 macos-x86_64 的 GitHub runner 斷線；只重跑那一個 job 就通過。
+- **Formula/scoop**：publish.zsh 改寫並讀回，`02faf84` 提交；提交前 M4 上的整套測試 0 失敗。
+- **母專案的 `helper/install_release.zsh`** 原本下載不帶後綴的 `linux-x86_64`，0.2.0 起已沒有這個檔名。
+  母專案 `8a81db0` 讓它依版本選名，0.2.0 起用 `-glibc`。
+- **節點升級**：M4 `brew upgrade` → `csv2 0.2.0 (v0.2.0 / 61598406)`。Windows、WSL 連不上（不在同一個區域網路），
+  guest 的 VM 沒有在跑；已請各節點的負責 session 代為升級。
+- **Windows 的整套測試沒有在 CI 跑**，與 0.1.9 相同。
+
 ## ~~v0.1.9~~ 已出貨
 
 ### 2026-11-04：v0.1.9 出了，八個平台，第一次全由 release.yml 建置與發布
