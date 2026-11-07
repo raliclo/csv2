@@ -32,7 +32,7 @@
 class Csv2 < Formula
   desc "Fail-loudly CSV parser and editor: names the record and field, never repairs"
   homepage "https://github.com/raliclo/csv2"
-  version "0.2.0"
+  version "0.2.1"
   license "MIT"
 
   # This url is the macOS arm64 one AND the formula's default, on purpose.
@@ -60,8 +60,8 @@ class Csv2 < Formula
   #
   # 它寫在**這裡**而不是複製一份進 `on_macos { on_arm }`，因為 publish.zsh 改寫時要求「每個平台
   # 恰好一個 url 與一個 sha256」，看到兩個就拒絕。每個平台一個位置，是兩邊都需要的安排。
-  url "https://github.com/raliclo/csv2/releases/download/v0.2.0/csv2-0.2.0-macos-arm64.tar.zst"
-  sha256 "708c1b5305751945c0c8250cdade07e0413022ede84dd79d6ff443eb19f937a6"
+  url "https://github.com/raliclo/csv2/releases/download/v0.2.1/csv2-0.2.1-macos-arm64.tar.zst"
+  sha256 "425c8dc4b42fb7239bad4c0694c15ce9f785dd7615d277db71d788c6effe5816"
 
   # Only the platforms whose archive was built AND verified on that platform.
   # Until v0.1.8 macOS x86_64 was absent, and `depends_on arch: :arm64` kept an
@@ -80,15 +80,15 @@ class Csv2 < Formula
     # 寫在這裡，讓那道拒絕發生在安裝時、由 Homebrew 說出版本，而不是裝好之後才執行不了。
     depends_on macos: :tahoe
     on_intel do
-      url "https://github.com/raliclo/csv2/releases/download/v0.2.0/csv2-0.2.0-macos-x86_64.tar.zst"
-      sha256 "37ceeb943430626e0f38590d4ea240c1e3627acf86b0c04cabbd8a74c9a6c2cb"
+      url "https://github.com/raliclo/csv2/releases/download/v0.2.1/csv2-0.2.1-macos-x86_64.tar.zst"
+      sha256 "437e9eb06556d60232e38b6d077c14621d9edf8434de45ad434716a820d67f17"
     end
   end
 
   on_linux do
     on_intel do
-      url "https://github.com/raliclo/csv2/releases/download/v0.2.0/csv2-0.2.0-linux-x86_64-musl.tar.zst"
-      sha256 "e4b41cbb984de03aeb60b7e3f15acb89a6b02ef26ca6d5d5687be05ff468f57b"
+      url "https://github.com/raliclo/csv2/releases/download/v0.2.1/csv2-0.2.1-linux-x86_64-musl.tar.zst"
+      sha256 "5b18106b6a8be1b5e83714327e32fedc175cddea854de20bb19aa59aa83da5de"
     end
     # aarch64 arrives in v0.1.1. It was absent from v0.1.0 not because it was
     # untested -- T47 compares twelve invocations byte for byte against macOS
@@ -99,8 +99,8 @@ class Csv2 < Formula
     # 呼叫與 macOS 逐位元比對——而是因為一份「在 tag 打完之後才建的」封存，會回報與它三個手足
     # 不同的版本字串，那就是 QD。v0.1.1 的四份封存全部是在 tag 上建的。
     on_arm do
-      url "https://github.com/raliclo/csv2/releases/download/v0.2.0/csv2-0.2.0-linux-aarch64-musl.tar.zst"
-      sha256 "46a09d652a9e4b0787da3a07b4c986ab6a221800c197498df09de1a1f556da4c"
+      url "https://github.com/raliclo/csv2/releases/download/v0.2.1/csv2-0.2.1-linux-aarch64-musl.tar.zst"
+      sha256 "d353dd2b0c3929aa51f4b27d4f94497b7ca228127e7ee6ea7d66985e7d459230"
     end
   end
 
@@ -116,6 +116,6 @@ class Csv2 < Formula
   test do
     (testpath/"p.csv").write("pkg,license\nzlib,MIT\n")
     assert_equal "MIT", shell_output("#{bin}/csv2 -get 1:license -i #{testpath}/p.csv").strip
-    assert_match "csv2 0.2.0", shell_output("#{bin}/csv2 --version")
+    assert_match "csv2 0.2.1", shell_output("#{bin}/csv2 --version")
   end
 end
