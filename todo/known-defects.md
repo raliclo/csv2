@@ -14984,3 +14984,42 @@ T276b 以 `sed '1a\' + 換行 + '套件,授權'` 在 `pkg,license` 之後插入�
 
 From the same run on macos-15: T276b's .csv2, built with `sed '1a\'`, read back with 3 fields on header row 0b
 instead of 2. Not investigated, and not told apart whether sed or csv2 differs there. Outside support, as SU.
+
+## SW. `-count` 不接受 stdin：`-si` 一律被拒絕，呼叫端只能改用 `-get 2:1` 必須失敗之類的繞路
+
+來源：使用者回報（2026-11-07）。一個 agent 想確認管線輸入只有一筆紀錄，發現 `-count` 只能用在檔案上，只好改成
+「`-get 2:1` 必須失敗」的間接檢查。使用者要求把它當成缺陷修正。
+
+```
+$ csv2 --version
+csv2 0.2.0 (v0.2.0 / 61598406)
+$ printf 'a,b\n1,2\n3,4\n' | csv2 -count -si --headers 1
+csv2: -count needs -i FILE
+csv2：-count 需要 -i FILE
+rc=1
+$ printf 'a,b\n1,2\n3,4\n' | csv2 -r -si --headers 1      # 同一份輸入，讀取可以
+1,2
+3,4
+rc=0
+$ csv2 -count -i c.csv                                   # 同樣內容存成檔案
+2
+```
+
+**成因**：`runCount`（src/Run.swift）第一行就是 `guard let path = o.input else { throw … }`。它需要路徑只為了兩件事：
+查旁邊的索引（O(1) 的快速路徑），以及 `checkTornAppend`。這兩件事對 stdin 都不適用，但底下的 O(n) 掃描本來
+就經由 `openInput`，對 stdin 一樣能用。MK（2026-09-07）只把這個拒絕寫進文件、以 T257e 釘住，沒有說明為什麼
+不支援；README 也寫著「`-count` 和 `--in-place` 直接拒絕 stdin」。`--in-place` 拒絕 stdin 有理由（沒有檔案可以
+寫回），`-count` 沒有。
+
+**影響**：沒有錯誤的答案，只是拒絕回答。呼叫端被迫繞路，而繞路的檢查比較難讀，也比較容易寫錯。
+
+**計畫**：沒有 `-i` 時跳過索引與截斷附加檢查，直接掃描計數，與其他讀取路徑相同（`if let p = o.input { … }`）。
+`-si` 仍然需要 `--headers`，與每一個 stdin 讀取相同。T257e 改為斷言 `-count` 在 stdin 上回答正確的筆數，
+`--in-place` 仍然拒絕；README 的那一句改寫。
+
+`-count` refused stdin outright (`-count needs -i FILE`), although the
+scan it falls back to without an index already reads stdin through
+openInput. The path was needed only for the index lookup and the
+torn-append check, neither of which applies to a pipe. MK documented the
+refusal without a reason; --in-place has one (nothing to write back to),
+-count does not. Plan: skip both when there is no -i and count by scanning.
