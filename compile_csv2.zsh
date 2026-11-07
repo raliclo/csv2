@@ -137,7 +137,18 @@ mkdir -p release
 
 echo "Building csv2 for $HOST_KERNEL ($OPT) / 正在為 $HOST_KERNEL 建置 csv2（$OPT）"
 
-swiftc -swift-version 6 -warnings-as-errors $OPT -o release/csv2 $SOURCES
+# The lowest macOS a release runs on, stated here and nowhere else (T358
+# reads it from this line). Without -target the floor followed whatever macOS
+# did the build: v0.1.x and v0.2.0 came out at 26.0 because their builders
+# ran 26, and a build on a newer macOS would have raised it unannounced. 26 is
+# what every node runs, and the cases that fail on macOS 15 / Swift 6.1 (SU,
+# SV) are outside it. The user decided this on 2026-11-07.
+# 發行版能執行的最低 macOS，只寫在這裡（T358 從這一行讀取）。沒有 -target 時，下限跟著建置用的 macOS 走：
+# v0.1.x 與 v0.2.0 的下限是 26.0，只因為建置它們的機器跑 26；換到更新的 macOS 建置，下限就會在沒人宣告的
+# 情況下提高。26 是每個節點在跑的版本，而在 macOS 15／Swift 6.1 上失敗的案例（SU、SV）在範圍之外。
+# 使用者於 2026-11-07 決定。
+MACOS_MIN=26.0
+swiftc -swift-version 6 -warnings-as-errors $OPT -target "$(uname -m)-apple-macos$MACOS_MIN" -o release/csv2 $SOURCES
 
 # Verify by RUNNING it, not by checking the file exists. Whether the binary
 # landed proves nothing about whether it works; this is the same reasoning as

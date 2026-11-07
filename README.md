@@ -39,6 +39,14 @@ you have a reason not to: it needs nothing from the machine, and it is what
 Homebrew installs. The `-glibc` archives are the glibc build. v0.1.9 named
 them bare `linux-<arch>`, and up to v0.1.8 those were the only Linux archives.
 
+**The macOS archives need macOS 26 or later.** The binaries declare 26.0 as
+their minimum, and an older macOS refuses to start them; Homebrew says so at
+install. This has been true of every release so far -- it followed the macOS
+the release was built on -- and is stated, and fixed in the build, from
+2026-11-07. Building from source on an older macOS is not supported: two
+cases of the suite fail on macOS 15 with Swift 6.1 (SU, SV in
+`todo/known-defects.md`).
+
 **The `-musl` Linux archives are fully static** (from v0.1.9 on), linked against musl.
 They need no Swift toolchain and no glibc, so they run on any Linux of their
 architecture and keep running when the machine's Swift changes. v0.1.6 to
@@ -103,7 +111,8 @@ built with 6.4.2, v0.1.5 to v0.1.8 with 6.4.1, v0.1.4 with
 
 ## Build and install from source
 
-Requirements: Swift 6 with warnings treated as errors. The build uses plain
+Requirements: Swift 6.3 or later, with warnings treated as errors (6.3.3 is
+the oldest that passes the whole suite), and on macOS, macOS 26 or later. The build uses plain
 Swift source files, Foundation, and Dispatch; it does not use SwiftPM or
 SwiftNIO. The `-musl` build below also needs Swift's Static Linux SDK of the
 same version as the toolchain (`swift sdk install`, with the checksum swift.org

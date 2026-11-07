@@ -32,6 +32,11 @@ zstd -d csv2-0.2.0-macos-arm64.tar.zst -c | tar -x
 的任何東西，也是 Homebrew 安裝的那一份。`-glibc` 是 glibc 建置；v0.1.9 把它們命名為不帶字尾的 `linux-<arch>`，
 到 v0.1.8 為止那是唯一的 Linux 封存。
 
+**macOS 封存需要 macOS 26 以上。** 執行檔宣告的最低版本是 26.0，較舊的 macOS 會拒絕啟動；Homebrew 在安裝時就會說明。
+到目前為止的每一個版本其實都是如此（下限跟著建置用的 macOS 走），從 2026-11-07 起明文寫出，並在建置中固定下來。
+不支援在較舊的 macOS 上從原始碼建置：在 macOS 15、Swift 6.1 上，整套測試有兩個案例失敗（`todo/known-defects.md`
+的 SU、SV）。
+
 **`-musl` 的 Linux 封存對 musl 完全靜態連結**（從 v0.1.9 起）。它們不需要 Swift 工具鏈，也不需要 glibc，
 因此在同架構的任何 Linux 上都能跑，機器上的 Swift 換了版本也照樣能跑。v0.1.6 到 v0.1.8 只把 Swift
 靜態連進去，仍需要機器上的 glibc、libstdc++ 與 libgcc_s。v0.1.5 的 aarch64 執行檔在 RPATH 裡以版本號
@@ -82,7 +87,7 @@ runtime 跟著「那一版 release」走，不是跟著最新的 Swift：v0.1.9 
 
 ## 從原始碼建置與安裝
 
-需求：Swift 6，並將警告視為錯誤。建置使用純 Swift 原始檔、Foundation 與
+需求：Swift 6.3 以上，並將警告視為錯誤（6.3.3 是能通過整套測試的最舊版本）；在 macOS 上需要 macOS 26 以上。建置使用純 Swift 原始檔、Foundation 與
 Dispatch，不使用 SwiftPM 或 SwiftNIO。下面的 `-musl` 建置還需要與工具鏈同一版的
 Swift Static Linux SDK（以 `swift sdk install` 安裝，附上 swift.org 列出的 checksum）；缺少時建置會停下，
 並指名它需要的那一份。

@@ -72,6 +72,13 @@ class Csv2 < Formula
   # `depends_on arch: :arm64` 擋住 Intel Mac，免得它抓走上面那個 arm64 的預設 url。從 v0.1.9 起，
   # release.yml 在 macos-26-intel runner 上建置、測試並打包它，所以 Intel Mac 在這裡有自己的 url，那道限制也拿掉了。
   on_macos do
+    # The binaries declare macOS 26.0 as their minimum (compile_csv2.zsh,
+    # MACOS_MIN; T358), and an older macOS refuses to start them. Said here so
+    # that refusal comes at install, with Homebrew naming the version, rather
+    # than as a binary that installs and then will not run.
+    # 執行檔宣告的最低版本是 macOS 26.0（compile_csv2.zsh 的 MACOS_MIN；T358），較舊的 macOS 會拒絕啟動。
+    # 寫在這裡，讓那道拒絕發生在安裝時、由 Homebrew 說出版本，而不是裝好之後才執行不了。
+    depends_on macos: :tahoe
     on_intel do
       url "https://github.com/raliclo/csv2/releases/download/v0.2.0/csv2-0.2.0-macos-x86_64.tar.zst"
       sha256 "37ceeb943430626e0f38590d4ea240c1e3627acf86b0c04cabbd8a74c9a6c2cb"

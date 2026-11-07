@@ -18580,6 +18580,30 @@ fi
 assert_eq "$(_t357_execs "$TMP/t357.zsh")" "1" \
     "T357b with the old exec line put back, the check sees it / 把舊的 exec 那一行放回去，檢查看得到它"
 
+echo "--- T358: the macOS binary declares the minimum macOS the build states / T358：macOS 執行檔宣告的最低版本，就是建置腳本寫明的那一個 ---"
+# Until 2026-11-07 the floor was whatever macOS ran the build (v0.2.0: 26.0,
+# only because its builder ran 26). compile_csv2.zsh now passes -target with
+# MACOS_MIN, and this reads that value from the script rather than keeping a
+# second copy, so the two cannot drift. macOS only: other platforms have no
+# such field.
+# 到 2026-11-07 為止，下限就是執行建置的那個 macOS（v0.2.0 是 26.0，只因為建置它的機器跑 26）。
+# compile_csv2.zsh 現在以 MACOS_MIN 傳入 -target，而這裡從腳本讀出那個值、不另存一份，兩者因此不會分歧。
+# 只限 macOS：其他平台沒有這個欄位。
+_t358_want=$(LC_ALL=C sed -n 's/^MACOS_MIN=\([0-9.]*\)$/\1/p' "$ROOT/compile_csv2.zsh" 2>/dev/null | head -1)
+if [[ $(uname -s 2>/dev/null) != Darwin ]]; then
+    T358_SKIPPED=1
+    skipt "T358 the macOS binary declares the stated minimum macOS / macOS 執行檔宣告寫明的最低版本 (macOS only / 只限 macOS)"
+elif ! command -v otool >/dev/null 2>&1; then
+    T358_SKIPPED=1
+    skipt "T358 the macOS binary declares the stated minimum macOS / macOS 執行檔宣告寫明的最低版本 (no otool on this system / 這個系統沒有 otool)"
+elif [[ -z $_t358_want ]]; then
+    bad "T358 could not read MACOS_MIN from compile_csv2.zsh / 無法從 compile_csv2.zsh 讀出 MACOS_MIN"
+else
+    _t358_got=$(otool -l "$CSV2" 2>/dev/null | awk '/LC_BUILD_VERSION/ {f = 1} f && $1 == "minos" {print $2; exit}')
+    assert_eq "$_t358_got" "$_t358_want" \
+        "T358 the binary's LC_BUILD_VERSION minos is compile_csv2.zsh's MACOS_MIN / 執行檔 LC_BUILD_VERSION 的 minos 就是 compile_csv2.zsh 的 MACOS_MIN"
+fi
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which
@@ -18696,6 +18720,7 @@ fi
 (( ${T324_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T328_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T329_SKIPPED:-0} )) && (( want_skip += 1 ))
+(( ${T358_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T337_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T332_SKIPPED:-0} )) && (( want_skip += 1 ))
 (( ${T354_SKIPPED:-0} )) && (( want_skip += 1 ))
