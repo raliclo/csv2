@@ -25,11 +25,11 @@ extracting the archive, running the extracted binary and having it read a CSV.
 v0.1.8 and earlier published four.
 
 ```sh
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.0/csv2-0.2.0-macos-arm64.tar.zst
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.0/csv2-0.2.0-macos-arm64.tar.zst.sha256
-sha256sum -c csv2-0.2.0-macos-arm64.tar.zst.sha256
-zstd -d csv2-0.2.0-macos-arm64.tar.zst -c | tar -x
-./csv2-0.2.0-macos-arm64/csv2 --version
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.1/csv2-0.2.1-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.1/csv2-0.2.1-macos-arm64.tar.zst.sha256
+sha256sum -c csv2-0.2.1-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.2.1-macos-arm64.tar.zst -c | tar -x
+./csv2-0.2.1-macos-arm64/csv2 --version
 ```
 
 Substitute `macos-x86_64`, `linux-x86_64-musl`, `linux-aarch64-musl`,
@@ -80,7 +80,7 @@ scoop install https://raw.githubusercontent.com/raliclo/csv2/develop/scoop/csv2.
 **On Windows, csv2 needs the Swift runtime of the version that built it, and
 neither the archive nor Scoop installs that for you.** The Windows archive
 holds `csv2.exe` and nothing else; it loads `swiftCore.dll`, `Foundation.dll`
-and about a dozen siblings from `PATH`. v0.2.0 was built with **Swift 6.4.2**,
+and about a dozen siblings from `PATH`. v0.2.1 was built with **Swift 6.4.2**,
 so install the Swift 6.4.2 runtime — the directory
 `%LOCALAPPDATA%\Programs\Swift\Runtimes\6.4.2\usr\bin`, which the Swift 6.4.2
 installer from [swift.org](https://www.swift.org/install/windows/) creates and
@@ -104,7 +104,7 @@ A different patch version has been seen to work — v0.1.4, built with 6.4.0,
 runs on 6.4.1 — and a different minor version to fail, as above. Nothing else
 has been measured, so the safe choice is the runtime that built the release.
 
-The runtime follows the release, not the latest Swift: v0.1.9 and v0.2.0 were
+The runtime follows the release, not the latest Swift: v0.1.9 to v0.2.1 were
 built with 6.4.2, v0.1.5 to v0.1.8 with 6.4.1, v0.1.4 with
 6.4.0, and v0.1.3 and earlier with Swift 6.3.3. If `csv2 --version` reports
 0.1.3, installing 6.4.x is the wrong fix.
@@ -178,8 +178,8 @@ over it.
 ### Publishing every platform
 
 ```zsh
-./publish_matrix.zsh 0.2.0              # says what it would do
-./publish_matrix.zsh 0.2.0 --publish    # tag, wait for CI, download, ./publish.zsh
+./publish_matrix.zsh 0.2.1              # says what it would do
+./publish_matrix.zsh 0.2.1 --publish    # tag, wait for CI, download, ./publish.zsh
 ```
 
 `.github/workflows/release.yml` builds, tests and packages eight targets, each
