@@ -15170,3 +15170,40 @@ so they passed having measured nothing. The suite's guard asked only
 naming the binary and its exit code, and FAIL when a synthetic archive was
 not written. Rejected: picking some zstd that works, because publish.zsh runs
 the first zstd on PATH and the test would then measure a different binary.
+
+**2026-11-07 追記二：b19d381 的 VC++ DLL 收錄在 Windows 上從來沒有執行過。** 在 2b9b585 的乾淨 worktree 裡
+建置後跑 `release.zsh`（PATH 拿掉 msys2），它以 0 結束並印出：
+
+```
+/c/Users/lowei/proj/csv2-reltrial/dist/csv2-0.2.0-windows-x86_64.tar.zst
+755b776385836fe2e1d5273dbcbcfb2c4033acc2e2e0919b288c33528031a45b *csv2-0.2.0-windows-x86_64.tar.zst
+verified: extracted, ran, and read a CSV / 已驗證：解開、執行過，而且讀得了一個 CSV
+```
+
+沒有「bundled VC++ runtime DLLs」那一行，而封存裡只有 csv2.exe、LICENSE 與兩份 README，**一個 DLL 都沒有**。
+原因在 `release.zsh` 選執行檔的那一段：先問 `[[ -x $HERE/release/csv2 ]]`，再問 `csv2.exe`。MSYS／Cygwin 的
+zsh 對不帶副檔名的名字會自動找 `.exe`：
+
+```
+$ ls release/
+csv2.exe  csv2.exp  csv2.lib
+$ zsh -fc 'if [[ -x release/csv2 ]]; then printf "%s\n" "-x release/csv2: true"; fi'
+-x release/csv2: true
+```
+
+所以 Windows 也取了 `BIN_NAME=csv2`。（`cp` 到 `csv2` 時 MSYS 又自動補上 `.exe`，封存裡的檔名因此看起來是對的，
+這一層掩蓋了上一層。）所有 `[[ $BIN_NAME == csv2.exe ]]` 的分支都被跳過：DLL 收錄、拒絕匯入 Swift DLL 的檢查，
+以及「只含系統目錄的 PATH」驗證——驗證用的是完整 PATH，而 6.4.2 的 runtime 就在上面，於是缺 DLL 也照樣通過。
+這是 b19d381 本身的缺陷，PD 時代的判斷順序在 SR 之前沒有後果，因為那時兩個分支做的事一樣。
+
+修法：依 `uname -s` 決定檔名，不依「哪個檔案存在」；Windows 上就是 `csv2.exe`，找不到才報錯。並加一個測試釘住
+「Windows 不會取到 BIN_NAME=csv2」。
+
+The DLL bundling added in b19d381 never ran on Windows. release.zsh picked
+the binary with `[[ -x release/csv2 ]]` first, and MSYS/Cygwin zsh answers
+that true for csv2.exe, so Windows took BIN_NAME=csv2 and skipped every
+csv2.exe branch: the bundling, the refusal of Swift DLL imports, and the
+System32-only verification. MSYS's cp then appended .exe on the copy, so the
+archive's file name looked right. A trial run in a clean worktree exited 0,
+said "verified", and shipped no DLL. Fix: choose the name from `uname -s`,
+not from which file exists, and pin it with a test.

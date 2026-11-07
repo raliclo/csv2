@@ -68,13 +68,20 @@ DIST=$HERE/dist
 # 這個平台建出來的是哪一個檔案？compile_csv2.zsh 的 Windows 分支產生 csv2.exe；只寫 POSIX
 # 檔名，剛建置成功的節點也會以「build first」結束。PD。
 # ---------------------------------------------------------------------
-if [[ -x $HERE/release/csv2 ]]; then
-    BIN=$HERE/release/csv2
-    BIN_NAME=csv2
-elif [[ -x $HERE/release/csv2.exe ]]; then
-    BIN=$HERE/release/csv2.exe
-    BIN_NAME=csv2.exe
-else
+#
+# The name comes from the platform, not from which file exists: MSYS/Cygwin
+# zsh answers `[[ -x release/csv2 ]]` true for csv2.exe, so the old order made
+# Windows take BIN_NAME=csv2 and skip every csv2.exe branch below -- the DLL
+# bundling and the System32-only check -- while still printing "verified". SR.
+# 檔名由平台決定，不由「哪個檔案存在」決定：MSYS／Cygwin 的 zsh 對 csv2.exe 也會回答
+# `[[ -x release/csv2 ]]` 為真，舊的順序因此讓 Windows 取到 BIN_NAME=csv2，跳過底下每一個 csv2.exe
+# 分支——DLL 收錄與只含系統目錄的檢查——卻照樣印出「verified」。SR。
+case $(uname -s) in
+    MINGW*|MSYS*|CYGWIN*) BIN_NAME=csv2.exe ;;
+    *)                    BIN_NAME=csv2 ;;
+esac
+BIN=$HERE/release/$BIN_NAME
+if [[ ! -x $BIN ]]; then
     print -u2 -- "no built binary; run ./compile_csv2.zsh first"
     print -u2 -- "找不到已建置的執行檔；請先執行 ./compile_csv2.zsh"
     exit 1
