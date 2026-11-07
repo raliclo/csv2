@@ -14940,3 +14940,47 @@ left behind: /var/folders/27/1t3nl4gn2wd1q6l1z8g600gr0000gn/T//sr-demo.vkCxkJ
 every run, because its last line `exec`s publish.zsh: the shell is
 replaced rather than exited, so the `EXIT` trap that removes the directory
 never fires. Plan: call publish.zsh normally and exit with its status.
+
+## SU. macOS 15／Swift 6.1 上，Markdown 就地編輯在 UTF-8 BOM 之後又寫出第二個 BOM（T352a）（2026-11-07：超出支援範圍，不修正）
+
+來源：`.github/workflows/release.yml` 第 1 次執行（41818689081，2026-11-04，`965dcd1`），macos-15 runner 的 job 126535987651，
+`Apple Swift version 6.1.2`。
+
+```console
+FAIL  T352a the BOM is still the first three bytes / BOM 仍是開頭的三個位元組 (got 'efbbbfef', want 'efbbbf78')
+PASS  T352b a file without a BOM does not gain one / 沒有 BOM 的檔案不會多出一個
+```
+
+T352 的輸入是 `\xef\xbb\xbfx\n\n| a | b |…`，以 `-update 1:2 X -md -t --md-table 1 --in-place` 編輯。預期開頭是
+`ef bb bf 78`（BOM 之後是 `x`），macOS 15 上得到 `ef bb bf ef`，也就是 BOM 之後緊接著另一個 BOM 的開頭。沒有 BOM 的檔案
+（T352b）正常。同一次執行的 Linux 與 Windows、之後所有 macos-26 runner（Swift 6.3.3）與各節點（macOS 26、Swift 6.4）都通過。
+
+**成因沒有調查**。推測是舊版 Foundation 在把位元組轉成字串或寫回時，自己保留或補上了 BOM，而 csv2 又寫了一次。
+
+**決定（使用者，2026-11-07）**：macOS 的最低支援版本定為 26。已發布的 macOS 執行檔（v0.1.x 到 v0.2.0）本來就宣告
+minos 26.0，在 macOS 15 上根本啟動不了，所以沒有任何使用者會用發布的執行檔遇到這個問題；只有在 macOS 15 上用 Swift 6.1
+自行建置才會。compile_csv2.zsh 以 `MACOS_MIN=26.0` 固定 `-target`，T358 檢查執行檔確實宣告它，Formula 加上
+`depends_on macos: :tahoe`，README 寫明需求。若日後要支援 macOS 15，這一條要先調查再修，並在 CI 加回 macos-15 的測試 job。
+
+From CI run 1 on macos-15 (Swift 6.1.2): a Markdown in-place edit of a file starting with a UTF-8 BOM wrote a
+second BOM after the first. It passes on macOS 26 everywhere. Not investigated: the user set macOS 26 as the
+minimum on 2026-11-07, and every published macOS binary already declares minos 26.0 and cannot start on 15.
+
+## SV. macOS 15／Swift 6.1 上，T276b 的 `.csv2` 標頭兩列欄數不同（2026-11-07：超出支援範圍，不修正）
+
+來源：同上，第 1 次執行（41818689081），macos-15 runner 的 job 126535987651。
+
+```console
+FAIL  T276b [csv2: … INFO  csv2 -contains needle -debug -i …/t276/s.csv2
+csv2: …/t276/s.csv2: header row 0a has 2 fields, row 0b has 3; a .csv2 header must have the same field count on both rows
+csv2：…/t276/s.csv2：標頭 0a 有 2 欄，0b 有 3 欄；.csv2 的兩列標頭欄數必須相同] / 實得如上
+```
+
+T276b 以 `sed '1a\' + 換行 + '套件,授權'` 在 `pkg,license` 之後插入第二列標頭，產生 `s.csv2`。macOS 15 上 csv2 讀到的第二列
+有 3 欄。**成因沒有調查**，可能在測試資料的產生（macOS 15 的 BSD sed 處理多位元組字元或 `a\` 的方式），也可能在 csv2 的讀取；
+這兩者沒有分辨過。macos-26 runner 與各節點都通過。
+
+**決定**：同 SU，超出支援範圍。若日後要支援 macOS 15，先分辨是 sed 產生的檔案不同，還是 csv2 讀同一個檔案的結果不同。
+
+From the same run on macos-15: T276b's .csv2, built with `sed '1a\'`, read back with 3 fields on header row 0b
+instead of 2. Not investigated, and not told apart whether sed or csv2 differs there. Outside support, as SU.
