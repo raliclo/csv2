@@ -15207,3 +15207,18 @@ System32-only verification. MSYS's cp then appended .exe on the copy, so the
 archive's file name looked right. A trial run in a clean worktree exited 0,
 said "verified", and shipped no DLL. Fix: choose the name from `uname -s`,
 not from which file exists, and pin it with a test.
+
+**2026-11-11 追記三：README 與 scoop notes 的分界寫錯了。** 兩份 README 與 `scoop/csv2.json` 寫「2026-11-06 以後
+的建置完全不需要 Swift」。SR 還沒推上去時，上游在 2026-11-07 打了 v0.2.1 並發布，它是在那之後建置的，Windows 封存
+卻仍是動態連結：rebase 時上游的 README 寫著「v0.2.1 was built with Swift 6.4.2」、scoop notes 寫著
+`csv2 0.2.1  was built with Swift 6.4.2  -> needs Runtimes\6.4.2\usr\bin on PATH`。日期描述的是「SR 寫好的那一天」，
+不是「SR 進入 release 的那一天」，而兩者之間隔著一個 release。改成以版本為界：v0.2.1 之後的 release 不需要
+Swift，v0.2.1 以前（含）需要。README 保留了錯誤寫法的說明。分界只能用版本寫，因為只有 tag 決定一份 release 帶不帶
+某個 commit。
+
+The two READMEs and the scoop notes said a build "made on or after
+2026-11-06" needs no Swift. Upstream tagged and shipped v0.2.1 on 2026-11-07,
+before SR was pushed, and its Windows archive is dynamic. The date named the
+day SR was written, not the release it entered. The line is now drawn by
+version: releases after v0.2.1 need no Swift. Only a tag decides whether a
+release carries a commit, so only a version can draw that line.
