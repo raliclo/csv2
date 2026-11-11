@@ -964,7 +964,9 @@ Linux VM and the default build stay glibc, and the Linux release archives are
   由 csv2-win 代為升級：scoop 的 `csv2.exe` 與 WSL 的 `/usr/local/bin/csv2` 都讀到 `v0.2.1 / fd6ae75f`。
   **但兩邊的 PATH 都先找到 `~/.local/bin/csv2`**：Windows 那份是使用者要求安裝的 develop `506e7c4` 靜態建置
   （`v0.2.1-7-g506e7c45`，比 0.2.1 新）；WSL 那份是 11/06 從 `61598406` 建的開發版（`v0.1.9-6-g61598406`），
-  比 0.2.1 舊，沒有 SW，所以 WSL 的 login shell 上 `-count -si` 仍會被拒絕。要不要移除由使用者決定。
+  比 0.2.1 舊，沒有 SW，所以 WSL 的 login shell 上 `-count -si` 仍會被拒絕。**使用者決定移除（2026-11-11）**：
+  csv2-win 確認版本字串相符後，把它移到 `~/backup/csv2-wsl-dev-0.2.0-61598406-removed-20261111`（可以還原）。
+  之後 `zsh -lc` 的 `command -v csv2` 是 `/usr/local/bin/csv2`，讀到 `v0.2.1 / fd6ae75f`，`-count -si` 印出 1。
   guest 的 VM 沒在跑，LinuxCS-M4 不在線，guest 與 prebuilt 尚未升級。M6 由使用者升級。
 - **Windows 的整套測試沒有在 CI 跑**，與 0.2.0 相同。
 
