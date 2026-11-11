@@ -933,6 +933,34 @@ Linux VM and the default build stay glibc, and the Linux release archives are
 2. README 的「安裝發行版」仍寫四份封存，那是 v0.1.8 的事實；0.1.9 發布後再改。
 3. plan.md 的「Linux 發行建置（`-musl`）全靜態」方塊：等 linux-x86_64-musl 的整套測試在 CI 上通過才勾。
 
+## ~~v0.2.1~~ 已出貨
+
+### 2026-11-07：v0.2.1 出了，`-count` 讀 stdin、macOS 26 成為明文的最低版本
+
+`https://github.com/raliclo/csv2/releases/tag/v0.2.1`，tag 指向 `fd6ae75`，由 release.yml 執行 42375934968
+（tag push 觸發）建置，`publish_matrix.zsh 0.2.1 --publish` 在使用者的機器上發布，發布者 raliclo，一次就成功。
+內容：SW（`-count` 讀 stdin）、040c2ed（macOS 26 在建置中固定，Formula 宣告 `depends_on macos: :tahoe`）。
+見 `release-notes/0.2.1.md` 與 known-defects.md。
+
+| 平台 | build id | 套件 | 封存 sha256 |
+|---|---|---|---|
+| linux-x86_64-glibc | `v0.2.1 / fd6ae75f` | 1576/0/4 | `fe873085…` |
+| linux-aarch64-glibc | `v0.2.1 / fd6ae75f` | 1576/0/4 | `fa4a8a8c…` |
+| linux-x86_64-musl | `v0.2.1 / fd6ae75f` | 1577/0/4 | `5b18106b…` |
+| linux-aarch64-musl | `v0.2.1 / fd6ae75f` | 1577/0/4 | `d353dd2b…` |
+| macos-x86_64 | `v0.2.1 / fd6ae75f` | 1580/0/1 | `437e9eb0…` |
+| macos-arm64 | `v0.2.1 / fd6ae75f` | 1580/0/1 | `425c8dc4…` |
+| windows-x86_64 | `v0.2.1 / fd6ae75f` | 未跑（release.zsh 解開、執行、讀 CSV） | `c72162b1…` |
+| windows-arm64 | `v0.2.1 / fd6ae75f` | 未跑（同上） | `01636823…` |
+
+- **ST 的修正在這次發布中證實**：發布之後 `$TMPDIR` 裡沒有 `csv2-matrix.*` 留下。
+- **Formula/scoop**：publish.zsh 改寫並讀回，`d0584e5` 提交；提交前 M4 上整套測試 0 失敗。
+- **Windows 仍是動態建置，需要 Swift 6.4.2 runtime。** csv2-win 的 SR（靜態 Windows 建置，develop `506e7c4`）
+  在這一版之後；v0.2.1 之後的第一版才是不需要 Swift 的 Windows 版。
+- **節點升級**（2026-11-11 讀回）：M4 `brew` → `csv2 0.2.1 (v0.2.1 / fd6ae75f)`。Windows、WSL 從 M4 連不上，
+  guest 的 VM 沒在跑，三者都還沒確認到 0.2.1；已請 csv2-win 與 LinuxCS-M4。M6 由使用者升級。
+- **Windows 的整套測試沒有在 CI 跑**，與 0.2.0 相同。
+
 ## ~~v0.2.0~~ 已出貨
 
 ### 2026-11-06：v0.2.0 出了，Linux 封存改名為 -glibc／-musl，第一次在使用者的機器上發布
