@@ -957,8 +957,12 @@ Linux VM and the default build stay glibc, and the Linux release archives are
 - **Formula/scoop**：publish.zsh 改寫並讀回，`d0584e5` 提交；提交前 M4 上整套測試 0 失敗。
 - **Windows 仍是動態建置，需要 Swift 6.4.2 runtime。** csv2-win 的 SR（靜態 Windows 建置，develop `506e7c4`）
   在這一版之後；v0.2.1 之後的第一版才是不需要 Swift 的 Windows 版。
-- **節點升級**（2026-11-11 讀回）：M4 `brew` → `csv2 0.2.1 (v0.2.1 / fd6ae75f)`。Windows、WSL 從 M4 連不上，
-  guest 的 VM 沒在跑，三者都還沒確認到 0.2.1；已請 csv2-win 與 LinuxCS-M4。M6 由使用者升級。
+- **節點升級**（2026-11-11 讀回）：M4 `brew` → `csv2 0.2.1 (v0.2.1 / fd6ae75f)`。Windows 與 WSL 從 M4 連不上，
+  由 csv2-win 代為升級：scoop 的 `csv2.exe` 與 WSL 的 `/usr/local/bin/csv2` 都讀到 `v0.2.1 / fd6ae75f`。
+  **但兩邊的 PATH 都先找到 `~/.local/bin/csv2`**：Windows 那份是使用者要求安裝的 develop `506e7c4` 靜態建置
+  （`v0.2.1-7-g506e7c45`，比 0.2.1 新）；WSL 那份是 11/06 從 `61598406` 建的開發版（`v0.1.9-6-g61598406`），
+  比 0.2.1 舊，沒有 SW，所以 WSL 的 login shell 上 `-count -si` 仍會被拒絕。要不要移除由使用者決定。
+  guest 的 VM 沒在跑，LinuxCS-M4 不在線，guest 與 prebuilt 尚未升級。M6 由使用者升級。
 - **Windows 的整套測試沒有在 CI 跑**，與 0.2.0 相同。
 
 ## ~~v0.2.0~~ 已出貨
