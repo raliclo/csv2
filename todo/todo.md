@@ -913,6 +913,9 @@ Linux VM and the default build stay glibc, and the Linux release archives are
   節點（macOS 26、Swift 6.4）上這三個都通過，所以 runner 改為 macos-26。**若 macos-26 上仍失敗，
   它們就是 csv2 在那個環境的缺陷，要先寫進 `todo/known-defects.md` 再修。** T352a 尤其值得注意：
   它表示某個 Foundation 版本下就地編輯會多寫一個 BOM。
+  **結案（2026-11-07）**：只在 macOS 15／Swift 6.1 上失敗，已記為 known-defects 的 SU（T352a）與 SV（T276b）。
+  使用者決定 macOS 26 為最低支援版本、不支援 macOS 15，所以兩者不修正；`040c2ed` 在建置中固定 26.0、
+  以 T358 檢查、在 Formula 宣告 `depends_on macos: :tahoe`，隨 v0.2.1 出貨。
 
 **Considered and rejected / 考慮過但否決：**
 
