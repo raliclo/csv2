@@ -967,7 +967,11 @@ Linux VM and the default build stay glibc, and the Linux release archives are
   比 0.2.1 舊，沒有 SW，所以 WSL 的 login shell 上 `-count -si` 仍會被拒絕。**使用者決定移除（2026-11-11）**：
   csv2-win 確認版本字串相符後，把它移到 `~/backup/csv2-wsl-dev-0.2.0-61598406-removed-20261111`（可以還原）。
   之後 `zsh -lc` 的 `command -v csv2` 是 `/usr/local/bin/csv2`，讀到 `v0.2.1 / fd6ae75f`，`-count -si` 印出 1。
-  guest 的 VM 沒在跑，LinuxCS-M4 不在線，guest 與 prebuilt 尚未升級。M6 由使用者升級。
+  guest 與 prebuilt 由 LinuxCS-M4 升級（2026-11-12，LinuxCS `03f05cf`，使用者核可）：guest 的
+  `/usr/local/bin/csv2` 是指向 `/workspace/csv2/release/csv2` 的 symlink，讀到 `v0.2.1 / fd6ae75f`，
+  執行檔 sha256 `2d07c483…`，`-count -si` 印出 1。`prebuilt/csv2.tar.zst` 是從 aarch64-glibc 資產
+  （`fa4a8a8c…`）重新打包的，所以封存本身的 sha256（`d6ae0e96…`）與 release 不同，但裡面的執行檔是同一個
+  `2d07c483…`（M4 親自解開比對過），MANIFEST 第 1 列也是這個值。M6 由使用者升級。
 - **Windows 的整套測試沒有在 CI 跑**，與 0.2.0 相同。
 
 ## ~~v0.2.0~~ 已出貨
