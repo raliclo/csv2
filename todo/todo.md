@@ -971,7 +971,10 @@ Linux VM and the default build stay glibc, and the Linux release archives are
   `/usr/local/bin/csv2` 是指向 `/workspace/csv2/release/csv2` 的 symlink，讀到 `v0.2.1 / fd6ae75f`，
   執行檔 sha256 `2d07c483…`，`-count -si` 印出 1。`prebuilt/csv2.tar.zst` 是從 aarch64-glibc 資產
   （`fa4a8a8c…`）重新打包的，所以封存本身的 sha256（`d6ae0e96…`）與 release 不同，但裡面的執行檔是同一個
-  `2d07c483…`（M4 親自解開比對過），MANIFEST 第 1 列也是這個值。M6 由使用者升級。
+  `2d07c483…`（M4 親自解開比對過），MANIFEST 第 1 列也是這個值。M6 由使用者在 11/07 自行
+  `brew upgrade`；2026-11-13 從 M6 本機（Mulitissh-M6）與從 M4 經 multissh（Thunderbolt Bridge，
+  `~/.multissh/harvest/m6-tb2.conf` 的 `m6-tb2`，10.77.2.2:16888）各讀一次：`/opt/homebrew/bin/csv2`、
+  `csv2 0.2.1 (v0.2.1 / fd6ae75f)`、`-count -si` 印出 1。**所有節點都已是 0.2.1。**
 - **Windows 的整套測試沒有在 CI 跑**，與 0.2.0 相同。
 
 ## ~~v0.2.0~~ 已出貨
