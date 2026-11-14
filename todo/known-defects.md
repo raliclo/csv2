@@ -15222,3 +15222,62 @@ before SR was pushed, and its Windows archive is dynamic. The date named the
 day SR was written, not the release it entered. The line is now drawn by
 version: releases after v0.2.1 need no Swift. Only a tag decides whether a
 release carries a commit, so only a version can draw that line.
+
+## SX. 無法從無到有建立只有標頭的 `.csv2`；`-mid` 的拒絕也沒有指出既有的 `-r -t -o` 複製路徑（2026-11-14 記錄，待決定）
+
+來源：com-openfarm-M4（openfarm-com `d94e773`）經 Multissh-M4 轉達（2026-11-14）。LiveFiles 的 `auth.csv2` 一開始
+只有標頭；它想用 csv2 建立這個檔，三種寫法都被拒絕，最後改用 `cp` 一份追蹤中的範本
+（`setup/livefiles-samples/auth.csv2.sample`）。Multissh-M4 在 GCP VM 上遇到同一件事，當時用了 `printf`。
+
+M4 親手重現（範本 `tmpl.csv2` 內容為 `user,hash` 與 `string,string` 兩列標頭、零筆資料）：
+
+```
+$ csv2 --version
+csv2 0.2.2 (v0.2.2 / 1f3be1c5)
+$ csv2 -mid 1,2 -t -i tmpl.csv2 -o new.csv2
+csv2: -mid 1: this file has no data records at all, so no window can start there
+csv2：-mid 1：這個檔案完全沒有資料紀錄，因此沒有任何視窗能從那裡開始
+rc=1
+$ csv2 -mid 1,2 -t --headers 2 -i tmpl.csv2 -o new.csv2          # 同上，rc=1
+$ cp tmpl.csv2 auth.csv2.sample
+$ csv2 -mid 1,2 -t -i auth.csv2.sample -o new.csv2
+csv2: the input has 0 header row(s) and …/new.csv2 declares 2 by its suffix. csv2 will not convert between them: …
+rc=1
+$ csv2 -append 'a,b' -i missing.csv2 --in-place
+csv2: missing.csv2 does not exist; -append will not create a file with no header row
+rc=1
+```
+
+**但回報的「沒有辦法」不完全成立**：只要有範本，`-r -t -o` 已經能寫出只有標頭的檔，回報者沒有試到：
+
+```
+$ csv2 -r -t --headers 2 -i auth.csv2.sample -o auth.csv2; echo rc=$?
+rc=0                                       # 與範本逐位元組相同；umask 077 下為 -rw-------
+$ printf 'user,hash\nstring,string\n' | csv2 -r -t --headers 2 -si -o p.csv2   # stdin 亦可，rc=0
+$ csv2 -append 'x,x' -i auth.csv2 --in-place && csv2 -update 1:1 bob -i auth.csv2 --in-place
+$ cat auth.csv2
+user,hash
+string,string
+bob,x
+```
+
+**真正的缺口有兩個**：
+1. **沒有範本時，無法讓 csv2 寫出標頭。** 唯一的入口是自己寫出標頭文字（`printf` 或範本檔），也就是標頭名稱裡的
+   逗號與引號仍由呼叫端處理——全域 CLAUDE.md 的寫入規則正是禁止這件事。
+2. **能用的路徑找不到。** `-mid` 對只有標頭的檔案的拒絕本身沒錯（沒有第 1 筆可以開始），但訊息沒有提到
+   `-r -t -o` 可以複製標頭；README 也沒有「只複製標頭」的範例。回報者讀了訊息與 README 仍然繞去 `cp`。
+
+**影響**：沒有錯誤的資料；是拒絕與找不到路徑。代價是呼叫端退回 `cp` 或 `printf`，後者正是這個工具要取代的做法。
+
+**待決定（使用者）**：(a) 只補文件與 `-mid` 的提示，指向 `-r -t -o`；或 (b) 另加一個從欄名建立檔案、由 csv2 負責
+引號的寫法（拼法未定，例如 `-new`）。(b) 需要設計：`.csv2` 第二列（型別）要怎麼給、與 `-t`／副檔名規則如何一致。
+
+There is no way to create a header-only .csv2 from nothing: -mid refuses a
+file with no data records, the 0-to-2 header conversion is refused, and
+-append will not create a file. But the report's "no way at all" is not
+quite true: with a template, `csv2 -r -t --headers 2 -i T -o f.csv2` already
+writes a byte-identical header-only file (stdin works too), and it honours
+the umask. The gaps are that csv2 cannot write a header from field names
+itself, so the caller still quotes them, and that neither the -mid refusal
+nor the README points to the -r -t -o path. Decision pending: document the
+existing path only, or add a create verb.
