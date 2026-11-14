@@ -968,7 +968,13 @@ Linux VM and the default build stay glibc, and the Linux release archives are
   `/opt/homebrew/bin/csv2` 讀到 `v0.2.2 / 1f3be1c5`，`-count -si` 印出 1。guest 與 prebuilt 由 LinuxCS-M4 升級
   （LinuxCS `e13e32f`，使用者核可），M4 親自讀回：guest 讀到 `v0.2.2 / 1f3be1c5`、`-count -si` 印出 1，
   guest 的執行檔、prebuilt 封存裡的執行檔、MANIFEST 第 1 列三者的 sha256 都是 `195725c6…`。
-  Windows 與 WSL 待 csv2-win 上線（發布當時不在線）。
+  Windows 由 csv2-win 以 `scoop update csv2` 升級：快取封存 sha256 `44ab84f7…` 相符，內含 52936192 bytes 的
+  `csv2.exe` 與三個 VC++ DLL，scoop 那份讀到 `v0.2.2 / 1f3be1c5`；**在 `PATH` 只有 System32 與 Windows 的情況下
+  （`env -i` 的 bash 與 cmd.exe）也能執行，rc 0**，這是 SR 在使用者機器上的第一次證實。PATH 仍先找到
+  `~/.local/bin/csv2.exe`（develop `506e7c4` 靜態建置，`v0.2.1-7-g506e7c45`），依先前決定不動。
+  WSL：csv2-win 以一般使用者把 linux-x86_64-glibc 封存解到 `~/csv2-0.2.2-stage`，`sha256sum -c` 通過、讀到
+  `v0.2.2 / 1f3be1c5`；寫入 `/usr/local/bin` 需要 `wsl -u root`，被它的權限檢查擋下，**等使用者執行**，
+  在那之前 WSL 的 `/usr/local/bin/csv2` 仍是 0.2.1。
 - **Windows 的整套測試沒有在 CI 跑**，與先前各版相同。
 
 ## ~~v0.2.1~~ 已出貨
