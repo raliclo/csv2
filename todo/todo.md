@@ -973,8 +973,10 @@ Linux VM and the default build stay glibc, and the Linux release archives are
   （`env -i` 的 bash 與 cmd.exe）也能執行，rc 0**，這是 SR 在使用者機器上的第一次證實。PATH 仍先找到
   `~/.local/bin/csv2.exe`（develop `506e7c4` 靜態建置，`v0.2.1-7-g506e7c45`），依先前決定不動。
   WSL：csv2-win 以一般使用者把 linux-x86_64-glibc 封存解到 `~/csv2-0.2.2-stage`，`sha256sum -c` 通過、讀到
-  `v0.2.2 / 1f3be1c5`；寫入 `/usr/local/bin` 需要 `wsl -u root`，被它的權限檢查擋下，**等使用者執行**，
-  在那之前 WSL 的 `/usr/local/bin/csv2` 仍是 0.2.1。
+  `v0.2.2 / 1f3be1c5`；寫入 `/usr/local/bin` 需要 `wsl -u root`，被它的權限檢查擋下，等使用者核可；
+  使用者核可後 csv2-win 安裝：`/usr/local/bin/csv2` 58789624 bytes、root 0755，是 WSL PATH 上唯一的 csv2，
+  讀到 `v0.2.2 / 1f3be1c5`，`-count -si` 印出 1，暫存目錄已刪。（M4 連 WSL 仍是 socket error 60，
+  這一項是 csv2-win 的讀回，不是 M4 的。）**所有節點都已是 0.2.2**，Windows 的 PATH 仍先找到開發版，見上。
 - **Windows 的整套測試沒有在 CI 跑**，與先前各版相同。
 
 ## ~~v0.2.1~~ 已出貨
