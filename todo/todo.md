@@ -976,7 +976,11 @@ Linux VM and the default build stay glibc, and the Linux release archives are
   `v0.2.2 / 1f3be1c5`；寫入 `/usr/local/bin` 需要 `wsl -u root`，被它的權限檢查擋下，等使用者核可；
   使用者核可後 csv2-win 安裝：`/usr/local/bin/csv2` 58789624 bytes、root 0755，是 WSL PATH 上唯一的 csv2，
   讀到 `v0.2.2 / 1f3be1c5`，`-count -si` 印出 1，暫存目錄已刪。（M4 連 WSL 仍是 socket error 60，
-  這一項是 csv2-win 的讀回，不是 M4 的。）**所有節點都已是 0.2.2**，Windows 的 PATH 仍先找到開發版，見上。
+  這一項是 csv2-win 的讀回，不是 M4 的。）**所有節點都已是 0.2.2。**
+  Windows 的 PATH：使用者要求後，csv2-win 把 `~/.local/bin/csv2.exe`（`v0.2.1-7-g506e7c45`）移到
+  `~/backup/csv2-win-dev-0.2.1-7-g506e7c45-removed-20261114/`（可以還原）；之後 bash、zsh、cmd 都找到
+  `~/scoop/shims/csv2`，讀到 `v0.2.2 / 1f3be1c5`，`-count -si` 印出 1。`~/.local/bin/csv2.old-6.3-dynamic`
+  不會被 `csv2` 叫到，留著沒動。
 - **Windows 的整套測試沒有在 CI 跑**，與先前各版相同。
 
 ## ~~v0.2.1~~ 已出貨
