@@ -963,7 +963,10 @@ Linux VM and the default build stay glibc, and the Linux release archives are
 - **Formula/scoop**：publish.zsh 改寫並讀回，`a4acede` 提交；改寫後 M4 上整套測試 0 失敗。scoop 的說明保留
   「v0.2.1 以前需要 runtime、0.2.2 起不需要」的逐版列表。
 - 發布之後 `$TMPDIR` 裡沒有 `csv2-matrix.*` 留下。
-- **節點升級**：尚未開始，見下一次紀錄。
+- **節點升級**（2026-11-14 讀回）：M4 `brew` → `csv2 0.2.2 (v0.2.2 / 1f3be1c5)`。M6 依使用者要求從 M4 經
+  multissh（`m6-tb2`）執行 `brew update && brew upgrade raliclo/csv2/csv2`：0.2.1 → 0.2.2，rc=0，
+  `/opt/homebrew/bin/csv2` 讀到 `v0.2.2 / 1f3be1c5`，`-count -si` 印出 1。guest 與 prebuilt 已交給 LinuxCS-M4；
+  Windows 與 WSL 待 csv2-win 上線（發布當時不在線）。
 - **Windows 的整套測試沒有在 CI 跑**，與先前各版相同。
 
 ## ~~v0.2.1~~ 已出貨
