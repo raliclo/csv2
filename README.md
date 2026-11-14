@@ -25,11 +25,11 @@ extracting the archive, running the extracted binary and having it read a CSV.
 v0.1.8 and earlier published four.
 
 ```sh
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.1/csv2-0.2.1-macos-arm64.tar.zst
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.1/csv2-0.2.1-macos-arm64.tar.zst.sha256
-sha256sum -c csv2-0.2.1-macos-arm64.tar.zst.sha256
-zstd -d csv2-0.2.1-macos-arm64.tar.zst -c | tar -x
-./csv2-0.2.1-macos-arm64/csv2 --version
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.2/csv2-0.2.2-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.2/csv2-0.2.2-macos-arm64.tar.zst.sha256
+sha256sum -c csv2-0.2.2-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.2.2-macos-arm64.tar.zst -c | tar -x
+./csv2-0.2.2-macos-arm64/csv2 --version
 ```
 
 Substitute `macos-x86_64`, `linux-x86_64-musl`, `linux-aarch64-musl`,
@@ -197,8 +197,8 @@ over it.
 ### Publishing every platform
 
 ```zsh
-./publish_matrix.zsh 0.2.1              # says what it would do
-./publish_matrix.zsh 0.2.1 --publish    # tag, wait for CI, download, ./publish.zsh
+./publish_matrix.zsh 0.2.2              # says what it would do
+./publish_matrix.zsh 0.2.2 --publish    # tag, wait for CI, download, ./publish.zsh
 ```
 
 `.github/workflows/release.yml` builds, tests and packages eight targets, each

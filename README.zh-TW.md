@@ -20,11 +20,11 @@ English documentation: [README.md](README.md)。
 執行檔、並讓它讀一個 CSV**。v0.1.8 與更早的版本發布四份。
 
 ```sh
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.1/csv2-0.2.1-macos-arm64.tar.zst
-curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.1/csv2-0.2.1-macos-arm64.tar.zst.sha256
-sha256sum -c csv2-0.2.1-macos-arm64.tar.zst.sha256
-zstd -d csv2-0.2.1-macos-arm64.tar.zst -c | tar -x
-./csv2-0.2.1-macos-arm64/csv2 --version
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.2/csv2-0.2.2-macos-arm64.tar.zst
+curl -LO https://github.com/raliclo/csv2/releases/download/v0.2.2/csv2-0.2.2-macos-arm64.tar.zst.sha256
+sha256sum -c csv2-0.2.2-macos-arm64.tar.zst.sha256
+zstd -d csv2-0.2.2-macos-arm64.tar.zst -c | tar -x
+./csv2-0.2.2-macos-arm64/csv2 --version
 ```
 
 其餘的把 `macos-arm64` 換成 `macos-x86_64`、`linux-x86_64-musl`、`linux-aarch64-musl`、`linux-x86_64-glibc`、
@@ -153,8 +153,8 @@ Static Linux SDK；會在 swift_tar 與 multissh 找的那些位置尋找，或�
 ### 發布所有平台
 
 ```zsh
-./publish_matrix.zsh 0.2.1              # 說出它會做什麼
-./publish_matrix.zsh 0.2.1 --publish    # 打 tag、等 CI、下載、./publish.zsh
+./publish_matrix.zsh 0.2.2              # 說出它會做什麼
+./publish_matrix.zsh 0.2.2 --publish    # 打 tag、等 CI、下載、./publish.zsh
 ```
 
 `.github/workflows/release.yml` 建置、測試並打包八個目標，每一個都在它自己平台的 runner 上：x86_64 與
