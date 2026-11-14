@@ -936,6 +936,36 @@ Linux VM and the default build stay glibc, and the Linux release archives are
 2. README 的「安裝發行版」仍寫四份封存，那是 v0.1.8 的事實；0.1.9 發布後再改。
 3. plan.md 的「Linux 發行建置（`-musl`）全靜態」方塊：等 linux-x86_64-musl 的整套測試在 CI 上通過才勾。
 
+## ~~v0.2.2~~ 已出貨
+
+### 2026-11-14：v0.2.2 出了，Windows 版不再需要 Swift（SR）
+
+`https://github.com/raliclo/csv2/releases/tag/v0.2.2`，tag 指向 `1f3be1c`，由 release.yml 執行 43540364342
+（tag push 觸發）建置，`publish_matrix.zsh 0.2.2 --publish` 由使用者在 M4 上執行，發布者 raliclo，16 份資產，
+一次就成功。準備工作（版本號、README、scoop 說明、`release-notes/0.2.2.md`）由 csv2-Cloud 在 `1f3be1c` 完成；
+發布前 M4 上整套測試 0 失敗、develop 上的 CI 執行 43539286643 全綠。內容只有 SR，見 `release-notes/0.2.2.md`。
+
+| 平台 | build id | 套件 | 封存 sha256 |
+|---|---|---|---|
+| linux-x86_64-glibc | `v0.2.2 / 1f3be1c5` | 1580/0/4 | `bec47731…` |
+| linux-aarch64-glibc | `v0.2.2 / 1f3be1c5` | 1580/0/4 | `e119c265…` |
+| linux-x86_64-musl | `v0.2.2 / 1f3be1c5` | 1581/0/4 | `bcf0e716…` |
+| linux-aarch64-musl | `v0.2.2 / 1f3be1c5` | 1581/0/4 | `7c910522…` |
+| macos-x86_64 | `v0.2.2 / 1f3be1c5` | 1584/0/1 | `81f63b2e…` |
+| macos-arm64 | `v0.2.2 / 1f3be1c5` | 1584/0/1 | `5fde88c6…` |
+| windows-x86_64 | `v0.2.2 / 1f3be1c5` | 未跑（release.zsh 解開、執行、讀 CSV） | `44ab84f7…` |
+| windows-arm64 | `v0.2.2 / 1f3be1c5` | 未跑（同上） | `aff66b33…` |
+
+- **Windows 是第一個靜態版本。** M4 上用 `tar -tvf` 看過兩份封存：x86_64 的 `csv2.exe` 52936192 bytes，旁邊有
+  `vcruntime140.dll`、`vcruntime140_1.dll`、`msvcp140.dll`；arm64 的 51086848 bytes，有 `vcruntime140.dll`、
+  `msvcp140.dll`（arm64 不匯入 `vcruntime140_1.dll`，與 release notes 相符）。這一項是 csv2-win 要求的檢查：
+  `507cf71` 之前 release.zsh 會跳過 DLL 卻仍印出「verified」。
+- **Formula/scoop**：publish.zsh 改寫並讀回，`a4acede` 提交；改寫後 M4 上整套測試 0 失敗。scoop 的說明保留
+  「v0.2.1 以前需要 runtime、0.2.2 起不需要」的逐版列表。
+- 發布之後 `$TMPDIR` 裡沒有 `csv2-matrix.*` 留下。
+- **節點升級**：尚未開始，見下一次紀錄。
+- **Windows 的整套測試沒有在 CI 跑**，與先前各版相同。
+
 ## ~~v0.2.1~~ 已出貨
 
 ### 2026-11-07：v0.2.1 出了，`-count` 讀 stdin、macOS 26 成為明文的最低版本
