@@ -965,7 +965,9 @@ Linux VM and the default build stay glibc, and the Linux release archives are
 - 發布之後 `$TMPDIR` 裡沒有 `csv2-matrix.*` 留下。
 - **節點升級**（2026-11-14 讀回）：M4 `brew` → `csv2 0.2.2 (v0.2.2 / 1f3be1c5)`。M6 依使用者要求從 M4 經
   multissh（`m6-tb2`）執行 `brew update && brew upgrade raliclo/csv2/csv2`：0.2.1 → 0.2.2，rc=0，
-  `/opt/homebrew/bin/csv2` 讀到 `v0.2.2 / 1f3be1c5`，`-count -si` 印出 1。guest 與 prebuilt 已交給 LinuxCS-M4；
+  `/opt/homebrew/bin/csv2` 讀到 `v0.2.2 / 1f3be1c5`，`-count -si` 印出 1。guest 與 prebuilt 由 LinuxCS-M4 升級
+  （LinuxCS `e13e32f`，使用者核可），M4 親自讀回：guest 讀到 `v0.2.2 / 1f3be1c5`、`-count -si` 印出 1，
+  guest 的執行檔、prebuilt 封存裡的執行檔、MANIFEST 第 1 列三者的 sha256 都是 `195725c6…`。
   Windows 與 WSL 待 csv2-win 上線（發布當時不在線）。
 - **Windows 的整套測試沒有在 CI 跑**，與先前各版相同。
 
