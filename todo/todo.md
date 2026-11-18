@@ -960,7 +960,9 @@ Linux VM and the default build stay glibc, and the Linux release archives are
   `vcruntime140.dll`、`msvcp140.dll`。
 - **Formula/scoop**：publish.zsh 改寫並讀回，`f00988b` 提交；改寫後 M4 上整套測試 1601/0/1。`$TMPDIR` 沒有留下 `csv2-matrix.*`。
 - **節點升級**（2026-11-18）：M4 `brew` → `csv2 0.2.3 (v0.2.3 / f85591b8)`。M6 從 M4 經 multissh（`m6-tb2`）`brew upgrade`，
-  讀到同一個 build id，並在 M6 上實際 `-create` 一個 `.csv2`，rc=0、兩列標頭正確。guest／prebuilt 已交給 LinuxCS-M4。
+  讀到同一個 build id，並在 M6 上實際 `-create` 一個 `.csv2`，rc=0、兩列標頭正確。guest 與 prebuilt 由 LinuxCS-M4 升級
+  （LinuxCS `094d9d8`，使用者核可），M4 讀回：guest 讀到 `v0.2.3 / f85591b8`，guest 的執行檔、prebuilt 封存裡的執行檔與
+  MANIFEST 第 1 列的 sha256 都是 `a0268c8b…`；它也在 guest 上 `-create` 了一個 `.csv`（4 bytes、0600）。
   Windows 由 csv2-win 以 `scoop update csv2` 升級：快取封存 `beb1afc1…` 相符，bash、zsh、cmd 都找到 scoop 的 shim，讀到
   `v0.2.3 / f85591b8`，`PATH` 只有 System32 與 Windows 時亦同。**`-create` 第一次在 Windows 上執行**（NTFS 暫存目錄）：
   建立 `.csv2` rc=0，內容 `a,"b, c"\n甲,乙\n`（17 bytes，只有 LF）；再執行一次 rc=1「already exists」，檔案未變、沒有暫存檔
