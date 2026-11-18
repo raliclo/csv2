@@ -936,6 +936,34 @@ Linux VM and the default build stay glibc, and the Linux release archives are
 2. README 的「安裝發行版」仍寫四份封存，那是 v0.1.8 的事實；0.1.9 發布後再改。
 3. plan.md 的「Linux 發行建置（`-musl`）全靜態」方塊：等 linux-x86_64-musl 的整套測試在 CI 上通過才勾。
 
+## ~~v0.2.3~~ 已出貨
+
+### 2026-11-18：v0.2.3 出了，`-create`（SX）、`-log` 指向 `--value-file` 被拒絕（SZ）
+
+`https://github.com/raliclo/csv2/releases/tag/v0.2.3`，tag 指向 `f85591b`，由 release.yml 執行 44239189346
+（tag push 觸發）建置，`publish_matrix.zsh 0.2.3 --publish` 由使用者在 M4 的 Claude Code session 裡以 `!` 執行，
+發布者 raliclo，16 份資產，一次就成功。（第一次嘗試打在一個連到 M6 的 Terminal 分頁，`cd` 失敗、什麼都沒發生。）
+內容：SX（`-create`）、SZ、TA 的副作用（`--version` 後的未知旗標被拒絕），見 `release-notes/0.2.3.md`。
+
+| 平台 | build id | 套件 | 封存 sha256 |
+|---|---|---|---|
+| linux-x86_64-glibc | `v0.2.3 / f85591b8` | 1596/0/4 | `c7b179c5…` |
+| linux-aarch64-glibc | `v0.2.3 / f85591b8` | 1596/0/4 | `35964f8d…` |
+| linux-x86_64-musl | `v0.2.3 / f85591b8` | 1597/0/4 | `77635002…` |
+| linux-aarch64-musl | `v0.2.3 / f85591b8` | 1597/0/4 | `b5cf9acd…` |
+| macos-x86_64 | `v0.2.3 / f85591b8` | 1600/0/1 | `1d116014…` |
+| macos-arm64 | `v0.2.3 / f85591b8` | 1600/0/1 | `4f9fe45a…` |
+| windows-x86_64 | `v0.2.3 / f85591b8` | 未跑（release.zsh 解開、執行、讀 CSV） | `beb1afc1…` |
+| windows-arm64 | `v0.2.3 / f85591b8` | 未跑（同上） | `1bea989e…` |
+
+- Windows 封存以 `tar -tvf` 看過：x86_64 的 `csv2.exe` 52955648 bytes 加三個 VC++ DLL；arm64 的 51105280 bytes 加
+  `vcruntime140.dll`、`msvcp140.dll`。
+- **Formula/scoop**：publish.zsh 改寫並讀回，`f00988b` 提交；改寫後 M4 上整套測試 1601/0/1。`$TMPDIR` 沒有留下 `csv2-matrix.*`。
+- **節點升級**（2026-11-18）：M4 `brew` → `csv2 0.2.3 (v0.2.3 / f85591b8)`。M6 從 M4 經 multissh（`m6-tb2`）`brew upgrade`，
+  讀到同一個 build id，並在 M6 上實際 `-create` 一個 `.csv2`，rc=0、兩列標頭正確。Windows／WSL 已交給 csv2-win（並請它在
+  Windows 上實際跑 `-create`，因為 CI 只編譯過 MoveFileExW 那段）；guest／prebuilt 已交給 LinuxCS-M4。
+- **Windows 的整套測試沒有在 CI 跑**，與先前各版相同。
+
 ## ~~v0.2.2~~ 已出貨
 
 ### 2026-11-14：v0.2.2 出了，Windows 版不再需要 Swift（SR）
