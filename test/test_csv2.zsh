@@ -18771,6 +18771,119 @@ else
     skipt "T360 release.zsh names the Windows binary from uname / release.zsh 依 uname 命名 Windows 執行檔 (no release.zsh in this tree / 這棵樹裡沒有 release.zsh)"
 fi
 
+echo "--- T361: -create writes a file holding only its header rows / T361：-create 寫出只有標頭列的檔案 ---"
+# Phase 13, SX. LiveFiles' auth.csv2 starts with headers and no data; csv2 had
+# no way to make one from column names, so callers used cp of a template or
+# printf. One argument per header row, the -o suffix decides how many, an
+# existing file is never replaced, and nothing else may ride along.
+# 第 13 階段、SX。LiveFiles 的 auth.csv2 一開始只有標頭、沒有資料；csv2 原本無法從欄名造出一份，
+# 呼叫端只好 cp 範本或用 printf。一列標頭一個參數、由 -o 的副檔名決定幾列、絕不取代既有檔案、旁邊
+# 不得夾帶其他旗標。
+_t361=$TMP/t361; mkdir -p "$_t361"
+"$CSV2" -create 'user,hash' '使用者,雜湊' -o "$_t361/a.csv2" 2>"$_t361/a.err"; _t361_rc=$?
+assert_eq "rc=$_t361_rc out=$(tr '\n' '|' < "$_t361/a.csv2" 2>/dev/null) err=$(wc -c < "$_t361/a.err" | tr -d ' ')" \
+    "rc=0 out=user,hash|使用者,雜湊| err=0" \
+    "T361a a .csv2 gets its two header rows and nothing else, silently / .csv2 得到兩列標頭、其他什麼都沒有，且不出聲"
+"$CSV2" -create 'user,"note, misc",x' -o "$_t361/b.csv" 2>/dev/null
+assert_eq "$(cat "$_t361/b.csv")" 'user,"note, misc",x' \
+    "T361b a .csv gets one header row; a title holding a comma stays one title, quoted by csv2 / .csv 得到一列標頭；含逗號的標題仍是一個標題，由 csv2 加引號"
+assert_eq "$("$CSV2" -count -i "$_t361/b.csv" 2>&1) $("$CSV2" -r -t --json -i "$_t361/b.csv" 2>&1 | head -1)" \
+    '0 {"meta":{"format":"csv","headers":1,"fields":3,"header":["user","note, misc","x"]}}' \
+    "T361c csv2 reads the result back: no data records, three named columns / csv2 讀得回結果：零筆資料、三個具名欄位"
+_t361_d=""
+"$CSV2" -create 'a,b' -o "$_t361/d1.csv2" 2>/dev/null; _t361_d+="$?"
+"$CSV2" -create 'a,b' 'x,y' -o "$_t361/d2.csv" 2>/dev/null; _t361_d+="$?"
+assert_eq "$_t361_d $(ls "$_t361" | grep -c '^d')" "11 0" \
+    "T361d the number of title rows must match the suffix: one for .csv2 or two for .csv is refused, nothing written / 標題列數必須與副檔名相符：.csv2 給一列、.csv 給兩列都被拒絕，什麼都沒寫"
+_t361_e=""
+for _t361_dst in "$_t361/e.md" "$_t361/e" ; do
+    "$CSV2" -create 'a,b' -o "$_t361_dst" 2>/dev/null; _t361_e+="$?"
+done
+"$CSV2" -create 'a,b' -so >/dev/null 2>&1; _t361_e+="$?"
+"$CSV2" -create 'a,b' >/dev/null 2>&1; _t361_e+="$?"
+assert_eq "$_t361_e $(ls "$_t361" | grep -c '^e')" "1111 0" \
+    "T361e a .md, a suffix-less file, -so and no destination are all refused / .md、沒有副檔名的檔案、-so 與沒有目的地都被拒絕"
+_t361_f=""
+"$CSV2" -create 'a,,b' -o "$_t361/f1.csv" 2>"$_t361/f1.err"; _t361_f+="$?"
+"$CSV2" -create 'a,b' '甲,' -o "$_t361/f2.csv2" 2>/dev/null; _t361_f+="$?"
+"$CSV2" -create '' -o "$_t361/f3.csv" 2>/dev/null; _t361_f+="$?"
+assert_eq "$_t361_f $(ls "$_t361" | grep -c '^f[0-9].csv') $(LC_ALL=C grep -c 'column 2 of header row 0 is empty' "$_t361/f1.err")" "111 0 1" \
+    "T361f an empty title is refused in either row, naming the column / 任一列的空標題都被拒絕，並指名哪一欄"
+"$CSV2" -create 'a,b,a' -o "$_t361/g.csv" 2>"$_t361/g.err"; _t361_g=$?
+assert_eq "rc=$_t361_g exists=$([[ -e $_t361/g.csv ]] && print y || print n) $(LC_ALL=C grep -c 'titles columns 1, 3' "$_t361/g.err")" "rc=1 exists=n 1" \
+    "T361g a repeated English title is refused, naming both columns / 重複的英文標題被拒絕，並指名兩欄"
+_t361_h=""
+"$CSV2" -create 'a,b' '甲' -o "$_t361/h1.csv2" 2>/dev/null; _t361_h+="$?"
+"$CSV2" -create 'a:x,b' -o "$_t361/h2.csv" 2>/dev/null; _t361_h+="$?"
+"$CSV2" -create '#a' -o "$_t361/h3.csv" 2>/dev/null; _t361_h+="$?"
+"$CSV2" -create 'a,"b' -o "$_t361/h4.csv" 2>"$_t361/h4.err"; _t361_h+="$?"
+assert_eq "$_t361_h $(ls "$_t361" | grep -c '^h[0-9][.]csv') $(LC_ALL=C grep -c 'truncate-partial' "$_t361/h4.err")" "1111 0 0" \
+    "T361h unequal rows, ':', a lone '#' title and an open quote are refused; the open quote does not offer --truncate-partial / 欄數不等、':'、單獨的 '#' 標題與沒收尾的引號都被拒絕；引號那一則不建議 --truncate-partial"
+cp "$_t361/a.csv2" "$_t361/i.before"
+"$CSV2" -create 'other,cols' '其他,欄位' -o "$_t361/a.csv2" 2>"$_t361/i.err"; _t361_i=$?
+if [[ $_t361_i == 1 ]] && cmp -s "$_t361/a.csv2" "$_t361/i.before" \
+   && LC_ALL=C grep -q 'already exists' "$_t361/i.err"; then
+    ok "T361i an existing target is refused and left byte-for-byte unchanged / 既有目標被拒絕，且逐位元組未變"
+else
+    bad "T361i rc=$_t361_i err=[$(tr '\n' '|' < "$_t361/i.err")] / 實得如上"
+fi
+"$CSV2" -create 'a,b' -o "$_t361/j.csv" -r -t --in-place 2>"$_t361/j.err"; _t361_j=$?
+assert_eq "rc=$_t361_j exists=$([[ -e $_t361/j.csv ]] && print y || print n) $(head -1 "$_t361/j.err")" \
+    "rc=1 exists=n csv2: -create cannot be combined with -r, -t, --in-place: -create writes a new file holding only its header rows and does nothing else, so the rest of this command line would be silently discarded. Create the file first, then run the rest against it" \
+    "T361j every companion is refused by the name the caller typed / 每一個同伴都以呼叫端打的名字被拒絕"
+"$CSV2" -append 'u1,x' -i "$_t361/a.csv2" --in-place 2>/dev/null \
+    && "$CSV2" -update '1:hash' 'v, "q"' -i "$_t361/a.csv2" --in-place 2>/dev/null
+assert_eq "$(tr '\n' '|' < "$_t361/a.csv2") $("$CSV2" -get 1:hash -i "$_t361/a.csv2" 2>&1)" \
+    'user,hash|使用者,雜湊|u1,"v, ""q"""| v, "q"' \
+    "T361k -append and -update work on the created file, and the value round-trips / -append 與 -update 可用於建立出的檔案，值完整往返"
+
+# A refused log alias must leave both the value source and the input untouched.
+# 拒絕 log 路徑重疊時，值來源與輸入檔都不得變動。
+printf 'original payload' > "$_t361/value"
+cp "$_t361/value" "$_t361/value.before"
+cp "$_t361/a.csv2" "$_t361/input.before"
+"$CSV2" -update 1:2 --value-file "$_t361/value" -log "$_t361/./value" \
+    -i "$_t361/a.csv2" --in-place >"$_t361/l.out" 2>"$_t361/l.err"
+if [[ $? == 1 ]] && cmp -s "$_t361/value" "$_t361/value.before" \
+   && cmp -s "$_t361/a.csv2" "$_t361/input.before" \
+   && grep -q 'is the --value-file' "$_t361/l.err"; then
+    ok "T361l the audit log cannot change the value source / 稽核紀錄不能改動值來源"
+else
+    bad "T361l the value-file/log alias was not safely refused / 值檔與 log 重疊時未安全拒絕"
+fi
+
+for _t361_flag in --version --help; do
+    "$CSV2" "$_t361_flag" -create a,b -o "$_t361/m.csv" >"$_t361/m.out" 2>"$_t361/m.err"
+    if [[ $? == 1 && ! -e $_t361/m.csv && ! -s $_t361/m.out ]] \
+       && grep -q -- "cannot be combined with $_t361_flag" "$_t361/m.err"; then
+        ok "T361m $_t361_flag cannot bypass create validation / 資訊旗標不能繞過建檔驗證"
+    else
+        bad "T361m $_t361_flag bypassed create validation / 資訊旗標繞過建檔驗證"
+    fi
+done
+
+"$CSV2" -create 'id,note:hash' '編號,備註:hash' -o "$_t361/n.csv2" >"$_t361/n.out" 2>"$_t361/n.err"
+if [[ $? == 1 && ! -e $_t361/n.csv2 ]] && grep -q 'protection markers' "$_t361/n.err"; then
+    ok "T361n create rejects a protected header / 建檔拒絕含保護標記的標頭"
+else
+    bad "T361n create accepted a protected header / 建檔接受了含保護標記的標頭"
+fi
+
+# Exactly one creator may publish, and its output must survive the other.
+# 只有一個行程可以完成建檔，另一個行程不能蓋掉它的輸出。
+"$CSV2" -create first -o "$_t361/race.csv" 2>"$_t361/race1.err" &
+_t361_pid1=$!
+"$CSV2" -create second -o "$_t361/race.csv" 2>"$_t361/race2.err" &
+_t361_pid2=$!
+wait "$_t361_pid1"; _t361_rc1=$?
+wait "$_t361_pid2"; _t361_rc2=$?
+_t361_winner=$(cat "$_t361/race.csv")
+if [[ "$_t361_rc1:$_t361_rc2:$_t361_winner" == (0:1:first|1:0:second) ]]; then
+    ok "T361o concurrent creators cannot overwrite the winner / 同時建檔不能覆寫先成功的檔案"
+else
+    bad "T361o unexpected result: $_t361_rc1:$_t361_rc2:$_t361_winner / 非預期結果"
+fi
+
 echo "--- Phase 6: cross-platform / 第 6 階段：跨平台 ---"
 # T47 compares TWO platforms, so it cannot run from inside one of them. It is
 # driven from the parent project by test_submodules/run_csv2_test.zsh, which

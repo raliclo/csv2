@@ -15223,7 +15223,7 @@ day SR was written, not the release it entered. The line is now drawn by
 version: releases after v0.2.1 need no Swift. Only a tag decides whether a
 release carries a commit, so only a version can draw that line.
 
-## SX. 無法從無到有建立只有標頭的 `.csv2`；`-mid` 的拒絕也沒有指出既有的 `-r -t -o` 複製路徑（2026-11-14 記錄，待決定）
+## SX. 無法從無到有建立只有標頭的 `.csv2`；`-mid` 的拒絕也沒有指出既有的 `-r -t -o` 複製路徑（2026-11-14 修正，T361a–k）
 
 來源：com-openfarm-M4（openfarm-com `d94e773`）經 Multissh-M4 轉達（2026-11-14）。LiveFiles 的 `auth.csv2` 一開始
 只有標頭；它想用 csv2 建立這個檔，三種寫法都被拒絕，最後改用 `cp` 一份追蹤中的範本
@@ -15272,6 +15272,12 @@ bob,x
 **待決定（使用者）**：(a) 只補文件與 `-mid` 的提示，指向 `-r -t -o`；或 (b) 另加一個從欄名建立檔案、由 csv2 負責
 引號的寫法（拼法未定，例如 `-new`）。(b) 需要設計：`.csv2` 第二列（型別）要怎麼給、與 `-t`／副檔名規則如何一致。
 
+**決定與修正（2026-11-14）**：使用者選 (b)，並選「一列標頭一個參數」：`csv2 -create 'user,hash' '使用者,雜湊' -o auth.csv2`。
+（上面「第二列（型別）」是記錄時的誤解：`.csv2` 的第二列是繁體中文標題。）設計見 plan.md 第 13 階段：`-o` 的副檔名決定
+列數；空標題、重複的英文標題、欄數不等及含冒號的標題都拒絕；絕不取代既有檔案（POSIX 用 link(2)，
+無法建立硬連結時拒絕）；不相容的旗標逐一點名拒絕。README 兩個語言版本加了一節，
+並寫出「用 `-r -t -o` 複製範本的標頭」這條既有路徑，補上第 2 個缺口。M4 整套測試 1596/0/1。
+
 There is no way to create a header-only .csv2 from nothing: -mid refuses a
 file with no data records, the 0-to-2 header conversion is refused, and
 -append will not create a file. But the report's "no way at all" is not
@@ -15281,3 +15287,93 @@ the umask. The gaps are that csv2 cannot write a header from field names
 itself, so the caller still quotes them, and that neither the -mid refusal
 nor the README points to the -r -t -o path. Decision pending: document the
 existing path only, or add a create verb.
+
+## SY. `-append`／`-insert` 的 ROW 少了收尾引號時，訊息說「第 1 筆」並建議 `--truncate-partial`，而那個旗標與 `-append` 併用會被拒絕（2026-11-14 記錄，未修）
+
+來源：實作 `-create`（第 13 階段）時，M4 親手發現。
+
+```
+$ csv2 --version
+csv2 0.2.2 (v0.2.2 / 1f3be1c5)
+$ printf 'a,b\n1,2\n' > f.csv
+$ csv2 -append 'x,"y' -i f.csv --in-place
+csv2: record 1: the input ends inside a quoted field -- the closing quote is missing. The record is incomplete; pass --truncate-partial to discard it.
+csv2：第 1 筆：輸入在引號欄位內就結束了——缺少收尾的引號。該紀錄不完整；要丟棄它請給 --truncate-partial。
+rc=1
+$ csv2 -append 'x,"y' -i f.csv --truncate-partial --in-place
+csv2: --truncate-partial is refused with -append, whatever the file contains: …
+rc=1
+```
+
+**成因**：`parseRowLiteral`（src/Ops.swift）把 ROW 交給讀檔用的解析器，它的錯誤原文描述的是「檔案」：「第 1 筆」指的是 ROW
+本身而不是檔案的第 1 筆，而 `--truncate-partial` 是丟掉檔案撕裂尾巴的旗標。
+
+**影響**：拒絕是對的，檔案沒有被動到；錯的是訊息把人指向檔案的第 1 筆，並建議一個接著就會被拒絕的旗標。
+
+**狀態**：只記錄。`-create` 自己的 ROW 解析已改用不提 `--truncate-partial` 的訊息（T361h）；`-append`／`-insert` 等使用者決定。
+
+When -append's or -insert's ROW is missing its closing quote, the message is
+the file parser's: it says "record 1" (meaning the argument, not the file's
+first record) and suggests --truncate-partial, which -append then refuses.
+The refusal itself is right and the file is untouched. Recorded, not fixed;
+-create's own row parsing avoids the wording (T361h).
+
+## SZ. `-log` 指向 `--value-file` 時，log 先寫進值檔，那一格被寫成「原值＋一整行 log」，值檔也被改掉，rc=0（2026-11-15 修正，T361l）
+
+來源：2026-11-15 有人在 M4 未提交的 `-create` 工作上做了修正（不是 csv2-M4 這個 session；使用者 2026-11-18 決定保留），
+修正與 T361l 一起出現，**但沒有先記在這裡**。2026-11-18 由 csv2-M4 在已發行的 0.2.2 上親手重現並補記。
+
+```
+$ csv2 --version
+csv2 0.2.2 (v0.2.2 / 1f3be1c5)
+$ printf 'a,b\n1,2\n' > a.csv; printf 'original payload' > value
+$ csv2 -update 1:2 --value-file value -log value -i a.csv --in-place; echo rc=$?
+rc=0
+$ cat a.csv
+a,b
+1,"original payload2026-11-18T11:56:37.157+08:00 INFO  csv2 -update 1:2 --value-file value -log value -i a.csv --in-place
+"
+$ cat value          # 值檔本身也多了三行 log
+original payload2026-11-18T11:56:37.157+08:00 INFO  csv2 -update …
+… INFO  update 1:b: "2" -> "original payload…"
+… INFO  wrote 1 records, 2 fields, atomic rename OK
+```
+
+**成因**：log 在讀取值檔之前就已開啟並寫入第一行；`refuseLogAliases` 檢查了 log 與輸入、輸出是否同一檔，沒有檢查 `--value-file`。
+
+**影響**：資料損毀且 rc=0：寫進儲存格的值不是呼叫端給的值，而值來源本身也被改寫。
+
+**修正**：`refuseLogAliases` 多檢查 `--value-file`（以 `sameFile` 判斷，`./value` 這類別名也算），拒絕並以 rc=1 結束，什麼都不寫。
+T361l 斷言：拒絕、值檔與輸入檔逐位元組未變。
+
+-log naming the --value-file: the log's first line is appended to the value
+file before it is read, so the cell receives the payload plus a log line, the
+value file itself is rewritten, and the run exits 0. Fixed by refusing the
+alias in refuseLogAliases (T361l). The fix was made on 2026-11-15 by someone
+other than csv2-M4 without an entry here; reproduced on released 0.2.2 and
+recorded on 2026-11-18.
+
+## TA. `--version`／`--help` 在解析時立即結束，因此夾在 `-create` 旁邊時，驗證被跳過、rc=0、什麼都沒建（2026-11-15 修正，T361m；未出貨）
+
+來源：同 SZ，2026-11-15 的那次修正，未先記錄；2026-11-18 由 csv2-M4 補記。只影響尚未出貨的 `-create`。
+
+在修正前的 `-create` 實作裡，`--version` 與 `--help` 在 `parseArgs` 中直接 `exit(0)`，因此 `csv2 -create a,b -o m.csv --version`
+印出版本、rc=0、沒有建立 `m.csv`，也沒有說 `-create` 不能與它併用。
+
+**修正**：兩者改為記下 `informationalFlag`，解析完整條命令列後才印出；有 `-create` 時先跑 `validate`，因此它們會被逐一點名拒絕
+（T361m）。**附帶的行為改變**：因為解析不再在 `--version` 處停下，後面的未知旗標現在會被拒絕：
+
+```
+$ csv2 --version -bogus            # 0.2.2
+csv2 0.2.2 (v0.2.2 / 1f3be1c5)
+rc=0
+$ ./release/csv2 --version -bogus  # 修正後
+csv2: unknown flag -bogus; run csv2 --help
+rc=1
+```
+
+--version and --help exited inside parseArgs, so beside -create they skipped
+validation and exited 0 with nothing created. They now print after the whole
+command line is parsed and, with -create, after validate (T361m). Side
+effect: an unknown flag after --version is now refused instead of ignored.
+

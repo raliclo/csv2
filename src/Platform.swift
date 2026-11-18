@@ -133,6 +133,44 @@ enum Platform {
         #endif
     }
 
+    enum NoReplaceMove { case moved, exists, failed(String) }
+
+    /// Move a finished temp file to a name that must still be FREE. Phase 13:
+    /// `-create` never replaces a file, and checking first then renaming would
+    /// replace one created between the two steps.
+    ///
+    /// POSIX: link(2) fails with EEXIST if the name is taken -- the check and
+    /// publication are one step. If linking fails, do not fall back to rename:
+    /// it would race with another creator and could replace its file.
+    /// Windows: MoveFileExW without MOVEFILE_REPLACE_EXISTING refuses an
+    /// existing target by itself.
+    ///
+    /// 把寫好的暫存檔移到一個「必須仍然空著」的名字。第 13 階段：`-create` 絕不取代檔案，而先檢查
+    /// 再 rename 會取代一個在兩步之間被建立的檔案。
+    /// POSIX：名字已被佔用時 link(2) 以 EEXIST 失敗，檢查與發布是同一步。硬連結失敗時不能退回
+    /// rename，否則可能覆寫另一個行程剛建立的檔案。Windows：不帶 MOVEFILE_REPLACE_EXISTING 的 MoveFileExW 本身
+    /// 就會拒絕既有目標。
+    static func moveNoReplace(_ from: String, _ to: String) -> NoReplaceMove {
+        #if canImport(ucrt)
+        let ok = from.withCString(encodedAs: UTF16.self) { f in
+            to.withCString(encodedAs: UTF16.self) { t in MoveFileExW(f, t, 0) }
+        }
+        if ok { return .moved }
+        let err = GetLastError()
+        // ERROR_FILE_EXISTS (80) and ERROR_ALREADY_EXISTS (183).
+        if err == 80 || err == 183 { return .exists }
+        return .failed("Windows error \(err)")
+        #else
+        if link(from, to) == 0 {
+            _ = unlink(from)
+            return .moved
+        }
+        let err = errno
+        if err == EEXIST { return .exists }
+        return .failed(String(cString: strerror(err)))
+        #endif
+    }
+
     /// The reason the last call failed, in words. Windows MoveFileExW reports
     /// through GetLastError rather than errno, so asking errno there would
     /// print a stale or meaningless message.

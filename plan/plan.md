@@ -3998,6 +3998,92 @@ first. `--headers 1|2` against a `.csv`/`.csv2` is still refused.
   把輸入當 CSV 解析。少了那個豁免，第 12 階段會變成「讀得了散文 `.md`、卻永遠寫不出一份」，而那對
   它被要求的情況等於什麼也沒解決。
 
+## Phase 13: `-create`, a file holding only its header rows / 第 13 階段：`-create`，只有標頭列的檔案
+
+SX (known-defects.md). LiveFiles' `auth.csv2` starts with its two header rows and
+no data. csv2 could copy such a file from a template (`-r -t -o`), but could not
+make one from column names, so callers fell back to `cp` of a template or to
+`printf` -- the second being exactly what the global CLAUDE.md forbids. The user
+chose a new verb (2026-11-14), and chose one argument per header row over one
+argument per column.
+
+SX（known-defects.md）。LiveFiles 的 `auth.csv2` 一開始只有兩列標頭、沒有資料。csv2 能從範本複製這種
+檔（`-r -t -o`），卻無法從欄名造出一份，於是呼叫端退回 `cp` 範本或 `printf`——後者正是全域
+CLAUDE.md 禁止的事。使用者選擇新增動詞（2026-11-14），並選了「一列標頭一個參數」而非「一欄一個參數」。
+
+### Decided / 已定案
+
+```
+csv2 -create 'user,hash' -o auth.csv
+csv2 -create 'user,hash' '使用者,雜湊' -o auth.csv2
+```
+
+- **One argument per header row, each one line of CSV text**, parsed by the
+  same parser as `-append`'s ROW and in the output's format. A title holding a
+  comma is quoted by the caller (`'"note, misc",x'`); csv2 then writes every
+  title with its own quoting rule, so what lands on disk is csv2's encoding,
+  not the caller's spelling. Rejected: one argument per column (`-col EN ZH`).
+  It frees the caller from quoting entirely, but it is a second way to spell a
+  row beside `-append`'s, and the user preferred the one the tool already has.
+  **一列標頭一個參數，每個都是一行 CSV 文字**，以與 `-append` 的 ROW 相同的解析器、依輸出的格式
+  解析。含逗號的標題由呼叫端加引號；之後 csv2 以自己的加引號規則寫出每一個標題，因此落到磁碟上
+  的是 csv2 的編碼，不是呼叫端的寫法。否決：一欄一個參數（`-col EN ZH`）。它讓呼叫端完全不必處理
+  引號，但那是在 `-append` 之外第二種「寫一列」的方式，使用者選了工具已有的那一種。
+- **The suffix of `-o` decides how many rows are required**: `.csv` exactly
+  one, `.csv2` exactly two. Any other destination is refused: a suffix-less
+  file or a `.md` has no header rows to create, and stdout has no suffix to
+  declare a format. One title row for a `.csv2` is refused rather than leaving
+  the Chinese row empty: an empty title is the thing this verb exists to avoid
+  having to fix later.
+  **`-o` 的副檔名決定需要幾列**：`.csv` 恰好一列，`.csv2` 恰好兩列。其他目的地一律拒絕：沒有副檔名
+  的檔案與 `.md` 沒有標頭列可建，stdout 沒有副檔名可以宣告格式。給 `.csv2` 只一列會被拒絕，而不是
+  把中文那一列留空：空標題正是這個動詞要讓人日後不必再修的東西。
+- **Every title must be non-empty, and the English titles must be distinct**
+  (compared the way a column name is looked up). A duplicate name is legal in a
+  file csv2 reads, but every by-name address to it is refused as ambiguous, and
+  a verb that creates a file should not create a column it cannot address by
+  name -- the rule phase 10 set for `-add-column`. The two rows must have the
+  same field count. A leading '#' is refused in the same cases as on read.
+  Colons are refused in new titles, including protection markers that would
+  prevent the first append.
+  **每個標題都不可為空，英文標題不可重複**（以查欄名時的比較方式）。重名在 csv2 讀的檔案裡是合法的，
+  但每一個以名稱定址它的動作都會因歧義被拒絕，而一個「建立檔案」的動詞不該造出一個無法以名稱定址
+  的欄位——第 10 階段為 `-add-column` 定下的規則。兩列欄數必須相同；開頭的 '#' 依讀取時的規則拒絕。
+  新標題不得含冒號，包括會阻止首筆追加的保護標記。
+- **It never replaces a file.** An existing `-o` target is refused before
+  anything is written, and the final step does not overwrite either: the temp
+  file is moved into place only if the name is still free (link(2) on POSIX,
+  MoveFileExW without REPLACE_EXISTING on Windows), so a file created by
+  someone else between the check and the rename is not silently replaced.
+  If hard-link publication fails on POSIX, creation fails.
+  Rejected: overwrite like `-o`. "Create" that truncates an existing
+  `auth.csv2` would destroy every row in it at rc=0.
+  **它絕不取代既有檔案。** `-o` 的目標已存在就在寫入任何東西之前拒絕，最後一步也不覆蓋：只有在名字
+  仍然空著時才把暫存檔移到位（POSIX 用 link(2)，Windows 用不帶 REPLACE_EXISTING 的 MoveFileExW），
+  因此在檢查與改名之間被別人建立的檔案不會被靜默取代。POSIX 無法建立硬連結時，建檔失敗。
+  否決：像 `-o` 一樣覆蓋。一個會截斷既有
+  `auth.csv2` 的「建立」，會在 rc=0 下毀掉裡面的每一列。
+- **It stands alone.** Every flag beside it except `-o`, `-log` and `-debug` is
+  refused by name, as `-count` does (OP): an edit verb or a read flag next to
+  it would otherwise be accepted and silently dropped.
+  **它單獨執行。** 除了 `-o`、`-log` 與 `-debug`，旁邊的每一個旗標都會被逐一點名拒絕，與 `-count`
+  相同（OP）：否則旁邊的編輯動詞或讀取旗標會被接受、然後被靜默丟掉。
+- The file is written through the same temp-file path as `-o`, so it is
+  created 0600 like every new `-o` file (HQ, T191).
+  檔案經由與 `-o` 相同的暫存檔路徑寫出，因此與每一個新的 `-o` 檔案一樣以 0600 建立（HQ、T191）。
+
+Tests: T361a–T361k, T361m–o (T361l is SZ, a separate defect). / 測試：T361a–T361k、T361m–o（T361l 屬於另一條缺陷 SZ）。
+
+- [x] `-create` writes a `.csv` and a `.csv2` holding only their header rows, quoting a title with a comma (T361a–c)
+- [x] the row count must match the suffix; other destinations are refused (T361d–e)
+- [x] empty, duplicate, ':' and mismatched titles are refused (T361f–h)
+- [x] an existing target is refused and left unchanged (T361i)
+- [x] companions are refused by name (T361j)
+- [x] `-append` and `-update` work on the result (T361k)
+- [x] `--version` and `--help` beside `-create` are refused, not a silent exit 0 (T361m, TA)
+- [x] a title carrying a protection marker is refused (T361n)
+- [x] two concurrent creators: exactly one wins and its file survives (T361o)
+
 ## 待決問題
 
 1. ~~submodule 掛在哪裡~~ —— 已定：`sos/csv2`。

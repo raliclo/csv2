@@ -851,6 +851,34 @@ surrounding prose is carried across and all output line endings are LF.
 `--dry-run` works here as it does everywhere: it prints each changed cell and
 writes nothing.
 
+### Creating a file that holds only its header rows
+
+```sh
+csv2 -create 'user,hash' '使用者,雜湊' -o auth.csv2
+csv2 -create 'user,"note, misc"' -o notes.csv
+```
+
+`-create` writes a NEW file containing its header rows and no data, so the
+first row can then be added with `-append`. Each argument is one header row,
+written as one line of CSV text exactly like `-append`'s ROW: a title that
+contains a comma is quoted, and csv2 writes every title with its own quoting.
+The suffix of `-o` decides how many rows it takes -- one for `.csv`, two for
+`.csv2`, English then Traditional Chinese -- and any other destination,
+including `-so`, is refused.
+
+It refuses, writing nothing: an `-o` that already exists (it never replaces a
+file; use `-append` to add rows, or remove the file first), an empty title in
+either row, an English title given twice (no by-name address could reach
+either column), unequal field counts, and titles containing ':' (including
+protection markers). Only `-o`, `-log` and `-debug` may accompany it. The new
+file is 0600, like every file `-o` creates. On POSIX, publishing the new file
+requires hard-link support; without it, `-create` fails without replacing anything.
+
+To copy the headers of a file you already have instead, read it with `-r -t`:
+`csv2 -r -t --headers 2 -i template.csv2.sample -o auth.csv2` writes its header
+rows and nothing else when it has no data records. `-mid` refuses such a file,
+because no window can start at record 1.
+
 ## Protection and audit logging
 
 ```sh

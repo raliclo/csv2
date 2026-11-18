@@ -1245,6 +1245,10 @@ public final class ByteSink {
     private let finalPath: String?
     private var closed = false
     private(set) var bytesWritten = 0
+    /// Phase 13: on close, move into place only if the target name is still
+    /// free, instead of replacing it. Only `-create` sets it.
+    /// 第 13 階段：關閉時只有在目標名字仍然空著時才移到位，而不是取代它。只有 `-create` 會設定。
+    var noReplace = false
 
     /// stdout / 標準輸出
     init(stdout limit: Int = 1 << 16) {
@@ -1435,6 +1439,22 @@ public final class ByteSink {
             // 0600 into 0644 and change who can read the file.
             // 被取代的那個檔案的模式，在 rename「之前」套到暫存檔上。暫存檔是新建的，帶的是
             // umask 的模式，因此少了這一步，只改一格的編輯會把 0600 靜默改成 0644，改變誰讀得到這個檔案。
+            if noReplace {
+                Platform.forgetTemp()
+                switch Platform.moveNoReplace(tmp, final) {
+                case .moved:
+                    return
+                case .exists:
+                    try? FileManager.default.removeItem(atPath: tmp)
+                    throw fault(
+                        "\(final) appeared while it was being written; -create never replaces a file, so what it wrote was discarded and \(final) is untouched",
+                        "\(final) 在寫入期間出現了；-create 絕不取代檔案，因此它寫出的內容已被丟棄，\(final) 未被改動")
+                case .failed(let e):
+                    try? FileManager.default.removeItem(atPath: tmp)
+                    throw fault("cannot move \(tmp) to \(final): \(e)",
+                                "無法將 \(tmp) 移為 \(final)：\(e)")
+                }
+            }
             Platform.copyMode(from: final, to: tmp)
             Platform.forgetTemp()
             if !Platform.replaceFile(tmp, final) {

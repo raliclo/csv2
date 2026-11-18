@@ -147,6 +147,17 @@ struct Options {
     var verifyIndex = false
     var buildIndex = false
     var count = false
+    /// Phase 13. One CSV-text argument per header row; the `-o` suffix says
+    /// how many there must be.
+    /// 第 13 階段。每一列標頭一個 CSV 文字參數；`-o` 的副檔名決定必須有幾個。
+    var create: [String]?
+    /// Every flag as the caller spelled it, in order. `-create` refuses its
+    /// companions by name, and a list built from Options fields would miss
+    /// any flag added later; this one cannot.
+    /// 呼叫端打的每一個旗標，依序、照原拼法。`-create` 會逐一點名拒絕它的同伴，而一份由 Options
+    /// 欄位組出的清單會漏掉日後新增的旗標；這一份不會。
+    var flagsGiven: [String] = []
+    var informationalFlag: String?
 }
 
 func usageError(_ en: String, _ zh: String) -> CSV2Error { fault(en, zh) }
@@ -261,6 +272,7 @@ let KNOWN_FLAGS: Set<String> = [
     "build-index",
     "cell",
     "count",
+    "create",
     "col",
     "contains",
     "search-cell",
@@ -523,6 +535,7 @@ func parseArgs(_ argv: [String]) throws -> Options {
                 "unexpected argument \"\(arg)\"; csv2 takes flags only",
                 "非預期的參數「\(arg)」；csv2 只接受旗標")
         }
+        o.flagsGiven.append(arg)
         switch normalizeFlag(arg) {
         case "r": o.read = true
         case "contains":
@@ -770,6 +783,24 @@ func parseArgs(_ argv: [String]) throws -> Options {
         case "verify-index": o.verifyIndex = true
         case "build-index": o.buildIndex = true
         case "count": o.count = true
+        case "create":
+            // One argument or two, read the way -add-column reads its optional
+            // value: only a KNOWN flag starts the next option, and `--` makes
+            // even a flag name literal. How many rows are REQUIRED is decided
+            // by the -o suffix, in runCreate, where the destination is known.
+            // 一個或兩個參數，讀法與 -add-column 讀它選填的值相同：只有「已知旗標」會開始下一個
+            // 選項，`--` 連旗標名稱也能標成字面值。「必須」有幾列由 -o 的副檔名決定，在 runCreate
+            // 裡、目的地已知的地方判斷。
+            try once("-create")
+            var rows = [try needData(arg)]
+            if i + 1 < argv.count {
+                let candidate = argv[i + 1]
+                let isFollowingFlag = candidate.hasPrefix("-")
+                    && candidate != "--"
+                    && KNOWN_FLAGS.contains(normalizeFlag(candidate))
+                if !isFollowingFlag { rows.append(try needData(arg)) }
+            }
+            o.create = rows
         case "version", "V":
             // The build, not just the number: two builds of one version report
             // the same number, so a stale binary on PATH or a wrong file copied
@@ -778,11 +809,9 @@ func parseArgs(_ argv: [String]) throws -> Options {
             // 印出這次建置，不只是那個號碼：同一版號的兩個建置回報的是同一個號碼，PATH 上的舊
             // 執行檔、或安裝時複製錯的檔案，都無法靠它分辨。安裝檢查比對的是檔案；這一項讓版本
             // 字串也答得出來。NN。
-            Platform.writeStdout("csv2 \(CSV2_VERSION) (\(CSV2_BUILD))\n")
-            exit(0)
+            if o.informationalFlag == nil { o.informationalFlag = "version" }
         case "h", "help":
-            printHelp()
-            exit(0)
+            if o.informationalFlag == nil { o.informationalFlag = "help" }
         default:
             throw usageError(
                 "unknown flag \(arg); run csv2 --help",
@@ -973,6 +1002,35 @@ func parseCellAddress(_ s0: String, flag: String,
 // ---------------------------------------------------------------------
 
 func validate(_ o: inout Options) throws {
+    // Phase 13. FIRST, for the reason -count's check below is placed early:
+    // `--in-place` derives o.output further down, and -create must name only
+    // what the caller typed. Every companion is refused by name -- an edit
+    // verb or a read flag beside it would otherwise be accepted and dropped.
+    // 第 13 階段。放在**最前面**，理由與下面 -count 的檢查提早放置相同：`--in-place` 在下方才
+    // 推導出 o.output，而 -create 只能點名呼叫端打過的東西。每一個同伴都逐一點名拒絕——否則旁邊
+    // 的編輯動詞或讀取旗標會被接受、然後被丟掉。
+    if o.create != nil {
+        let allowed: Set<String> = ["create", "o", "log", "debug", "debug=trace", "debug=TRACE"]
+        var others: [String] = []
+        for f in o.flagsGiven where !allowed.contains(normalizeFlag(f)) && !others.contains(f) {
+            others.append(f)
+        }
+        if !others.isEmpty {
+            let list = others.joined(separator: ", ")
+            throw usageError(
+                "-create cannot be combined with \(list): -create writes a new file holding only its header rows and does nothing else, so the rest of this command line would be silently discarded. Create the file first, then run the rest against it",
+                "-create 不可與 \(list) 併用：-create 只寫出一個只有標頭列的新檔、其他什麼都不做，因此這條命令列上的其餘部分會被靜默丟棄。請先建立檔案，再對它執行其餘的部分")
+        }
+        guard o.output != nil else {
+            throw usageError(
+                "-create needs -o FILE.csv or -o FILE.csv2: the suffix says how many header rows to write, and -create writes neither to stdout nor in place",
+                "-create 需要 -o FILE.csv 或 -o FILE.csv2：副檔名決定要寫幾列標頭，而 -create 既不寫到 stdout，也不就地寫入")
+        }
+        // Nothing below applies: every flag it checks has just been refused,
+        // and the input checks would demand an -i that -create has no use for.
+        // 底下的檢查都不適用：它們檢查的每一個旗標剛剛都已被拒絕，而輸入檢查會要求一個 -create 用不到的 -i。
+        return
+    }
     // Placed FIRST, before `--in-place` derives `o.output` from `o.input`
     // further down: checked later, `-count -update ... --in-place` would list
     // `-o` among the discarded flags though the caller never typed it -- a
@@ -2363,6 +2421,11 @@ struct InputPlan {
 /// 會造成損害的那一步。
 func refuseLogAliases(_ o: Options) throws {
     guard let lg = o.logPath else { return }
+    if let value = o.valueFile, sameFile(value, lg) {
+        throw usageError(
+            "-log \(lg) is the --value-file; appending the audit log would change the bytes used for the update",
+            "-log \(lg) 就是 --value-file；附加稽核紀錄會改變用來更新的位元組")
+    }
     if let inp = o.input, sameFile(inp, lg) {
         throw usageError(
             "-log \(lg) is the input; appending the log into the file being read leaves a file csv2 cannot parse",
@@ -2776,6 +2839,12 @@ func printHelp() {
                          only the English title warns and leaves row 2 empty.
                          VAL fills every data row; omitted, they are empty.
                          Not combinable with -delete -col in one run.
+      -create HEADER [HEADER] -o FILE
+                         write a NEW file holding only its header rows. Each
+                         HEADER is one line of CSV text, as for -append: one
+                         for a .csv, two for a .csv2 (English, then Traditional
+                         Chinese). Refuses an existing FILE, an empty or
+                         repeated title, and any other flag beside it.
       -get r:c           print that cell's value and nothing else. The read
                          that matches -update r:c VAL
       -update r:c VAL    set that cell
@@ -2940,6 +3009,17 @@ func sanitizedCommandLine(_ argv: [String]) -> String {
 func main() -> Int32 {
     do {
         var o = try parseArgs(Array(CommandLine.arguments.dropFirst()))
+        if let flag = o.informationalFlag {
+            // Check -create companions before informational output can return success.
+            // 先檢查 -create 的同伴旗標，再讓資訊旗標成功結束。
+            if o.create != nil { try validate(&o) }
+            if flag == "help" {
+                printHelp()
+            } else {
+                Platform.writeStdout("csv2 \(CSV2_VERSION) (\(CSV2_BUILD))\n")
+            }
+            return 0
+        }
         if o.debug { Logger.shared.threshold = o.trace ? .trace : .debug }
         // Before openLog, not in validate(). The log is opened first so that a
         // refusal reaches the audit trail -- which means a refusal ABOUT the
@@ -2969,7 +3049,9 @@ func main() -> Int32 {
         // 放進某一支，正是一條規則變成「只涵蓋它成立範圍的一部分」的方式。
         try validateLocationClaim(o)
 
-        if o.count {
+        if o.create != nil {
+            try runCreate(o)
+        } else if o.count {
             try runCount(o)
         } else if o.buildIndex {
             try runBuildIndex(o)

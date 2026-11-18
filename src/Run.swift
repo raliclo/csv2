@@ -616,6 +616,91 @@ func runBuildIndex(_ o: Options) throws {
 /// 存在時才知道，因此那個欄位會**時有時無**——而一個有時候出現的欄位，重新製造了這個工具存在
 /// 所要消滅的那種歧義：讀不到它的呼叫端，分不出「這個檔案是空的」與「這次執行沒有索引」。
 /// 一個動詞一定會回答，只是有時候比較慢。
+/// `-create HEADER [HEADER] -o FILE` -- phase 13, SX. Writes a file holding
+/// only its header rows. Everything is checked before a byte is written, and
+/// the file is moved into place only if its name is still free.
+/// `-create HEADER [HEADER] -o FILE`——第 13 階段、SX。寫出一個只有標頭列的檔案。寫出任何位元組
+/// 之前先檢查完一切，而且只有在名字仍然空著時才把檔案移到位。
+func runCreate(_ o: Options) throws {
+    guard let rows = o.create, let path = o.output else { return }
+    guard let fmt = Format.from(path: path) else {
+        throw fault(
+            "-create -o \(path): only a .csv (one header row) or a .csv2 (two: English, then Traditional Chinese) has header rows to create; a file with any other suffix has none",
+            "-create -o \(path)：只有 .csv（一列標頭）或 .csv2（兩列：英文，然後繁體中文）有標頭列可以建立；其他副檔名的檔案沒有標頭列")
+    }
+    guard rows.count == fmt.headerRows else {
+        let want = fmt == .csv2
+            ? ("two title rows, English then Traditional Chinese", "兩列標題：英文，然後繁體中文")
+            : ("exactly one title row", "恰好一列標題")
+        throw fault(
+            "-create was given \(rows.count) title row(s), but \(path) is a .\(fmt.rawValue), which takes \(want.0). No row is filled in or dropped for you",
+            "-create 收到 \(rows.count) 列標題，但 \(path) 是 .\(fmt.rawValue)，需要\(want.1)。不會替你補上或丟掉任何一列")
+    }
+    // Before parsing anything: the most likely mistake is pointing -create at
+    // a file that already holds data, and that answer should not wait behind a
+    // complaint about a title. lstat semantics, so a dangling symlink counts.
+    // 在解析任何東西之前：最可能的錯誤是把 -create 指向一個已經有資料的檔案，而那個答案不該排在
+    // 一則關於標題的抱怨後面。以 lstat 的語意判斷，懸空的 symlink 也算存在。
+    if (try? FileManager.default.attributesOfItem(atPath: path)) != nil {
+        throw fault(
+            "\(path) already exists; -create never replaces a file. To add rows to it use -append; to start over, remove it first",
+            "\(path) 已經存在；-create 絕不取代檔案。要在其中加列請用 -append；要重新開始，請先把它移除")
+    }
+    let labels = fmt == .csv2 ? ["0a", "0b"] : ["0"]
+    var headers: [Record] = []
+    for (k, text) in rows.enumerated() {
+        headers.append(try parseCreateRow(text, format: fmt, row: labels[k]))
+    }
+    for (k, h) in headers.enumerated() {
+        for (c, f) in h.fields.enumerated() {
+            if headerName(f).contains(":") {
+                throw fault(
+                    "-create: column \(c + 1) of header row \(labels[k]) cannot contain ':'; protection markers are written by the protection commands",
+                    "-create：標頭 \(labels[k]) 的第 \(c + 1) 欄不可含 ':'；保護標記由保護指令寫入")
+            }
+            guard !f.value.isEmpty else {
+                throw fault(
+                    "-create: column \(c + 1) of header row \(labels[k]) is empty; every column needs a title in every header row",
+                    "-create：標頭 \(labels[k]) 的第 \(c + 1) 欄是空的；每一欄在每一列標頭都需要一個標題")
+            }
+        }
+    }
+    // The read-side message for this shape explains how to READ such a file,
+    // which is no help to someone creating one.
+    // 讀取端對這個形狀的訊息，說的是怎麼「讀」這樣的檔，對正在建立它的人沒有幫助。
+    if headers[0].count == 1, headers[0].fields[0].value.first == BYTE_HASH {
+        throw fault(
+            "-create: the only title in header row \(labels[0]) starts with '#', and csv2 refuses to read a file whose header row is a single '#...' field (it looks like a comment line, and csv2 has no comment syntax). Choose another title",
+            "-create：標頭 \(labels[0]) 唯一的標題以 '#' 開頭，而 csv2 拒絕讀取「標頭列只有一個 '#...' 欄位」的檔案（它看起來像註解行，而 csv2 沒有註解語法）。請換一個標題")
+    }
+    // The checks a READ applies, so -create cannot write a file csv2 will not
+    // read back: equal field counts, no ':' in a name. Named "-create", not
+    // the path: the file does not exist, and a message headed by its name
+    // reads as a report on its contents.
+    // 讀取時套用的檢查，讓 -create 寫不出一份 csv2 讀不回來的檔案：欄數相同、名稱不含 ':'。主詞寫
+    // 「-create」而不是路徑：那個檔案並不存在，以它的名字開頭的訊息讀起來像是在描述它的內容。
+    try validateHeaders(headers, want: fmt.headerRows, path: "-create")
+    // Compared the way a column name is looked up (columnIndex), so two
+    // titles that collide there are refused here.
+    // 以查欄名時（columnIndex）的方式比較，因此在那裡會相撞的兩個標題，在這裡就被拒絕。
+    let names = headers[0].fields.map { baseName(headerName($0)) }
+    for (c, n) in names.enumerated() {
+        let hits = names.indices.filter { names[$0] == n }
+        if hits.count > 1, hits[0] == c {
+            let where_ = hits.map { "\($0 + 1)" }.joined(separator: ", ")
+            throw fault(
+                "-create: \"\(n)\" titles columns \(where_); every by-name address to it would be refused as ambiguous, so -create will not make a column it cannot reach by name",
+                "-create：「\(n)」是第 \(where_) 欄的標題；每一個以名稱定址它的動作都會因歧義被拒絕，因此 -create 不會造出一個無法以名稱到達的欄位")
+        }
+    }
+    let sink = try ByteSink(atomicPath: path)
+    sink.noReplace = true
+    for h in headers {
+        sink.write(FieldEncoder.encodeRecord(h, format: fmt, preserveRaw: false))
+    }
+    try sink.close()
+}
+
 func runCount(_ o: Options) throws {
     // stdin (-si) is counted by the scan below. The path is needed only for the
     // index lookup and the torn-append check, and neither applies to a pipe. SW:

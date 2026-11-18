@@ -1220,6 +1220,46 @@ func parseRowLiteral(_ text: String, format: Format, expected: Int, what: String
     return r
 }
 
+/// One `-create` title row: one line of CSV text in the output's format,
+/// parsed as `-append` parses its ROW. Phase 13.
+/// `-create` 的一列標題：一行依輸出格式寫成的 CSV 文字，解析方式與 `-append` 解析它的 ROW 相同。第 13 階段。
+func parseCreateRow(_ text: String, format: Format, row: String) throws -> Record {
+    var out: Record?
+    let parser = RecordParser(format: format) { r in
+        if out == nil { out = r }
+        return true
+    }
+    parser.isRowLiteral = true
+    do {
+        try parser.feed([UInt8](text.utf8))
+        try parser.finish()
+    } catch let e as CSV2Error {
+        // The parser's own wording for an open quote names "record 1" and
+        // offers --truncate-partial, both about a FILE; here there is only
+        // the argument, and -create refuses that flag. SY.
+        // 解析器對「引號沒收尾」的原文會說「第 1 筆」並建議 --truncate-partial，兩者講的都是「檔案」；
+        // 這裡只有一個參數，而 -create 會拒絕那個旗標。SY。
+        if e.message.contains("closing quote is missing") {
+            throw fault("-create header row \(row) is not one valid CSV record: a quoted title is missing its closing quote",
+                        "-create 的標頭 \(row) 不是一筆合法的 CSV 紀錄：有一個加了引號的標題缺少收尾的引號")
+        }
+        throw fault("-create header row \(row) is not one valid CSV record: \(e.message)",
+                    "-create 的標頭 \(row) 不是一筆合法的 CSV 紀錄：\(e.messageZh)")
+    }
+    guard var r = out else {
+        throw fault("-create header row \(row) is empty", "-create 的標頭 \(row) 是空的")
+    }
+    if parser.recordsEmitted > 1 {
+        throw fault("-create header row \(row) spans more than one record",
+                    "-create 的標頭 \(row) 跨越了不只一筆紀錄")
+    }
+    // As for a supplied row: no RAW, so csv2's own quoting rule applies.
+    // 與交進來的一列相同：沒有 RAW，因此套用 csv2 自己的加引號規則。
+    for i in r.fields.indices { r.fields[i].raw = nil }
+    r.number = 0
+    return r
+}
+
 /// Splits `-add-column`'s NAME into one title per header row.
 ///
 /// It is parsed as a CSV record, not split on commas, because a column name
