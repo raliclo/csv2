@@ -968,7 +968,8 @@ Linux VM and the default build stay glibc, and the Linux release archives are
   建立 `.csv2` rc=0，內容 `a,"b, c"\n甲,乙\n`（17 bytes，只有 LF）；再執行一次 rc=1「already exists」，檔案未變、沒有暫存檔
   留下（MoveFileExW 不帶 REPLACE_EXISTING 那段實際生效）；之後 `-append --in-place` rc=0、`-count` 印出 1。
   WSL：csv2-win 已把 linux-x86_64-glibc 解到 `~/csv2-0.2.3-stage`，`sha256sum -c` 通過、讀到 `v0.2.3 / f85591b8`；
-  寫入 `/usr/local/bin` 需要 root，等使用者核可，在那之前仍是 0.2.2。
+  寫入 `/usr/local/bin` 需要 root；使用者核可後安裝：58810104 bytes、root 0755，是 WSL PATH 上唯一的 csv2，讀到
+  `v0.2.3 / f85591b8`，`-count -si` 印出 1，暫存目錄已刪（csv2-win 的讀回；M4 連不到 WSL）。**所有節點都已是 0.2.3。**
 - **Windows 的整套測試沒有在 CI 跑**，與先前各版相同。
 
 ## ~~v0.2.2~~ 已出貨
