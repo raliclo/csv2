@@ -960,8 +960,13 @@ Linux VM and the default build stay glibc, and the Linux release archives are
   `vcruntime140.dll`、`msvcp140.dll`。
 - **Formula/scoop**：publish.zsh 改寫並讀回，`f00988b` 提交；改寫後 M4 上整套測試 1601/0/1。`$TMPDIR` 沒有留下 `csv2-matrix.*`。
 - **節點升級**（2026-11-18）：M4 `brew` → `csv2 0.2.3 (v0.2.3 / f85591b8)`。M6 從 M4 經 multissh（`m6-tb2`）`brew upgrade`，
-  讀到同一個 build id，並在 M6 上實際 `-create` 一個 `.csv2`，rc=0、兩列標頭正確。Windows／WSL 已交給 csv2-win（並請它在
-  Windows 上實際跑 `-create`，因為 CI 只編譯過 MoveFileExW 那段）；guest／prebuilt 已交給 LinuxCS-M4。
+  讀到同一個 build id，並在 M6 上實際 `-create` 一個 `.csv2`，rc=0、兩列標頭正確。guest／prebuilt 已交給 LinuxCS-M4。
+  Windows 由 csv2-win 以 `scoop update csv2` 升級：快取封存 `beb1afc1…` 相符，bash、zsh、cmd 都找到 scoop 的 shim，讀到
+  `v0.2.3 / f85591b8`，`PATH` 只有 System32 與 Windows 時亦同。**`-create` 第一次在 Windows 上執行**（NTFS 暫存目錄）：
+  建立 `.csv2` rc=0，內容 `a,"b, c"\n甲,乙\n`（17 bytes，只有 LF）；再執行一次 rc=1「already exists」，檔案未變、沒有暫存檔
+  留下（MoveFileExW 不帶 REPLACE_EXISTING 那段實際生效）；之後 `-append --in-place` rc=0、`-count` 印出 1。
+  WSL：csv2-win 已把 linux-x86_64-glibc 解到 `~/csv2-0.2.3-stage`，`sha256sum -c` 通過、讀到 `v0.2.3 / f85591b8`；
+  寫入 `/usr/local/bin` 需要 root，等使用者核可，在那之前仍是 0.2.2。
 - **Windows 的整套測試沒有在 CI 跑**，與先前各版相同。
 
 ## ~~v0.2.2~~ 已出貨
