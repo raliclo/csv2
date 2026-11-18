@@ -1,5 +1,5 @@
 {
-    "version": "0.2.2",
+    "version": "0.2.3",
     "description": "Fail-loudly CSV parser and editor: names the record and field, never repairs",
     "homepage": "https://github.com/raliclo/csv2",
     "license": "MIT",
@@ -37,14 +37,14 @@
     ],
     "architecture": {
         "64bit": {
-            "url": "https://github.com/raliclo/csv2/releases/download/v0.2.2/csv2-0.2.2-windows-x86_64.tar.zst",
-            "hash": "44ab84f74bcec670cc51529318f58e99a2217dbb6a3ad5d299fd6059b1297f1d",
-            "extract_dir": "csv2-0.2.2-windows-x86_64"
+            "url": "https://github.com/raliclo/csv2/releases/download/v0.2.3/csv2-0.2.3-windows-x86_64.tar.zst",
+            "hash": "beb1afc1a4cce0b67af2bb7b01f40c47340127a1c8b9617fd4d87639695c0035",
+            "extract_dir": "csv2-0.2.3-windows-x86_64"
         },
         "arm64": {
-            "url": "https://github.com/raliclo/csv2/releases/download/v0.2.2/csv2-0.2.2-windows-arm64.tar.zst",
-            "hash": "aff66b33c57be2336391e88bf408be9b795f804f5aaa9f20f20aa43a421a3d87",
-            "extract_dir": "csv2-0.2.2-windows-arm64"
+            "url": "https://github.com/raliclo/csv2/releases/download/v0.2.3/csv2-0.2.3-windows-arm64.tar.zst",
+            "hash": "1bea989efbafae766ea2c758546c2b333cbfb624b84a9e0341bd93fc885b98f0",
+            "extract_dir": "csv2-0.2.3-windows-arm64"
         }
     },
     "bin": "csv2.exe",
